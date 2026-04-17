@@ -1,0 +1,180 @@
+{% extends "base.html" %}
+
+{% block title %}Defect History - VisionIQ{% endblock %}
+
+{% block content %}
+<div class="container">
+    <div class="page-header">
+        <h2>Defect History</h2>
+        <p class="subtitle">View all detected defects with images and details</p>
+    </div>
+
+    <div class="history-controls">
+        <div class="filter-group">
+            <label for="defectTypeFilter">Filter by Type:</label>
+            <select id="defectTypeFilter">
+                <option value="">All Types</option>
+                <option value="crack">Crack</option>
+                <option value="scratch">Scratch/Mark</option>
+                <option value="missing_label">Missing Label</option>
+                <option value="wrong_label">Wrong Label</option>
+                <option value="missing_cap">Missing Cap</option>
+                <option value="wrong_cap_color">Wrong Cap Color</option>
+            </select>
+        </div>
+        <button id="refreshHistoryBtn" class="btn btn-primary">Refresh</button>
+    </div>
+
+    <div id="defectsList" class="defects-list">
+        <div class="loading">Loading defects...</div>
+    </div>
+
+    <div id="pagination" class="pagination"></div>
+</div>
+
+<!-- Image Modal -->
+<div id="imageModal" class="modal">
+    <div class="modal-content">
+        <span class="modal-close">&times;</span>
+        <img id="modalImage" src="" alt="Defect Image">
+        <div id="modalInfo" class="modal-info"></div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    // History page JavaScript
+    let currentPage = 0;
+    const itemsPerPage = 20;
+
+    function formatDate(timestamp) {
+        const date = new Date(timestamp);
+        return date.toLocaleString();
+    }
+
+    function formatDefectType(type) {
+        const names = {
+            'crack': 'Crack',
+            'scratch': 'Scratch/Mark',
+            'missing_label': 'Missing Label',
+            'wrong_label': 'Wrong Label',
+            'missing_cap': 'Missing Cap',
+            'wrong_cap_color': 'Wrong Cap Color'
+        };
+        return names[type] || type.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase());
+    }
+
+    function loadDefects(page = 0, defectType = '') {
+        const skip = page * itemsPerPage;
+        let url = `/api/defects?limit=${itemsPerPage}&skip=${skip}`;
+        if (defectType) {
+            url += `&type=${defectType}`;
+        }
+
+        document.getElementById('defectsList').innerHTML = '<div class="loading">Loading defects...</div>';
+
+        fetch(url)
+            .then(response => response.json())
+            .then(data => {
+                const defects = data.defects || [];
+                displayDefects(defects);
+                updatePagination(page, defects.length === itemsPerPage);
+            })
+            .catch(error => {
+                console.error('Error loading defects:', error);
+                document.getElementById('defectsList').innerHTML = 
+                    '<div class="error">Error loading defects. Please try again.</div>';
+            });
+    }
+
+    function displayDefects(defects) {
+        const container = document.getElementById('defectsList');
+        
+        if (defects.length === 0) {
+            container.innerHTML = '<div class="no-defects">No defects found.</div>';
+            return;
+        }
+
+        const html = defects.map(defect => {
+            const imageSrc = `data:image/${defect.image_format || 'jpg'};base64,${defect.image}`;
+            const formattedDate = formatDate(defect.timestamp);
+            const formattedType = formatDefectType(defect.defect_type);
+            const confidence = (defect.confidence * 100).toFixed(1);
+
+            return `
+                <div class="defect-card" onclick="showImageModal('${imageSrc}', '${formattedType}', ${defect.confidence}, '${formattedDate}')">
+                    <div class="defect-thumbnail">
+                        <img src="${imageSrc}" alt="Defect" onerror="this.src='data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIwMCIgZmlsbD0iIzMzMzMzMyIvPjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LWZhbWlseT0iQXJpYWwiIGZvbnQtc2l6ZT0iMTQiIGZpbGw9IiM5OTk5OTkiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGR5PSIuM2VtIj5JbWFnZSBub3QgYXZhaWxhYmxlPC90ZXh0Pjwvc3ZnPg=='">
+                    </div>
+                    <div class="defect-info">
+                        <div class="defect-type">${formattedType}</div>
+                        <div class="defect-confidence">Confidence: ${confidence}%</div>
+                        <div class="defect-timestamp">${formattedDate}</div>
+                    </div>
+                </div>
+            `;
+        }).join('');
+
+        container.innerHTML = html;
+    }
+
+    function updatePagination(page, hasMore) {
+        const container = document.getElementById('pagination');
+        currentPage = page;
+
+        let html = '';
+        if (page > 0) {
+            html += `<button class="btn btn-secondary" onclick="loadDefects(${page - 1}, '${document.getElementById('defectTypeFilter').value}')">Previous</button>`;
+        }
+        html += `<span class="page-info">Page ${page + 1}</span>`;
+        if (hasMore) {
+            html += `<button class="btn btn-secondary" onclick="loadDefects(${page + 1}, '${document.getElementById('defectTypeFilter').value}')">Next</button>`;
+        }
+
+        container.innerHTML = html;
+    }
+
+    function showImageModal(imageSrc, type, confidence, timestamp) {
+        const modal = document.getElementById('imageModal');
+        const modalImage = document.getElementById('modalImage');
+        const modalInfo = document.getElementById('modalInfo');
+
+        modalImage.src = imageSrc;
+        modalInfo.innerHTML = `
+            <h3>${type}</h3>
+            <p><strong>Confidence:</strong> ${(confidence * 100).toFixed(1)}%</p>
+            <p><strong>Timestamp:</strong> ${timestamp}</p>
+        `;
+
+        modal.style.display = 'block';
+    }
+
+    // Event listeners
+    document.getElementById('defectTypeFilter').addEventListener('change', (e) => {
+        loadDefects(0, e.target.value);
+    });
+
+    document.getElementById('refreshHistoryBtn').addEventListener('click', () => {
+        loadDefects(currentPage, document.getElementById('defectTypeFilter').value);
+    });
+
+    // Modal close
+    document.querySelector('.modal-close').addEventListener('click', () => {
+        document.getElementById('imageModal').style.display = 'none';
+    });
+
+    window.onclick = function(event) {
+        const modal = document.getElementById('imageModal');
+        if (event.target === modal) {
+            modal.style.display = 'none';
+        }
+    }
+
+    // Make showImageModal globally accessible
+    window.showImageModal = showImageModal;
+
+    // Initial load
+    loadDefects(0);
+</script>
+{% endblock %}

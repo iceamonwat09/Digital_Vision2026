@@ -1,0 +1,14 @@
+path: bottle_defect_dataset
+
+train: images/train
+val: images/val
+test: images/test
+
+nc: 5
+
+names:
+  0: cap
+  1: crumbled
+  2: label
+  3: no-cap
+  4: not-crumbled

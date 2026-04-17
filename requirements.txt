@@ -1,0 +1,22 @@
+# Requirements for YOLO-based Defect Detection System
+
+# Web Framework
+Flask==3.0.0
+Werkzeug==3.0.1
+
+# Computer Vision
+opencv-python==4.8.1.78
+ultralytics==8.1.0
+numpy>=1.26.0
+
+# Database
+pymongo==4.6.0
+
+# Utilities
+Pillow==10.1.0
+pygrabber==0.2
+comtypes==1.4.16
+
+# Optional: For better performance
+# torch==2.1.0
+# torchvision==0.16.0

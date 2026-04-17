@@ -1,0 +1,206 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - VisionIQ{% endblock %}
+
+{% block content %}
+<div class="container">
+    <div class="page-header">
+        <h2>Analysis Dashboard</h2>
+        <p class="subtitle">Defect detection statistics and trends</p>
+    </div>
+
+    <div class="stats-grid">
+        <div class="stat-card-large">
+            <div class="stat-icon">📊</div>
+            <div class="stat-label">Total Bottles Inspected</div>
+            <div class="stat-value-large" id="totalBottles">0</div>
+        </div>
+        <div class="stat-card-large">
+            <div class="stat-icon">⚠️</div>
+            <div class="stat-label">Total Defects Detected</div>
+            <div class="stat-value-large" id="totalDefects">0</div>
+        </div>
+        <div class="stat-card-large">
+            <div class="stat-icon">🕐</div>
+            <div class="stat-label">Recent Defects (24h)</div>
+            <div class="stat-value-large" id="recentDefects">0</div>
+        </div>
+    </div>
+
+    <div class="dashboard-grid">
+        <div class="dashboard-card">
+            <h3>Defect Distribution by Type</h3>
+            <div id="defectDistribution" class="chart-container">
+                <canvas id="distributionChart"></canvas>
+            </div>
+        </div>
+
+        <div class="dashboard-card">
+            <h3>Defect Trends (24 Hours)</h3>
+            <div id="defectTrends" class="chart-container">
+                <canvas id="trendsChart"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <div class="refresh-controls">
+        <button id="refreshBtn" class="btn btn-primary">Refresh Data</button>
+        <span id="lastUpdate" class="last-update"></span>
+    </div>
+</div>
+{% endblock %}
+
+
+{% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script>
+    // Dashboard JavaScript
+    let distributionChart = null;
+    let trendsChart = null;
+
+    function updateDashboard() {
+        fetch('/api/stats')
+            .then(response => response.json())
+            .then(data => {
+                const stats = data.statistics;
+                const timeSeries = data.time_series || [];
+
+                // Update summary stats
+                document.getElementById('totalBottles').textContent = stats.total_bottles || 0;
+                document.getElementById('totalDefects').textContent = stats.total_defects || 0;
+                document.getElementById('recentDefects').textContent = stats.recent_defects || 0;
+
+                // Update defect distribution chart
+                updateDistributionChart(stats.defects_by_type || {});
+
+                // Update trends chart
+                updateTrendsChart(timeSeries);
+
+                // Update last update time
+                document.getElementById('lastUpdate').textContent = 
+                    'Last updated: ' + new Date().toLocaleTimeString();
+            })
+            .catch(error => {
+                console.error('Error fetching dashboard data:', error);
+            });
+    }
+
+    function updateDistributionChart(data) {
+        const ctx = document.getElementById('distributionChart');
+        
+        const labels = Object.keys(data);
+        const values = Object.values(data);
+
+        if (distributionChart) {
+            distributionChart.data.labels = labels;
+            distributionChart.data.datasets[0].data = values;
+            distributionChart.update();
+        } else {
+            distributionChart = new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        data: values,
+                        backgroundColor: [
+                            'rgba(255, 99, 132, 0.8)',
+                            'rgba(54, 162, 235, 0.8)',
+                            'rgba(255, 206, 86, 0.8)',
+                            'rgba(75, 192, 192, 0.8)',
+                            'rgba(153, 102, 255, 0.8)',
+                            'rgba(255, 159, 64, 0.8)'
+                        ],
+                        borderColor: [
+                            'rgba(255, 99, 132, 1)',
+                            'rgba(54, 162, 235, 1)',
+                            'rgba(255, 206, 86, 1)',
+                            'rgba(75, 192, 192, 1)',
+                            'rgba(153, 102, 255, 1)',
+                            'rgba(255, 159, 64, 1)'
+                        ],
+                        borderWidth: 2
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    plugins: {
+                        legend: {
+                            position: 'bottom',
+                            labels: {
+                                color: '#e0e0e0'
+                            }
+                        }
+                    }
+                }
+            });
+        }
+    }
+
+    function updateTrendsChart(data) {
+        const ctx = document.getElementById('trendsChart');
+        
+        const labels = data.map(item => item.timestamp);
+        const values = data.map(item => item.count);
+
+        if (trendsChart) {
+            trendsChart.data.labels = labels;
+            trendsChart.data.datasets[0].data = values;
+            trendsChart.update();
+        } else {
+            trendsChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Defects',
+                        data: values,
+                        borderColor: 'rgba(75, 192, 192, 1)',
+                        backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                        borderWidth: 2,
+                        fill: true,
+                        tension: 0.4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    scales: {
+                        x: {
+                            ticks: {
+                                color: '#e0e0e0'
+                            },
+                            grid: {
+                                color: 'rgba(255, 255, 255, 0.1)'
+                            }
+                        },
+                        y: {
+                            beginAtZero: true,
+                            ticks: {
+                                color: '#e0e0e0'
+                            },
+                            grid: {
+                                color: 'rgba(255, 255, 255, 0.1)'
+                            }
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            labels: {
+                                color: '#e0e0e0'
+                            }
+                        }
+                    }
+                }
+            });
+        }
+    }
+
+    document.getElementById('refreshBtn').addEventListener('click', updateDashboard);
+
+    // Initial load
+    updateDashboard();
+    // Auto-refresh every 30 seconds
+    setInterval(updateDashboard, 30000);
+</script>
+{% endblock %}
