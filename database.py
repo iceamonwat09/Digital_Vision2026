@@ -48,26 +48,34 @@ class Database:
     # Connection
     # ----------------------------------------------------------
     def connect(self) -> bool:
-        """เชื่อมต่อ SQL Server — Windows Authentication"""
+        """เชื่อมต่อ SQL Server — SQL Server Authentication (UID/PWD)"""
         try:
             server   = getattr(config, "SQL_SERVER",   "localhost")
             database = getattr(config, "SQL_DATABASE", "VisionIQ")
+            user     = getattr(config, "SQL_USER",     "sa")
+            password = getattr(config, "SQL_PASSWORD", "")
 
             conn_str = (
                 f"DRIVER={{SQL Server}};"
                 f"SERVER={server};"
                 f"DATABASE={database};"
-                f"Trusted_Connection=yes;"
+                f"UID={user};"
+                f"PWD={password};"
             )
             self.conn = pyodbc.connect(conn_str, timeout=5)
             self.conn.autocommit = False
             self.is_connected = True
-            logger.info(f"SQL Server connected: {server}/{database}")
+            logger.info(f"SQL Server connected: {server}/{database} (user={user})")
             return True
 
         except Exception as e:
             logger.error(f"SQL Server connection failed: {e}")
-            logger.error("ตรวจสอบ: SQL Server เปิดอยู่? / SQL_SERVER ใน config.py ถูกต้อง?")
+            logger.error(
+                "ตรวจสอบ: "
+                "1) SQL Server เปิดอยู่และ TCP/IP enabled? "
+                "2) SQL_SERVER / SQL_USER / SQL_PASSWORD ใน config.py ถูกต้อง? "
+                "3) SQL Server Authentication mode เปิดอยู่?"
+            )
             self.is_connected = False
             return False
 

@@ -41,33 +41,32 @@ CONFIDENCE_THRESHOLD = 0.5
 IOU_THRESHOLD = 0.45
 
 # ====================
-# DEFECT CLASS MAPPING
+# DEFECT CLASS MAPPING  (Can Dent Detection)
 # ====================
 # Map YOLO class IDs to defect types
 # MUST match your data.yaml class names and order
 DEFECT_CLASSES = {
-    0: "cap",
-    1: "crumbled",
-    2: "label",
-    3: "no-cap",
-    4: "not-crumbled"
+    0: "can_dent",
+    1: "can_good"
 }
 
 # Reverse mapping for display
 DEFECT_CLASS_NAMES = {
-    "cap": "Cap",
-    "crumbled": "Crumbled",
-    "label": "Label",
-    "no-cap": "No Cap",
-    "not-crumbled": "Not Crumbled"
+    "can_dent": "Can Dent",
+    "can_good": "Can Good"
 }
 
 # ====================
-# DATABASE CONFIGURATION
+# DATABASE CONFIGURATION  (SQL Server 2014)
 # ====================
-MONGODB_URI = "mongodb://localhost:27017/"
-DATABASE_NAME = "bottle_defect_detection"
-COLLECTION_NAME = "defects"
+SQL_SERVER   = "172.32.0.55"       # IP Address ของ SQL Server
+SQL_DATABASE = "VisionIQ"          # ชื่อ Database
+SQL_USER     = "sa"                # SQL Server Login
+SQL_PASSWORD = "?????"             # <<< ใส่ Password จริงก่อน python database.py
+
+# Plant / Line Information
+PLANT_CODE  = "TUM1"               # รหัสโรงงาน (Thai Union Mahachai 1)
+LINE_NUMBER = "LINE-01"            # รหัสสายการผลิต
 
 # ====================
 # DEFECT LOGGING CONFIGURATION
