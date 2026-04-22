@@ -196,6 +196,9 @@ def api_scan_cameras():
     active_idx = camera.camera_index if (camera and camera.is_initialized) else None
     skip = [active_idx] if active_idx is not None else []
     cameras = scan_cameras_fast(max_index=4, skip_indices=skip)
+    # Always include the configured index as fallback so dropdown is never empty
+    if not cameras:
+        cameras = [{"id": config.CAMERA_INDEX, "name": f"Camera {config.CAMERA_INDEX} (default)"}]
     return jsonify({"cameras": cameras})
 
 

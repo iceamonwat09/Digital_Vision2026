@@ -25,7 +25,18 @@ _BACKEND_NAMES = {
 
 
 def _probe_index(index: int) -> bool:
-    """Return True if any backend can open and read from this camera index."""
+    """Return True if the camera index is readable.
+    Uses VideoCapture without explicit backend first (most compatible on Windows),
+    then falls back to explicit backends.
+    """
+    # No-backend call matches what test_camera.py does — most reliable on Windows
+    cap = cv2.VideoCapture(index)
+    if cap.isOpened():
+        ret, _ = cap.read()
+        cap.release()
+        if ret:
+            return True
+
     for backend in _BACKENDS:
         cap = cv2.VideoCapture(index, backend)
         if cap.isOpened():
@@ -85,17 +96,20 @@ class Camera:
 
     def initialize(self) -> bool:
         """
-        Initialize the camera, trying multiple backends automatically.
-        On Windows tries DirectShow → MSMF → Auto.
-        On Linux tries Auto → V4L2.
+        Initialize the camera.
+        Tries no-backend (most compatible) first, then explicit backends.
         """
         if self.is_initialized:
             self.release()
 
         logger.info(f"Initializing camera index={self.camera_index} ...")
 
-        for backend in _BACKENDS:
-            cap = cv2.VideoCapture(self.camera_index, backend)
+        # Build try list: no-backend first (works when DSHOW/MSMF fail by index)
+        attempts = [None] + _BACKENDS   # None = no explicit backend
+
+        for backend in attempts:
+            cap = (cv2.VideoCapture(self.camera_index) if backend is None
+                   else cv2.VideoCapture(self.camera_index, backend))
             if not cap.isOpened():
                 cap.release()
                 continue
@@ -105,7 +119,7 @@ class Camera:
             cap.set(cv2.CAP_PROP_FPS,          config.CAMERA_FPS)
             cap.set(cv2.CAP_PROP_BUFFERSIZE,   1)
 
-            # Warm-up: discard initial frames — some cameras output blank frames
+            # Warm-up: discard initial frames
             for _ in range(5):
                 cap.read()
 
@@ -113,7 +127,7 @@ class Camera:
             if ret and frame is not None:
                 self.cap = cap
                 self.is_initialized = True
-                bname = _BACKEND_NAMES.get(backend, str(backend))
+                bname = "Default" if backend is None else _BACKEND_NAMES.get(backend, str(backend))
                 logger.info(f"Camera ready (index={self.camera_index}, backend={bname})")
                 return True
 

@@ -48,6 +48,16 @@ class YOLODetector:
                 )
                 model_path = "yolov8n.pt"   # ultralytics downloads automatically on first run
 
+            # PyTorch 2.6+ changed weights_only default to True which breaks
+            # older ultralytics. Add DetectionModel to safe globals as workaround.
+            try:
+                import torch
+                from ultralytics.nn.tasks import DetectionModel
+                if hasattr(torch.serialization, 'add_safe_globals'):
+                    torch.serialization.add_safe_globals([DetectionModel])
+            except Exception:
+                pass
+
             logger.info(f"Loading YOLO model: {model_path}")
             self.model = YOLO(model_path)
             logger.info("YOLO model loaded successfully")

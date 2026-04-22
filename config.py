@@ -59,10 +59,10 @@ DEFECT_CLASS_NAMES = {
 # ====================
 # DATABASE CONFIGURATION  (SQL Server 2014)
 # ====================
-SQL_SERVER   = "172.32.0.55"       # IP Address ของ SQL Server
+SQL_SERVER   = "172.32.0.50"       # IP Address ของ SQL Server
 SQL_DATABASE = "VisionIQ"          # ชื่อ Database
 SQL_USER     = "sa"                # SQL Server Login
-SQL_PASSWORD = "?????"             # <<< ใส่ Password จริงก่อน python database.py
+SQL_PASSWORD = "P@ssw0rd"          # SQL Server Authentication password
 
 # Plant / Line Information
 PLANT_CODE  = "TUM1"               # รหัสโรงงาน (Thai Union Mahachai 1)
