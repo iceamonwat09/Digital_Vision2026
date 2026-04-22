@@ -11,23 +11,38 @@ from logger import setup_logger
 
 logger = setup_logger(__name__)
 
-# Use DirectShow on Windows for faster, non-blocking camera operations
-_BACKEND = cv2.CAP_DSHOW if os.name == 'nt' else cv2.CAP_ANY
+# Priority-ordered backends for each OS
+_BACKENDS_WIN   = [cv2.CAP_DSHOW, cv2.CAP_MSMF, cv2.CAP_ANY]
+_BACKENDS_LINUX = [cv2.CAP_ANY, cv2.CAP_V4L2]
+_BACKENDS = _BACKENDS_WIN if os.name == 'nt' else _BACKENDS_LINUX
+
+_BACKEND_NAMES = {
+    cv2.CAP_DSHOW: "DirectShow",
+    cv2.CAP_MSMF:  "MSMF",
+    cv2.CAP_ANY:   "Auto",
+    cv2.CAP_V4L2:  "V4L2",
+}
+
+
+def _probe_index(index: int) -> bool:
+    """Return True if any backend can open and read from this camera index."""
+    for backend in _BACKENDS:
+        cap = cv2.VideoCapture(index, backend)
+        if cap.isOpened():
+            ret, _ = cap.read()
+            cap.release()
+            if ret:
+                return True
+    return False
 
 
 def scan_cameras_fast(max_index: int = 4) -> List[Dict]:
     """
     Quickly probe camera indices and return available ones with actual names.
-    Uses pygrabber on Windows for precise camera names.
-
-    Args:
-        max_index: Maximum camera index to test (inclusive) for fallback.
-
-    Returns:
-        List of dictionaries containing 'id' and 'name'.
+    Uses pygrabber on Windows for precise camera names, falls back to OpenCV.
     """
     cameras = []
-    
+
     if os.name == 'nt':
         try:
             from pygrabber.dshow_graph import FilterGraph
@@ -38,16 +53,12 @@ def scan_cameras_fast(max_index: int = 4) -> List[Dict]:
             if cameras:
                 return cameras
         except Exception as e:
-            logger.warning(f"Could not retrieve camera names using pygrabber: {e}. Falling back to standard OpenCV probe.")
+            logger.warning(f"pygrabber unavailable ({e}), falling back to OpenCV probe.")
 
-    # Fallback to OpenCV probe
+    # Fallback: probe each index with all backends
     for i in range(max_index + 1):
-        cap = cv2.VideoCapture(i, _BACKEND)
-        if cap.isOpened():
-            ret, _ = cap.read()
-            if ret:
-                cameras.append({"id": i, "name": f"Camera {i}"})
-            cap.release()
+        if _probe_index(i):
+            cameras.append({"id": i, "name": f"Camera {i}"})
     return cameras
 
 
@@ -70,39 +81,48 @@ class Camera:
 
     def initialize(self) -> bool:
         """
-        Initialize the camera with configured settings.
-
-        Returns:
-            True if initialization successful, False otherwise
+        Initialize the camera, trying multiple backends automatically.
+        On Windows tries DirectShow → MSMF → Auto.
+        On Linux tries Auto → V4L2.
         """
         if self.is_initialized:
             self.release()
 
-        logger.info(f"Initializing camera at index {self.camera_index}")
-        self.cap = cv2.VideoCapture(self.camera_index, _BACKEND)
+        logger.info(f"Initializing camera index={self.camera_index} ...")
 
-        if not self.cap.isOpened():
-            logger.error(f"Failed to open camera at index {self.camera_index}")
-            return False
+        for backend in _BACKENDS:
+            cap = cv2.VideoCapture(self.camera_index, backend)
+            if not cap.isOpened():
+                cap.release()
+                continue
 
-        # Set camera properties
-        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, config.CAMERA_WIDTH)
-        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, config.CAMERA_HEIGHT)
-        self.cap.set(cv2.CAP_PROP_FPS, config.CAMERA_FPS)
-        # Minimize internal buffer to reduce latency
-        self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH,  config.CAMERA_WIDTH)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, config.CAMERA_HEIGHT)
+            cap.set(cv2.CAP_PROP_FPS,          config.CAMERA_FPS)
+            cap.set(cv2.CAP_PROP_BUFFERSIZE,   1)
 
-        # Quick frame test
-        ret, frame = self.cap.read()
-        if not ret or frame is None:
-            logger.error("Camera opened but cannot read frames.")
-            self.cap.release()
-            self.cap = None
-            return False
+            ret, frame = cap.read()
+            if ret and frame is not None:
+                self.cap = cap
+                self.is_initialized = True
+                bname = _BACKEND_NAMES.get(backend, str(backend))
+                logger.info(f"Camera ready (index={self.camera_index}, backend={bname})")
+                return True
 
-        logger.info("Camera initialized successfully.")
-        self.is_initialized = True
-        return True
+            cap.release()
+
+        # All backends failed — help the user pick the right index
+        logger.error(
+            f"Cannot open camera index={self.camera_index}. "
+            "Is it connected? Is another app (Teams/Zoom) using it?"
+        )
+        available = scan_cameras_fast()
+        if available:
+            ids = [c["id"] for c in available]
+            logger.error(f"Available camera indices: {ids}. Set CAMERA_INDEX in config.py")
+        else:
+            logger.error("No cameras found at all. Check cable / driver / Device Manager.")
+        return False
 
     def read_frame(self) -> Optional[Tuple[bool, any]]:
         """
