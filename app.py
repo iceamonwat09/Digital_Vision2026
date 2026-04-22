@@ -84,11 +84,15 @@ def detection_loop():
                 time.sleep(0.05)
                 continue
 
-            # Perform detection
-            detections = detector.detect(frame)
-
-            # Draw detections on frame
-            annotated_frame = detector.draw_detections(frame, detections)
+            # Perform detection (skip if model not loaded — show raw camera feed)
+            if detector is not None and detector.model is not None:
+                detections = detector.detect(frame)
+                annotated_frame = detector.draw_detections(frame, detections)
+            else:
+                detections = []
+                annotated_frame = frame.copy()
+                cv2.putText(annotated_frame, "Camera Preview (No Model)",
+                            (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 165, 255), 2)
 
             # Update current frame (minimal lock time)
             with frame_lock:
@@ -203,8 +207,9 @@ def start_detection():
     if detection_active:
         return jsonify({"status": "already_running", "message": "Detection already active"}), 200
 
-    if detector is None or detector.model is None:
-        return jsonify({"status": "error", "message": "Detector not initialized"}), 500
+    model_ready = detector is not None and detector.model is not None
+    if not model_ready:
+        logger.warning("No YOLO model loaded — camera will open in preview-only mode (no detection).")
 
     # Get camera index from request (default to config value)
     data = request.get_json(silent=True) or {}
