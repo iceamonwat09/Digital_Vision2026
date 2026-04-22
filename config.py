@@ -11,9 +11,9 @@ import os
 # IMPORTANT: Configure your external USB webcam index here
 # Default camera indices: 0 = built-in/laptop camera, 1+ = external USB webcams
 # To find your external webcam index, run: python -c "import cv2; [print(f'Index {i}: {cv2.VideoCapture(i).read()[0]}') for i in range(5)]"
-CAMERA_INDEX = 0  # Change this to your external USB webcam index (typically 1, 2, 3, etc.)
-CAMERA_WIDTH = 1280
-CAMERA_HEIGHT = 720
+CAMERA_INDEX = 0  # ผลจาก test_camera.py: กล้องอยู่ที่ index 0
+CAMERA_WIDTH  = 640   # 640x480 ใช้ได้กับทุกกล้อง (notebook + USB)
+CAMERA_HEIGHT = 480   # เปลี่ยนเป็น 1280x720 ได้ถ้าต้องการ HD
 CAMERA_FPS = 30
 
 # Enable this to test available cameras at startup

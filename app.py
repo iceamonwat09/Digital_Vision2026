@@ -188,8 +188,10 @@ def video_feed():
 
 @app.route('/api/camera/scan', methods=['GET'])
 def api_scan_cameras():
-    """Scan for available cameras and return the list."""
-    cameras = scan_cameras_fast(max_index=4)
+    """Scan for available cameras. Skips probing the camera that is already open."""
+    active_idx = camera.camera_index if (camera and camera.is_initialized) else None
+    skip = [active_idx] if active_idx is not None else []
+    cameras = scan_cameras_fast(max_index=4, skip_indices=skip)
     return jsonify({"cameras": cameras})
 
 
@@ -211,7 +213,18 @@ def start_detection():
     # Initialize camera on demand
     camera = Camera(camera_index=int(camera_index))
     if not camera.initialize():
-        return jsonify({"status": "error", "message": f"Failed to open camera {camera_index}"}), 500
+        available = scan_cameras_fast()
+        hint = ""
+        if available:
+            ids = [c["id"] for c in available]
+            hint = f" Available indices: {ids}. Try one of these."
+        else:
+            hint = " No cameras found — check connection and drivers."
+        return jsonify({
+            "status": "error",
+            "message": f"Cannot open camera {camera_index}.{hint}",
+            "available_cameras": available
+        }), 500
 
     detection_active = True
     detection_thread = threading.Thread(target=detection_loop, daemon=True)
