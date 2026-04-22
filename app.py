@@ -188,8 +188,10 @@ def video_feed():
 
 @app.route('/api/camera/scan', methods=['GET'])
 def api_scan_cameras():
-    """Scan for available cameras and return the list."""
-    cameras = scan_cameras_fast(max_index=4)
+    """Scan for available cameras. Skips probing the camera that is already open."""
+    active_idx = camera.camera_index if (camera and camera.is_initialized) else None
+    skip = [active_idx] if active_idx is not None else []
+    cameras = scan_cameras_fast(max_index=4, skip_indices=skip)
     return jsonify({"cameras": cameras})
 
 

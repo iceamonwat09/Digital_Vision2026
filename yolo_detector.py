@@ -35,31 +35,30 @@ class YOLODetector:
     def load_model(self) -> bool:
         """
         Load YOLO model.
-        
-        Returns:
-            True if model loaded successfully, False otherwise
+        Falls back to yolov8n.pt (pretrained) if custom model file is missing.
         """
         try:
-            # Check if model file exists
-            if not os.path.exists(self.model_path):
-                logger.error(f"Model file not found: {self.model_path}")
-                logger.error("Please train the model first using: python train_custom_model.py")
-                logger.error("Or update MODEL_PATH in config.py to use a pretrained model")
-                return False
-            
-            logger.info(f"Loading YOLO model from: {self.model_path}")
-            self.model = YOLO(self.model_path)
+            model_path = self.model_path
+
+            if not os.path.exists(model_path):
+                logger.warning(f"Custom model not found: {model_path}")
+                logger.warning(
+                    "Falling back to yolov8n.pt (COCO pretrained). "
+                    "Train a custom model (Step 6) for real can_dent detection."
+                )
+                model_path = "yolov8n.pt"   # ultralytics downloads automatically on first run
+
+            logger.info(f"Loading YOLO model: {model_path}")
+            self.model = YOLO(model_path)
             logger.info("YOLO model loaded successfully")
-            
-            # Log model info
+
             if hasattr(self.model, 'names'):
-                num_classes = len(self.model.names)
-                logger.info(f"Model info: {num_classes} classes detected")
-                logger.debug(f"Model classes: {list(self.model.names.values())}")
-            
+                logger.info(f"Model classes ({len(self.model.names)}): {list(self.model.names.values())}")
+
             return True
+
         except Exception as e:
-            logger.error(f"Failed to load YOLO model: {str(e)}", exc_info=True)
+            logger.error(f"Failed to load YOLO model: {e}", exc_info=True)
             return False
     
     def detect(self, frame: np.ndarray) -> List[Dict]:
@@ -142,26 +141,24 @@ class YOLODetector:
         """
         frame_copy = frame.copy()
         
-        # Color mapping for different defect types
+        # Color mapping — Can Dent classes first, bottle classes kept for legacy
         colors = {
-            "cap": (0, 255, 0),        # Green
-            "crumbled": (0, 0, 255),   # Red
-            "label": (255, 0, 0),      # Blue
-            "no-cap": (255, 165, 0),   # Orange
-            "not-crumbled": (0, 255, 255),  # Cyan
+            "can_dent": (0, 0, 255),        # Red   — defect
+            "can_good": (0, 255, 0),        # Green — good
+            "cap":           (0, 255, 0),
+            "crumbled":      (0, 0, 255),
+            "label":         (255, 0, 0),
+            "no-cap":        (255, 165, 0),
+            "not-crumbled":  (0, 255, 255),
         }
-        
+        DEFAULT_COLOR = (0, 255, 255)   # Cyan fallback for any unknown class
+
         for det in detections:
             x1, y1, x2, y2 = det["bbox"]
             class_name = det["class_name"]
             confidence = det["confidence"]
-            
-            # Only draw if it's a valid defect type (should already be filtered, but safety check)
-            if class_name not in colors:
-                continue  # Skip drawing unknown defect types
-            
-            # Get color for this defect type (guaranteed to exist after check above)
-            color = colors[class_name]
+
+            color = colors.get(class_name, DEFAULT_COLOR)
             
             # Draw bounding box
             cv2.rectangle(frame_copy, (x1, y1), (x2, y2), color, 2)

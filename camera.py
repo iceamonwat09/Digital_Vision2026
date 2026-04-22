@@ -36,11 +36,12 @@ def _probe_index(index: int) -> bool:
     return False
 
 
-def scan_cameras_fast(max_index: int = 4) -> List[Dict]:
+def scan_cameras_fast(max_index: int = 4, skip_indices: list = None) -> List[Dict]:
     """
-    Quickly probe camera indices and return available ones with actual names.
-    Uses pygrabber on Windows for precise camera names, falls back to OpenCV.
+    List available cameras.  skip_indices lets callers exclude already-open cameras
+    so we never probe (and briefly steal) a camera that is already in use.
     """
+    skip = set(skip_indices or [])
     cameras = []
 
     if os.name == 'nt':
@@ -55,8 +56,11 @@ def scan_cameras_fast(max_index: int = 4) -> List[Dict]:
         except Exception as e:
             logger.warning(f"pygrabber unavailable ({e}), falling back to OpenCV probe.")
 
-    # Fallback: probe each index with all backends
+    # Fallback: probe only indices not currently in use
     for i in range(max_index + 1):
+        if i in skip:
+            cameras.append({"id": i, "name": f"Camera {i} (in use)"})
+            continue
         if _probe_index(i):
             cameras.append({"id": i, "name": f"Camera {i}"})
     return cameras
@@ -100,6 +104,10 @@ class Camera:
             cap.set(cv2.CAP_PROP_FRAME_HEIGHT, config.CAMERA_HEIGHT)
             cap.set(cv2.CAP_PROP_FPS,          config.CAMERA_FPS)
             cap.set(cv2.CAP_PROP_BUFFERSIZE,   1)
+
+            # Warm-up: discard initial frames — some cameras output blank frames
+            for _ in range(5):
+                cap.read()
 
             ret, frame = cap.read()
             if ret and frame is not None:
