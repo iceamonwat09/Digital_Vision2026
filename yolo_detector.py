@@ -91,45 +91,48 @@ class YOLODetector:
             return []
         
         try:
-            # Run YOLO inference
+            # Run YOLO inference (low conf=0.01 to capture ALL raw detections for debug)
             results = self.model(
                 frame,
-                conf=self.confidence_threshold,
+                conf=0.01,
                 iou=self.iou_threshold,
                 verbose=False
             )
-            
+
             detections = []
-            
-            # Process results
+
             for result in results:
                 boxes = result.boxes
                 if boxes is not None and len(boxes) > 0:
                     for box in boxes:
-                        # Get box coordinates
                         x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
-                        
-                        # Get class ID and confidence
-                        class_id = int(box.cls[0].cpu().numpy())
+                        class_id   = int(box.cls[0].cpu().numpy())
                         confidence = float(box.conf[0].cpu().numpy())
-                        
-                        # Only process detections that match our defect classes (0-5)
-                        # Ignore all other YOLO detections (COCO classes, etc.)
+
+                        # Debug: log every raw detection so we can see what model finds
+                        raw_name = (self.model.names.get(class_id, str(class_id))
+                                    if hasattr(self.model, 'names') else str(class_id))
+                        logger.info(
+                            f"RAW detect → class_id={class_id} name='{raw_name}' "
+                            f"conf={confidence:.3f} (threshold={self.confidence_threshold})"
+                        )
+
+                        # Apply our confidence threshold
+                        if confidence < self.confidence_threshold:
+                            continue
+
                         if class_id not in config.DEFECT_CLASSES:
-                            continue  # Skip this detection - not a valid defect type
-                        
-                        # Map class ID to defect type (guaranteed to exist after check above)
+                            logger.debug(f"  SKIP class_id={class_id} not in DEFECT_CLASSES")
+                            continue
+
                         class_name = config.DEFECT_CLASSES[class_id]
-                        
-                        # Create detection dictionary
                         detection = {
-                            "class_id": class_id,
+                            "class_id":   class_id,
                             "class_name": class_name,
                             "confidence": confidence,
-                            "bbox": [int(x1), int(y1), int(x2), int(y2)],
+                            "bbox":   [int(x1), int(y1), int(x2), int(y2)],
                             "center": [int((x1 + x2) / 2), int((y1 + y2) / 2)]
                         }
-                        
                         detections.append(detection)
             
             return detections
