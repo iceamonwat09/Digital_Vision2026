@@ -46,14 +46,14 @@ IOU_THRESHOLD = 0.45
 # Map YOLO class IDs to defect types
 # MUST match your data.yaml class names and order
 DEFECT_CLASSES = {
-    0: "can_dent",
-    1: "can_good"
+    0: "dented",
+    1: "good"
 }
 
 # Reverse mapping for display
 DEFECT_CLASS_NAMES = {
-    "can_dent": "Can Dent",
-    "can_good": "Can Good"
+    "dented": "Can Dent",
+    "good":   "Can Good"
 }
 
 # ====================

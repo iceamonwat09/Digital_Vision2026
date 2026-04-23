@@ -154,17 +154,13 @@ class YOLODetector:
         """
         frame_copy = frame.copy()
         
-        # Color mapping — Can Dent classes first, bottle classes kept for legacy
         colors = {
-            "can_dent": (0, 0, 255),        # Red   — defect
-            "can_good": (0, 255, 0),        # Green — good
-            "cap":           (0, 255, 0),
-            "crumbled":      (0, 0, 255),
-            "label":         (255, 0, 0),
-            "no-cap":        (255, 165, 0),
-            "not-crumbled":  (0, 255, 255),
+            "dented":   (0, 0, 255),   # Red   — defect
+            "good":     (0, 255, 0),   # Green — good
+            "can_dent": (0, 0, 255),
+            "can_good": (0, 255, 0),
         }
-        DEFAULT_COLOR = (0, 255, 255)   # Cyan fallback for any unknown class
+        DEFAULT_COLOR = (0, 165, 255)  # Orange fallback
 
         for det in detections:
             x1, y1, x2, y2 = det["bbox"]
