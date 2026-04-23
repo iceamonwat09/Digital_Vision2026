@@ -32,10 +32,10 @@ TEST_CAMERAS_ON_STARTUP = False
 #   - "yolov8x.pt" (extra large, most accurate)
 #   - Or path to your custom trained model: "path/to/best.pt"
 # After training, update this to: r"bottle_defect_dataset/runs/detect/bottle_defects/weights/best.pt"
-MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "runs", "detect", "bottle_defects", "weights", "best.pt")
+MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "weights", "best.pt")
 
 # Confidence threshold for detections
-CONFIDENCE_THRESHOLD = 0.25   # ลดจาก 0.5 → 0.25 สำหรับ model ที่เพิ่ง train ใหม่
+CONFIDENCE_THRESHOLD = 0.25
 
 # IoU threshold for NMS (Non-Maximum Suppression)
 IOU_THRESHOLD = 0.45
