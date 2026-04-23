@@ -35,7 +35,7 @@ TEST_CAMERAS_ON_STARTUP = False
 MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "runs", "detect", "bottle_defects", "weights", "best.pt")
 
 # Confidence threshold for detections
-CONFIDENCE_THRESHOLD = 0.5
+CONFIDENCE_THRESHOLD = 0.25   # ลดจาก 0.5 → 0.25 สำหรับ model ที่เพิ่ง train ใหม่
 
 # IoU threshold for NMS (Non-Maximum Suppression)
 IOU_THRESHOLD = 0.45
