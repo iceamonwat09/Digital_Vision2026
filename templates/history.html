@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}Defect History - VisionIQ{% endblock %}
+{% block title %}ประวัติ - Thai Union Can Inspector{% endblock %}
 
 {% block content %}
 <div class="container">
@@ -11,15 +11,11 @@
 
     <div class="history-controls">
         <div class="filter-group">
-            <label for="defectTypeFilter">Filter by Type:</label>
+            <label for="defectTypeFilter">กรองตามประเภท:</label>
             <select id="defectTypeFilter">
-                <option value="">All Types</option>
-                <option value="crack">Crack</option>
-                <option value="scratch">Scratch/Mark</option>
-                <option value="missing_label">Missing Label</option>
-                <option value="wrong_label">Wrong Label</option>
-                <option value="missing_cap">Missing Cap</option>
-                <option value="wrong_cap_color">Wrong Cap Color</option>
+                <option value="">ทั้งหมด</option>
+                <option value="dented">กระป๋องบุบ (Dented)</option>
+                <option value="good">กระป๋องดี (Good)</option>
             </select>
         </div>
         <button id="refreshHistoryBtn" class="btn btn-primary">Refresh</button>
@@ -55,12 +51,8 @@
 
     function formatDefectType(type) {
         const names = {
-            'crack': 'Crack',
-            'scratch': 'Scratch/Mark',
-            'missing_label': 'Missing Label',
-            'wrong_label': 'Wrong Label',
-            'missing_cap': 'Missing Cap',
-            'wrong_cap_color': 'Wrong Cap Color'
+            'dented': 'กระป๋องบุบ (Can Dent)',
+            'good':   'กระป๋องดี (Can Good)'
         };
         return names[type] || type.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase());
     }

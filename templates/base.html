@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="th">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}VisionIQ{% endblock %}</title>
+    <title>{% block title %}Thai Union Can Inspector{% endblock %}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     {% block extra_css %}{% endblock %}
 </head>
@@ -11,12 +11,16 @@
     <nav class="navbar">
         <div class="nav-container">
             <div class="nav-brand">
-                <h1>🔍 VisionIQ <span style="font-size:0.55em;font-weight:400;opacity:0.75;">v1.2.0</span></h1>
+                <div class="brand-logo">TU</div>
+                <div class="brand-text">
+                    <span class="brand-name">Thai Union</span>
+                    <span class="brand-sub">ระบบตรวจสอบกระป๋อง <span class="brand-version">v1.3.0</span></span>
+                </div>
             </div>
             <ul class="nav-menu">
-                <li><a href="/" class="nav-link">Live Detection</a></li>
-                <li><a href="/dashboard" class="nav-link">Dashboard</a></li>
-                <li><a href="/history" class="nav-link">History</a></li>
+                <li><a href="/" class="nav-link">ตรวจจับสด</a></li>
+                <li><a href="/dashboard" class="nav-link">แดชบอร์ด</a></li>
+                <li><a href="/history" class="nav-link">ประวัติ</a></li>
             </ul>
         </div>
     </nav>
@@ -26,7 +30,7 @@
     </main>
 
     <footer class="footer">
-        <p>&copy; 2024 VisionIQ. Powered by YOLOv8.</p>
+        <p>&copy; 2026 Thai Union Group PCL. &nbsp;|&nbsp; Can Dent Detection System &nbsp;|&nbsp; Powered by YOLOv8</p>
     </footer>
 
     <script src="{{ url_for('static', filename='js/main.js') }}"></script>
