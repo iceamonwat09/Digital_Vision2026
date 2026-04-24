@@ -216,10 +216,18 @@ def start_detection():
 
     # Get camera index from request (default to config value)
     data = request.get_json(silent=True) or {}
-    camera_index = data.get("camera_index", config.CAMERA_INDEX)
+    camera_index_raw = data.get("camera_index", config.CAMERA_INDEX)
+
+    # Keep RTSP/HTTP URLs as strings; convert numeric values to int
+    if isinstance(camera_index_raw, str) and camera_index_raw.isdigit():
+        camera_index = int(camera_index_raw)
+    elif isinstance(camera_index_raw, (int, float)):
+        camera_index = int(camera_index_raw)
+    else:
+        camera_index = camera_index_raw  # RTSP URL string
 
     # Initialize camera on demand
-    camera = Camera(camera_index=int(camera_index))
+    camera = Camera(camera_index=camera_index)
     if not camera.initialize():
         available = scan_cameras_fast()
         hint = ""

@@ -8,12 +8,33 @@
         <h2>Live Defect Detection</h2>
         <div class="detection-controls-compact">
             <div class="control-group">
-                <div class="camera-select-group">
-                    <select id="cameraSelect" class="camera-select" title="Select camera">
-                        <option value="" disabled selected>Loading cameras…</option>
-                    </select>
-                    <button id="refreshCamerasBtn" class="btn btn-icon" title="Refresh camera list">&#x1F504;</button>
+
+                <!-- Source type tabs -->
+                <div class="src-tabs">
+                    <button id="tabUsb"  class="src-tab src-tab-active" onclick="switchSource('usb')">กล้อง USB</button>
+                    <button id="tabRtsp" class="src-tab" onclick="switchSource('rtsp')">กล้อง IP (RTSP)</button>
                 </div>
+
+                <!-- USB panel -->
+                <div id="panelUsb" class="camera-panel">
+                    <div class="camera-select-group">
+                        <select id="cameraSelect" class="camera-select" title="Select camera">
+                            <option value="" disabled selected>Loading cameras…</option>
+                        </select>
+                        <button id="refreshCamerasBtn" class="btn btn-icon" title="Refresh">&#x1F504;</button>
+                    </div>
+                </div>
+
+                <!-- RTSP panel -->
+                <div id="panelRtsp" class="camera-panel" style="display:none">
+                    <div class="rtsp-input-group">
+                        <input id="rtspUrl" type="text" class="rtsp-input"
+                               placeholder="rtsp://user:pass@192.168.x.x:554/stream"
+                               title="RTSP URL">
+                        <button class="btn btn-icon" onclick="saveRtsp()" title="บันทึก URL">&#x1F4BE;</button>
+                    </div>
+                </div>
+
                 <button id="startBtn" class="btn btn-primary">Start Detection</button>
                 <button id="stopBtn" class="btn btn-danger" disabled>Stop Detection</button>
             </div>
@@ -51,19 +72,43 @@
 
 {% block extra_js %}
 <script>
-    const startBtn = document.getElementById('startBtn');
-    const stopBtn = document.getElementById('stopBtn');
-    const statusDot = document.getElementById('statusDot');
-    const statusText = document.getElementById('statusText');
-    const activeDefects = document.getElementById('activeDefects');
-    const totalDetected = document.getElementById('totalDetected');
+    const startBtn        = document.getElementById('startBtn');
+    const stopBtn         = document.getElementById('stopBtn');
+    const statusDot       = document.getElementById('statusDot');
+    const statusText      = document.getElementById('statusText');
+    const activeDefects   = document.getElementById('activeDefects');
+    const totalDetected   = document.getElementById('totalDetected');
     const detectionStatus = document.getElementById('detectionStatus');
-    const cameraSelect = document.getElementById('cameraSelect');
+    const cameraSelect    = document.getElementById('cameraSelect');
     const refreshCamerasBtn = document.getElementById('refreshCamerasBtn');
+    const rtspUrlInput    = document.getElementById('rtspUrl');
 
     let statusCheckInterval = null;
+    let currentSource = 'usb';   // 'usb' | 'rtsp'
 
-    // ── Camera scanning ───────────────────────────────
+    // ── Source tab switching ──────────────────────────
+    window.switchSource = function(src) {
+        currentSource = src;
+        document.getElementById('panelUsb').style.display  = src === 'usb'  ? '' : 'none';
+        document.getElementById('panelRtsp').style.display = src === 'rtsp' ? '' : 'none';
+        document.getElementById('tabUsb').classList.toggle('src-tab-active',  src === 'usb');
+        document.getElementById('tabRtsp').classList.toggle('src-tab-active', src === 'rtsp');
+    };
+
+    window.saveRtsp = function() {
+        const url = rtspUrlInput.value.trim();
+        if (url) {
+            localStorage.setItem('rtspUrl', url);
+            rtspUrlInput.style.borderColor = 'var(--success)';
+            setTimeout(() => rtspUrlInput.style.borderColor = '', 1500);
+        }
+    };
+
+    // Restore saved RTSP URL
+    const savedRtsp = localStorage.getItem('rtspUrl');
+    if (savedRtsp) rtspUrlInput.value = savedRtsp;
+
+    // ── Camera scanning (USB only) ────────────────────
     function scanCameras() {
         cameraSelect.disabled = true;
         cameraSelect.innerHTML = '<option value="" disabled selected>Scanning…</option>';
@@ -82,15 +127,13 @@
                     });
                     cameraSelect.disabled = false;
                 } else {
-                    cameraSelect.innerHTML = '<option value="" disabled selected>No cameras found</option>';
+                    cameraSelect.innerHTML = '<option value="" disabled selected>ไม่พบกล้อง</option>';
                 }
             })
             .catch(() => {
                 cameraSelect.innerHTML = '<option value="" disabled selected>Scan failed</option>';
             })
-            .finally(() => {
-                refreshCamerasBtn.disabled = false;
-            });
+            .finally(() => { refreshCamerasBtn.disabled = false; });
     }
 
     refreshCamerasBtn.addEventListener('click', scanCameras);
@@ -103,24 +146,35 @@
                 const isActive = data.active;
                 statusDot.className = 'status-dot ' + (isActive ? 'status-active' : 'status-inactive');
                 statusText.textContent = isActive ? 'Active' : 'Inactive';
-                startBtn.disabled = isActive;
-                stopBtn.disabled = !isActive;
-                cameraSelect.disabled = isActive;
+                startBtn.disabled  = isActive;
+                stopBtn.disabled   = !isActive;
+                cameraSelect.disabled      = isActive;
                 refreshCamerasBtn.disabled = isActive;
+                rtspUrlInput.disabled      = isActive;
 
-                activeDefects.textContent = data.stats.current_defects || 0;
-                totalDetected.textContent = data.stats.total_detected || 0;
+                activeDefects.textContent   = data.stats.current_defects || 0;
+                totalDetected.textContent   = data.stats.total_detected  || 0;
                 detectionStatus.textContent = isActive ? 'Detecting...' : 'Ready';
             })
             .catch(err => console.error('Status error:', err));
     }
 
-    // ── Start / Stop ──────────────────────────────────
+    // ── Start ─────────────────────────────────────────
     startBtn.addEventListener('click', () => {
-        const camIdx = cameraSelect.value;
-        if (!camIdx && camIdx !== 0 && camIdx !== '0') {
-            alert('Please select a camera first.');
-            return;
+        let cameraIndex;
+
+        if (currentSource === 'usb') {
+            const val = cameraSelect.value;
+            if (val === '' || val === null) { alert('กรุณาเลือกกล้องก่อน'); return; }
+            cameraIndex = parseInt(val);
+        } else {
+            const url = rtspUrlInput.value.trim();
+            if (!url) { alert('กรุณาใส่ RTSP URL ก่อน'); return; }
+            if (!url.match(/^(rtsp|rtsps|rtmp|http|https):\/\//i)) {
+                alert('URL ไม่ถูกต้อง ต้องขึ้นต้นด้วย rtsp:// หรือ http://'); return;
+            }
+            cameraIndex = url;
+            localStorage.setItem('rtspUrl', url);
         }
 
         startBtn.disabled = true;
@@ -129,7 +183,7 @@
         fetch('/api/detection/start', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ camera_index: parseInt(camIdx) })
+            body: JSON.stringify({ camera_index: cameraIndex })
         })
         .then(r => r.json())
         .then(data => {
@@ -140,9 +194,7 @@
                 return;
             }
             updateStatus();
-            if (!statusCheckInterval) {
-                statusCheckInterval = setInterval(updateStatus, 1000);
-            }
+            if (!statusCheckInterval) statusCheckInterval = setInterval(updateStatus, 1000);
         })
         .catch(err => {
             console.error('Start error:', err);
@@ -152,6 +204,7 @@
         });
     });
 
+    // ── Stop ──────────────────────────────────────────
     stopBtn.addEventListener('click', () => {
         fetch('/api/detection/stop', { method: 'POST' })
             .then(r => r.json())
