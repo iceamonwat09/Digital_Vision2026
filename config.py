@@ -32,10 +32,10 @@ TEST_CAMERAS_ON_STARTUP = False
 #   - "yolov8x.pt" (extra large, most accurate)
 #   - Or path to your custom trained model: "path/to/best.pt"
 # After training, update this to: r"bottle_defect_dataset/runs/detect/bottle_defects/weights/best.pt"
-MODEL_PATH = "yolov8n.pt"
+MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "weights", "best.pt")
 
 # Confidence threshold for detections
-CONFIDENCE_THRESHOLD = 0.5
+CONFIDENCE_THRESHOLD = 0.25
 
 # IoU threshold for NMS (Non-Maximum Suppression)
 IOU_THRESHOLD = 0.45
@@ -46,14 +46,14 @@ IOU_THRESHOLD = 0.45
 # Map YOLO class IDs to defect types
 # MUST match your data.yaml class names and order
 DEFECT_CLASSES = {
-    0: "can_dent",
-    1: "can_good"
+    0: "dented",
+    1: "good"
 }
 
 # Reverse mapping for display
 DEFECT_CLASS_NAMES = {
-    "can_dent": "Can Dent",
-    "can_good": "Can Good"
+    "dented": "Can Dent",
+    "good":   "Can Good"
 }
 
 # ====================
@@ -62,7 +62,7 @@ DEFECT_CLASS_NAMES = {
 SQL_SERVER   = "172.32.0.50"       # IP Address ของ SQL Server
 SQL_DATABASE = "VisionIQ"          # ชื่อ Database
 SQL_USER     = "sa"                # SQL Server Login
-SQL_PASSWORD = "P@ssw0rd"             # <<< ใส่ Password จริงก่อน python database.py
+SQL_PASSWORD = "P@ssw0rd"          # SQL Server Authentication password
 
 # Plant / Line Information
 PLANT_CODE  = "TUM1"               # รหัสโรงงาน (Thai Union Mahachai 1)
