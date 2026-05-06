@@ -143,11 +143,17 @@ class YOLODetector:
                         if confidence < self.confidence_threshold:
                             continue
 
-                        if class_id not in config.DEFECT_CLASSES:
-                            logger.debug(f"  SKIP class_id={class_id} not in DEFECT_CLASSES")
+                        # ใช้ชื่อ class จากโมเดลโดยตรง (ตรงกับ data.yaml เสมอ)
+                        class_name = (self.model.names.get(class_id, str(class_id))
+                                      if hasattr(self.model, 'names')
+                                      else config.DEFECT_CLASSES.get(class_id, str(class_id)))
+
+                        # กรองเฉพาะ class ที่กำหนดใน config
+                        known = set(config.DEFECT_CLASS_NAMES.keys())
+                        if known and class_name not in known:
+                            logger.debug(f"  SKIP unknown class: '{class_name}'")
                             continue
 
-                        class_name = config.DEFECT_CLASSES[class_id]
                         detection = {
                             "class_id":   class_id,
                             "class_name": class_name,

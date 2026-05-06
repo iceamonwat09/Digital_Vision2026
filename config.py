@@ -43,17 +43,16 @@ IOU_THRESHOLD = 0.45
 # ====================
 # DEFECT CLASS MAPPING  (Can Dent Detection)
 # ====================
-# Map YOLO class IDs to defect types
-# MUST match data.yaml exported from Roboflow
-# Roboflow sorts classes alphabetically → dented=0, dented_spot=1, good=2
-# *** Verify with: open weights/data.yaml after placing new best.pt ***
+# NOTE: ระบบอ่านชื่อ class จาก model.names โดยตรง (ตรงกับ data.yaml เสมอ)
+# DEFECT_CLASSES ใช้เป็น fallback เท่านั้น ไม่ต้องแก้ทุกครั้งที่เทรนใหม่
 DEFECT_CLASSES = {
-    0: "dented",        # กระป๋องบุบ (กรอบใหญ่)
-    1: "dented_spot",   # จุดที่บุบ  (กรอบเล็ก)
-    2: "good"           # กระป๋องดี
+    0: "dented",
+    1: "dented_spot",
+    2: "good"
 }
 
-# Reverse mapping for display
+# Display names — เพิ่ม/ลบ class ตรงนี้เท่านั้น
+# class ใดที่ไม่อยู่ใน dict นี้จะถูกกรองออกจากผลลัพธ์
 DEFECT_CLASS_NAMES = {
     "dented":      "Can Dent",
     "dented_spot": "Dent Area",
