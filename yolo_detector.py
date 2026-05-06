@@ -15,9 +15,9 @@ logger = setup_logger(__name__)
 
 # BGR color palette
 _COLORS = {
-    "good":      (80,  200,  0),    # เขียว
-    "dented":    (0,    0,  220),   # แดง   (กรอบหนา)
-    "dent_spot": (0,  100,  255),   # ส้ม   (corner marks)
+    "good":         (80,  200,  0),    # เขียว
+    "dented":       (0,    0,  220),   # แดง   (กรอบหนา)
+    "dented_spot":  (0,  100,  255),   # ส้ม   (corner marks)
 }
 _COLOR_DEFAULT = (0, 165, 255)      # ส้ม fallback
 
@@ -177,7 +177,7 @@ class YOLODetector:
 
         # Draw good/dented first, dent_spot on top
         ordered = sorted(detections,
-                         key=lambda d: 1 if d["class_name"] == "dent_spot" else 0)
+                         key=lambda d: 1 if d["class_name"] == "dented_spot" else 0)
 
         for det in ordered:
             x1, y1, x2, y2 = det["bbox"]
@@ -186,7 +186,7 @@ class YOLODetector:
             color          = _COLORS.get(class_name, _COLOR_DEFAULT)
 
             # ── Box ──────────────────────────────────────
-            if class_name == "dent_spot":
+            if class_name == "dented_spot":
                 _draw_corner_marks(frame_copy, x1, y1, x2, y2, color,
                                    thickness=2, length=18)
             elif class_name == "dented":
@@ -207,7 +207,7 @@ class YOLODetector:
             )
 
             # dent_spot label below box (avoids overlapping with dented label above)
-            if class_name == "dent_spot":
+            if class_name == "dented_spot":
                 bg_y1   = y2 + 1
                 bg_y2   = y2 + lh + baseline + 6
                 text_y  = y2 + lh + 3
