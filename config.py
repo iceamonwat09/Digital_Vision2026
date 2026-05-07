@@ -23,16 +23,15 @@ TEST_CAMERAS_ON_STARTUP = False
 # ====================
 # YOLO MODEL CONFIGURATION
 # ====================
-# YOLOv8 model path - can be a pretrained model or custom trained model
-# Options:
-#   - "yolov8n.pt" (nano, fastest)
-#   - "yolov8s.pt" (small)
-#   - "yolov8m.pt" (medium)
-#   - "yolov8l.pt" (large)
-#   - "yolov8x.pt" (extra large, most accurate)
-#   - Or path to your custom trained model: "path/to/best.pt"
-# After training, update this to: r"bottle_defect_dataset/runs/detect/bottle_defects/weights/best.pt"
-MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "weights", "best.pt")
+# Weights live under weights/<mode>/ — see modes/ package for per-mode config.
+WEIGHTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "weights")
+
+# Default mode that loads at startup (must match a name in modes/registry.py).
+DEFAULT_MODE = "can_dent"
+
+# Legacy single-model path. Kept so existing code that imports
+# ``config.MODEL_PATH`` keeps working. Points at the can_dent default weights.
+MODEL_PATH = os.path.join(WEIGHTS_DIR, "can_dent", "best.pt")
 
 # Confidence threshold for detections
 CONFIDENCE_THRESHOLD = 0.25
@@ -44,15 +43,16 @@ IOU_THRESHOLD = 0.45
 # DEFECT CLASS MAPPING  (Can Dent Detection)
 # ====================
 # NOTE: ระบบอ่านชื่อ class จาก model.names โดยตรง (ตรงกับ data.yaml เสมอ)
-# DEFECT_CLASSES ใช้เป็น fallback เท่านั้น ไม่ต้องแก้ทุกครั้งที่เทรนใหม่
+# ค่าเหล่านี้ใช้เป็น fallback / backward-compat สำหรับโค้ดเดิมเท่านั้น
+# Per-mode config อยู่ใน modes/<mode>.py
 DEFECT_CLASSES = {
     0: "dented",
     1: "dented_spot",
     2: "good"
 }
 
-# Display names — เพิ่ม/ลบ class ตรงนี้เท่านั้น
-# class ใดที่ไม่อยู่ใน dict นี้จะถูกกรองออกจากผลลัพธ์
+# Display names — Can Dent mode (default).
+# Used as fallback when no mode_config is supplied to YOLODetector.
 DEFECT_CLASS_NAMES = {
     "dented":      "Can Dent",
     "dented_spot": "Dent Area",

@@ -13,7 +13,8 @@ from logger import setup_logger
 
 logger = setup_logger(__name__)
 
-# BGR color palette
+# Fallback BGR color palette (Can Dent). Per-mode colors override this when a
+# ``mode_config`` is passed to YOLODetector.
 _COLORS = {
     "good":         (80,  200,  0),    # เขียว
     "dented":       (0,    0,  220),   # แดง   (กรอบหนา)
@@ -79,17 +80,36 @@ class YOLODetector:
     Handles model loading, inference, and result processing.
     """
     
-    def __init__(self, model_path: str = None):
+    def __init__(self, model_path: str = None, mode_config=None):
         """
         Initialize YOLO detector.
-        
+
         Args:
             model_path: Path to YOLO model. If None, uses config.MODEL_PATH
+            mode_config: Optional mode module from ``modes/`` providing
+                ``CLASS_NAMES`` (display labels) and ``COLORS`` (BGR tuples).
+                When None, falls back to the legacy ``config`` globals so
+                existing call sites keep working unchanged.
         """
         self.model_path = model_path if model_path is not None else config.MODEL_PATH
         self.model: Optional[YOLO] = None
         self.confidence_threshold = config.CONFIDENCE_THRESHOLD
         self.iou_threshold = config.IOU_THRESHOLD
+        self.mode_config = mode_config
+
+    def _class_names(self) -> dict:
+        """Active class-name → display-label mapping."""
+        if self.mode_config is not None:
+            return getattr(self.mode_config, "CLASS_NAMES", {}) or {}
+        return config.DEFECT_CLASS_NAMES
+
+    def _colors(self) -> dict:
+        """Active class-name → BGR tuple mapping."""
+        if self.mode_config is not None:
+            colors = getattr(self.mode_config, "COLORS", None)
+            if colors:
+                return colors
+        return _COLORS
         
     def load_model(self) -> bool:
         """
@@ -185,8 +205,9 @@ class YOLODetector:
                                       if hasattr(self.model, 'names')
                                       else config.DEFECT_CLASSES.get(class_id, str(class_id)))
 
-                        # กรองเฉพาะ class ที่กำหนดใน config
-                        known = set(config.DEFECT_CLASS_NAMES.keys())
+                        # กรองเฉพาะ class ที่กำหนดใน mode/config
+                        # known ว่าง = accept ทุก class (เช่น Label mode ก่อนเติม wording)
+                        known = set(self._class_names().keys())
                         if known and class_name not in known:
                             logger.debug(f"  SKIP unknown class: '{class_name}'")
                             continue
@@ -217,6 +238,8 @@ class YOLODetector:
                       (drawn last so it appears on top of dented box)
         """
         frame_copy = frame.copy()
+        palette = self._colors()
+        name_map = self._class_names()
 
         # Draw good/dented first, dent_spot on top
         ordered = sorted(detections,
@@ -226,7 +249,7 @@ class YOLODetector:
             x1, y1, x2, y2 = det["bbox"]
             class_name     = det["class_name"]
             confidence     = det["confidence"]
-            color          = _COLORS.get(class_name, _COLOR_DEFAULT)
+            color          = palette.get(class_name, _COLOR_DEFAULT)
 
             # ── Box ──────────────────────────────────────
             if class_name == "dented_spot":
@@ -238,7 +261,7 @@ class YOLODetector:
                 cv2.rectangle(frame_copy, (x1, y1), (x2, y2), color, 2)
 
             # ── Label ────────────────────────────────────
-            display_name = config.DEFECT_CLASS_NAMES.get(
+            display_name = name_map.get(
                 class_name, class_name.replace("_", " ").title()
             )
             label = f"{display_name}: {confidence:.2f}"
@@ -281,9 +304,10 @@ class YOLODetector:
             "defects_by_type": {}
         }
         
+        name_map = self._class_names()
         for det in detections:
             class_name = det["class_name"]
-            display_name = config.DEFECT_CLASS_NAMES.get(
+            display_name = name_map.get(
                 class_name,
                 class_name.replace("_", " ").title()
             )
