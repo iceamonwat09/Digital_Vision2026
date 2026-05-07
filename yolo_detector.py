@@ -22,6 +22,43 @@ _COLORS = {
 _COLOR_DEFAULT = (0, 165, 255)      # ส้ม fallback
 
 
+def _suppress_false_dent_spots(detections: list, good_conf_threshold: float = 0.90) -> list:
+    """
+    ลบ dented_spot ที่เป็น false positive ออก โดยใช้เงื่อนไข 3 ข้อพร้อมกัน:
+      1. center ของ dented_spot อยู่ภายใน good box (containment)
+      2. good.confidence >= good_conf_threshold (default 0.90)
+      3. good.confidence > dented_spot.confidence
+    """
+    good_dets = [d for d in detections if d["class_name"] == "good"]
+    if not good_dets:
+        return detections
+
+    def _inside(cx, cy, bbox):
+        x1, y1, x2, y2 = bbox
+        return x1 <= cx <= x2 and y1 <= cy <= y2
+
+    suppressed = set()
+    for i, det in enumerate(detections):
+        if det["class_name"] != "dented_spot":
+            continue
+        cx, cy = det["center"]
+        for g in good_dets:
+            if (g["confidence"] >= good_conf_threshold
+                    and g["confidence"] > det["confidence"]
+                    and _inside(cx, cy, g["bbox"])):
+                suppressed.add(i)
+                logger.debug(
+                    f"SUPPRESS dented_spot conf={det['confidence']:.2f} "
+                    f"(inside good conf={g['confidence']:.2f})"
+                )
+                break
+
+    result = [d for i, d in enumerate(detections) if i not in suppressed]
+    if suppressed:
+        logger.info(f"Suppressed {len(suppressed)} false dented_spot detection(s)")
+    return result
+
+
 def _draw_corner_marks(frame: np.ndarray, x1: int, y1: int, x2: int, y2: int,
                        color, thickness: int = 2, length: int = 20) -> None:
     """Draw targeting corner brackets instead of a full rectangle."""
@@ -162,8 +199,8 @@ class YOLODetector:
                             "center": [int((x1 + x2) / 2), int((y1 + y2) / 2)]
                         }
                         detections.append(detection)
-            
-            return detections
+
+            return _suppress_false_dent_spots(detections)
             
         except Exception as e:
             logger.error(f"Detection error: {str(e)}")
