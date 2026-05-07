@@ -13,6 +13,65 @@ from logger import setup_logger
 
 logger = setup_logger(__name__)
 
+# BGR color palette
+_COLORS = {
+    "good":         (80,  200,  0),    # เขียว
+    "dented":       (0,    0,  220),   # แดง   (กรอบหนา)
+    "dented_spot":  (0,  100,  255),   # ส้ม   (corner marks)
+}
+_COLOR_DEFAULT = (0, 165, 255)      # ส้ม fallback
+
+
+def _suppress_false_dent_spots(detections: list, good_conf_threshold: float = 0.90) -> list:
+    """
+    ลบ dented_spot ที่เป็น false positive ออก โดยใช้เงื่อนไข 3 ข้อพร้อมกัน:
+      1. center ของ dented_spot อยู่ภายใน good box (containment)
+      2. good.confidence >= good_conf_threshold (default 0.90)
+      3. good.confidence > dented_spot.confidence
+    """
+    good_dets = [d for d in detections if d["class_name"] == "good"]
+    if not good_dets:
+        return detections
+
+    def _inside(cx, cy, bbox):
+        x1, y1, x2, y2 = bbox
+        return x1 <= cx <= x2 and y1 <= cy <= y2
+
+    suppressed = set()
+    for i, det in enumerate(detections):
+        if det["class_name"] != "dented_spot":
+            continue
+        cx, cy = det["center"]
+        for g in good_dets:
+            if (g["confidence"] >= good_conf_threshold
+                    and g["confidence"] > det["confidence"]
+                    and _inside(cx, cy, g["bbox"])):
+                suppressed.add(i)
+                logger.debug(
+                    f"SUPPRESS dented_spot conf={det['confidence']:.2f} "
+                    f"(inside good conf={g['confidence']:.2f})"
+                )
+                break
+
+    result = [d for i, d in enumerate(detections) if i not in suppressed]
+    if suppressed:
+        logger.info(f"Suppressed {len(suppressed)} false dented_spot detection(s)")
+    return result
+
+
+def _draw_corner_marks(frame: np.ndarray, x1: int, y1: int, x2: int, y2: int,
+                       color, thickness: int = 2, length: int = 20) -> None:
+    """Draw targeting corner brackets instead of a full rectangle."""
+    ln = min(length, (x2 - x1) // 3, (y2 - y1) // 3)
+    pts = [
+        ((x1, y1), (x1 + ln, y1)), ((x1, y1), (x1, y1 + ln)),   # TL
+        ((x2, y1), (x2 - ln, y1)), ((x2, y1), (x2, y1 + ln)),   # TR
+        ((x1, y2), (x1 + ln, y2)), ((x1, y2), (x1, y2 - ln)),   # BL
+        ((x2, y2), (x2 - ln, y2)), ((x2, y2), (x2, y2 - ln)),   # BR
+    ]
+    for p1, p2 in pts:
+        cv2.line(frame, p1, p2, color, thickness)
+
 
 class YOLODetector:
     """
@@ -121,11 +180,17 @@ class YOLODetector:
                         if confidence < self.confidence_threshold:
                             continue
 
-                        if class_id not in config.DEFECT_CLASSES:
-                            logger.debug(f"  SKIP class_id={class_id} not in DEFECT_CLASSES")
+                        # ใช้ชื่อ class จากโมเดลโดยตรง (ตรงกับ data.yaml เสมอ)
+                        class_name = (self.model.names.get(class_id, str(class_id))
+                                      if hasattr(self.model, 'names')
+                                      else config.DEFECT_CLASSES.get(class_id, str(class_id)))
+
+                        # กรองเฉพาะ class ที่กำหนดใน config
+                        known = set(config.DEFECT_CLASS_NAMES.keys())
+                        if known and class_name not in known:
+                            logger.debug(f"  SKIP unknown class: '{class_name}'")
                             continue
 
-                        class_name = config.DEFECT_CLASSES[class_id]
                         detection = {
                             "class_id":   class_id,
                             "class_name": class_name,
@@ -134,8 +199,8 @@ class YOLODetector:
                             "center": [int((x1 + x2) / 2), int((y1 + y2) / 2)]
                         }
                         detections.append(detection)
-            
-            return detections
+
+            return _suppress_false_dent_spots(detections)
             
         except Exception as e:
             logger.error(f"Detection error: {str(e)}")
@@ -144,66 +209,61 @@ class YOLODetector:
     def draw_detections(self, frame: np.ndarray, detections: List[Dict]) -> np.ndarray:
         """
         Draw bounding boxes and labels on frame.
-        
-        Args:
-            frame: Input frame
-            detections: List of detection dictionaries
-            
-        Returns:
-            Frame with drawn bounding boxes and labels
+
+        Rendering rules:
+          good      → solid green rectangle, thickness 2, label above
+          dented    → solid red rectangle,   thickness 3, label above
+          dent_spot → orange corner brackets, thickness 2, label below box
+                      (drawn last so it appears on top of dented box)
         """
         frame_copy = frame.copy()
-        
-        colors = {
-            "dented":   (0, 0, 255),   # Red   — defect
-            "good":     (0, 255, 0),   # Green — good
-            "can_dent": (0, 0, 255),
-            "can_good": (0, 255, 0),
-        }
-        DEFAULT_COLOR = (0, 165, 255)  # Orange fallback
 
-        for det in detections:
+        # Draw good/dented first, dent_spot on top
+        ordered = sorted(detections,
+                         key=lambda d: 1 if d["class_name"] == "dented_spot" else 0)
+
+        for det in ordered:
             x1, y1, x2, y2 = det["bbox"]
-            class_name = det["class_name"]
-            confidence = det["confidence"]
+            class_name     = det["class_name"]
+            confidence     = det["confidence"]
+            color          = _COLORS.get(class_name, _COLOR_DEFAULT)
 
-            color = colors.get(class_name, DEFAULT_COLOR)
-            
-            # Draw bounding box
-            cv2.rectangle(frame_copy, (x1, y1), (x2, y2), color, 2)
-            
-            # Prepare label text
+            # ── Box ──────────────────────────────────────
+            if class_name == "dented_spot":
+                _draw_corner_marks(frame_copy, x1, y1, x2, y2, color,
+                                   thickness=2, length=18)
+            elif class_name == "dented":
+                cv2.rectangle(frame_copy, (x1, y1), (x2, y2), color, 3)
+            else:
+                cv2.rectangle(frame_copy, (x1, y1), (x2, y2), color, 2)
+
+            # ── Label ────────────────────────────────────
             display_name = config.DEFECT_CLASS_NAMES.get(
-                class_name,
-                class_name.replace("_", " ").title()
+                class_name, class_name.replace("_", " ").title()
             )
             label = f"{display_name}: {confidence:.2f}"
-            
-            # Calculate label size and position
-            (label_width, label_height), baseline = cv2.getTextSize(
-                label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2
+
+            font_scale = 0.52
+            font_thick = 1
+            (lw, lh), baseline = cv2.getTextSize(
+                label, cv2.FONT_HERSHEY_SIMPLEX, font_scale, font_thick + 1
             )
-            
-            # Draw label background
-            cv2.rectangle(
-                frame_copy,
-                (x1, y1 - label_height - baseline - 5),
-                (x1 + label_width, y1),
-                color,
-                -1
-            )
-            
-            # Draw label text
-            cv2.putText(
-                frame_copy,
-                label,
-                (x1, y1 - baseline - 3),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.6,
-                (255, 255, 255),
-                2
-            )
-        
+
+            # dent_spot label below box (avoids overlapping with dented label above)
+            if class_name == "dented_spot":
+                bg_y1   = y2 + 1
+                bg_y2   = y2 + lh + baseline + 6
+                text_y  = y2 + lh + 3
+            else:
+                bg_y1   = max(0, y1 - lh - baseline - 5)
+                bg_y2   = y1
+                text_y  = y1 - baseline - 3
+
+            cv2.rectangle(frame_copy, (x1, bg_y1), (x1 + lw, bg_y2), color, -1)
+            cv2.putText(frame_copy, label, (x1, text_y),
+                        cv2.FONT_HERSHEY_SIMPLEX, font_scale, (255, 255, 255),
+                        font_thick + 1)
+
         return frame_copy
     
     def get_detection_summary(self, detections: List[Dict]) -> Dict:

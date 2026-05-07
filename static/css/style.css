@@ -210,7 +210,56 @@ body {
 .btn:disabled { opacity: .45; cursor: not-allowed; transform: none !important; }
 
 /* ── Camera Controls ─────────────────────────────────────── */
-.control-group { display: flex; gap: 0.6rem; align-items: center; }
+.control-group { display: flex; gap: 0.6rem; align-items: center; flex-wrap: wrap; }
+
+/* Source tabs */
+.src-tabs {
+    display: flex;
+    background: var(--gray-100);
+    border: 1.5px solid var(--gray-200);
+    border-radius: 8px;
+    padding: 3px;
+    gap: 2px;
+}
+
+.src-tab {
+    padding: 0.32rem 0.85rem;
+    border: none;
+    border-radius: 6px;
+    font-size: 0.8rem;
+    font-weight: 500;
+    cursor: pointer;
+    color: var(--gray-600);
+    background: transparent;
+    transition: all .2s;
+    white-space: nowrap;
+}
+
+.src-tab-active {
+    background: var(--white);
+    color: var(--blue);
+    box-shadow: var(--shadow-sm);
+    font-weight: 600;
+}
+
+.camera-panel { display: flex; align-items: center; }
+
+/* RTSP URL input */
+.rtsp-input-group { display: flex; align-items: center; gap: 0.25rem; }
+
+.rtsp-input {
+    padding: 0.42rem 0.8rem;
+    background: var(--white);
+    color: var(--gray-800);
+    border: 1.5px solid var(--gray-200);
+    border-radius: 7px;
+    font-size: 0.82rem;
+    width: 300px;
+    transition: border-color .2s;
+}
+.rtsp-input:focus { outline: none; border-color: var(--blue-mid); }
+.rtsp-input:disabled { opacity: .45; cursor: not-allowed; }
+.rtsp-input::placeholder { color: var(--gray-400); }
 
 .camera-select-group { display: flex; align-items: center; gap: 0.25rem; }
 

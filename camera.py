@@ -1,11 +1,11 @@
 """
-Camera module for handling external USB webcam input.
+Camera module for handling USB webcams and RTSP IP camera streams.
 Provides camera detection, initialization, and frame capture functionality.
 """
 
 import cv2
 import os
-from typing import Optional, Tuple, List, Dict
+from typing import Optional, Tuple, List, Dict, Union
 import config
 from logger import setup_logger
 
@@ -17,19 +17,22 @@ _BACKENDS_LINUX = [cv2.CAP_ANY, cv2.CAP_V4L2]
 _BACKENDS = _BACKENDS_WIN if os.name == 'nt' else _BACKENDS_LINUX
 
 _BACKEND_NAMES = {
-    cv2.CAP_DSHOW: "DirectShow",
-    cv2.CAP_MSMF:  "MSMF",
-    cv2.CAP_ANY:   "Auto",
-    cv2.CAP_V4L2:  "V4L2",
+    cv2.CAP_DSHOW:  "DirectShow",
+    cv2.CAP_MSMF:   "MSMF",
+    cv2.CAP_ANY:    "Auto",
+    cv2.CAP_V4L2:   "V4L2",
+    cv2.CAP_FFMPEG: "FFMPEG",
 }
+
+_RTSP_PREFIXES = ('rtsp://', 'rtsps://', 'rtmp://', 'http://', 'https://')
+
+
+def _is_url(value) -> bool:
+    return isinstance(value, str) and value.lower().startswith(_RTSP_PREFIXES)
 
 
 def _probe_index(index: int) -> bool:
-    """Return True if the camera index is readable.
-    Uses VideoCapture without explicit backend first (most compatible on Windows),
-    then falls back to explicit backends.
-    """
-    # No-backend call matches what test_camera.py does — most reliable on Windows
+    """Return True if the camera index is readable."""
     cap = cv2.VideoCapture(index)
     if cap.isOpened():
         ret, _ = cap.read()
@@ -49,8 +52,7 @@ def _probe_index(index: int) -> bool:
 
 def scan_cameras_fast(max_index: int = 4, skip_indices: list = None) -> List[Dict]:
     """
-    List available cameras.  skip_indices lets callers exclude already-open cameras
-    so we never probe (and briefly steal) a camera that is already in use.
+    List available local cameras.  skip_indices lets callers exclude already-open cameras.
     """
     skip = set(skip_indices or [])
     cameras = []
@@ -67,7 +69,6 @@ def scan_cameras_fast(max_index: int = 4, skip_indices: list = None) -> List[Dic
         except Exception as e:
             logger.warning(f"pygrabber unavailable ({e}), falling back to OpenCV probe.")
 
-    # Fallback: probe only indices not currently in use
     for i in range(max_index + 1):
         if i in skip:
             cameras.append({"id": i, "name": f"Camera {i} (in use)"})
@@ -79,33 +80,30 @@ def scan_cameras_fast(max_index: int = 4, skip_indices: list = None) -> List[Dic
 
 class Camera:
     """
-    Camera handler for external USB webcam.
-    Provides methods to detect available cameras and capture frames.
+    Camera handler supporting USB webcams (index) and IP cameras (RTSP URL).
     """
 
-    def __init__(self, camera_index: int = None):
-        """
-        Initialize camera handler.
-
-        Args:
-            camera_index: Camera index to use. If None, uses config.CAMERA_INDEX
-        """
-        self.camera_index = camera_index if camera_index is not None else config.CAMERA_INDEX
+    def __init__(self, camera_index: Union[int, str] = None):
+        raw = camera_index if camera_index is not None else config.CAMERA_INDEX
+        # Normalise numeric strings ("0", "1") → int
+        if isinstance(raw, str) and raw.isdigit():
+            raw = int(raw)
+        self.camera_index = raw
         self.cap: Optional[cv2.VideoCapture] = None
         self.is_initialized = False
 
     def initialize(self) -> bool:
-        """
-        Initialize the camera.
-        Tries no-backend (most compatible) first, then explicit backends.
-        """
         if self.is_initialized:
             self.release()
+        if _is_url(self.camera_index):
+            return self._initialize_rtsp()
+        return self._initialize_usb()
 
-        logger.info(f"Initializing camera index={self.camera_index} ...")
+    def _initialize_usb(self) -> bool:
+        """Open a local USB/built-in camera by index."""
+        logger.info(f"Initializing USB camera index={self.camera_index} ...")
 
-        # Build try list: no-backend first (works when DSHOW/MSMF fail by index)
-        attempts = [None] + _BACKENDS   # None = no explicit backend
+        attempts = [None] + _BACKENDS
 
         for backend in attempts:
             cap = (cv2.VideoCapture(self.camera_index) if backend is None
@@ -119,7 +117,6 @@ class Camera:
             cap.set(cv2.CAP_PROP_FPS,          config.CAMERA_FPS)
             cap.set(cv2.CAP_PROP_BUFFERSIZE,   1)
 
-            # Warm-up: discard initial frames
             for _ in range(5):
                 cap.read()
 
@@ -128,12 +125,11 @@ class Camera:
                 self.cap = cap
                 self.is_initialized = True
                 bname = "Default" if backend is None else _BACKEND_NAMES.get(backend, str(backend))
-                logger.info(f"Camera ready (index={self.camera_index}, backend={bname})")
+                logger.info(f"USB camera ready (index={self.camera_index}, backend={bname})")
                 return True
 
             cap.release()
 
-        # All backends failed — help the user pick the right index
         logger.error(
             f"Cannot open camera index={self.camera_index}. "
             "Is it connected? Is another app (Teams/Zoom) using it?"
@@ -141,9 +137,40 @@ class Camera:
         available = scan_cameras_fast()
         if available:
             ids = [c["id"] for c in available]
-            logger.error(f"Available camera indices: {ids}. Set CAMERA_INDEX in config.py")
-        else:
-            logger.error("No cameras found at all. Check cable / driver / Device Manager.")
+            logger.error(f"Available camera indices: {ids}.")
+        return False
+
+    def _initialize_rtsp(self) -> bool:
+        """Connect to an RTSP / IP camera stream."""
+        url = self.camera_index
+        logger.info(f"Connecting to IP camera: {url}")
+
+        # Try FFMPEG backend first (best RTSP support), then default
+        for backend in [cv2.CAP_FFMPEG, None]:
+            cap = (cv2.VideoCapture(url) if backend is None
+                   else cv2.VideoCapture(url, backend))
+            if not cap.isOpened():
+                cap.release()
+                continue
+
+            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+
+            # Warm-up: flush initial buffered frames
+            for _ in range(3):
+                cap.read()
+
+            ret, frame = cap.read()
+            if ret and frame is not None:
+                self.cap = cap
+                self.is_initialized = True
+                bname = _BACKEND_NAMES.get(backend, "Default") if backend else "Default"
+                logger.info(f"IP camera connected (backend={bname}): {url}")
+                return True
+
+            cap.release()
+
+        logger.error(f"Cannot connect to IP camera: {url}")
+        logger.error("Check: URL format, credentials, network access, camera power.")
         return False
 
     def read_frame(self) -> Optional[Tuple[bool, any]]:
