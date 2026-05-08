@@ -204,6 +204,10 @@ class YOLODetector:
                         class_name = (self.model.names.get(class_id, str(class_id))
                                       if hasattr(self.model, 'names')
                                       else config.DEFECT_CLASSES.get(class_id, str(class_id)))
+                        # Normalize to lower-case so palette/CLASS_NAMES keys stay
+                        # simple no matter how the model was annotated
+                        # (Good / GOOD / good all match the same entry).
+                        class_name = str(class_name).lower()
 
                         # กรองเฉพาะ class ที่กำหนดใน mode/config
                         # known ว่าง = accept ทุก class (เช่น Label mode ก่อนเติม wording)
