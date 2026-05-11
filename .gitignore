@@ -54,3 +54,10 @@ uploads/
 # Environment variables
 .env
 .env.local
+
+# Label Paper Inspection — runtime data, not source
+credentials/
+data/label_paper/inspections/
+data/label_paper/reports/
+# Keep skus/ tracked so spec.json is versioned; master PDFs are large and
+# ignored by the global *.pdf rule below if you add one (currently allowed).

@@ -3,6 +3,7 @@ Flask application for YOLO-based defect detection system.
 Main application file with routes, video streaming, and API endpoints.
 """
 
+import os
 import threading
 import time
 from datetime import datetime
@@ -17,6 +18,11 @@ from camera import Camera, scan_cameras_fast
 from yolo_detector import YOLODetector
 from database import Database
 from modes import registry as mode_registry
+
+# Label Paper Inspection (PDF master + manual crop + Vertex AI).
+# Kept independent of the YOLO mode-switcher above on purpose.
+from modes import label_paper as label_paper_cfg
+from inspectors import master_loader, label_pipeline
 
 # Setup centralized logging
 logger = setup_logger(__name__)
@@ -397,6 +403,60 @@ def api_switch_mode():
         "model_file": current_model_file,
         "model_loaded": detector.model is not None,
     })
+
+
+# ── Label Paper Inspection (PDF master + manual crop) ──
+# These routes are completely independent from the YOLO detection pipeline
+# above (no camera, no detection thread, no shared state).
+
+@app.route('/label_paper')
+def label_paper_page():
+    """Label Paper inspection page — upload, manual crop, inspect."""
+    return render_template('label_paper.html')
+
+
+@app.route('/api/label_paper/skus', methods=['GET'])
+def api_label_paper_skus():
+    """List SKUs found under ``data/label_paper/skus/``."""
+    skus = master_loader.list_skus(label_paper_cfg.SKUS_DIR)
+    return jsonify({"skus": skus})
+
+
+@app.route('/api/label_paper/inspect', methods=['POST'])
+def api_label_paper_inspect():
+    """
+    Inspect a cropped label image against its SKU master.
+
+    multipart/form-data:
+        sku_code: str   — must match a directory under SKUS_DIR
+        image:    file  — already-cropped JPG/PNG from the browser
+    """
+    sku_code = (request.form.get("sku_code") or "").strip()
+    upload = request.files.get("image")
+    if not sku_code or upload is None:
+        return jsonify({"error": "sku_code and image are required"}), 400
+
+    sku_dir = os.path.join(label_paper_cfg.SKUS_DIR, sku_code)
+    if not os.path.isdir(sku_dir):
+        return jsonify({"error": f"SKU '{sku_code}' not found"}), 404
+
+    try:
+        master = master_loader.load_master(sku_dir)
+    except Exception as e:
+        logger.error(f"[label_paper] failed to load master for {sku_code}: {e}")
+        return jsonify({"error": f"failed to load master: {e}"}), 500
+
+    image_bytes = upload.read()
+    if not image_bytes:
+        return jsonify({"error": "empty image"}), 400
+
+    try:
+        report = label_pipeline.inspect(master, image_bytes)
+    except Exception as e:
+        logger.error(f"[label_paper] inspection failed for {sku_code}: {e}")
+        return jsonify({"error": f"inspection failed: {e}"}), 500
+
+    return jsonify(report.to_dict())
 
 
 @app.errorhandler(404)

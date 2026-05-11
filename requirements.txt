@@ -18,6 +18,15 @@ Pillow==10.1.0
 pygrabber==0.2
 comtypes==1.4.16
 
+# Label Paper Inspection (PDF master + Levenshtein + Vertex AI)
+PyMuPDF>=1.24.0           # extract text from master.pdf (no OCR needed on master)
+python-Levenshtein>=0.25  # fast text distance; module also has a pure-Python fallback
+
+# Vertex AI — uncomment when VERTEX_ENABLED=true and credentials are wired
+# google-cloud-aiplatform>=1.60.0
+# google-cloud-documentai>=2.27.0
+# colormath>=3.0.0          # for real CIE2000 ΔE (Phase 2)
+
 # Optional: For better performance
 # torch==2.1.0
 # torchvision==0.16.0
