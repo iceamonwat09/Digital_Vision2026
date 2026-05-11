@@ -46,6 +46,13 @@ class MasterColor:
 
 
 @dataclass
+class PixelInspectionConfig:
+    enabled: bool = True
+    delta_e_tolerance: float = 6.0
+    min_defect_area_px: int = 80
+
+
+@dataclass
 class Master:
     sku_code: str
     display_name: str
@@ -53,6 +60,7 @@ class Master:
     raw_text: str
     fields: List[FieldSpec] = field(default_factory=list)
     colors: List[MasterColor] = field(default_factory=list)
+    pixel_inspection: PixelInspectionConfig = field(default_factory=PixelInspectionConfig)
 
 
 def load_master(sku_dir: str) -> Master:
@@ -70,6 +78,13 @@ def load_master(sku_dir: str) -> Master:
     fields = [FieldSpec(**fd) for fd in spec.get("fields", [])]
     colors = [MasterColor(**c) for c in spec.get("colors", [])]
 
+    px_spec = spec.get("pixel_inspection") or {}
+    pixel_cfg = PixelInspectionConfig(
+        enabled=bool(px_spec.get("enabled", True)),
+        delta_e_tolerance=float(px_spec.get("delta_e_tolerance", 6.0)),
+        min_defect_area_px=int(px_spec.get("min_defect_area_px", 80)),
+    )
+
     return Master(
         sku_code=spec["sku_code"],
         display_name=spec.get("display_name", spec["sku_code"]),
@@ -77,6 +92,7 @@ def load_master(sku_dir: str) -> Master:
         raw_text=raw_text,
         fields=fields,
         colors=colors,
+        pixel_inspection=pixel_cfg,
     )
 
 

@@ -129,9 +129,11 @@
     let html = `<div class="lp-verdict ${vClass}">ผลรวม: ${r.verdict}</div>`;
 
     if (r.stub_mode) {
-      html += `<div class="lp-stub">⚠️ ระบบกำลังทำงานใน <b>STUB MODE</b> — Vertex Document AI / Gemini ยังไม่ถูกเรียก<br>
-              ตั้งค่า env <code>VERTEX_ENABLED=true</code> และใส่ credentials เพื่อใช้งานจริง</div>`;
+      html += `<div class="lp-stub">⚠️ OCR ส่วนตัวอักษรกำลังทำงานใน <b>STUB MODE</b> — Vertex Document AI ยังไม่ถูกเรียก<br>
+              ตั้งค่า env <code>VERTEX_ENABLED=true</code> และใส่ credentials เพื่อใช้งานจริง (ส่วนตรวจสี/pixel ทำงานเต็มแล้ว)</div>`;
     }
+
+    html += renderPixelInspection(r.pixel_inspection || {});
 
     html += `<h4 style="margin:14px 0 6px;">ผลตรวจตัวอักษร (Field-aware)</h4>`;
     if (r.field_results && r.field_results.length) {
@@ -181,6 +183,73 @@
         <summary>OCR text (raw)</summary>
         <pre class="lp-pre">${escapeHtml(r.ocr_text)}</pre>
       </details>`;
+    }
+    return html;
+  }
+
+  function renderPixelInspection(p) {
+    if (!p || Object.keys(p).length === 0) return '';
+
+    let html = `<h4 style="margin:14px 0 6px;">ผลตรวจระดับ pixel (ΔE2000 map)</h4>`;
+
+    if (!p.enabled) {
+      const reason = p.note || p.verdict || 'ไม่ได้เปิดใช้งาน';
+      return html + `<div class="lp-empty" style="padding:14px;">${escapeHtml(reason)}</div>`;
+    }
+
+    const pvClass = p.verdict === 'PASS' ? 'lp-v-pass'
+                  : p.verdict === 'WARN' ? 'lp-v-warn'
+                                         : 'lp-v-fail';
+    const passRate = (typeof p.pass_rate === 'number') ? p.pass_rate.toFixed(2) : p.pass_rate;
+    const peak = (typeof p.de_peak === 'number') ? p.de_peak.toFixed(1) : p.de_peak;
+    const mean = (typeof p.de_mean === 'number') ? p.de_mean.toFixed(2) : p.de_mean;
+    const p95  = (typeof p.de_p95  === 'number') ? p.de_p95.toFixed(1)  : p.de_p95;
+    const p99  = (typeof p.de_p99  === 'number') ? p.de_p99.toFixed(1)  : p.de_p99;
+
+    html += `
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px;">
+        <span class="lp-verdict ${pvClass}" style="font-size:14px;padding:4px 10px;">pixel: ${escapeHtml(p.verdict)}</span>
+        <span style="font-size:13px;color:#37474f;">
+          pass-rate <b>${passRate}%</b> &nbsp;|&nbsp;
+          peak ΔE <b>${peak}</b> &nbsp;|&nbsp;
+          mean ΔE <b>${mean}</b> &nbsp;|&nbsp;
+          p95 <b>${p95}</b> &nbsp;|&nbsp; p99 <b>${p99}</b>
+          &nbsp;|&nbsp; tol ${p.tolerance}
+        </span>
+      </div>`;
+
+    if (p.align_info && p.align_info.ok === false) {
+      html += `<div class="lp-stub">⚠️ ECC alignment ไม่ converge — ผลอาจเพี้ยน ลองครอปให้แนบขอบฉลากให้แม่นขึ้นหรือเพิ่มแสง</div>`;
+    }
+
+    if (p.heatmap_png_b64) {
+      html += `<img src="data:image/png;base64,${p.heatmap_png_b64}"
+                   style="max-width:100%;border:1px solid #cfd8dc;border-radius:6px;display:block;margin:6px 0;">`;
+    }
+
+    if (p.defects && p.defects.length) {
+      html += `<table class="lp-tbl"><tr>
+        <th>#</th><th>ตำแหน่ง (x,y,w,h)</th><th>พื้นที่ (px)</th>
+        <th>peak ΔE</th><th>mean ΔE</th><th>Master → พบ</th><th>สถานะ</th></tr>`;
+      p.defects.forEach((d, i) => {
+        html += `<tr>
+          <td>${i + 1}</td>
+          <td>${d.bbox.join(', ')}</td>
+          <td>${d.area_px}</td>
+          <td><b>${d.peak_de}</b></td>
+          <td>${d.mean_de}</td>
+          <td>
+            <span class="lp-swatch" style="background:${escapeAttr(d.master_hex)}"></span>${escapeHtml(d.master_hex)}
+            &nbsp;→&nbsp;
+            <span class="lp-swatch" style="background:${escapeAttr(d.found_hex)}"></span>${escapeHtml(d.found_hex)}
+          </td>
+          <td>${severityTag(d.severity)}</td>
+        </tr>`;
+      });
+      html += '</table>';
+    } else {
+      html += `<div class="lp-empty" style="padding:10px;color:#2e7d32;">
+                ✓ ไม่พบจุดที่ ΔE เกิน tolerance (${p.tolerance}) — สีตรง master ทั้งภาพ</div>`;
     }
     return html;
   }

@@ -1,0 +1,79 @@
+{
+  "sku_code": "AQUA-CHUNK-140",
+  "display_name": "AQUA PREMIUM CHUNK Light Meat Tuna 140g",
+  "fields": [
+    {
+      "name": "brand",
+      "expected": "AQUA",
+      "tolerance": 0,
+      "method": "exact",
+      "critical": true
+    },
+    {
+      "name": "sub_brand",
+      "expected": "PREMIUM",
+      "tolerance": 0,
+      "method": "exact",
+      "critical": true
+    },
+    {
+      "name": "product_type",
+      "expected": "CHUNK",
+      "tolerance": 0,
+      "method": "exact",
+      "critical": true
+    },
+    {
+      "name": "product_descriptor",
+      "expected": "LIGHT MEAT TUNA",
+      "tolerance": 1,
+      "method": "levenshtein",
+      "critical": true
+    },
+    {
+      "name": "net_weight",
+      "expected": "Net Weight: 140 gm",
+      "tolerance": 2,
+      "method": "levenshtein",
+      "critical": true
+    },
+    {
+      "name": "drained_weight",
+      "expected": "Drained Weight: 100gm",
+      "tolerance": 2,
+      "method": "levenshtein",
+      "critical": true
+    },
+    {
+      "name": "ingredients",
+      "expected": "Tuna, Soybean Oil (Non-GMO), Water, Salt",
+      "tolerance": 4,
+      "method": "levenshtein",
+      "critical": false
+    },
+    {
+      "name": "fish_type",
+      "expected": "Fish type: Katsuwonus pelamis (Skipjack)",
+      "tolerance": 3,
+      "method": "levenshtein",
+      "critical": false
+    },
+    {
+      "name": "manufacturer",
+      "expected": "Thai Union Manufacturing Co., Ltd.",
+      "tolerance": 3,
+      "method": "levenshtein",
+      "critical": false
+    }
+  ],
+  "colors": [
+    {"name": "brand_navy",  "hex": "#0D1F4A", "delta_e_tolerance": 6.0},
+    {"name": "logo_white",  "hex": "#FFFFFF", "delta_e_tolerance": 6.0},
+    {"name": "tuna_pink",   "hex": "#D9B4A4", "delta_e_tolerance": 8.0}
+  ],
+  "pixel_inspection": {
+    "enabled": true,
+    "delta_e_tolerance": 6.0,
+    "min_defect_area_px": 80
+  }
+}
