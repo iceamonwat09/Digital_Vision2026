@@ -75,8 +75,14 @@ def load_master(sku_dir: str) -> Master:
 
     raw_text = _extract_pdf_text(pdf_path) if os.path.isfile(pdf_path) else ""
 
-    fields = [FieldSpec(**fd) for fd in spec.get("fields", [])]
-    colors = [MasterColor(**c) for c in spec.get("colors", [])]
+    # Tolerate extra documentation keys in spec.json (e.g. ``cmyk``, ``note``)
+    # by filtering each row down to the dataclass-known field names.
+    _field_keys = {"name", "expected", "tolerance", "method", "critical"}
+    _color_keys = {"name", "hex", "delta_e_tolerance"}
+    fields = [FieldSpec(**{k: v for k, v in fd.items() if k in _field_keys})
+              for fd in spec.get("fields", [])]
+    colors = [MasterColor(**{k: v for k, v in c.items() if k in _color_keys})
+              for c in spec.get("colors", [])]
 
     px_spec = spec.get("pixel_inspection") or {}
     pixel_cfg = PixelInspectionConfig(
