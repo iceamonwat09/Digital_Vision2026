@@ -24,6 +24,7 @@ from . import calibration, deltae_map, master_renderer, overlay, registration, v
 from .color_compare import compare_colors
 from .master_loader import Master
 from .text_compare import compare_all, overall_text_verdict
+from .text_diff import line_diff
 
 
 @dataclass
@@ -51,12 +52,52 @@ class InspectionReport:
     field_results: List[dict] = field(default_factory=list)
     color_results: List[dict] = field(default_factory=list)
     ocr_text: str = ""
+    master_text: str = ""              # full text layer from master.pdf
+    text_line_diff: List[dict] = field(default_factory=list)
+    summary: dict = field(default_factory=dict)
+    ocr_engine: str = ""
+    ocr_error: str = ""
     gemini: dict = field(default_factory=dict)
     stub_mode: bool = False
     pixel_inspection: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return asdict(self)
+
+
+def _build_summary(field_results, color_results, px_report) -> dict:
+    """Compact counters the UI shows in the 'what's different' header."""
+    fld_total = len(field_results)
+    fld_fail = [r for r in field_results if not r.passed]
+    fld_critical = [r for r in fld_fail if r.severity == "critical"]
+
+    col_total = len(color_results)
+    col_fail = [c for c in color_results if not c.passed]
+
+    px_defects = px_report.defects or []
+    px_area = sum(int(d.get("area_px", 0)) for d in px_defects)
+
+    return {
+        "fields": {
+            "total":    fld_total,
+            "failed":   len(fld_fail),
+            "critical": len(fld_critical),
+            "passed":   fld_total - len(fld_fail),
+        },
+        "colors": {
+            "total":  col_total,
+            "failed": len(col_fail),
+            "passed": col_total - len(col_fail),
+        },
+        "pixels": {
+            "enabled":      px_report.enabled,
+            "verdict":      px_report.verdict,
+            "defect_count": len(px_defects),
+            "defect_area":  px_area,
+            "pass_rate":    px_report.pass_rate,
+            "peak":         px_report.de_peak,
+        },
+    }
 
 
 # ── Helpers ─────────────────────────────────────────────────────────────
@@ -219,12 +260,23 @@ def inspect(master: Master,
     else:
         verdict = "PASS"
 
+    summary = _build_summary(field_results, color_results, px_report)
+    summary["verdict"] = verdict
+    summary["text_verdict"]  = text_verdict
+    summary["color_verdict"] = color_verdict
+    summary["pixel_verdict"] = px_report.verdict
+
     return InspectionReport(
         sku_code=master.sku_code,
         verdict=verdict,
         field_results=[r.__dict__ for r in field_results],
         color_results=[c.__dict__ for c in color_results],
         ocr_text=ocr_text,
+        master_text=master.raw_text or "",
+        text_line_diff=line_diff(master.raw_text or "", ocr_text),
+        summary=summary,
+        ocr_engine=str(ocr.get("engine", "")),
+        ocr_error=str(ocr.get("error", "")),
         gemini=gemini,
         stub_mode=bool(ocr.get("stub", False)),
         pixel_inspection=asdict(px_report),
