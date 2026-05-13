@@ -121,3 +121,28 @@ N8N_OCR_WEBHOOK_URL = os.getenv(
     "http://localhost:5678/webhook/660b85ac-2dff-4541-b9c8-72241c1bd731",
 ).strip()
 N8N_OCR_TIMEOUT_S = float(os.getenv("N8N_OCR_TIMEOUT_S", "60"))
+
+# ====================
+# LABEL PAPER — VISUAL DIFF (Gemini compares 2 images)
+# ====================
+# When the N8N workflow routes by which binaries arrived (``image`` →
+# OCR, ``master`` + ``captured`` → visual diff), the visual-diff stage
+# reuses the OCR webhook URL above. Set ``N8N_VISDIFF_WEBHOOK_URL`` to
+# override only when the user splits visual diff into a dedicated flow.
+N8N_VISDIFF_WEBHOOK_URL = os.getenv("N8N_VISDIFF_WEBHOOK_URL", "").strip()
+N8N_VISDIFF_TIMEOUT_S = float(os.getenv("N8N_VISDIFF_TIMEOUT_S", "60"))
+
+# Toggle the visual-diff pipeline stage. Default ON when the OCR webhook
+# is configured (the shared-flow case). Set to "0" / "false" to disable
+# without changing URLs.
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.getenv(name, "").strip().lower()
+    if not raw:
+        return default
+    return raw not in {"0", "false", "no", "off"}
+
+
+VISUAL_DIFF_ENABLED = _env_bool(
+    "VISUAL_DIFF_ENABLED",
+    default=bool(N8N_OCR_WEBHOOK_URL or N8N_VISDIFF_WEBHOOK_URL),
+)

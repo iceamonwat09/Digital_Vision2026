@@ -78,3 +78,27 @@ def get_master_image(pdf_path: str, dpi: int = _DEFAULT_DPI,
             img = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_AREA)
 
     return img
+
+
+def encode_rgb_to_jpeg_bytes(rgb: np.ndarray, quality: int = 90) -> bytes:
+    """RGB ndarray → JPEG bytes (for upload to Gemini via N8N)."""
+    bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+    ok, buf = cv2.imencode(".jpg", bgr, [cv2.IMWRITE_JPEG_QUALITY, int(quality)])
+    if not ok:
+        raise RuntimeError("cv2.imencode failed to produce JPEG")
+    return bytes(buf)
+
+
+def render_master_to_jpeg_bytes(pdf_path: str,
+                                dpi: int = _DEFAULT_DPI,
+                                max_long_edge: Optional[int] = 1600,
+                                quality: int = 88) -> bytes:
+    """
+    Convenience: render the master PDF and return JPEG bytes ready to upload.
+
+    A smaller default ``max_long_edge`` than the pixel-ΔE path keeps the
+    payload to Gemini reasonable (~150-300 KB) without sacrificing
+    legibility of label text.
+    """
+    rgb = get_master_image(pdf_path, dpi=dpi, max_long_edge=max_long_edge)
+    return encode_rgb_to_jpeg_bytes(rgb, quality=quality)

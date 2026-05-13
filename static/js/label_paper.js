@@ -130,6 +130,8 @@
 
     html += renderSummary(r);
 
+    html += renderVisualDiff(r.visual_diff || {});
+
     if (r.stub_mode) {
       const engine = r.ocr_engine || 'stub';
       const reason = r.ocr_error
@@ -233,7 +235,74 @@
     } else {
       cards += card('Pixel', '— ปิด —', 'pixel_inspection.enabled=false', '');
     }
+    // Visual diff (Gemini)
+    const v = s.visual_diff || {};
+    if (v.enabled) {
+      const vn = v.count || 0, vc = v.critical || 0;
+      const vKind = vc > 0 ? 'bad' : (vn > 0 ? 'warn' : 'ok');
+      cards += card('AI พบความต่าง', `${vn} รายการ`,
+                    vc > 0 ? `${vc} critical` : (vn > 0 ? 'ไม่ critical' : 'ไม่พบ'),
+                    vKind);
+    } else {
+      cards += card('AI Visual Diff', '— ปิด —', 'ตั้ง VISUAL_DIFF_ENABLED=1 + N8N URL', '');
+    }
     return `<div class="lp-summary">${cards}</div>`;
+  }
+
+  // ── Gemini Visual Diff panel ───────────────────────────────────
+  function renderVisualDiff(vd) {
+    if (!vd || (vd.stub && !vd.error)) return '';
+    if (vd.stub) {
+      return `<div class="lp-vd-box">
+        <div class="lp-vd-head">
+          <h4>🔍 AI Visual Diff (Master ↔ Captured)</h4>
+          <span class="lp-tag lp-tag-minor">SKIPPED</span>
+        </div>
+        <div class="lp-vd-summary">${escapeHtml(vd.error || 'ไม่ได้ทำงาน')}</div>
+      </div>`;
+    }
+    const diffs = vd.differences || [];
+    const engine = vd.engine || 'gemini';
+    const summary = vd.summary || (diffs.length === 0
+      ? '✓ ไม่พบความต่างของตัวอักษร'
+      : `พบ ${diffs.length} รายการ`);
+    const tagSeverity = (() => {
+      if (!diffs.length) return 'ok';
+      if (diffs.some(d => d.severity === 'critical')) return 'critical';
+      if (diffs.some(d => d.severity === 'warning'))  return 'warning';
+      return 'minor';
+    })();
+
+    let body = '';
+    if (diffs.length) {
+      body = '<ul class="lp-vd-list">' + diffs.map(d => {
+        const sev = (d.severity || 'warning').toLowerCase();
+        const klass = (sev === 'critical' || sev === 'warning' || sev === 'minor') ? sev : 'warning';
+        const masterT  = escapeHtml(d.master_text  || '—');
+        const capT     = escapeHtml(d.captured_text || '—');
+        const loc      = d.location_hint ? `<div class="lp-vd-loc">📍 ${escapeHtml(d.location_hint)}</div>` : '';
+        return `<li class="lp-vd-item ${klass}">
+          <span class="lp-vd-type">${escapeHtml(d.type || 'diff')}</span>
+          ${severityTag(klass)}
+          <div style="margin-top:4px;">
+            <span style="color:#546e7a;">Master:</span> <span class="lp-d-rep-a">${masterT}</span>
+            &nbsp;→&nbsp;
+            <span style="color:#546e7a;">พบ:</span> <span class="lp-d-rep-b">${capT}</span>
+          </div>
+          ${loc}
+        </li>`;
+      }).join('') + '</ul>';
+    }
+
+    return `<div class="lp-vd-box">
+      <div class="lp-vd-head">
+        <h4>🔍 AI Visual Diff (Master ↔ Captured)</h4>
+        ${severityTag(tagSeverity)}
+        <span class="lp-vd-summary">${escapeHtml(summary)}</span>
+        <span style="font-size:11px;color:#90a4ae;">${escapeHtml(engine)}</span>
+      </div>
+      ${body}
+    </div>`;
   }
 
   // ── Character-level diff inside Field table ─────────────────────

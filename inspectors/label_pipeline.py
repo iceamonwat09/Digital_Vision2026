@@ -20,7 +20,17 @@ from typing import List, Optional
 import cv2
 import numpy as np
 
-from . import calibration, deltae_map, master_renderer, overlay, registration, vertex_client
+import config
+
+from . import (
+    calibration,
+    deltae_map,
+    master_renderer,
+    overlay,
+    registration,
+    vertex_client,
+    visual_diff as visual_diff_client,
+)
 from .color_compare import compare_colors
 from .master_loader import Master
 from .text_compare import compare_all, overall_text_verdict
@@ -58,6 +68,7 @@ class InspectionReport:
     ocr_engine: str = ""
     ocr_error: str = ""
     gemini: dict = field(default_factory=dict)
+    visual_diff: dict = field(default_factory=dict)  # Gemini master↔captured diff
     stub_mode: bool = False
     pixel_inspection: dict = field(default_factory=dict)
 
@@ -65,7 +76,34 @@ class InspectionReport:
         return asdict(self)
 
 
-def _build_summary(field_results, color_results, px_report) -> dict:
+_SEVERITY_RANK = {"critical": 3, "warning": 2, "minor": 1, "ok": 0, "": 0}
+
+
+def _visual_diff_verdict(vd: dict) -> str:
+    """
+    PASS/WARN/FAIL from Gemini's list of differences.
+
+    SKIPPED when the stage was disabled, stubbed, or errored — those
+    cases must not poison the overall verdict.
+    """
+    if not vd or vd.get("stub"):
+        return "SKIPPED"
+    if vd.get("error"):
+        return "SKIPPED"
+    diffs = vd.get("differences") or []
+    if not diffs:
+        return "PASS"
+    worst = max((_SEVERITY_RANK.get(d.get("severity", ""), 0) for d in diffs),
+                default=0)
+    if worst >= 3:
+        return "FAIL"
+    if worst >= 2:
+        return "WARN"
+    return "WARN"  # any minor difference still warrants operator review
+
+
+def _build_summary(field_results, color_results, px_report,
+                   visual_diff_payload: dict) -> dict:
     """Compact counters the UI shows in the 'what's different' header."""
     fld_total = len(field_results)
     fld_fail = [r for r in field_results if not r.passed]
@@ -76,6 +114,10 @@ def _build_summary(field_results, color_results, px_report) -> dict:
 
     px_defects = px_report.defects or []
     px_area = sum(int(d.get("area_px", 0)) for d in px_defects)
+
+    vd_diffs = (visual_diff_payload or {}).get("differences") or []
+    vd_critical = sum(1 for d in vd_diffs if d.get("severity") == "critical")
+    vd_enabled = bool(visual_diff_payload) and not visual_diff_payload.get("stub")
 
     return {
         "fields": {
@@ -96,6 +138,12 @@ def _build_summary(field_results, color_results, px_report) -> dict:
             "defect_area":  px_area,
             "pass_rate":    px_report.pass_rate,
             "peak":         px_report.de_peak,
+        },
+        "visual_diff": {
+            "enabled":   vd_enabled,
+            "count":     len(vd_diffs),
+            "critical":  vd_critical,
+            "engine":    (visual_diff_payload or {}).get("engine", ""),
         },
     }
 
@@ -202,6 +250,55 @@ def pixel_inspect(master: Master,
     )
 
 
+# ── Visual diff stage (Gemini, two images) ──────────────────────────────
+
+def visual_inspect(master: Master, captured_jpeg_bytes: bytes) -> dict:
+    """
+    Ask Gemini (via N8N) to enumerate text differences between the SKU
+    master and the captured photo. Always returns a dict; failures are
+    encoded as ``stub=True`` so the caller can mark the stage as SKIPPED.
+    """
+    if not getattr(config, "VISUAL_DIFF_ENABLED", False):
+        return {
+            "differences": [],
+            "summary": "",
+            "stub": True,
+            "engine": "visual_diff",
+            "error": "VISUAL_DIFF_ENABLED=false",
+        }
+    if not master.pdf_path:
+        return {
+            "differences": [],
+            "summary": "",
+            "stub": True,
+            "engine": "visual_diff",
+            "error": "SKU has no master.pdf",
+        }
+    if not captured_jpeg_bytes:
+        return {
+            "differences": [],
+            "summary": "",
+            "stub": True,
+            "engine": "visual_diff",
+            "error": "empty captured image",
+        }
+    try:
+        master_bytes = master_renderer.render_master_to_jpeg_bytes(master.pdf_path)
+    except Exception as e:
+        return {
+            "differences": [],
+            "summary": "",
+            "stub": True,
+            "engine": "visual_diff",
+            "error": f"failed to render master: {e}",
+        }
+    return visual_diff_client.compare_images(
+        master_bytes=master_bytes,
+        captured_bytes=captured_jpeg_bytes,
+        sku_code=master.sku_code,
+    )
+
+
 # ── Main orchestrator ───────────────────────────────────────────────────
 
 def inspect(master: Master,
@@ -228,7 +325,11 @@ def inspect(master: Master,
     # 4. Pixel inspection (ΔE map)
     px_report = pixel_inspect(master, captured_rgb)
 
-    # 5. Gemini context check
+    # 5. Gemini visual diff (master vs captured) — independent of OCR/ROI
+    vd_payload = visual_inspect(master, cropped_image_bytes)
+    vd_verdict = _visual_diff_verdict(vd_payload)
+
+    # 6. Gemini context check (legacy text-only ambiguity probe)
     ambiguous = [r.name for r in field_results if r.severity in ("minor", "warning")]
     gemini = (
         {"verdict": "not_needed"}
@@ -236,10 +337,10 @@ def inspect(master: Master,
         else vertex_client.gemini_context_check(master.raw_text, ocr_text, ambiguous)
     )
 
-    # 6. Combined verdict.
+    # 7. Combined verdict.
     # When OCR is stubbed every text field "fails" against the stub string,
     # so we ignore the text verdict in stub mode and let the pixel + color
-    # checks decide.
+    # + visual-diff checks decide.
     stub = bool(ocr.get("stub", False))
     text_verdict = "SKIPPED" if stub else overall_text_verdict(field_results)
     if not color_results:
@@ -247,7 +348,7 @@ def inspect(master: Master,
     else:
         color_verdict = "FAIL" if any(not c.passed for c in color_results) else "PASS"
 
-    candidates = {text_verdict, px_report.verdict, color_verdict}
+    candidates = {text_verdict, px_report.verdict, color_verdict, vd_verdict}
     real = {v for v in candidates if v != "SKIPPED"}
 
     if "FAIL" in real:
@@ -260,11 +361,12 @@ def inspect(master: Master,
     else:
         verdict = "PASS"
 
-    summary = _build_summary(field_results, color_results, px_report)
+    summary = _build_summary(field_results, color_results, px_report, vd_payload)
     summary["verdict"] = verdict
-    summary["text_verdict"]  = text_verdict
-    summary["color_verdict"] = color_verdict
-    summary["pixel_verdict"] = px_report.verdict
+    summary["text_verdict"]   = text_verdict
+    summary["color_verdict"]  = color_verdict
+    summary["pixel_verdict"]  = px_report.verdict
+    summary["visual_verdict"] = vd_verdict
 
     return InspectionReport(
         sku_code=master.sku_code,
@@ -278,6 +380,7 @@ def inspect(master: Master,
         ocr_engine=str(ocr.get("engine", "")),
         ocr_error=str(ocr.get("error", "")),
         gemini=gemini,
+        visual_diff=vd_payload,
         stub_mode=bool(ocr.get("stub", False)),
         pixel_inspection=asdict(px_report),
     )

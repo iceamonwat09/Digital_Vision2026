@@ -69,6 +69,23 @@
   .lp-d-rep-a   { background:#ffebee; color:#b71c1c; text-decoration:line-through; padding:0 2px; border-radius:2px; }
   .lp-d-rep-b   { background:#fff3e0; color:#e65100; padding:0 2px; border-radius:2px; }
 
+  /* Gemini visual diff panel */
+  .lp-vd-box   { border:1px solid #c8e1f5; background:#f4faff; border-radius:8px;
+                 padding:10px 14px; margin:12px 0 4px; }
+  .lp-vd-head  { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:6px; }
+  .lp-vd-head h4 { margin:0; font-size:15px; color:#0d47a1; }
+  .lp-vd-summary { font-size:13px; color:#37474f; flex:1 1 auto; }
+  .lp-vd-list  { list-style:none; padding:0; margin:6px 0 0; }
+  .lp-vd-item  { border-left:4px solid #cfd8dc; background:#fff; padding:8px 12px;
+                 margin-bottom:6px; border-radius:0 4px 4px 0; font-size:13px; }
+  .lp-vd-item.critical { border-left-color:#c62828; background:#fff5f5; }
+  .lp-vd-item.warning  { border-left-color:#ef6c00; background:#fff8ec; }
+  .lp-vd-item.minor    { border-left-color:#1976d2; background:#f4faff; }
+  .lp-vd-loc   { color:#546e7a; font-size:11px; font-style:italic; margin-top:2px; }
+  .lp-vd-type  { display:inline-block; padding:1px 6px; border-radius:8px;
+                 background:#eceff1; color:#37474f; font-size:10px; font-weight:600;
+                 text-transform:uppercase; letter-spacing:.4px; margin-right:6px; }
+
   /* Side-by-side master vs OCR text */
   .lp-diff-grid { display:grid; grid-template-columns: 1fr 1fr; gap:8px; margin-top:8px; }
   @media (max-width:700px){ .lp-diff-grid{ grid-template-columns:1fr; } }
