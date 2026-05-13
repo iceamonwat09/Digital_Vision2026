@@ -9,6 +9,19 @@
         <div class="detection-controls-compact">
             <div class="control-group">
 
+                <!-- Inspection mode tabs -->
+                <div class="src-tabs" id="modeTabs">
+                    <!-- populated from /api/modes -->
+                </div>
+
+                <!-- Model file picker (per-mode) -->
+                <div class="camera-select-group">
+                    <select id="modelSelect" class="camera-select" title="เลือกไฟล์โมเดล (.pt)">
+                        <option value="" disabled selected>Loading models…</option>
+                    </select>
+                    <button id="refreshModelsBtn" class="btn btn-icon" title="รีเฟรชรายการโมเดล">&#x1F504;</button>
+                </div>
+
                 <!-- Source type tabs -->
                 <div class="src-tabs">
                     <button id="tabUsb"  class="src-tab src-tab-active" onclick="switchSource('usb')">กล้อง USB</button>
@@ -82,9 +95,13 @@
     const cameraSelect    = document.getElementById('cameraSelect');
     const refreshCamerasBtn = document.getElementById('refreshCamerasBtn');
     const rtspUrlInput    = document.getElementById('rtspUrl');
+    const modeTabs       = document.getElementById('modeTabs');
+    const modelSelect    = document.getElementById('modelSelect');
+    const refreshModelsBtn = document.getElementById('refreshModelsBtn');
 
     let statusCheckInterval = null;
     let currentSource = 'usb';   // 'usb' | 'rtsp'
+    let currentMode  = null;     // populated from /api/modes
 
     // ── Source tab switching ──────────────────────────
     window.switchSource = function(src) {
@@ -151,6 +168,9 @@
                 cameraSelect.disabled      = isActive;
                 refreshCamerasBtn.disabled = isActive;
                 rtspUrlInput.disabled      = isActive;
+                modelSelect.disabled       = isActive || modelSelect.options.length === 0;
+                refreshModelsBtn.disabled  = isActive;
+                Array.from(modeTabs.children).forEach(b => b.disabled = isActive);
 
                 activeDefects.textContent   = data.stats.current_defects || 0;
                 totalDetected.textContent   = data.stats.total_detected  || 0;
@@ -212,7 +232,97 @@
             .catch(err => console.error('Stop error:', err));
     });
 
+    // ── Mode tabs / Model picker ──────────────────────
+    function renderModeTabs(modes, active) {
+        modeTabs.innerHTML = '';
+        modes.forEach(m => {
+            const btn = document.createElement('button');
+            btn.className = 'src-tab' + (m.name === active ? ' src-tab-active' : '');
+            btn.textContent = m.display_name;
+            btn.dataset.mode = m.name;
+            btn.addEventListener('click', () => switchMode(m.name));
+            modeTabs.appendChild(btn);
+        });
+    }
+
+    function loadModels(mode) {
+        modelSelect.disabled = true;
+        modelSelect.innerHTML = '<option value="" disabled selected>Loading…</option>';
+        refreshModelsBtn.disabled = true;
+        return fetch('/api/models?mode=' + encodeURIComponent(mode))
+            .then(r => r.json())
+            .then(data => {
+                modelSelect.innerHTML = '';
+                if (!data.models || data.models.length === 0) {
+                    modelSelect.innerHTML = '<option value="" disabled selected>ไม่พบไฟล์ .pt</option>';
+                    return;
+                }
+                data.models.forEach(f => {
+                    const opt = document.createElement('option');
+                    opt.value = f;
+                    opt.textContent = f;
+                    if (f === data.current) opt.selected = true;
+                    modelSelect.appendChild(opt);
+                });
+                modelSelect.disabled = false;
+            })
+            .catch(() => {
+                modelSelect.innerHTML = '<option value="" disabled selected>โหลดล้มเหลว</option>';
+            })
+            .finally(() => { refreshModelsBtn.disabled = false; });
+    }
+
+    function switchMode(mode) {
+        if (mode === currentMode) return;
+        // Optimistically update tabs
+        Array.from(modeTabs.children).forEach(b =>
+            b.classList.toggle('src-tab-active', b.dataset.mode === mode));
+        currentMode = mode;
+        loadModels(mode).then(() => applyModeOnServer());
+    }
+
+    function applyModeOnServer() {
+        const file = modelSelect.value || null;
+        return fetch('/api/mode/switch', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ mode: currentMode, model_file: file })
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.status !== 'ok') {
+                alert(data.message || 'สลับโหมดไม่สำเร็จ');
+            } else if (!data.model_loaded) {
+                detectionStatus.textContent = 'No Model';
+            }
+        })
+        .catch(err => {
+            console.error('Mode switch error:', err);
+            alert('สลับโหมดไม่สำเร็จ');
+        });
+    }
+
+    function initModes() {
+        return fetch('/api/modes')
+            .then(r => r.json())
+            .then(data => {
+                currentMode = data.current;
+                renderModeTabs(data.modes, currentMode);
+                return loadModels(currentMode);
+            })
+            .catch(err => {
+                console.error('Mode list error:', err);
+                modeTabs.innerHTML = '<span style="color:#999">โหลดโหมดไม่ได้</span>';
+            });
+    }
+
+    modelSelect.addEventListener('change', applyModeOnServer);
+    refreshModelsBtn.addEventListener('click', () => {
+        if (currentMode) loadModels(currentMode);
+    });
+
     // ── Init ──────────────────────────────────────────
+    initModes();
     scanCameras();
     updateStatus();
     statusCheckInterval = setInterval(updateStatus, 1000);

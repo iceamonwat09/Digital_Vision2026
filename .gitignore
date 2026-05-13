@@ -54,3 +54,10 @@ uploads/
 # Environment variables
 .env
 .env.local
+
+# Label Paper Inspection — runtime data, not source
+credentials/
+data/label_paper/inspections/
+data/label_paper/reports/
+# Rendered-master cache: regenerated on first inspect, no need to track
+data/label_paper/skus/*/master_*dpi.png

@@ -1,0 +1,75 @@
+{
+  "sku_code": "AQUA-CHUNK-140",
+  "display_name": "AQUA PREMIUM CHUNK Light Meat Tuna 140g",
+  "production_master_ref": {
+    "approval_no":    "AWN202500020461",
+    "material_code":  "5K2WO081N000000200",
+    "internal_id":    "3AAOCO36BAUN5ENNS4",
+    "tug_code":       "TUG-17790R01-0-M_M4",
+    "cad_code":       "C5807172R0",
+    "customer":       "SM",
+    "rev":            "01 / 01/07/2566",
+    "dimensions_mm":  "307x108 2PCS (29x277 mm per piece)"
+  },
+  "fields": [
+    {"name": "brand",              "expected": "AQUA",                                          "tolerance": 0, "method": "exact",       "critical": true},
+    {"name": "sub_brand",          "expected": "PREMIUM",                                       "tolerance": 0, "method": "exact",       "critical": true},
+    {"name": "product_type",       "expected": "CHUNK",                                         "tolerance": 0, "method": "exact",       "critical": true},
+    {"name": "product_descriptor", "expected": "LIGHT MEAT TUNA",                               "tolerance": 1, "method": "levenshtein","critical": true},
+    {"name": "first_grade_claim",  "expected": "Chunk Tuna Light Meat First Grade",             "tolerance": 4, "method": "levenshtein","critical": false},
+    {"name": "net_weight",         "expected": "Net Weight: 140 gm",                            "tolerance": 2, "method": "levenshtein","critical": true},
+    {"name": "drained_weight",     "expected": "Drained Weight: 100gm",                         "tolerance": 2, "method": "levenshtein","critical": true},
+    {"name": "ingredients",        "expected": "Tuna, Soybean Oil (Non-GMO), Water, Salt",      "tolerance": 4, "method": "levenshtein","critical": true},
+    {"name": "fish_species",       "expected": "Katsuwonus pelamis (Skipjack)",                 "tolerance": 3, "method": "levenshtein","critical": true},
+    {"name": "barcode_ean13",      "expected": "7493350088589",                                 "tolerance": 0, "method": "exact",       "critical": true},
+    {"name": "manufacturer",       "expected": "Thai Union Manufacturing Co., Ltd.",            "tolerance": 3, "method": "levenshtein","critical": true},
+    {"name": "manufacturer_addr",  "expected": "94/6 Sethakit 1 Road, Mueang Samut Sakhon",     "tolerance": 5, "method": "levenshtein","critical": false},
+    {"name": "manufacturer_city",  "expected": "Samut Sakhon 74000, Thailand",                  "tolerance": 3, "method": "levenshtein","critical": false},
+    {"name": "importer_egypt",     "expected": "Pure Company for Integrated Business Solutions","tolerance": 5, "method": "levenshtein","critical": false},
+    {"name": "egypt_address",      "expected": "Bahgat Aly St, Al Zamalek, Cairo, P.C. 11211",  "tolerance": 5, "method": "levenshtein","critical": false},
+    {"name": "egypt_phone",        "expected": "+201220120185",                                 "tolerance": 0, "method": "exact",       "critical": true},
+    {"name": "egypt_email",        "expected": "info@pureibs.com",                              "tolerance": 1, "method": "levenshtein","critical": true},
+    {"name": "importer_uae",       "expected": "Pure Osho General Trading L.L.C",               "tolerance": 3, "method": "levenshtein","critical": false},
+    {"name": "uae_po_box",         "expected": "P.O.Box 26265 Dubai",                           "tolerance": 2, "method": "levenshtein","critical": true},
+    {"name": "uae_phone",          "expected": "+97143800899",                                  "tolerance": 0, "method": "exact",       "critical": true},
+    {"name": "uae_email",          "expected": "info@pureosho-trading.com",                     "tolerance": 1, "method": "levenshtein","critical": true},
+    {"name": "nutrition_header",   "expected": "Nutrition information",                         "tolerance": 1, "method": "levenshtein","critical": false},
+    {"name": "energy_value",       "expected": "170",                                           "tolerance": 0, "method": "exact",       "critical": true},
+    {"name": "energy_kj",          "expected": "710",                                           "tolerance": 0, "method": "exact",       "critical": true},
+    {"name": "protein_value",      "expected": "26",                                            "tolerance": 0, "method": "exact",       "critical": true},
+    {"name": "fat_value",          "expected": "4",                                             "tolerance": 0, "method": "exact",       "critical": false},
+    {"name": "saturated_fat",      "expected": "1",                                             "tolerance": 0, "method": "exact",       "critical": false},
+    {"name": "sodium_value",       "expected": "476",                                           "tolerance": 0, "method": "exact",       "critical": true},
+    {"name": "country_of_origin",  "expected": "Product of Thailand",                           "tolerance": 2, "method": "levenshtein","critical": true}
+  ],
+  "colors": [
+    {
+      "name": "brand_navy",
+      "hex": "#1A2454",
+      "cmyk": [100, 93, 15, 4],
+      "delta_e_tolerance": 6.0,
+      "note": "Official: CMYK C=100 M=93 Y=15 K=4. Hex sampled from the rendered master PDF (true on-press appearance, not naive CMYK→RGB)."
+    },
+    {"name": "logo_white",   "hex": "#FFFFFF", "delta_e_tolerance": 5.0},
+    {"name": "tuna_meat",    "hex": "#D9B4A4", "delta_e_tolerance": 12.0, "note": "Tuna meat photograph — relaxed tolerance because it is a continuous-tone image, not a flat spot color"},
+    {"name": "wave_stripe",  "hex": "#FFFFFF", "delta_e_tolerance": 6.0,  "note": "White wave at bottom of label"}
+  ],
+  "pixel_inspection": {
+    "enabled": true,
+    "delta_e_tolerance": 6.0,
+    "min_defect_area_px": 80,
+    "note": "Production tolerance from print master frame: Diecut ±1 mm, Stamp/Emboss/Spot UV ±0.5 mm"
+  },
+  "production_qc_checklist": [
+    "Diemension/Cut (Overprint): ±1 mm tolerance",
+    "Overprint / FillStork details: registration tighter than ±0.5 mm",
+    "Mockup PDF visual match",
+    "Barcode 100% scan rate (max ~0.42% reduction)",
+    "Show All / Ctrl+Alt+3 — no hidden layers",
+    "Font: text height ≥ 1.2 mm; stroke width ≥ 0.15 mm (legibility)",
+    "Spot UV: ±0.5 mm tolerance",
+    "Webbing / Walmart guideline",
+    "Save PDF / Create Font: outlined before press",
+    "Coating: UV หน้า/หลังหน้า ครบ"
+  ]
+}

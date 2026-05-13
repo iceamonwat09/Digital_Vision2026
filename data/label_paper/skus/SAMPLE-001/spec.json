@@ -1,0 +1,31 @@
+{
+  "sku_code": "SAMPLE-001",
+  "display_name": "ตัวอย่างฉลาก (demo, no master PDF yet)",
+  "fields": [
+    {
+      "name": "barcode",
+      "expected": "8851234567890",
+      "tolerance": 0,
+      "method": "exact",
+      "critical": true
+    },
+    {
+      "name": "expiry_format",
+      "expected": "EXP \\d{2}/\\d{2}/\\d{4}",
+      "tolerance": 0,
+      "method": "regex",
+      "critical": true
+    },
+    {
+      "name": "product_name",
+      "expected": "ตัวอย่างสินค้า",
+      "tolerance": 2,
+      "method": "levenshtein",
+      "critical": false
+    }
+  ],
+  "colors": [
+    {"name": "brand_red", "hex": "#E53935", "delta_e_tolerance": 8.0},
+    {"name": "accent_yellow", "hex": "#FDD835", "delta_e_tolerance": 10.0}
+  ]
+}
