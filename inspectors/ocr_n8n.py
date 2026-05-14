@@ -26,12 +26,15 @@ finishes instead of raising.
 from __future__ import annotations
 
 import json
+import logging
 import os
 from typing import Optional
 
 import requests
 
 import config
+
+logger = logging.getLogger(__name__)
 
 
 def is_enabled(url: Optional[str] = None) -> bool:
@@ -96,10 +99,19 @@ def ocr_image(image_bytes: bytes,
     files = {"image": ("crop.jpg", image_bytes, "image/jpeg")}
     t = float(timeout if timeout is not None else config.N8N_OCR_TIMEOUT_S)
 
+    size_kb = len(image_bytes) / 1024.0
+    print(f"[N8N→OCR] POST {target}")
+    print(f"[N8N→OCR]   field 'image' = crop.jpg ({size_kb:.1f} KB, image/jpeg)")
+    print(f"[N8N→OCR]   timeout = {t}s")
+    logger.info("OCR request: %s  image=%.1fKB  timeout=%.0fs",
+                target, size_kb, t)
+
     try:
         resp = requests.post(target, files=files, timeout=t)
         resp.raise_for_status()
+        print(f"[N8N→OCR] ← HTTP {resp.status_code}  ({len(resp.content)} bytes)")
     except requests.RequestException as e:
+        print(f"[N8N→OCR] ✗ request failed: {e}")
         return {
             "text": "",
             "blocks": [],

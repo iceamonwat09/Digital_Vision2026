@@ -27,12 +27,15 @@ Expected JSON response from N8N (schema enforced by the prompt):
 
 from __future__ import annotations
 
+import logging
 import os
 from typing import List, Optional
 
 import requests
 
 import config
+
+logger = logging.getLogger(__name__)
 
 
 def is_enabled() -> bool:
@@ -110,10 +113,23 @@ def compare_images(master_bytes: bytes,
                      getattr(config, "N8N_OCR_TIMEOUT_S", 60.0))
     )
 
+    master_kb = len(master_bytes) / 1024.0
+    captured_kb = len(captured_bytes) / 1024.0
+    print(f"[N8N→VisualDiff] POST {target}")
+    print(f"[N8N→VisualDiff]   field 'master'   = master.jpg   ({master_kb:.1f} KB, image/jpeg)")
+    print(f"[N8N→VisualDiff]   field 'captured' = captured.jpg ({captured_kb:.1f} KB, image/jpeg)")
+    if sku_code:
+        print(f"[N8N→VisualDiff]   field 'sku_code' = {sku_code}")
+    print(f"[N8N→VisualDiff]   timeout = {t}s")
+    logger.info("VisualDiff request: %s  master=%.1fKB  captured=%.1fKB  sku=%s  timeout=%.0fs",
+                target, master_kb, captured_kb, sku_code or "-", t)
+
     try:
         resp = requests.post(target, files=files, data=data, timeout=t)
         resp.raise_for_status()
+        print(f"[N8N→VisualDiff] ← HTTP {resp.status_code}  ({len(resp.content)} bytes)")
     except requests.RequestException as e:
+        print(f"[N8N→VisualDiff] ✗ request failed: {e}")
         return {
             "differences": [],
             "summary": "",
