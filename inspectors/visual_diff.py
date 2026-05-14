@@ -36,9 +36,8 @@ import config
 
 
 def is_enabled() -> bool:
-    """True iff a visual-diff webhook URL is configured."""
-    url = (getattr(config, "N8N_VISDIFF_WEBHOOK_URL", "") or "").strip()
-    return bool(url)
+    """True iff any webhook URL is available (dedicated or OCR fallback)."""
+    return bool(_resolve_url())
 
 
 def _resolve_url() -> str:
