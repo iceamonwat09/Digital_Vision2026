@@ -11,10 +11,11 @@ Each spec field carries its own ``method`` and ``tolerance``:
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import List
 
 from .master_loader import FieldSpec
+from .text_diff import char_diff
 
 
 @dataclass
@@ -27,6 +28,7 @@ class FieldResult:
     passed: bool
     critical: bool
     severity: str   # "ok" | "minor" | "warning" | "critical"
+    diff: List[dict] = field(default_factory=list)  # char-level ops
 
 
 def _levenshtein(a: str, b: str) -> int:
@@ -106,6 +108,13 @@ def compare_field(spec: FieldSpec, ocr_text: str) -> FieldResult:
         passed = False
         distance = 999
 
+    # Build a char-level diff only when it carries information — regex
+    # results have no meaningful expected/found character mapping, and
+    # passing fields don't need a per-character breakdown.
+    diff_ops: List[dict] = []
+    if method != "regex" and not passed:
+        diff_ops = char_diff(spec.expected, found)
+
     return FieldResult(
         name=spec.name,
         expected=spec.expected,
@@ -115,6 +124,7 @@ def compare_field(spec: FieldSpec, ocr_text: str) -> FieldResult:
         passed=passed,
         critical=spec.critical,
         severity=_severity(distance, spec.critical, passed),
+        diff=diff_ops,
     )
 
 

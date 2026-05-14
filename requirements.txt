@@ -23,7 +23,10 @@ PyMuPDF>=1.24.0           # render master.pdf to numpy RGB + extract text layer
 python-Levenshtein>=0.25  # fast text distance (pure-Python fallback included)
 scikit-image>=0.22.0      # CIE2000 ΔE per-pixel (skimage.color.deltaE_ciede2000)
 
-# Vertex AI — uncomment when VERTEX_ENABLED=true and credentials are wired
+# OCR backend — POSTs cropped images to an N8N webhook (Gemini / Vision)
+requests>=2.31.0
+
+# Vertex AI — uncomment when OCR_BACKEND=vertex and credentials are wired
 # google-cloud-aiplatform>=1.60.0
 # google-cloud-documentai>=2.27.0
 

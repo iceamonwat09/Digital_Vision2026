@@ -128,23 +128,31 @@
                                         : 'lp-v-fail';
     let html = `<div class="lp-verdict ${vClass}">ผลรวม: ${r.verdict}</div>`;
 
+    html += renderSummary(r);
+
+    html += renderVisualDiff(r.visual_diff || {});
+
     if (r.stub_mode) {
-      html += `<div class="lp-stub">⚠️ OCR ส่วนตัวอักษรกำลังทำงานใน <b>STUB MODE</b> — Vertex Document AI ยังไม่ถูกเรียก<br>
-              ตั้งค่า env <code>VERTEX_ENABLED=true</code> และใส่ credentials เพื่อใช้งานจริง (ส่วนตรวจสี/pixel ทำงานเต็มแล้ว)</div>`;
+      const engine = r.ocr_engine || 'stub';
+      const reason = r.ocr_error
+        ? `เหตุผล: <code>${escapeHtml(r.ocr_error)}</code>`
+        : `ตั้งค่า env <code>OCR_BACKEND=n8n</code> และ <code>N8N_OCR_WEBHOOK_URL</code> เพื่อใช้ OCR จริง`;
+      html += `<div class="lp-stub">⚠️ OCR กำลังทำงานใน <b>STUB MODE</b> (backend: <code>${escapeHtml(engine)}</code>)<br>${reason}<br>
+              ผลตรวจตัวอักษรด้านล่างจะถูกข้าม — ส่วน <b>สี / pixel</b> ทำงานเต็มปกติ</div>`;
     }
 
-    html += renderPixelInspection(r.pixel_inspection || {});
+    html += renderTextLineDiff(r);
 
-    html += `<h4 style="margin:14px 0 6px;">ผลตรวจตัวอักษร (Field-aware)</h4>`;
+    html += `<h4 style="margin:14px 0 6px;">ผลตรวจตัวอักษรแยกตาม Field</h4>`;
     if (r.field_results && r.field_results.length) {
-      html += '<table class="lp-tbl"><tr><th>Field</th><th>คาดหวัง</th><th>พบ</th><th>Δ</th><th>วิธี</th><th>สถานะ</th></tr>';
+      html += '<table class="lp-tbl"><tr><th>Field</th><th>Master (คาดหวัง)</th><th>พบใน OCR</th><th>ความต่าง</th><th>Δ</th><th>สถานะ</th></tr>';
       for (const f of r.field_results) {
         html += `<tr>
-          <td><b>${escapeHtml(f.name)}</b>${f.critical ? ' <span style="color:#c62828;font-size:11px;">[critical]</span>' : ''}</td>
+          <td><b>${escapeHtml(f.name)}</b>${f.critical ? ' <span style="color:#c62828;font-size:11px;">[critical]</span>' : ''}<br><span style="color:#90a4ae;font-size:11px;">${escapeHtml(f.method)}</span></td>
           <td>${escapeHtml(f.expected)}</td>
           <td>${escapeHtml(f.found || '—')}</td>
+          <td>${renderCharDiff(f)}</td>
           <td>${f.distance}</td>
-          <td>${escapeHtml(f.method)}</td>
           <td>${severityTag(f.severity)}</td>
         </tr>`;
       }
@@ -152,6 +160,8 @@
     } else {
       html += '<div class="lp-empty" style="padding:14px;">spec.json ของ SKU นี้ไม่มี field</div>';
     }
+
+    html += renderPixelInspection(r.pixel_inspection || {});
 
     html += `<h4 style="margin:18px 0 6px;">ผลตรวจสี (ΔE)</h4>`;
     if (r.color_results && r.color_results.length) {
@@ -178,13 +188,175 @@
                <div style="font-size:13px;color:#37474f;">${escapeHtml(JSON.stringify(r.gemini))}</div>`;
     }
 
-    if (r.ocr_text) {
+    if (r.ocr_text || r.master_text) {
       html += `<details>
-        <summary>OCR text (raw)</summary>
-        <pre class="lp-pre">${escapeHtml(r.ocr_text)}</pre>
+        <summary>ข้อความดิบ (Master text layer + OCR)</summary>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:6px;">
+          <div><div style="font-size:11px;color:#546e7a;margin-bottom:2px;">MASTER</div>
+               <pre class="lp-pre">${escapeHtml(r.master_text || '(ไม่มี text layer ใน master.pdf)')}</pre></div>
+          <div><div style="font-size:11px;color:#546e7a;margin-bottom:2px;">OCR</div>
+               <pre class="lp-pre">${escapeHtml(r.ocr_text || '(ว่าง)')}</pre></div>
+        </div>
       </details>`;
     }
     return html;
+  }
+
+  // ── Summary panel ───────────────────────────────────────────────
+  function renderSummary(r) {
+    const s = r.summary || {};
+    const f = s.fields || {}, c = s.colors || {}, p = s.pixels || {};
+    function card(label, value, sub, kind) {
+      const cls = kind ? ` ${kind}` : '';
+      return `<div class="lp-sumcard${cls}"><span>${escapeHtml(label)}</span>
+              <b>${escapeHtml(String(value))}</b>
+              ${sub ? `<span style="font-size:11px;color:#78909c;">${escapeHtml(sub)}</span>` : ''}</div>`;
+    }
+    let cards = '';
+    // Fields
+    const fFail = f.failed || 0, fCrit = f.critical || 0, fTot = f.total || 0;
+    const fKind = fCrit > 0 ? 'bad' : (fFail > 0 ? 'warn' : (fTot > 0 ? 'ok' : ''));
+    cards += card('Field ผิด', `${fFail} / ${fTot}`,
+                  fCrit > 0 ? `${fCrit} critical` : (fFail > 0 ? 'ไม่ critical' : 'ตรงทั้งหมด'),
+                  fKind);
+    // Colors
+    const cFail = c.failed || 0, cTot = c.total || 0;
+    const cKind = cFail > 0 ? 'warn' : (cTot > 0 ? 'ok' : '');
+    cards += card('สีผิด tol', `${cFail} / ${cTot}`,
+                  cTot === 0 ? 'spec ไม่มีสี' : (cFail > 0 ? 'เกิน ΔE tolerance' : 'อยู่ใน tolerance'),
+                  cKind);
+    // Pixels
+    if (p.enabled) {
+      const pn = p.defect_count || 0, pa = p.defect_area || 0;
+      const pKind = (p.verdict === 'FAIL') ? 'bad' : (p.verdict === 'WARN' ? 'warn' : 'ok');
+      cards += card('Pixel ผิด', `${pn} จุด`,
+                    pa > 0 ? `รวม ${pa.toLocaleString()} px` : 'ไม่พบ',
+                    pKind);
+    } else {
+      cards += card('Pixel', '— ปิด —', 'pixel_inspection.enabled=false', '');
+    }
+    // Visual diff (Gemini)
+    const v = s.visual_diff || {};
+    if (v.enabled) {
+      const vn = v.count || 0, vc = v.critical || 0;
+      const vKind = vc > 0 ? 'bad' : (vn > 0 ? 'warn' : 'ok');
+      cards += card('AI พบความต่าง', `${vn} รายการ`,
+                    vc > 0 ? `${vc} critical` : (vn > 0 ? 'ไม่ critical' : 'ไม่พบ'),
+                    vKind);
+    } else {
+      cards += card('AI Visual Diff', '— ปิด —', 'ตั้ง VISUAL_DIFF_ENABLED=1 + N8N URL', '');
+    }
+    return `<div class="lp-summary">${cards}</div>`;
+  }
+
+  // ── Gemini Visual Diff panel ───────────────────────────────────
+  function renderVisualDiff(vd) {
+    if (!vd || (vd.stub && !vd.error)) return '';
+    if (vd.stub) {
+      return `<div class="lp-vd-box">
+        <div class="lp-vd-head">
+          <h4>🔍 AI Visual Diff (Master ↔ Captured)</h4>
+          <span class="lp-tag lp-tag-minor">SKIPPED</span>
+        </div>
+        <div class="lp-vd-summary">${escapeHtml(vd.error || 'ไม่ได้ทำงาน')}</div>
+      </div>`;
+    }
+    const diffs = vd.differences || [];
+    const engine = vd.engine || 'gemini';
+    const summary = vd.summary || (diffs.length === 0
+      ? '✓ ไม่พบความต่างของตัวอักษร'
+      : `พบ ${diffs.length} รายการ`);
+    const tagSeverity = (() => {
+      if (!diffs.length) return 'ok';
+      if (diffs.some(d => d.severity === 'critical')) return 'critical';
+      if (diffs.some(d => d.severity === 'warning'))  return 'warning';
+      return 'minor';
+    })();
+
+    let body = '';
+    if (diffs.length) {
+      body = '<ul class="lp-vd-list">' + diffs.map(d => {
+        const sev = (d.severity || 'warning').toLowerCase();
+        const klass = (sev === 'critical' || sev === 'warning' || sev === 'minor') ? sev : 'warning';
+        const masterT  = escapeHtml(d.master_text  || '—');
+        const capT     = escapeHtml(d.captured_text || '—');
+        const loc      = d.location_hint ? `<div class="lp-vd-loc">📍 ${escapeHtml(d.location_hint)}</div>` : '';
+        return `<li class="lp-vd-item ${klass}">
+          <span class="lp-vd-type">${escapeHtml(d.type || 'diff')}</span>
+          ${severityTag(klass)}
+          <div style="margin-top:4px;">
+            <span style="color:#546e7a;">Master:</span> <span class="lp-d-rep-a">${masterT}</span>
+            &nbsp;→&nbsp;
+            <span style="color:#546e7a;">พบ:</span> <span class="lp-d-rep-b">${capT}</span>
+          </div>
+          ${loc}
+        </li>`;
+      }).join('') + '</ul>';
+    }
+
+    return `<div class="lp-vd-box">
+      <div class="lp-vd-head">
+        <h4>🔍 AI Visual Diff (Master ↔ Captured)</h4>
+        ${severityTag(tagSeverity)}
+        <span class="lp-vd-summary">${escapeHtml(summary)}</span>
+        <span style="font-size:11px;color:#90a4ae;">${escapeHtml(engine)}</span>
+      </div>
+      ${body}
+    </div>`;
+  }
+
+  // ── Character-level diff inside Field table ─────────────────────
+  function renderCharDiff(f) {
+    if (f.passed) return '<span style="color:#2e7d32;">✓ ตรง</span>';
+    const ops = f.diff || [];
+    if (!ops.length) {
+      // Fallback for methods (regex) or empty found
+      return f.found
+        ? `<span class="lp-d-rep-b">${escapeHtml(f.found)}</span>`
+        : '<span style="color:#90a4ae;">(ไม่พบในภาพ)</span>';
+    }
+    return ops.map(op => {
+      switch (op.op) {
+        case 'equal':   return `<span class="lp-d-equal">${escapeHtml(op.text)}</span>`;
+        case 'delete':  return `<span class="lp-d-del" title="ขาดหายจาก OCR">${escapeHtml(op.text)}</span>`;
+        case 'insert':  return `<span class="lp-d-ins" title="เกินมาใน OCR">${escapeHtml(op.text)}</span>`;
+        case 'replace': return `<span class="lp-d-rep-a" title="Master">${escapeHtml(op.a)}</span>` +
+                               `<span class="lp-d-rep-b" title="OCR">${escapeHtml(op.b)}</span>`;
+        default: return '';
+      }
+    }).join('');
+  }
+
+  // ── Side-by-side Master vs OCR line diff ────────────────────────
+  function renderTextLineDiff(r) {
+    const ops = r.text_line_diff || [];
+    if (!ops.length) return '';
+    let left = '', right = '';
+    for (const op of ops) {
+      if (op.op === 'equal') {
+        left  += `<div class="lp-diff-line equal">${escapeHtml(op.text)}</div>`;
+        right += `<div class="lp-diff-line equal">${escapeHtml(op.text)}</div>`;
+      } else if (op.op === 'delete') {
+        left  += `<div class="lp-diff-line del">− ${escapeHtml(op.text)}</div>`;
+        right += `<div class="lp-diff-line gap">·</div>`;
+      } else if (op.op === 'insert') {
+        left  += `<div class="lp-diff-line gap">·</div>`;
+        right += `<div class="lp-diff-line ins">+ ${escapeHtml(op.text)}</div>`;
+      } else if (op.op === 'replace') {
+        left  += `<div class="lp-diff-line rep">~ ${escapeHtml(op.a)}</div>`;
+        right += `<div class="lp-diff-line rep">~ ${escapeHtml(op.b)}</div>`;
+      }
+    }
+    return `<h4 style="margin:14px 0 6px;">เปรียบเทียบข้อความ Master ↔ OCR</h4>
+            <div style="font-size:12px;color:#546e7a;margin-bottom:4px;">
+              <span class="lp-d-del">แดง</span> = เฉพาะใน Master &nbsp;
+              <span class="lp-d-ins">เขียว</span> = เฉพาะใน OCR &nbsp;
+              <span class="lp-d-rep-b">เหลือง</span> = ทั้งคู่แต่ต่าง
+            </div>
+            <div class="lp-diff-grid">
+              <div class="lp-diff-col"><h5>Master (PDF text layer)</h5>${left || '<div class="lp-diff-line gap">(ว่าง)</div>'}</div>
+              <div class="lp-diff-col"><h5>OCR (ภาพถ่าย)</h5>${right || '<div class="lp-diff-line gap">(ว่าง)</div>'}</div>
+            </div>`;
   }
 
   function renderPixelInspection(p) {
