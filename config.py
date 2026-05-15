@@ -118,7 +118,7 @@ OCR_BACKEND = os.getenv("OCR_BACKEND", "").strip().lower()
 # `blocks` is optional — when missing, only line-level text comparison is possible.
 N8N_OCR_WEBHOOK_URL = os.getenv(
     "N8N_OCR_WEBHOOK_URL",
-    "http://localhost:5678/webhook/660b85ac-2dff-4541-b9c8-72241c1bd731",
+    "http://localhost:5678/webhook-test/3d597970-f7de-4a8c-85eb-c9ad8c1e0877",
 ).strip()
 N8N_OCR_TIMEOUT_S = float(os.getenv("N8N_OCR_TIMEOUT_S", "60"))
 
