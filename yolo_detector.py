@@ -22,6 +22,16 @@ _COLORS = {
 }
 _COLOR_DEFAULT = (0, 165, 255)      # ส้ม fallback
 
+# ── bestX.pt — two-class model: "dent" + "good" only ─────────────────────────
+_BESTX_CLASS_NAMES = {
+    "dent": "Can Dent",
+    "good": "Can Good",
+}
+_BESTX_COLORS = {
+    "dent": (0,   0, 220),   # red
+    "good": (80, 200,   0),  # green
+}
+
 
 def _suppress_false_dent_spots(detections: list, good_conf_threshold: float = 0.90) -> list:
     """
@@ -74,6 +84,19 @@ def _draw_corner_marks(frame: np.ndarray, x1: int, y1: int, x2: int, y2: int,
         cv2.line(frame, p1, p2, color, thickness)
 
 
+def _draw_bestx_verdict(frame: np.ndarray, verdict: str) -> None:
+    """Draw NG / OK verdict badge in the top-right corner (bestX.pt mode only)."""
+    text  = "NG" if verdict == "ng" else "OK"
+    color = (0, 0, 220) if verdict == "ng" else (80, 200, 0)
+    font  = cv2.FONT_HERSHEY_SIMPLEX
+    scale, thick = 3.0, 6
+    (tw, th), _ = cv2.getTextSize(text, font, scale, thick)
+    h, w = frame.shape[:2]
+    x, y = w - tw - 20, th + 20
+    cv2.rectangle(frame, (x - 10, 10), (w - 10, y + 10), (0, 0, 0), cv2.FILLED)
+    cv2.putText(frame, text, (x, y), font, scale, color, thick)
+
+
 class YOLODetector:
     """
     YOLO-based defect detector for water bottles.
@@ -97,14 +120,23 @@ class YOLODetector:
         self.iou_threshold = config.IOU_THRESHOLD
         self.mode_config = mode_config
 
+    @property
+    def is_bestx_mode(self) -> bool:
+        """True when the loaded model file is bestX.pt."""
+        return os.path.basename(self.model_path).lower() == "bestx.pt"
+
     def _class_names(self) -> dict:
         """Active class-name → display-label mapping."""
+        if self.is_bestx_mode:
+            return _BESTX_CLASS_NAMES
         if self.mode_config is not None:
             return getattr(self.mode_config, "CLASS_NAMES", {}) or {}
         return config.DEFECT_CLASS_NAMES
 
     def _colors(self) -> dict:
         """Active class-name → BGR tuple mapping."""
+        if self.is_bestx_mode:
+            return _BESTX_COLORS
         if self.mode_config is not None:
             colors = getattr(self.mode_config, "COLORS", None)
             if colors:
@@ -149,7 +181,19 @@ class YOLODetector:
         except Exception as e:
             logger.error(f"Failed to load YOLO model: {e}", exc_info=True)
             return False
-    
+
+    def classify_frame_bestx(self, detections: List[Dict]) -> str:
+        """
+        bestX.pt verdict logic:
+          "ng" — "dent" class detected (defective, even when "good" also present)
+          "ok" — only "good" or no detections
+        Only call when is_bestx_mode is True.
+        """
+        for det in detections:
+            if det["class_name"] == "dent":
+                return "ng"
+        return "ok"
+
     def detect(self, frame: np.ndarray) -> List[Dict]:
         """
         Perform defect detection on a frame.
@@ -290,6 +334,10 @@ class YOLODetector:
             cv2.putText(frame_copy, label, (x1, text_y),
                         cv2.FONT_HERSHEY_SIMPLEX, font_scale, (255, 255, 255),
                         font_thick + 1)
+
+        # bestX.pt: overlay NG / OK verdict on the frame
+        if self.is_bestx_mode:
+            _draw_bestx_verdict(frame_copy, self.classify_frame_bestx(detections))
 
         return frame_copy
     
