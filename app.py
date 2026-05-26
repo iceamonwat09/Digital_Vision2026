@@ -115,15 +115,13 @@ def detection_loop():
                 time.sleep(0.05)
                 continue
 
-            bestx_verdict = None  # None = not in bestX mode
+            bestx_mode = False  # True only when bestX.pt is the active model
 
             # Perform detection (skip if model not loaded — show raw camera feed)
             if detector is not None and detector.model is not None:
                 detections = detector.detect(frame)
                 annotated_frame = detector.draw_detections(frame, detections)
-                # bestX.pt: verdict is already drawn inside draw_detections; capture it here for logging
-                if detector.is_bestx_mode:
-                    bestx_verdict = detector.classify_frame_bestx(detections)
+                bestx_mode = detector.is_bestx_mode
             else:
                 detections = []
                 annotated_frame = frame.copy()
@@ -141,24 +139,24 @@ def detection_loop():
 
             # Log defects to database (with cooldown)
             current_time = time.time()
-            if bestx_verdict is not None:
-                # bestX.pt logic: log only "dent" detections when verdict is NG
-                if bestx_verdict == "ng":
-                    for det in detections:
-                        if det["class_name"] != "dent":
-                            continue
-                        defect_type = det["class_name"]
-                        last_log_time = defect_log_cooldown.get(defect_type, 0)
-                        if current_time - last_log_time >= config.DEFECT_LOGGING_COOLDOWN:
-                            if db and db.is_connected:
-                                db.log_defect(
-                                    defect_type=defect_type,
-                                    confidence=det["confidence"],
-                                    frame=frame,
-                                    bbox=det["bbox"],
-                                    timestamp=datetime.now()
-                                )
-                                defect_log_cooldown[defect_type] = current_time
+            if bestx_mode:
+                # bestX.pt logic: a "dent" detection means the can is defective.
+                # Log dent only; "can" (good) is never logged as a defect.
+                for det in detections:
+                    if det["class_name"] != "dent":
+                        continue
+                    defect_type = det["class_name"]
+                    last_log_time = defect_log_cooldown.get(defect_type, 0)
+                    if current_time - last_log_time >= config.DEFECT_LOGGING_COOLDOWN:
+                        if db and db.is_connected:
+                            db.log_defect(
+                                defect_type=defect_type,
+                                confidence=det["confidence"],
+                                frame=frame,
+                                bbox=det["bbox"],
+                                timestamp=datetime.now()
+                            )
+                            defect_log_cooldown[defect_type] = current_time
             else:
                 for det in detections:
                     defect_type = det["class_name"]
@@ -174,8 +172,10 @@ def detection_loop():
                             )
                             defect_log_cooldown[defect_type] = current_time
 
-            # Control frame rate
-            time.sleep(1.0 / config.STREAM_FPS)
+            # No artificial sleep here: camera.read_frame() blocks at the camera's
+            # FPS and generate_frames() already throttles the MJPEG output. The old
+            # sleep(1/STREAM_FPS) only slowed the detection/refresh rate and made the
+            # live feed stutter (frames were repeated while detection lagged behind).
 
         except Exception as e:
             logger.error(f"Error in detection loop: {e}")

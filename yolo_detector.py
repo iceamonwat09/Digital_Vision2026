@@ -4,6 +4,7 @@ Handles YOLOv8 model loading, inference, and defect classification.
 """
 
 import cv2
+import logging
 import numpy as np
 import os
 from typing import List, Dict, Tuple, Optional
@@ -84,8 +85,11 @@ def _draw_corner_marks(frame: np.ndarray, x1: int, y1: int, x2: int, y2: int,
         cv2.line(frame, p1, p2, color, thickness)
 
 
-def _draw_bestx_verdict(frame: np.ndarray, verdict: str) -> None:
-    """Draw NG / OK verdict badge in the top-right corner (bestX.pt mode only)."""
+def _draw_bestx_verdict(frame: np.ndarray, verdict: Optional[str]) -> None:
+    """Draw NG / OK verdict badge in the top-right corner (bestX.pt mode only).
+    verdict=None → no can detected yet, so draw nothing."""
+    if verdict is None:
+        return
     text  = "NG" if verdict == "ng" else "OK"
     color = (0, 0, 220) if verdict == "ng" else (80, 200, 0)
     font  = cv2.FONT_HERSHEY_SIMPLEX
@@ -182,17 +186,19 @@ class YOLODetector:
             logger.error(f"Failed to load YOLO model: {e}", exc_info=True)
             return False
 
-    def classify_frame_bestx(self, detections: List[Dict]) -> str:
+    def classify_frame_bestx(self, detections: List[Dict]) -> Optional[str]:
         """
         bestX.pt verdict logic:
-          "ng" — "dent" class detected (defective, even when "good" also present)
-          "ok" — only "good" or no detections
+          "ng"  — "dent" detected → the whole can is defective
+          "ok"  — "can" detected and no dent → good can
+          None  — nothing detected yet → caller shows no verdict
         Only call when is_bestx_mode is True.
         """
-        for det in detections:
-            if det["class_name"] == "dent":
-                return "ng"
-        return "ok"
+        if any(d["class_name"] == "dent" for d in detections):
+            return "ng"
+        if any(d["class_name"] == "can" for d in detections):
+            return "ok"
+        return None
 
     def detect(self, frame: np.ndarray) -> List[Dict]:
         """
@@ -232,13 +238,17 @@ class YOLODetector:
                         class_id   = int(box.cls[0].cpu().numpy())
                         confidence = float(box.conf[0].cpu().numpy())
 
-                        # Debug: log every raw detection so we can see what model finds
-                        raw_name = (self.model.names.get(class_id, str(class_id))
-                                    if hasattr(self.model, 'names') else str(class_id))
-                        logger.info(
-                            f"RAW detect → class_id={class_id} name='{raw_name}' "
-                            f"conf={confidence:.3f} (threshold={self.confidence_threshold})"
-                        )
+                        # Debug: log every raw detection so we can see what model finds.
+                        # Kept at DEBUG level — at INFO this fired for every raw box
+                        # (conf=0.01 → many boxes/frame) and the synchronous I/O
+                        # was a major cause of live-feed stutter.
+                        if logger.isEnabledFor(logging.DEBUG):
+                            raw_name = (self.model.names.get(class_id, str(class_id))
+                                        if hasattr(self.model, 'names') else str(class_id))
+                            logger.debug(
+                                f"RAW detect → class_id={class_id} name='{raw_name}' "
+                                f"conf={confidence:.3f} (threshold={self.confidence_threshold})"
+                            )
 
                         # Apply our confidence threshold
                         if confidence < self.confidence_threshold:
@@ -289,8 +299,15 @@ class YOLODetector:
         palette = self._colors()
         name_map = self._class_names()
 
+        # bestX.pt: when a dent exists the whole can is defective, so drop the
+        # green "can" box — it must never co-exist with the NG verdict.
+        bestx_verdict = self.classify_frame_bestx(detections) if self.is_bestx_mode else None
+        draw_targets = detections
+        if bestx_verdict == "ng":
+            draw_targets = [d for d in detections if d["class_name"] != "can"]
+
         # Draw good/dented first, dent_spot on top
-        ordered = sorted(detections,
+        ordered = sorted(draw_targets,
                          key=lambda d: 1 if d["class_name"] == "dented_spot" else 0)
 
         for det in ordered:
@@ -335,9 +352,9 @@ class YOLODetector:
                         cv2.FONT_HERSHEY_SIMPLEX, font_scale, (255, 255, 255),
                         font_thick + 1)
 
-        # bestX.pt: overlay NG / OK verdict on the frame
+        # bestX.pt: overlay NG / OK verdict on the frame (None → nothing drawn)
         if self.is_bestx_mode:
-            _draw_bestx_verdict(frame_copy, self.classify_frame_bestx(detections))
+            _draw_bestx_verdict(frame_copy, bestx_verdict)
 
         return frame_copy
     
