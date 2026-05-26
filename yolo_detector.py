@@ -22,14 +22,14 @@ _COLORS = {
 }
 _COLOR_DEFAULT = (0, 165, 255)      # ส้ม fallback
 
-# ── bestX.pt — two-class model: "dent" + "good" only ─────────────────────────
+# ── bestX.pt — two-class model: "dent" + "can" only ──────────────────────────
 _BESTX_CLASS_NAMES = {
     "dent": "Can Dent",
-    "good": "Can Good",
+    "can":  "Can Good",
 }
 _BESTX_COLORS = {
     "dent": (0,   0, 220),   # red
-    "good": (80, 200,   0),  # green
+    "can":  (80, 200,   0),  # green
 }
 
 
