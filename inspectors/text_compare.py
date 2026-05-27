@@ -69,25 +69,45 @@ def _severity(distance: int, critical: bool, passed: bool) -> str:
 
 def _find_candidate(spec: FieldSpec, ocr_text: str) -> str:
     """
-    Phase 1 heuristic locator:
-      - if ``expected`` is a substring of OCR text, return it
-      - else return the OCR line whose length is closest to ``expected``
+    Method-aware candidate locator.
+
+    regex       → return the first line (or substring) that satisfies the
+                  pattern; empty string when nothing matches.
+    exact       → scan every line for an exact match first, then fall back
+                  to the line with minimum Levenshtein distance.
+    levenshtein → return the line with minimum Levenshtein distance.
 
     Phase 2 will use Document AI bounding boxes / labels for this.
     """
     if not ocr_text:
         return ""
-    if spec.expected and spec.expected in ocr_text:
-        return spec.expected
-    target_len = len(spec.expected)
-    best, best_diff = "", 10**9
-    for raw_line in ocr_text.splitlines():
-        line = raw_line.strip()
-        if not line:
-            continue
-        diff = abs(len(line) - target_len)
-        if diff < best_diff:
-            best, best_diff = line, diff
+
+    method = spec.method.lower()
+    lines = [l.strip() for l in ocr_text.splitlines() if l.strip()]
+
+    if method == "regex":
+        for line in lines:
+            if re.search(spec.expected, line):
+                return line
+        # Try the whole block as a single string (multi-line patterns)
+        m = re.search(spec.expected, ocr_text)
+        return m.group(0) if m else ""
+
+    if method == "exact":
+        # Exact line match
+        for line in lines:
+            if line == spec.expected:
+                return line
+        # Expected appears as a substring of one line
+        for line in lines:
+            if spec.expected in line:
+                return spec.expected
+        # Fall through to Levenshtein-closest
+
+    # levenshtein (and exact fallback): pick the line closest in edit distance
+    if not lines:
+        return ""
+    best = min(lines, key=lambda l: _levenshtein(spec.expected, l))
     return best
 
 
