@@ -25,6 +25,7 @@ finishes instead of raising.
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import os
@@ -96,18 +97,18 @@ def ocr_image(image_bytes: bytes,
             "error": "empty image bytes",
         }
 
-    files = {"image": ("crop.jpg", image_bytes, "image/jpeg")}
+    image_b64 = base64.b64encode(image_bytes).decode("ascii")
     t = float(timeout if timeout is not None else config.N8N_OCR_TIMEOUT_S)
 
     size_kb = len(image_bytes) / 1024.0
     print(f"[N8N→OCR] POST {target}")
-    print(f"[N8N→OCR]   field 'image' = crop.jpg ({size_kb:.1f} KB, image/jpeg)")
+    print(f"[N8N→OCR]   field 'image_b64' = {size_kb:.1f} KB → {len(image_b64)} chars base64")
     print(f"[N8N→OCR]   timeout = {t}s")
     logger.info("OCR request: %s  image=%.1fKB  timeout=%.0fs",
                 target, size_kb, t)
 
     try:
-        resp = requests.post(target, files=files, timeout=t)
+        resp = requests.post(target, data={"image_b64": image_b64}, timeout=t)
         resp.raise_for_status()
         print(f"[N8N→OCR] ← HTTP {resp.status_code}  ({len(resp.content)} bytes)")
     except requests.RequestException as e:

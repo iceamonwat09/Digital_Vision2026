@@ -27,6 +27,7 @@ Expected JSON response from N8N (schema enforced by the prompt):
 
 from __future__ import annotations
 
+import base64
 import logging
 import os
 from typing import List, Optional
@@ -102,11 +103,8 @@ def compare_images(master_bytes: bytes,
             "error": "missing master or captured image bytes",
         }
 
-    files = {
-        "master":   ("master.jpg",   master_bytes,   "image/jpeg"),
-        "captured": ("captured.jpg", captured_bytes, "image/jpeg"),
-    }
-    data = {"sku_code": sku_code} if sku_code else {}
+    master_b64   = base64.b64encode(master_bytes).decode("ascii")
+    captured_b64 = base64.b64encode(captured_bytes).decode("ascii")
     t = float(
         timeout if timeout is not None
         else getattr(config, "N8N_VISDIFF_TIMEOUT_S",
@@ -116,16 +114,23 @@ def compare_images(master_bytes: bytes,
     master_kb = len(master_bytes) / 1024.0
     captured_kb = len(captured_bytes) / 1024.0
     print(f"[N8N→VisualDiff] POST {target}")
-    print(f"[N8N→VisualDiff]   field 'master'   = master.jpg   ({master_kb:.1f} KB, image/jpeg)")
-    print(f"[N8N→VisualDiff]   field 'captured' = captured.jpg ({captured_kb:.1f} KB, image/jpeg)")
+    print(f"[N8N→VisualDiff]   field 'master_b64'   = {master_kb:.1f} KB → {len(master_b64)} chars base64")
+    print(f"[N8N→VisualDiff]   field 'captured_b64' = {captured_kb:.1f} KB → {len(captured_b64)} chars base64")
     if sku_code:
         print(f"[N8N→VisualDiff]   field 'sku_code' = {sku_code}")
     print(f"[N8N→VisualDiff]   timeout = {t}s")
     logger.info("VisualDiff request: %s  master=%.1fKB  captured=%.1fKB  sku=%s  timeout=%.0fs",
                 target, master_kb, captured_kb, sku_code or "-", t)
 
+    data = {
+        "master_b64":   master_b64,
+        "captured_b64": captured_b64,
+    }
+    if sku_code:
+        data["sku_code"] = sku_code
+
     try:
-        resp = requests.post(target, files=files, data=data, timeout=t)
+        resp = requests.post(target, data=data, timeout=t)
         resp.raise_for_status()
         print(f"[N8N→VisualDiff] ← HTTP {resp.status_code}  ({len(resp.content)} bytes)")
     except requests.RequestException as e:
