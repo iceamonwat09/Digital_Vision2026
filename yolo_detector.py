@@ -4,6 +4,7 @@ Handles YOLOv8 model loading, inference, and defect classification.
 """
 
 import cv2
+import logging
 import numpy as np
 import os
 from typing import List, Dict, Tuple, Optional
@@ -21,6 +22,16 @@ _COLORS = {
     "dented_spot":  (0,  100,  255),   # ส้ม   (corner marks)
 }
 _COLOR_DEFAULT = (0, 165, 255)      # ส้ม fallback
+
+# ── bestX.pt — two-class model: "dent" + "can" only ──────────────────────────
+_BESTX_CLASS_NAMES = {
+    "dent": "Can Dent",
+    "can":  "Can Good",
+}
+_BESTX_COLORS = {
+    "dent": (0,   0, 220),   # red
+    "can":  (80, 200,   0),  # green
+}
 
 
 def _suppress_false_dent_spots(detections: list, good_conf_threshold: float = 0.90) -> list:
@@ -74,6 +85,22 @@ def _draw_corner_marks(frame: np.ndarray, x1: int, y1: int, x2: int, y2: int,
         cv2.line(frame, p1, p2, color, thickness)
 
 
+def _draw_bestx_verdict(frame: np.ndarray, verdict: Optional[str]) -> None:
+    """Draw NG / OK verdict badge in the top-right corner (bestX.pt mode only).
+    verdict=None → no can detected yet, so draw nothing."""
+    if verdict is None:
+        return
+    text  = "NG" if verdict == "ng" else "OK"
+    color = (0, 0, 220) if verdict == "ng" else (80, 200, 0)
+    font  = cv2.FONT_HERSHEY_SIMPLEX
+    scale, thick = 3.0, 6
+    (tw, th), _ = cv2.getTextSize(text, font, scale, thick)
+    h, w = frame.shape[:2]
+    x, y = w - tw - 20, th + 20
+    cv2.rectangle(frame, (x - 10, 10), (w - 10, y + 10), (0, 0, 0), cv2.FILLED)
+    cv2.putText(frame, text, (x, y), font, scale, color, thick)
+
+
 class YOLODetector:
     """
     YOLO-based defect detector for water bottles.
@@ -97,14 +124,23 @@ class YOLODetector:
         self.iou_threshold = config.IOU_THRESHOLD
         self.mode_config = mode_config
 
+    @property
+    def is_bestx_mode(self) -> bool:
+        """True when the loaded model file is bestX.pt."""
+        return os.path.basename(self.model_path).lower() == "bestx.pt"
+
     def _class_names(self) -> dict:
         """Active class-name → display-label mapping."""
+        if self.is_bestx_mode:
+            return _BESTX_CLASS_NAMES
         if self.mode_config is not None:
             return getattr(self.mode_config, "CLASS_NAMES", {}) or {}
         return config.DEFECT_CLASS_NAMES
 
     def _colors(self) -> dict:
         """Active class-name → BGR tuple mapping."""
+        if self.is_bestx_mode:
+            return _BESTX_COLORS
         if self.mode_config is not None:
             colors = getattr(self.mode_config, "COLORS", None)
             if colors:
@@ -149,7 +185,21 @@ class YOLODetector:
         except Exception as e:
             logger.error(f"Failed to load YOLO model: {e}", exc_info=True)
             return False
-    
+
+    def classify_frame_bestx(self, detections: List[Dict]) -> Optional[str]:
+        """
+        bestX.pt verdict logic:
+          "ng"  — "dent" detected → the whole can is defective
+          "ok"  — "can" detected and no dent → good can
+          None  — nothing detected yet → caller shows no verdict
+        Only call when is_bestx_mode is True.
+        """
+        if any(d["class_name"] == "dent" for d in detections):
+            return "ng"
+        if any(d["class_name"] == "can" for d in detections):
+            return "ok"
+        return None
+
     def detect(self, frame: np.ndarray) -> List[Dict]:
         """
         Perform defect detection on a frame.
@@ -188,13 +238,17 @@ class YOLODetector:
                         class_id   = int(box.cls[0].cpu().numpy())
                         confidence = float(box.conf[0].cpu().numpy())
 
-                        # Debug: log every raw detection so we can see what model finds
-                        raw_name = (self.model.names.get(class_id, str(class_id))
-                                    if hasattr(self.model, 'names') else str(class_id))
-                        logger.info(
-                            f"RAW detect → class_id={class_id} name='{raw_name}' "
-                            f"conf={confidence:.3f} (threshold={self.confidence_threshold})"
-                        )
+                        # Debug: log every raw detection so we can see what model finds.
+                        # Kept at DEBUG level — at INFO this fired for every raw box
+                        # (conf=0.01 → many boxes/frame) and the synchronous I/O
+                        # was a major cause of live-feed stutter.
+                        if logger.isEnabledFor(logging.DEBUG):
+                            raw_name = (self.model.names.get(class_id, str(class_id))
+                                        if hasattr(self.model, 'names') else str(class_id))
+                            logger.debug(
+                                f"RAW detect → class_id={class_id} name='{raw_name}' "
+                                f"conf={confidence:.3f} (threshold={self.confidence_threshold})"
+                            )
 
                         # Apply our confidence threshold
                         if confidence < self.confidence_threshold:
@@ -245,8 +299,15 @@ class YOLODetector:
         palette = self._colors()
         name_map = self._class_names()
 
+        # bestX.pt: when a dent exists the whole can is defective, so drop the
+        # green "can" box — it must never co-exist with the NG verdict.
+        bestx_verdict = self.classify_frame_bestx(detections) if self.is_bestx_mode else None
+        draw_targets = detections
+        if bestx_verdict == "ng":
+            draw_targets = [d for d in detections if d["class_name"] != "can"]
+
         # Draw good/dented first, dent_spot on top
-        ordered = sorted(detections,
+        ordered = sorted(draw_targets,
                          key=lambda d: 1 if d["class_name"] == "dented_spot" else 0)
 
         for det in ordered:
@@ -290,6 +351,10 @@ class YOLODetector:
             cv2.putText(frame_copy, label, (x1, text_y),
                         cv2.FONT_HERSHEY_SIMPLEX, font_scale, (255, 255, 255),
                         font_thick + 1)
+
+        # bestX.pt: overlay NG / OK verdict on the frame (None → nothing drawn)
+        if self.is_bestx_mode:
+            _draw_bestx_verdict(frame_copy, bestx_verdict)
 
         return frame_copy
     
