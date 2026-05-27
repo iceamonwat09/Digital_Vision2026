@@ -516,6 +516,12 @@ if __name__ == '__main__':
         logger.error(f"Error during system initialization: {e}")
         logger.warning("Flask server will start but some features may be unavailable.")
 
+    print("=" * 64)
+    print(f"  CONFIG_VERSION      : {config.CONFIG_VERSION}")
+    print(f"  OCR_BACKEND         : {config.OCR_BACKEND or '(auto)'}")
+    print(f"  N8N_OCR_WEBHOOK_URL : {config.N8N_OCR_WEBHOOK_URL}")
+    print("=" * 64)
+
     try:
         logger.info(f"Starting Flask server at http://{config.FLASK_HOST}:{config.FLASK_PORT}")
         app.run(
