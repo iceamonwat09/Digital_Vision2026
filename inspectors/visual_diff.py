@@ -28,6 +28,7 @@ Expected JSON response from N8N (schema enforced by the prompt):
 from __future__ import annotations
 
 import base64
+import json
 import logging
 import os
 from typing import List, Optional
@@ -79,11 +80,26 @@ def compare_images(master_bytes: bytes,
                    captured_bytes: bytes,
                    sku_code: str = "",
                    url: Optional[str] = None,
-                   timeout: Optional[float] = None) -> dict:
+                   timeout: Optional[float] = None,
+                   block_diff: Optional[dict] = None) -> dict:
     """
     POST master + captured to the N8N webhook and return a normalised
     dict. Never raises — on any failure, returns a stub dict with an
     ``error`` field so the pipeline can mark the stage as SKIPPED.
+
+    ``block_diff`` (optional) is the compact summary produced by
+    ``block_match.diff_summary``.  When provided, it is serialised as
+    ``block_diff_json`` in the POST body so the N8N workflow can inject it
+    into the Gemini prompt as grounding context.
+
+    N8N workflow update required to use this field:
+        In the "Build Gemini" Code node, add:
+            const ctx = body.block_diff_json;
+            if (ctx) {
+              prompt += "\\n\\nLocal OCR pre-analysis:\\n" + ctx +
+                        "\\nPlease confirm these findings and identify " +
+                        "additional visual/graphical differences.";
+            }
     """
     target = (url if url is not None else _resolve_url()).strip()
     if not target:
@@ -128,6 +144,15 @@ def compare_images(master_bytes: bytes,
     }
     if sku_code:
         data["sku_code"] = sku_code
+    if block_diff:
+        try:
+            data["block_diff_json"] = json.dumps(block_diff, ensure_ascii=False)
+            print(f"[N8N→VisualDiff]   field 'block_diff_json' = "
+                  f"m:{block_diff.get('missing_count',0)} missing, "
+                  f"e:{block_diff.get('extra_count',0)} extra, "
+                  f"s:{len(block_diff.get('suspect_matches',[]))} suspect")
+        except (TypeError, ValueError):
+            pass
 
     try:
         resp = requests.post(target, data=data, timeout=t)

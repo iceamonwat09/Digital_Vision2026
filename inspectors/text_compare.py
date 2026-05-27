@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import List
+from typing import List, Optional
 
 from .master_loader import FieldSpec
 from .text_diff import char_diff
@@ -111,8 +111,39 @@ def _find_candidate(spec: FieldSpec, ocr_text: str) -> str:
     return best
 
 
-def compare_field(spec: FieldSpec, ocr_text: str) -> FieldResult:
-    found = _find_candidate(spec, ocr_text)
+def compare_field(spec: FieldSpec,
+                  ocr_text: str,
+                  master_blocks: Optional[List[dict]] = None,
+                  captured_blocks: Optional[List[dict]] = None,
+                  master_img_w: int = 1,
+                  master_img_h: int = 1,
+                  captured_img_w: int = 1,
+                  captured_img_h: int = 1) -> FieldResult:
+    """
+    Compare a single field spec against OCR text.
+
+    When ``master_blocks`` and ``captured_blocks`` are supplied and both
+    contain bbox coordinates, uses spatial block matching (Phase 2) to
+    locate the field before falling back to the flat-text heuristic.
+    """
+    # Spatial block matching (Phase 2) — only when both sides have bbox data
+    found: Optional[str] = None
+    has_spatial = (
+        master_blocks and captured_blocks
+        and any(b.get("bbox") for b in master_blocks)
+        and any(b.get("bbox") for b in captured_blocks)
+    )
+    if has_spatial:
+        from . import block_match as _bm
+        found = _bm.find_field_candidate(
+            spec.expected, spec.method,
+            master_blocks, captured_blocks,
+            master_img_w, master_img_h,
+            captured_img_w, captured_img_h,
+        )
+    if found is None:
+        found = _find_candidate(spec, ocr_text)
+
     method = spec.method.lower()
 
     if method == "exact":
@@ -148,8 +179,26 @@ def compare_field(spec: FieldSpec, ocr_text: str) -> FieldResult:
     )
 
 
-def compare_all(fields: List[FieldSpec], ocr_text: str) -> List[FieldResult]:
-    return [compare_field(f, ocr_text) for f in fields]
+def compare_all(fields: List[FieldSpec],
+                ocr_text: str,
+                master_blocks: Optional[List[dict]] = None,
+                captured_blocks: Optional[List[dict]] = None,
+                master_img_w: int = 1,
+                master_img_h: int = 1,
+                captured_img_w: int = 1,
+                captured_img_h: int = 1) -> List[FieldResult]:
+    return [
+        compare_field(
+            f, ocr_text,
+            master_blocks=master_blocks,
+            captured_blocks=captured_blocks,
+            master_img_w=master_img_w,
+            master_img_h=master_img_h,
+            captured_img_w=captured_img_w,
+            captured_img_h=captured_img_h,
+        )
+        for f in fields
+    ]
 
 
 def overall_text_verdict(results: List[FieldResult]) -> str:
