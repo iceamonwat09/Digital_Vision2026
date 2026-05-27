@@ -30,6 +30,11 @@ logger = setup_logger(__name__)
 # Initialize Flask app
 app = Flask(__name__, template_folder=config.TEMPLATES_DIR, static_folder=config.STATIC_DIR)
 
+# Inject CONFIG_VERSION into every template automatically
+@app.context_processor
+def inject_config():
+    return {"config_version": config.CONFIG_VERSION}
+
 # Pre-computed JPEG encode params (avoids re-creating each frame)
 _JPEG_PARAMS = [cv2.IMWRITE_JPEG_QUALITY, 80]
 
