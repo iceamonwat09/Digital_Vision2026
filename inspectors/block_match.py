@@ -272,7 +272,15 @@ def find_field_candidate(expected: str,
         return ""
 
     best = max(candidates, key=lambda c: _text_similarity(expected, c["text"]))
-    return best["text"] if best else None
+    if not best:
+        return None
+    # Return None when confidence too low so flat-text fallback can take over.
+    # Short strings (≤6 chars) need a higher bar because many blocks score
+    # similarly by chance.
+    min_sim = 0.5 if len(expected) <= 6 else 0.3
+    if _text_similarity(expected, best["text"]) < min_sim:
+        return None
+    return best["text"]
 
 
 def diff_summary(match_result: dict) -> dict:
