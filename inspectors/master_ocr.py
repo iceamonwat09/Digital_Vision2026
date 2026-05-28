@@ -28,6 +28,20 @@ from . import ocr_n8n
 logger = logging.getLogger(__name__)
 
 _CACHE_FILENAME = "master_ocr.json"
+_CACHE_VERSION  = 2   # bump when cache schema changes to auto-invalidate old files
+_MIN_BLOCKS     = 5   # refuse to cache results sparser than this
+_MIN_TEXT_LEN   = 20  # minimum non-whitespace characters in text field
+
+
+def _is_valid_ocr(result: dict) -> bool:
+    """Return True only when the OCR result is rich enough to be worth caching."""
+    if result.get("stub") or result.get("parse_error"):
+        return False
+    if len(result.get("text", "").strip()) < _MIN_TEXT_LEN:
+        return False
+    if len(result.get("blocks", [])) < _MIN_BLOCKS:
+        return False
+    return True
 
 
 # ── Cache helpers ────────────────────────────────────────────────────────────
@@ -92,10 +106,17 @@ def get_master_ocr(pdf_path: str, force_refresh: bool = False) -> dict:
         try:
             with open(cache, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            data["cached"] = True
-            print(f"[MasterOCR] cache hit → {os.path.basename(cache)}")
-            logger.info("Master OCR cache hit: %s", cache)
-            return data
+            if data.get("_cache_version") != _CACHE_VERSION:
+                logger.info("Master OCR cache version mismatch (got %s, want %d) — re-OCR",
+                            data.get("_cache_version"), _CACHE_VERSION)
+            elif not _is_valid_ocr(data):
+                logger.info("Master OCR cache is sparse (blocks=%d, text=%d) — re-OCR",
+                            len(data.get("blocks", [])), len(data.get("text", "").strip()))
+            else:
+                data["cached"] = True
+                print(f"[MasterOCR] cache hit → {os.path.basename(cache)}")
+                logger.info("Master OCR cache hit: %s", cache)
+                return data
         except Exception as e:
             logger.warning("Master OCR cache read failed (%s) — will re-OCR", e)
 
@@ -120,14 +141,24 @@ def get_master_ocr(pdf_path: str, force_refresh: bool = False) -> dict:
         return result
 
     # ── Persist cache (best-effort) ──────────────────────────────────────────
-    try:
-        payload = {k: v for k, v in result.items() if k != "cached"}
-        with open(cache, "w", encoding="utf-8") as f:
-            json.dump(payload, f, ensure_ascii=False, indent=2)
-        print(f"[MasterOCR] result cached → {os.path.basename(cache)}")
-        logger.info("Master OCR cached: %s  text_len=%d  blocks=%d",
-                    cache, len(result.get("text", "")), len(result.get("blocks", [])))
-    except Exception as e:
-        logger.warning("Master OCR cache write failed: %s", e)
+    n_blocks = len(result.get("blocks", []))
+    n_chars  = len(result.get("text", "").strip())
+    if not _is_valid_ocr(result):
+        logger.warning(
+            "Master OCR result too sparse to cache (blocks=%d, text=%d chars) — "
+            "using for this run only", n_blocks, n_chars)
+        print(f"[MasterOCR] ⚠ result too sparse to cache (blocks={n_blocks}, chars={n_chars})")
+    else:
+        try:
+            payload = {k: v for k, v in result.items() if k != "cached"}
+            payload["_cache_version"] = _CACHE_VERSION
+            with open(cache, "w", encoding="utf-8") as f:
+                json.dump(payload, f, ensure_ascii=False, indent=2)
+            print(f"[MasterOCR] result cached → {os.path.basename(cache)} "
+                  f"(blocks={n_blocks}, chars={n_chars})")
+            logger.info("Master OCR cached: %s  text_len=%d  blocks=%d",
+                        cache, n_chars, n_blocks)
+        except Exception as e:
+            logger.warning("Master OCR cache write failed: %s", e)
 
     return result
