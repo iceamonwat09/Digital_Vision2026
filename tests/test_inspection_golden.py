@@ -357,3 +357,164 @@ class TestDefectDetection:
             FieldResult("b", "y", "y", "exact", 0, True, True, "ok"),
         ]
         assert overall_text_verdict(results) == "PASS"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Layer 3: sequence-aware block matching
+# ─────────────────────────────────────────────────────────────────────────────
+
+from inspectors.block_match import match_blocks, _reading_order_key
+
+
+def _blk(text, x, y, w=0.10, h=0.05, img=1000):
+    return {
+        "text": text,
+        "bbox": [int(x * img), int(y * img), int(w * img), int(h * img)],
+        "conf": 0.9,
+    }
+
+
+class TestSequenceAwareMatching:
+    # Reading order key sorts by y-band then x
+    def test_reading_order_key_no_bbox(self):
+        b = {"text": "x", "bbox_n": None}
+        assert _reading_order_key(b) == (1.0, 0.0)
+
+    def test_reading_order_key_with_bbox(self):
+        b = {"text": "x", "bbox_n": (0.1, 0.23, 0.2, 0.05)}
+        key = _reading_order_key(b)
+        assert abs(key[1] - 0.1) < 1e-6
+
+    # Same layout — all blocks should be matched
+    def test_identical_layout_all_matched(self):
+        mb = [_blk("AQUA",    0.1, 0.1), _blk("476", 0.5, 0.8)]
+        cb = [_blk("AQUA",    0.1, 0.1), _blk("476", 0.5, 0.8)]
+        r  = match_blocks(mb, cb, 1000, 1000, 1000, 1000)
+        assert len(r["matched"]) == 2
+        assert len(r["missing"]) == 0
+
+    # Cross-position match is impossible with sequence matching
+    def test_no_cross_position_match(self):
+        mb = [_blk("AQUA", 0.1, 0.05), _blk("476",  0.5, 0.80)]
+        cb = [_blk("AQUA", 0.1, 0.05), _blk("490",  0.5, 0.80)]
+        r  = match_blocks(mb, cb, 1000, 1000, 1000, 1000)
+        # AQUA must match AQUA (not 490)
+        aqua_match = next(
+            (p for p in r["matched"] if p["master"]["text"] == "AQUA"), None
+        )
+        assert aqua_match is not None
+        assert aqua_match["captured"]["text"] == "AQUA"
+
+    # Changed value (replace window) still matched
+    def test_changed_value_still_matched(self):
+        mb = [_blk("Sodium", 0.1, 0.7), _blk("476", 0.5, 0.8)]
+        cb = [_blk("Sodium", 0.1, 0.7), _blk("490", 0.5, 0.8)]
+        r  = match_blocks(mb, cb, 1000, 1000, 1000, 1000)
+        sod_match = next(
+            (p for p in r["matched"] if p["master"]["text"] == "476"), None
+        )
+        assert sod_match is not None
+        assert sod_match["captured"]["text"] == "490"
+
+    # Extra block in captured → appears in extra list
+    def test_extra_block_captured(self):
+        mb = [_blk("AQUA", 0.1, 0.1)]
+        cb = [_blk("AQUA", 0.1, 0.1), _blk("EXTRA", 0.5, 0.9)]
+        r  = match_blocks(mb, cb, 1000, 1000, 1000, 1000)
+        assert len(r["extra"]) >= 1
+        extra_texts = [b["text"] for b in r["extra"]]
+        assert "EXTRA" in extra_texts
+
+    # Missing block in captured → appears in missing list
+    def test_missing_block_captured(self):
+        mb = [_blk("AQUA", 0.1, 0.1), _blk("MISSING", 0.5, 0.9)]
+        cb = [_blk("AQUA", 0.1, 0.1)]
+        r  = match_blocks(mb, cb, 1000, 1000, 1000, 1000)
+        assert any(b["text"] == "MISSING" for b in r["missing"])
+
+    # Empty inputs return empty result
+    def test_empty_blocks(self):
+        r = match_blocks([], [], 100, 100, 100, 100)
+        assert r == {"matched": [], "missing": [], "extra": []}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Layer 4: master_found symmetric comparison
+# ─────────────────────────────────────────────────────────────────────────────
+
+MASTER_OCR_TEXT = """\
+Ingredients:
+Tuna, Soybean Oil (Non-GMO), Water, Salt
+Net Weight: 140 gm
+Sodium (mg)
+476
+"""
+
+CAPTURED_OCR_TEXT = """\
+Ingredients:
+Tuna, Palm Oil, Water, Salt
+Net Weight: 140 gm
+Sodium (mg)
+490
+"""
+
+
+class TestMasterFound:
+    def test_master_found_populated(self):
+        spec = FieldSpec(
+            name="sodium_value", expected="476",
+            method="exact", tolerance=0, critical=True,
+            anchor="Sodium", value_regex=r"\d+",
+        )
+        result = compare_field(spec, CAPTURED_OCR_TEXT,
+                               master_ocr_text=MASTER_OCR_TEXT)
+        assert result.master_found == "476"
+        assert result.found == "490"
+        assert not result.passed
+
+    def test_master_found_empty_when_no_master_text(self):
+        spec = FieldSpec(
+            name="sodium_value", expected="476",
+            method="exact", tolerance=0, critical=True,
+            anchor="Sodium", value_regex=r"\d+",
+        )
+        result = compare_field(spec, CAPTURED_OCR_TEXT, master_ocr_text="")
+        assert result.master_found == ""
+
+    def test_master_found_correct_label(self):
+        spec = FieldSpec(
+            name="sodium_value", expected="476",
+            method="exact", tolerance=0, critical=True,
+            anchor="Sodium", value_regex=r"\d+",
+        )
+        result = compare_field(spec, MASTER_OCR_TEXT,
+                               master_ocr_text=MASTER_OCR_TEXT)
+        assert result.master_found == "476"
+        assert result.found == "476"
+        assert result.passed
+
+    def test_master_found_ingredients(self):
+        spec = FieldSpec(
+            name="ingredients",
+            expected="Tuna, Soybean Oil (Non-GMO), Water, Salt",
+            method="levenshtein", tolerance=4, critical=True, anchor="Ingredients",
+        )
+        result = compare_field(spec, CAPTURED_OCR_TEXT,
+                               master_ocr_text=MASTER_OCR_TEXT)
+        assert "Soybean Oil" in result.master_found
+        assert "Palm Oil" in result.found
+        assert not result.passed
+
+    def test_fieldresult_default_master_found(self):
+        fr = FieldResult("x", "a", "b", "exact", 1, False, True, "critical")
+        assert fr.master_found == ""
+
+    def test_compare_all_propagates_master_text(self):
+        from inspectors.text_compare import compare_all
+        specs = [
+            FieldSpec(name="s", expected="476", method="exact", tolerance=0,
+                      critical=True, anchor="Sodium", value_regex=r"\d+"),
+        ]
+        results = compare_all(specs, CAPTURED_OCR_TEXT,
+                              master_ocr_text=MASTER_OCR_TEXT)
+        assert results[0].master_found == "476"

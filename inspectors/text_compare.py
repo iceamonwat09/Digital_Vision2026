@@ -45,7 +45,8 @@ class FieldResult:
     distance: int
     passed: bool
     critical: bool
-    severity: str   # "ok" | "minor" | "warning" | "critical"
+    severity: str
+    master_found: str = ""     # value extracted from master OCR (symmetric)
     diff: List[dict] = field(default_factory=list)  # char-level ops
 
 
@@ -185,6 +186,7 @@ def _find_candidate(spec: FieldSpec, ocr_text: str) -> str:
 
 def compare_field(spec: FieldSpec,
                   ocr_text: str,
+                  master_ocr_text: str = "",
                   master_blocks: Optional[List[dict]] = None,
                   captured_blocks: Optional[List[dict]] = None,
                   master_img_w: int = 1,
@@ -194,10 +196,15 @@ def compare_field(spec: FieldSpec,
     """
     Compare a single field spec against OCR text.
 
-    Candidate search priority:
+    Candidate search priority (captured image):
       1. Spatial block matching  (when both sides have bbox data)
       2. Anchor-based extraction (spec.anchor defined)
       3. Flat-text heuristic     (method-aware Levenshtein / substring)
+
+    When ``master_ocr_text`` is provided, the same anchor + flat-text search
+    is run on the master to populate ``FieldResult.master_found``.  This
+    enables 3-way visibility in the UI:
+      Spec (spec.json) ↔ Master (OCR) ↔ Captured (camera)
 
     Normalization (spec.normalize) is applied to *both* expected and found
     before the pass/fail comparison, so the raw ``found`` value is preserved
@@ -205,7 +212,7 @@ def compare_field(spec: FieldSpec,
     """
     found: Optional[str] = None
 
-    # ── 1. Spatial block matching ────────────────────────────────────────────
+    # ── 1. Spatial block matching (captured) ─────────────────────────────────
     has_spatial = (
         master_blocks and captured_blocks
         and any(b.get("bbox") for b in master_blocks)
@@ -220,16 +227,24 @@ def compare_field(spec: FieldSpec,
             captured_img_w, captured_img_h,
         )
 
-    # ── 2. Anchor-based extraction ───────────────────────────────────────────
+    # ── 2. Anchor-based extraction (captured) ────────────────────────────────
     if found is None:
         found = _find_anchor_candidate(spec, ocr_text)
 
-    # ── 3. Flat-text fallback ────────────────────────────────────────────────
+    # ── 3. Flat-text fallback (captured) ─────────────────────────────────────
     if found is None:
         found = _find_candidate(spec, ocr_text)
 
     if found is None:
         found = ""
+
+    # ── 4. Symmetric master extraction ───────────────────────────────────────
+    master_found = ""
+    if master_ocr_text:
+        mf = _find_anchor_candidate(spec, master_ocr_text)
+        if mf is None:
+            mf = _find_candidate(spec, master_ocr_text)
+        master_found = mf or ""
 
     # ── Normalise for comparison ─────────────────────────────────────────────
     norm = getattr(spec, "normalize", "")
@@ -265,12 +280,14 @@ def compare_field(spec: FieldSpec,
         passed=passed,
         critical=spec.critical,
         severity=_severity(distance, spec.critical, passed),
+        master_found=master_found,
         diff=diff_ops,
     )
 
 
 def compare_all(fields: List[FieldSpec],
                 ocr_text: str,
+                master_ocr_text: str = "",
                 master_blocks: Optional[List[dict]] = None,
                 captured_blocks: Optional[List[dict]] = None,
                 master_img_w: int = 1,
@@ -280,6 +297,7 @@ def compare_all(fields: List[FieldSpec],
     return [
         compare_field(
             f, ocr_text,
+            master_ocr_text=master_ocr_text,
             master_blocks=master_blocks,
             captured_blocks=captured_blocks,
             master_img_w=master_img_w,

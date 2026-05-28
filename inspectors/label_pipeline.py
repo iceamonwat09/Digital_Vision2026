@@ -409,9 +409,10 @@ def inspect(
         if found_color_hexes else []
     )
 
-    # ── 3. Field-aware text compare (Phase 2: block-guided) ──────────────
+    # ── 3. Field-aware text compare (Phase 2: block-guided + symmetric OCR) ─
     field_results = compare_all(
         master.fields, ocr_text,
+        master_ocr_text=master_ocr_text,   # symmetric: master_found per field
         master_blocks=master_blocks,
         captured_blocks=captured_blocks,
         master_img_w=master_w,

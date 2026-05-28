@@ -7,8 +7,15 @@ Each OCR result (from ``ocr_n8n.ocr_image``) returns a ``blocks`` list::
 
 where ``bbox`` coordinates are pixel offsets in the image that was sent to
 OCR.  This module normalises bboxes to [0, 1] fractions (relative to image
-dimensions), then greedily matches each master block to the best unmatched
-captured block using a combined spatial + textual score.
+dimensions), then matches blocks using a **sequence-aware** algorithm:
+
+  1. Sort both lists by reading order (y-band strips → x position).
+  2. ``difflib.SequenceMatcher`` derives an alignment skeleton on the text
+     sequences.  'equal' blocks are paired directly; 'replace' windows are
+     resolved locally with a combined spatial + textual score.
+  3. This prevents cross-position matches (a block at the top of the master
+     being incorrectly paired with a block at the bottom of the captured
+     image) that plagued the old greedy approach.
 
 Output of ``match_blocks``::
 
@@ -35,6 +42,7 @@ blocks to narrow the search in captured blocks before doing text scoring.
 from __future__ import annotations
 
 import re
+from difflib import SequenceMatcher
 from typing import List, Optional, Tuple
 
 # Weights for the combined spatial + textual score
@@ -44,6 +52,8 @@ _TEXT_WEIGHT    = 0.5
 _MIN_SCORE      = 0.20
 # How far to expand the master bbox search region (fraction of image size)
 _SEARCH_EXPAND  = 0.15
+# y-band granularity for reading-order sort (fraction of label height)
+_YBAND          = 0.05
 
 
 # ── Levenshtein (pure-Python fallback, no circular dependency) ───────────────
@@ -134,6 +144,21 @@ def _prepare_blocks(raw_blocks: list,
     return out
 
 
+def _reading_order_key(b: dict) -> tuple:
+    """
+    Sort key for reading order.
+
+    Groups blocks into horizontal y-bands (``_YBAND`` of label height) to
+    tolerate minor baseline jitter between master and captured OCR, then
+    orders within each band by x position (left-to-right).
+    """
+    bn = b.get("bbox_n")
+    if bn is None:
+        return (1.0, 0.0)
+    y_band = round(bn[1] / _YBAND) * _YBAND
+    return (y_band, bn[0])
+
+
 # ── Scoring ───────────────────────────────────────────────────────────────────
 
 def _score_pair(m: dict, c: dict) -> float:
@@ -143,12 +168,21 @@ def _score_pair(m: dict, c: dict) -> float:
 
     if m_bn is not None and c_bn is not None:
         iou = _iou(m_bn, c_bn)
-        # Centroid proximity (scaled so 33% of label width = 0)
         dist = _centroid_dist(m_bn, c_bn)
         spatial = max(iou, max(0.0, 1.0 - dist * 3.0))
         return _SPATIAL_WEIGHT * spatial + _TEXT_WEIGHT * text_sim
-    # No spatial info on at least one side → text-only
     return text_sim
+
+
+def _build_pair(m: dict, c: dict, score: float) -> dict:
+    return {
+        "master":   m,
+        "captured": c,
+        "iou":      round(_iou(m["bbox_n"], c["bbox_n"]), 3)
+                     if (m.get("bbox_n") and c.get("bbox_n")) else 0.0,
+        "text_sim": round(_text_similarity(m["text"], c["text"]), 3),
+        "score":    round(score, 3),
+    }
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
@@ -160,9 +194,13 @@ def match_blocks(master_blocks: list,
                  captured_img_w: int = 1,
                  captured_img_h: int = 1) -> dict:
     """
-    Greedy match: for each master block (in reading order) find the best
-    unmatched captured block.  Pairs scoring below ``_MIN_SCORE`` are left
-    unmatched.
+    Sequence-aware block match.
+
+    Sorts both block lists by reading order, runs
+    ``difflib.SequenceMatcher`` on the text sequences to derive an alignment
+    skeleton, then resolves changed ('replace') windows using the spatial +
+    textual score.  This prevents cross-position false matches that occur
+    with a purely greedy approach.
 
     Returns ``{"matched": [...], "missing": [...], "extra": [...]}``
     (see module docstring for full schema).
@@ -170,33 +208,55 @@ def match_blocks(master_blocks: list,
     m_prep = _prepare_blocks(master_blocks, master_img_w, master_img_h)
     c_prep = _prepare_blocks(captured_blocks, captured_img_w, captured_img_h)
 
-    matched: List[dict] = []
-    used_c: set = set()
+    # Sort both lists into reading order before sequence alignment
+    m_sorted = sorted(m_prep, key=_reading_order_key)
+    c_sorted = sorted(c_prep, key=_reading_order_key)
 
-    for m in m_prep:
-        best_score, best_idx = -1.0, -1
-        for i, c in enumerate(c_prep):
-            if i in used_c:
-                continue
-            s = _score_pair(m, c)
-            if s > best_score:
-                best_score, best_idx = s, i
+    m_texts = [b["text"] for b in m_sorted]
+    c_texts = [b["text"] for b in c_sorted]
 
-        if best_idx >= 0 and best_score >= _MIN_SCORE:
-            c = c_prep[best_idx]
-            used_c.add(best_idx)
-            matched.append({
-                "master":   m,
-                "captured": c,
-                "iou":      round(_iou(m["bbox_n"], c["bbox_n"]), 3)
-                             if (m.get("bbox_n") and c.get("bbox_n")) else 0.0,
-                "text_sim": round(_text_similarity(m["text"], c["text"]), 3),
-                "score":    round(best_score, 3),
-            })
+    matched:   List[dict] = []
+    matched_m: set        = set()
+    matched_c: set        = set()
 
-    matched_master_ids = {id(p["master"]) for p in matched}
-    missing = [m for m in m_prep if id(m) not in matched_master_ids]
-    extra   = [c_prep[i] for i in range(len(c_prep)) if i not in used_c]
+    sm = SequenceMatcher(None, m_texts, c_texts, autojunk=False)
+
+    for tag, i1, i2, j1, j2 in sm.get_opcodes():
+
+        if tag == "equal":
+            # Text is identical → pair up in reading order, verify with score
+            for d in range(i2 - i1):
+                mi, ci = i1 + d, j1 + d
+                m, c = m_sorted[mi], c_sorted[ci]
+                score = _score_pair(m, c)
+                if score >= _MIN_SCORE:
+                    matched.append(_build_pair(m, c, score))
+                    matched_m.add(mi)
+                    matched_c.add(ci)
+
+        elif tag == "replace":
+            # Text differs locally → score-based matching confined to this
+            # window (cross-position matches are structurally impossible here)
+            for mi in range(i1, i2):
+                m = m_sorted[mi]
+                best_s, best_ci = -1.0, -1
+                for ci in range(j1, j2):
+                    if ci in matched_c:
+                        continue
+                    s = _score_pair(m, c_sorted[ci])
+                    if s > best_s:
+                        best_s, best_ci = s, ci
+                if best_ci >= 0 and best_s >= _MIN_SCORE:
+                    c = c_sorted[best_ci]
+                    matched.append(_build_pair(m, c, best_s))
+                    matched_m.add(mi)
+                    matched_c.add(best_ci)
+
+        # 'delete' → master blocks with no captured match → missing
+        # 'insert' → captured blocks with no master match → extra
+
+    missing = [m_sorted[i] for i in range(len(m_sorted)) if i not in matched_m]
+    extra   = [c_sorted[i] for i in range(len(c_sorted)) if i not in matched_c]
 
     return {"matched": matched, "missing": missing, "extra": extra}
 
@@ -217,8 +277,8 @@ def find_field_candidate(expected: str,
        (expanded by ±``_SEARCH_EXPAND`` in each direction).
     3. From the spatial candidates, return the best text match.
 
-    Returns ``None`` when blocks are unavailable, so the caller can fall
-    back to flat-text ``_find_candidate``.
+    Returns ``None`` when blocks are unavailable or confidence is too low,
+    so the caller can fall back to anchor-based or flat-text search.
     """
     m_prep = _prepare_blocks(master_blocks, master_img_w, master_img_h)
     c_prep = _prepare_blocks(captured_blocks, captured_img_w, captured_img_h)
@@ -242,7 +302,6 @@ def find_field_candidate(expected: str,
                 break
 
     if target_m is None:
-        # Fallback: pick master block with highest text similarity
         target_m = max(m_prep, key=lambda b: _text_similarity(expected, b["text"]))
 
     # ── Step 2: spatial candidates from captured ─────────────────────────────
@@ -274,9 +333,6 @@ def find_field_candidate(expected: str,
     best = max(candidates, key=lambda c: _text_similarity(expected, c["text"]))
     if not best:
         return None
-    # Return None when confidence too low so flat-text fallback can take over.
-    # Short strings (≤6 chars) need a higher bar because many blocks score
-    # similarly by chance.
     min_sim = 0.5 if len(expected) <= 6 else 0.3
     if _text_similarity(expected, best["text"]) < min_sim:
         return None
