@@ -43,9 +43,23 @@ camera = None
 detector = None
 db = None
 detection_active = False
-detection_thread = None
-current_frame = None
-frame_lock = threading.Lock()
+
+# ── Decoupled capture / inference pipeline ─────────────────────────────
+# Capture and inference run on separate threads so the displayed video
+# stays at the camera's frame rate even when the model is slow. The
+# capture thread only grabs frames; the inference thread consumes the
+# latest grabbed frame at whatever rate the model can manage; the MJPEG
+# generator composites the newest detections onto the newest frame.
+capture_thread = None
+inference_thread = None
+
+latest_raw_frame = None           # newest raw BGR frame from the camera
+raw_frame_seq = 0                 # increments on every new captured frame
+raw_lock = threading.Lock()
+
+latest_detections = []            # newest detection list from the model
+det_lock = threading.Lock()
+
 detection_stats = {
     "total_detected": 0,
     "current_defects": 0,
@@ -102,97 +116,103 @@ def init_system():
     return True
 
 
-def detection_loop():
-    """Main detection loop running in separate thread."""
-    global current_frame, detection_active, detection_stats, defect_log_cooldown
+def capture_loop():
+    """
+    Capture thread: grab frames from the camera as fast as it delivers them
+    and publish only the newest one. Does no inference, so the camera never
+    waits on the model — this is what keeps the displayed feed smooth.
+    """
+    global latest_raw_frame, raw_frame_seq
 
-    logger.info("Detection loop started")
-
+    logger.info("Capture loop started")
     while detection_active:
         try:
             result = camera.read_frame()
             if result is None:
-                time.sleep(0.05)
+                time.sleep(0.02)
                 continue
-
             success, frame = result
             if not success or frame is None:
-                time.sleep(0.05)
+                time.sleep(0.02)
                 continue
+            with raw_lock:
+                latest_raw_frame = frame
+                raw_frame_seq += 1
+        except Exception as e:
+            logger.error(f"Error in capture loop: {e}")
+            time.sleep(0.05)
+    logger.info("Capture loop stopped")
 
-            bestx_mode = False  # True only when bestX.pt is the active model
 
-            # Perform detection (skip if model not loaded — show raw camera feed)
+def inference_loop():
+    """
+    Inference thread: run the model on the newest captured frame at whatever
+    rate it can sustain. Publishes the detection list (the MJPEG generator
+    draws it) and handles cooldown-gated DB logging. Skips frames it has
+    already processed so it never blocks waiting for new ones.
+    """
+    global latest_detections, detection_stats, defect_log_cooldown
+
+    logger.info("Inference loop started")
+    last_seq = -1
+
+    while detection_active:
+        try:
+            with raw_lock:
+                frame = latest_raw_frame
+                seq = raw_frame_seq
+
+            if frame is None or seq == last_seq:
+                time.sleep(0.005)   # nothing new yet — yield briefly
+                continue
+            last_seq = seq
+
             if detector is not None and detector.model is not None:
                 detections = detector.detect(frame)
-                annotated_frame = detector.draw_detections(frame, detections)
-                bestx_mode = detector.is_bestx_mode
             else:
                 detections = []
-                annotated_frame = frame.copy()
-                cv2.putText(annotated_frame, "Camera Preview (No Model)",
-                            (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 165, 255), 2)
 
-            # Update current frame (minimal lock time)
-            with frame_lock:
-                current_frame = annotated_frame
+            with det_lock:
+                latest_detections = detections
 
-            # Update stats
             detection_stats["current_defects"] = len(detections)
             if detections:
                 detection_stats["total_detected"] += len(detections)
 
-            # Log defects to database (with cooldown)
+            # Log defects to database (with cooldown). For bestX.pt only a
+            # "dent" is a defect; "can" (good) is never logged.
+            bestx_mode = detector.is_bestx_mode if detector else False
             current_time = time.time()
-            if bestx_mode:
-                # bestX.pt logic: a "dent" detection means the can is defective.
-                # Log dent only; "can" (good) is never logged as a defect.
-                for det in detections:
-                    if det["class_name"] != "dent":
-                        continue
-                    defect_type = det["class_name"]
-                    last_log_time = defect_log_cooldown.get(defect_type, 0)
-                    if current_time - last_log_time >= config.DEFECT_LOGGING_COOLDOWN:
-                        if db and db.is_connected:
-                            db.log_defect(
-                                defect_type=defect_type,
-                                confidence=det["confidence"],
-                                frame=frame,
-                                bbox=det["bbox"],
-                                timestamp=datetime.now()
-                            )
-                            defect_log_cooldown[defect_type] = current_time
-            else:
-                for det in detections:
-                    defect_type = det["class_name"]
-                    last_log_time = defect_log_cooldown.get(defect_type, 0)
-                    if current_time - last_log_time >= config.DEFECT_LOGGING_COOLDOWN:
-                        if db and db.is_connected:
-                            db.log_defect(
-                                defect_type=defect_type,
-                                confidence=det["confidence"],
-                                frame=frame,
-                                bbox=det["bbox"],
-                                timestamp=datetime.now()
-                            )
-                            defect_log_cooldown[defect_type] = current_time
-
-            # No artificial sleep here: camera.read_frame() blocks at the camera's
-            # FPS and generate_frames() already throttles the MJPEG output. The old
-            # sleep(1/STREAM_FPS) only slowed the detection/refresh rate and made the
-            # live feed stutter (frames were repeated while detection lagged behind).
+            for det in detections:
+                if bestx_mode and det["class_name"] != "dent":
+                    continue
+                defect_type = det["class_name"]
+                last_log_time = defect_log_cooldown.get(defect_type, 0)
+                if current_time - last_log_time >= config.DEFECT_LOGGING_COOLDOWN:
+                    if db and db.is_connected:
+                        db.log_defect(
+                            defect_type=defect_type,
+                            confidence=det["confidence"],
+                            frame=frame,
+                            bbox=det["bbox"],
+                            timestamp=datetime.now()
+                        )
+                        defect_log_cooldown[defect_type] = current_time
 
         except Exception as e:
-            logger.error(f"Error in detection loop: {e}")
+            logger.error(f"Error in inference loop: {e}")
             time.sleep(0.1)
 
-    logger.info("Detection loop stopped")
+    logger.info("Inference loop stopped")
 
 
 def generate_frames():
-    """Generator function for video streaming (MJPEG)."""
-    global current_frame
-
+    """
+    MJPEG generator. Composites the newest detections onto the newest raw
+    frame at the stream rate, independent of the (possibly slower) inference
+    rate. Re-encodes JPEG only when a new camera frame has arrived, so a
+    stalled or idle feed costs nothing.
+    """
     # Placeholder frame (created once)
     placeholder = np.zeros((480, 640, 3), dtype=np.uint8)
     cv2.putText(placeholder, "Waiting for camera...", (150, 240),
@@ -200,18 +220,31 @@ def generate_frames():
     _, placeholder_buf = cv2.imencode('.jpg', placeholder, _JPEG_PARAMS)
     placeholder_bytes = placeholder_buf.tobytes()
 
-    while True:
-        with frame_lock:
-            frame = current_frame
+    last_encoded_seq = -1
+    frame_bytes = placeholder_bytes
 
-        if frame is not None:
-            ret, buffer = cv2.imencode('.jpg', frame, _JPEG_PARAMS)
+    while True:
+        with raw_lock:
+            frame = latest_raw_frame
+            seq = raw_frame_seq
+
+        # Only redo work when the camera produced a new frame.
+        if frame is not None and seq != last_encoded_seq:
+            last_encoded_seq = seq
+            with det_lock:
+                detections = latest_detections
+
+            if detector is not None and detector.model is not None:
+                annotated = detector.draw_detections(frame, detections)
+            else:
+                annotated = frame.copy()
+                cv2.putText(annotated, "Camera Preview (No Model)",
+                            (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8,
+                            (0, 165, 255), 2)
+
+            ret, buffer = cv2.imencode('.jpg', annotated, _JPEG_PARAMS)
             if ret:
                 frame_bytes = buffer.tobytes()
-            else:
-                frame_bytes = placeholder_bytes
-        else:
-            frame_bytes = placeholder_bytes
 
         yield (b'--frame\r\n'
                b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
@@ -265,7 +298,8 @@ def api_scan_cameras():
 @app.route('/api/detection/start', methods=['POST'])
 def start_detection():
     """Start defect detection with the selected camera."""
-    global detection_active, detection_thread, camera
+    global detection_active, capture_thread, inference_thread, camera
+    global latest_raw_frame, raw_frame_seq, latest_detections
 
     if detection_active:
         return jsonify({"status": "already_running", "message": "Detection already active"}), 200
@@ -302,9 +336,18 @@ def start_detection():
             "available_cameras": available
         }), 500
 
+    # Reset shared frame/detection state from any previous session
+    with raw_lock:
+        latest_raw_frame = None
+        raw_frame_seq = 0
+    with det_lock:
+        latest_detections = []
+
     detection_active = True
-    detection_thread = threading.Thread(target=detection_loop, daemon=True)
-    detection_thread.start()
+    capture_thread = threading.Thread(target=capture_loop, daemon=True)
+    inference_thread = threading.Thread(target=inference_loop, daemon=True)
+    capture_thread.start()
+    inference_thread.start()
 
     logger.info(f"Detection started on camera {camera_index}")
     return jsonify({"status": "started", "message": f"Detection started on camera {camera_index}"})
@@ -313,18 +356,27 @@ def start_detection():
 @app.route('/api/detection/stop', methods=['POST'])
 def stop_detection():
     """Stop defect detection and release camera."""
-    global detection_active, camera, current_frame
+    global detection_active, camera, capture_thread, inference_thread
+    global latest_raw_frame, latest_detections
 
     detection_active = False
 
-    # Wait briefly for detection thread to finish, then release camera
+    # Wait for both worker threads to exit before releasing the camera so
+    # capture_loop never reads from a released handle.
+    for t in (capture_thread, inference_thread):
+        if t is not None:
+            t.join(timeout=1.0)
+    capture_thread = None
+    inference_thread = None
+
     if camera:
-        time.sleep(0.2)
         camera.release()
         camera = None
 
-    with frame_lock:
-        current_frame = None
+    with raw_lock:
+        latest_raw_frame = None
+    with det_lock:
+        latest_detections = []
 
     logger.info("Detection stopped")
     return jsonify({"status": "stopped", "message": "Detection stopped successfully"})

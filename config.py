@@ -43,6 +43,12 @@ CONFIDENCE_THRESHOLD = 0.25
 # IoU threshold for NMS (Non-Maximum Suppression)
 IOU_THRESHOLD = 0.45
 
+# Hard cap on detections returned per frame by the model's NMS. A can-inspection
+# frame never holds more than a handful of objects, so capping this keeps the
+# per-frame post-processing bounded and prevents low-confidence junk boxes from
+# stalling the live feed (was unbounded at the old conf=0.01 debug floor).
+YOLO_MAX_DET = 20
+
 # ====================
 # DEFECT CLASS MAPPING  (Can Dent Detection)
 # ====================
