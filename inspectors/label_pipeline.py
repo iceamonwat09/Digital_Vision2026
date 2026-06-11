@@ -18,6 +18,7 @@ Stages (revised with Phase 1-5 improvements):
 
 from __future__ import annotations
 
+import base64
 import logging
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field
@@ -63,6 +64,8 @@ class PixelInspectionReport:
     total_pixels: int = 0
     defects: List[dict] = field(default_factory=list)
     heatmap_png_b64: str = ""
+    master_png_b64: str = ""        # downscaled master render (for UI compare)
+    aligned_png_b64: str = ""       # downscaled aligned capture (for UI compare)
     align_info: dict = field(default_factory=dict)
     verdict: str = "PASS"           # "PASS" | "WARN" | "FAIL" | "SKIPPED"
     note: str = ""
@@ -94,6 +97,26 @@ class InspectionReport:
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 _SEVERITY_RANK = {"critical": 3, "warning": 2, "minor": 1, "ok": 0, "": 0}
+
+_PREVIEW_MAX_EDGE = 1000     # downscale master/aligned previews for the UI
+
+
+def _rgb_preview_b64(rgb: Optional[np.ndarray]) -> str:
+    """Downscaled JPEG-base64 of an RGB image for side-by-side UI display."""
+    if rgb is None:
+        return ""
+    try:
+        h, w = rgb.shape[:2]
+        long_edge = max(h, w)
+        if long_edge > _PREVIEW_MAX_EDGE:
+            scale = _PREVIEW_MAX_EDGE / long_edge
+            rgb = cv2.resize(rgb, (int(w * scale), int(h * scale)),
+                             interpolation=cv2.INTER_AREA)
+        bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+        ok, buf = cv2.imencode(".jpg", bgr, [cv2.IMWRITE_JPEG_QUALITY, 80])
+        return base64.b64encode(buf).decode("ascii") if ok else ""
+    except Exception:
+        return ""
 
 
 def _visual_diff_verdict(vd: dict) -> str:
@@ -332,6 +355,8 @@ def pixel_inspect(
         total_pixels=stats["total_pixels"],
         defects=defects,
         heatmap_png_b64=heatmap_b64,
+        master_png_b64=_rgb_preview_b64(master_rgb),
+        aligned_png_b64=_rgb_preview_b64(aligned_rgb),
         align_info=align_info,
         verdict=verdict,
         mask_info=mask_info,

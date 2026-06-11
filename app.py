@@ -22,7 +22,8 @@ from modes import registry as mode_registry
 # Label Paper Inspection (PDF master + manual crop + Vertex AI).
 # Kept independent of the YOLO mode-switcher above on purpose.
 from modes import label_paper as label_paper_cfg
-from inspectors import master_loader, label_pipeline, perspective
+from inspectors import master_loader, label_pipeline, perspective, master_ocr
+from inspectors import history as label_history
 
 # Setup centralized logging
 logger = setup_logger(__name__)
@@ -492,7 +493,7 @@ def api_switch_mode():
 
 @app.route('/label_paper')
 def label_paper_page():
-    """Label Paper inspection page — upload, manual crop, inspect."""
+    """Label Paper inspection page — upload, 4-point crop, inspect."""
     return render_template('label_paper.html')
 
 
@@ -553,7 +554,63 @@ def api_label_paper_inspect():
         logger.error(f"[label_paper] inspection failed for {sku_code}: {e}")
         return jsonify({"error": f"inspection failed: {e}"}), 500
 
-    return jsonify(report.to_dict())
+    report_dict = report.to_dict()
+
+    # Persist to the QC audit trail (best-effort — never blocks the response).
+    rec_id = label_history.save_inspection(
+        label_paper_cfg.INSPECTIONS_DIR, sku_code, ocr_bytes, report_dict)
+    report_dict["record_id"] = rec_id
+
+    return jsonify(report_dict)
+
+
+@app.route('/api/label_paper/history', methods=['GET'])
+def api_label_paper_history():
+    """List recent label inspections (newest first)."""
+    limit = request.args.get("limit", 100, type=int)
+    records = label_history.list_inspections(label_paper_cfg.INSPECTIONS_DIR, limit=limit)
+    return jsonify({"records": records})
+
+
+@app.route('/api/label_paper/history/<rec_id>', methods=['GET'])
+def api_label_paper_history_detail(rec_id):
+    """Return the full stored report for one inspection record."""
+    report = label_history.load_report(label_paper_cfg.INSPECTIONS_DIR, rec_id)
+    if report is None:
+        return jsonify({"error": "record not found"}), 404
+    return jsonify(report)
+
+
+@app.route('/api/label_paper/history/<rec_id>/crop', methods=['GET'])
+def api_label_paper_history_crop(rec_id):
+    """Serve the stored crop image for one inspection record."""
+    from flask import send_file
+    path = label_history.crop_path(label_paper_cfg.INSPECTIONS_DIR, rec_id)
+    if path is None:
+        return jsonify({"error": "crop not found"}), 404
+    return send_file(path, mimetype="image/jpeg")
+
+
+@app.route('/api/label_paper/master/refresh', methods=['POST'])
+def api_label_paper_master_refresh():
+    """
+    Invalidate a SKU's cached master OCR so the next inspection re-OCRs it.
+    Needed after approving a new artwork revision (new master.pdf).
+    """
+    data = request.get_json(silent=True) or {}
+    sku_code = (data.get("sku_code") or "").strip()
+    sku_dir = os.path.join(label_paper_cfg.SKUS_DIR, sku_code)
+    pdf_path = os.path.join(sku_dir, "master.pdf")
+    if not sku_code or not os.path.isfile(pdf_path):
+        return jsonify({"error": f"SKU '{sku_code}' has no master.pdf"}), 404
+    removed = master_ocr.invalidate_cache(pdf_path)
+    return jsonify({"status": "ok", "sku_code": sku_code, "cache_removed": removed})
+
+
+@app.route('/label_paper/history')
+def label_paper_history_page():
+    """Label Paper inspection history page."""
+    return render_template('label_paper_history.html')
 
 
 @app.errorhandler(404)
