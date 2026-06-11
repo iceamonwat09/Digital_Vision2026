@@ -54,6 +54,25 @@ class PixelInspectionConfig:
     delta_e_tolerance: float = 6.0
     min_defect_area_px: int = 80
 
+    # ── False-positive suppression (per-material, overridable in spec.json) ──
+    # Sub-pixel misalignment at high-contrast text edges and specular glare on
+    # glossy/UV-coated labels both create ΔE that is NOT a print defect. These
+    # masks exclude those pixels from the ΔE statistics and defect clustering.
+    ignore_edges: bool = True
+    edge_dilate_px: int = 3          # how far around a master edge to ignore
+    ignore_glare: bool = True
+    glare_v_thresh: int = 245        # HSV V ≥ this  → candidate highlight
+    glare_s_thresh: int = 35         # HSV S ≤ this  → washed-out (specular)
+
+    # ── Verdict thresholds (were hard-coded in label_pipeline._pixel_verdict) ──
+    # A real print defect is LARGE + HIGH ΔE; these tune how strict that is.
+    fail_pass_rate: float = 88.0     # pass_rate below this → FAIL
+    warn_pass_rate: float = 97.0     # pass_rate below this → WARN
+    peak_fail_mult: float = 6.0      # peak ΔE > tol*this → FAIL
+    peak_warn_mult: float = 2.0      # peak ΔE > tol*this → WARN
+    critical_area_px: int = 500      # 'critical'-severity defect this big → FAIL
+    big_area_px: int = 2000          # any defect this big → FAIL
+
 
 @dataclass
 class Master:
@@ -89,10 +108,22 @@ def load_master(sku_dir: str) -> Master:
               for c in spec.get("colors", [])]
 
     px_spec = spec.get("pixel_inspection") or {}
+    _px_defaults = PixelInspectionConfig()
     pixel_cfg = PixelInspectionConfig(
         enabled=bool(px_spec.get("enabled", True)),
         delta_e_tolerance=float(px_spec.get("delta_e_tolerance", 6.0)),
         min_defect_area_px=int(px_spec.get("min_defect_area_px", 80)),
+        ignore_edges=bool(px_spec.get("ignore_edges", _px_defaults.ignore_edges)),
+        edge_dilate_px=int(px_spec.get("edge_dilate_px", _px_defaults.edge_dilate_px)),
+        ignore_glare=bool(px_spec.get("ignore_glare", _px_defaults.ignore_glare)),
+        glare_v_thresh=int(px_spec.get("glare_v_thresh", _px_defaults.glare_v_thresh)),
+        glare_s_thresh=int(px_spec.get("glare_s_thresh", _px_defaults.glare_s_thresh)),
+        fail_pass_rate=float(px_spec.get("fail_pass_rate", _px_defaults.fail_pass_rate)),
+        warn_pass_rate=float(px_spec.get("warn_pass_rate", _px_defaults.warn_pass_rate)),
+        peak_fail_mult=float(px_spec.get("peak_fail_mult", _px_defaults.peak_fail_mult)),
+        peak_warn_mult=float(px_spec.get("peak_warn_mult", _px_defaults.peak_warn_mult)),
+        critical_area_px=int(px_spec.get("critical_area_px", _px_defaults.critical_area_px)),
+        big_area_px=int(px_spec.get("big_area_px", _px_defaults.big_area_px)),
     )
 
     return Master(

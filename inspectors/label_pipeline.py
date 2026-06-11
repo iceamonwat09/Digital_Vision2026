@@ -64,6 +64,7 @@ class PixelInspectionReport:
     align_info: dict = field(default_factory=dict)
     verdict: str = "PASS"           # "PASS" | "WARN" | "FAIL" | "SKIPPED"
     note: str = ""
+    mask_info: dict = field(default_factory=dict)   # edge/glare/ignored %
 
 
 @dataclass
@@ -186,24 +187,34 @@ def _image_dims(image_bytes: bytes) -> Tuple[int, int]:
         return int(arr.shape[1]), int(arr.shape[0])
 
 
-def _pixel_verdict(stats: dict, defects: List[dict]) -> str:
+def _pixel_verdict(stats: dict, defects: List[dict], cfg=None) -> str:
     """
     Reduce per-pixel stats to PASS/WARN/FAIL.
 
     Tolerates JPEG noise and sub-pixel alignment artefacts at
     high-contrast edges.  A real print defect is LARGE + HIGH ΔE.
+
+    Thresholds come from the SKU's ``pixel_inspection`` spec (``cfg``) so
+    each material can be tuned; falls back to the dataclass defaults.
     """
+    from .master_loader import PixelInspectionConfig
+    if cfg is None:
+        cfg = PixelInspectionConfig()
+
     pass_rate = stats.get("pass_rate", 100.0)
     peak = stats.get("peak", 0.0)
-    tol  = stats.get("tolerance", 6.0)
+    tol  = stats.get("tolerance", cfg.delta_e_tolerance)
 
     severe = [d for d in defects
-              if d.get("severity") == "critical" and d.get("area_px", 0) >= 500]
-    big    = [d for d in defects if d.get("area_px", 0) >= 2000]
+              if d.get("severity") == "critical"
+              and d.get("area_px", 0) >= cfg.critical_area_px]
+    big    = [d for d in defects if d.get("area_px", 0) >= cfg.big_area_px]
 
-    if severe or big or pass_rate < 88.0 or peak > tol * 6.0:
+    if (severe or big or pass_rate < cfg.fail_pass_rate
+            or peak > tol * cfg.peak_fail_mult):
         return "FAIL"
-    if defects or pass_rate < 97.0 or peak > tol * 2.0:
+    if (defects or pass_rate < cfg.warn_pass_rate
+            or peak > tol * cfg.peak_warn_mult):
         return "WARN"
     return "PASS"
 
@@ -281,16 +292,28 @@ def pixel_inspect(
     align_info = align_info or {}
 
     de = deltae_map.compute_delta_e(master_rgb, aligned_rgb)
+
+    # Suppress registration-halo (edges) + specular glare before scoring.
+    ignore_mask, mask_info = deltae_map.build_ignore_mask(
+        master_rgb, aligned_rgb,
+        ignore_edges=cfg.ignore_edges,
+        edge_dilate_px=cfg.edge_dilate_px,
+        ignore_glare=cfg.ignore_glare,
+        glare_v_thresh=cfg.glare_v_thresh,
+        glare_s_thresh=cfg.glare_s_thresh,
+    )
+
     defects, _mask = deltae_map.cluster_defects(
         de, master_rgb, aligned_rgb,
         tolerance=cfg.delta_e_tolerance,
         min_area_px=cfg.min_defect_area_px,
+        ignore_mask=ignore_mask,
     )
-    stats = deltae_map.map_stats(de, cfg.delta_e_tolerance)
+    stats = deltae_map.map_stats(de, cfg.delta_e_tolerance, ignore_mask=ignore_mask)
     heatmap_b64 = overlay.make_heatmap_overlay(
         aligned_rgb, de, cfg.delta_e_tolerance, defects
     ) or ""
-    verdict = _pixel_verdict(stats, defects)
+    verdict = _pixel_verdict(stats, defects, cfg=cfg)
 
     return PixelInspectionReport(
         enabled=True,
@@ -306,6 +329,7 @@ def pixel_inspect(
         heatmap_png_b64=heatmap_b64,
         align_info=align_info,
         verdict=verdict,
+        mask_info=mask_info,
     )
 
 

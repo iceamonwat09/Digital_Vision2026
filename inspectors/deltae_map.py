@@ -46,6 +46,71 @@ def _hex(rgb: Tuple[int, int, int]) -> str:
     return f"#{r:02X}{g:02X}{b:02X}"
 
 
+def edge_mask(master_rgb: np.ndarray, dilate_px: int = 3) -> np.ndarray:
+    """
+    Boolean mask of pixels on/near high-contrast edges in the master.
+
+    Sub-pixel misalignment at these edges (text, logos, die-cut lines)
+    produces large ΔE that is a registration artefact, not a print defect.
+    Dilating the Canny edges by ``dilate_px`` covers the few-pixel halo the
+    misalignment smears across.
+    """
+    gray = cv2.cvtColor(master_rgb, cv2.COLOR_RGB2GRAY)
+    edges = cv2.Canny(gray, 50, 150)
+    if dilate_px > 0:
+        k = cv2.getStructuringElement(
+            cv2.MORPH_ELLIPSE, (2 * dilate_px + 1, 2 * dilate_px + 1))
+        edges = cv2.dilate(edges, k)
+    return edges > 0
+
+
+def specular_mask(rgb: np.ndarray, v_thresh: int = 245,
+                  s_thresh: int = 35) -> np.ndarray:
+    """
+    Boolean mask of specular-glare pixels: blown-out highlights that are
+    bright (HSV V high) and washed out (HSV S low). On glossy / UV-coated
+    labels these reflect the light source, not the ink, so their ΔE is
+    meaningless and must be excluded.
+    """
+    hsv = cv2.cvtColor(rgb, cv2.COLOR_RGB2HSV)
+    v = hsv[..., 2]
+    s = hsv[..., 1]
+    return (v >= v_thresh) & (s <= s_thresh)
+
+
+def build_ignore_mask(
+    master_rgb: np.ndarray,
+    aligned_rgb: np.ndarray,
+    ignore_edges: bool = True,
+    edge_dilate_px: int = 3,
+    ignore_glare: bool = True,
+    glare_v_thresh: int = 245,
+    glare_s_thresh: int = 35,
+) -> Tuple[np.ndarray, dict]:
+    """
+    Combine edge + glare masks into one boolean "ignore" mask plus a small
+    stats dict (fraction of pixels each mask covers). Pixels that are True
+    are excluded from ΔE statistics and defect clustering.
+    """
+    h, w = master_rgb.shape[:2]
+    ignore = np.zeros((h, w), dtype=bool)
+    stats = {"edge_pct": 0.0, "glare_pct": 0.0, "ignored_pct": 0.0}
+    total = float(h * w) or 1.0
+
+    if ignore_edges:
+        em = edge_mask(master_rgb, edge_dilate_px)
+        stats["edge_pct"] = round(100.0 * float(em.sum()) / total, 2)
+        ignore |= em
+
+    if ignore_glare:
+        gm = specular_mask(aligned_rgb, glare_v_thresh, glare_s_thresh)
+        stats["glare_pct"] = round(100.0 * float(gm.sum()) / total, 2)
+        ignore |= gm
+
+    stats["ignored_pct"] = round(100.0 * float(ignore.sum()) / total, 2)
+    return ignore, stats
+
+
 def cluster_defects(
     de_map: np.ndarray,
     master_rgb: np.ndarray,
@@ -53,14 +118,20 @@ def cluster_defects(
     tolerance: float = 6.0,
     min_area_px: int = 80,
     max_defects: int = 50,
+    ignore_mask: Tuple[np.ndarray, None] = None,
 ) -> Tuple[List[dict], np.ndarray]:
     """
     Threshold the ΔE map and group failing pixels into connected components.
 
     Returns ``(defects, mask)`` where each defect is a dict with bbox,
     statistics, and dominant colors taken from master vs captured.
+
+    ``ignore_mask`` (bool HxW) zeroes out edge/glare pixels before clustering
+    so registration halos and specular highlights never form a "defect".
     """
     mask = (de_map > tolerance).astype(np.uint8)
+    if ignore_mask is not None:
+        mask[ignore_mask] = 0
 
     kernel = np.ones((3, 3), np.uint8)
     mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)
@@ -108,17 +179,29 @@ def cluster_defects(
     return defects[:max_defects], mask
 
 
-def map_stats(de_map: np.ndarray, tolerance: float) -> dict:
-    """Summary metrics for the ΔE map."""
-    total = de_map.size
-    fail = int((de_map > tolerance).sum())
+def map_stats(de_map: np.ndarray, tolerance: float,
+              ignore_mask: Tuple[np.ndarray, None] = None) -> dict:
+    """
+    Summary metrics for the ΔE map. When ``ignore_mask`` is given, all
+    statistics are computed over the *valid* (non-ignored) pixels only, so
+    edge/glare artefacts don't drag pass_rate or peak around.
+    """
+    if ignore_mask is not None:
+        de_valid = de_map[~ignore_mask]
+        if de_valid.size == 0:        # everything masked → fall back to full map
+            de_valid = de_map.ravel()
+    else:
+        de_valid = de_map.ravel()
+
+    total = int(de_valid.size)
+    fail = int((de_valid > tolerance).sum())
     return {
-        "mean": round(float(de_map.mean()), 3),
-        "peak": round(float(de_map.max()), 2),
-        "p95":  round(float(np.percentile(de_map, 95)), 2),
-        "p99":  round(float(np.percentile(de_map, 99)), 2),
-        "pass_rate": round(100.0 * (1.0 - fail / total), 3),
+        "mean": round(float(de_valid.mean()), 3),
+        "peak": round(float(de_valid.max()), 2),
+        "p95":  round(float(np.percentile(de_valid, 95)), 2),
+        "p99":  round(float(np.percentile(de_valid, 99)), 2),
+        "pass_rate": round(100.0 * (1.0 - fail / total), 3) if total else 100.0,
         "fail_pixels": fail,
-        "total_pixels": int(total),
+        "total_pixels": total,
         "tolerance": tolerance,
     }
