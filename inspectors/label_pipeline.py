@@ -479,6 +479,18 @@ def inspect(
     if master_rgb is not None:
         master_h, master_w = int(master_rgb.shape[0]), int(master_rgb.shape[1])
 
+    # Auto white-balance the aligned capture against the master's white
+    # regions (location-free white-patch) — sharpens colour ΔE under
+    # non-neutral lighting. Feeds the ΔE + brand-colour stages below.
+    _px_cfg = master.pixel_inspection
+    if (aligned_rgb is not None and master_rgb is not None
+            and getattr(_px_cfg, "auto_white_balance", True)):
+        aligned_rgb, wb_info = calibration.auto_white_balance_from_master(
+            aligned_rgb, master_rgb,
+            white_thresh=getattr(_px_cfg, "white_ref_thresh", 235))
+        if wb_info:
+            align_info = {**align_info, "white_balance": wb_info}
+
     # ────────────────────────────────────────────────────────────────────────
     # Phase 2: Spatial block matching
     # ────────────────────────────────────────────────────────────────────────

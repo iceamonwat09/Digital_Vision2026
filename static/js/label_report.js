@@ -307,6 +307,11 @@
         ไม่นับพิกเซล <b>${mi.ignored_pct}%</b> (ขอบตัวอักษร ${mi.edge_pct || 0}% / แสงสะท้อน ${mi.glare_pct || 0}%)${glareWarn}</div>`;
     }
 
+    const wb = (p.align_info && p.align_info.white_balance) || null;
+    if (wb && wb.applied) {
+      html += `<div style="font-size:12px;color:#78909c;margin-bottom:6px;">
+        ปรับ white-balance อัตโนมัติจากพื้นที่ขาวของ master (gain RGB ${(wb.gain || []).join(' / ')})</div>`;
+    }
     if (p.align_info && p.align_info.ok === false) {
       html += `<div class="lp-stub">⚠️ ECC alignment ไม่ converge — ผลอาจเพี้ยน ลองลากมุม 4 จุดให้แนบขอบฉลากให้แม่นขึ้นหรือเพิ่มแสง</div>`;
     }

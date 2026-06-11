@@ -64,6 +64,12 @@ class PixelInspectionConfig:
     glare_v_thresh: int = 245        # HSV V ≥ this  → candidate highlight
     glare_s_thresh: int = 35         # HSV S ≤ this  → washed-out (specular)
 
+    # Auto white-balance the aligned capture using the master's white regions
+    # as a reference (location-free white-patch). Improves ΔE colour accuracy
+    # under non-neutral lighting without an operator click.
+    auto_white_balance: bool = True
+    white_ref_thresh: int = 235      # master pixel near-white in all channels
+
     # ── Verdict thresholds (were hard-coded in label_pipeline._pixel_verdict) ──
     # A real print defect is LARGE + HIGH ΔE; these tune how strict that is.
     fail_pass_rate: float = 88.0     # pass_rate below this → FAIL
@@ -118,6 +124,8 @@ def load_master(sku_dir: str) -> Master:
         ignore_glare=bool(px_spec.get("ignore_glare", _px_defaults.ignore_glare)),
         glare_v_thresh=int(px_spec.get("glare_v_thresh", _px_defaults.glare_v_thresh)),
         glare_s_thresh=int(px_spec.get("glare_s_thresh", _px_defaults.glare_s_thresh)),
+        auto_white_balance=bool(px_spec.get("auto_white_balance", _px_defaults.auto_white_balance)),
+        white_ref_thresh=int(px_spec.get("white_ref_thresh", _px_defaults.white_ref_thresh)),
         fail_pass_rate=float(px_spec.get("fail_pass_rate", _px_defaults.fail_pass_rate)),
         warn_pass_rate=float(px_spec.get("warn_pass_rate", _px_defaults.warn_pass_rate)),
         peak_fail_mult=float(px_spec.get("peak_fail_mult", _px_defaults.peak_fail_mult)),
