@@ -28,6 +28,7 @@ import numpy as np
 import config
 
 from . import (
+    barcode as barcode_decoder,
     block_match,
     calibration,
     deltae_map,
@@ -83,6 +84,7 @@ class InspectionReport:
     visual_diff: dict = field(default_factory=dict)
     stub_mode: bool = False
     pixel_inspection: dict = field(default_factory=dict)
+    barcodes: List[dict] = field(default_factory=list)  # decoded 1-D/2-D symbols
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -464,6 +466,11 @@ def inspect(
         if found_color_hexes else []
     )
 
+    # ── Barcode decode (authoritative for barcode fields; falls back to OCR) ─
+    # Decode from the high-res OCR variant — the bars need resolution.
+    decoded_barcodes = barcode_decoder.decode_barcodes(
+        ocr_image_bytes or cropped_image_bytes)
+
     # ── 3. Field-aware text compare (Phase 2: block-guided + symmetric OCR) ─
     field_results = compare_all(
         master.fields, ocr_text,
@@ -474,6 +481,7 @@ def inspect(
         master_img_h=master_h,
         captured_img_w=captured_w,
         captured_img_h=captured_h,
+        decoded_barcodes=decoded_barcodes,
     )
 
     # ── 6. Pixel inspection (Phase 3: pre-computed alignment) ────────────
@@ -552,4 +560,5 @@ def inspect(
         visual_diff=vd_payload,
         stub_mode=stub_ocr,
         pixel_inspection=asdict(px_report),
+        barcodes=decoded_barcodes,
     )

@@ -184,6 +184,21 @@ def _find_candidate(spec: FieldSpec, ocr_text: str) -> str:
     return best
 
 
+def _is_barcode_field(spec: FieldSpec) -> bool:
+    """
+    Heuristic: a field is a barcode when its name says so, or it is an exact
+    digit-normalised field whose expected value is a typical symbol length
+    (EAN-8/12/13, ITF-14). Lets decoded barcodes override OCR without
+    requiring every spec.json to add a new key.
+    """
+    if "barcode" in spec.name.lower():
+        return True
+    exp_digits = re.sub(r"\D", "", spec.expected or "")
+    return (spec.method.lower() == "exact"
+            and getattr(spec, "normalize", "") == "digits"
+            and len(exp_digits) in (8, 12, 13, 14))
+
+
 def compare_field(spec: FieldSpec,
                   ocr_text: str,
                   master_ocr_text: str = "",
@@ -192,7 +207,8 @@ def compare_field(spec: FieldSpec,
                   master_img_w: int = 1,
                   master_img_h: int = 1,
                   captured_img_w: int = 1,
-                  captured_img_h: int = 1) -> FieldResult:
+                  captured_img_h: int = 1,
+                  decoded_barcodes: Optional[List[dict]] = None) -> FieldResult:
     """
     Compare a single field spec against OCR text.
 
@@ -211,6 +227,17 @@ def compare_field(spec: FieldSpec,
     in the result for display purposes.
     """
     found: Optional[str] = None
+    method_label = spec.method
+
+    # ── 0. Decoded barcode wins for barcode-like fields ──────────────────────
+    # A real decoder reads the bars (exact + proves scannability), so it
+    # overrides the OCR'd human-readable digits which are the least reliable.
+    if decoded_barcodes and _is_barcode_field(spec):
+        from . import barcode as _bc
+        bc_found = _bc.best_match(decoded_barcodes, spec.expected)
+        if bc_found is not None:
+            found = bc_found
+            method_label = f"{spec.method}+barcode"
 
     # ── 1. Spatial block matching (captured) ─────────────────────────────────
     has_spatial = (
@@ -218,7 +245,7 @@ def compare_field(spec: FieldSpec,
         and any(b.get("bbox") for b in master_blocks)
         and any(b.get("bbox") for b in captured_blocks)
     )
-    if has_spatial:
+    if found is None and has_spatial:
         from . import block_match as _bm
         found = _bm.find_field_candidate(
             spec.expected, spec.method,
@@ -275,7 +302,7 @@ def compare_field(spec: FieldSpec,
         name=spec.name,
         expected=spec.expected,
         found=found,
-        method=spec.method,
+        method=method_label,
         distance=distance,
         passed=passed,
         critical=spec.critical,
@@ -293,7 +320,8 @@ def compare_all(fields: List[FieldSpec],
                 master_img_w: int = 1,
                 master_img_h: int = 1,
                 captured_img_w: int = 1,
-                captured_img_h: int = 1) -> List[FieldResult]:
+                captured_img_h: int = 1,
+                decoded_barcodes: Optional[List[dict]] = None) -> List[FieldResult]:
     return [
         compare_field(
             f, ocr_text,
@@ -304,6 +332,7 @@ def compare_all(fields: List[FieldSpec],
             master_img_h=master_img_h,
             captured_img_w=captured_img_w,
             captured_img_h=captured_img_h,
+            decoded_barcodes=decoded_barcodes,
         )
         for f in fields
     ]
