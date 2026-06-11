@@ -165,6 +165,27 @@ def _decode_image_to_rgb(image_bytes: bytes) -> Optional[np.ndarray]:
     return cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
 
 
+def _image_dims(image_bytes: bytes) -> Tuple[int, int]:
+    """
+    (width, height) of an encoded image.  Header-only read via Pillow so the
+    high-res OCR variant is never fully decoded just for its dimensions;
+    falls back to an OpenCV decode when Pillow is unavailable.
+    """
+    try:
+        from io import BytesIO
+
+        from PIL import Image
+
+        with Image.open(BytesIO(image_bytes)) as im:
+            return int(im.width), int(im.height)
+    except Exception:
+        arr = cv2.imdecode(np.frombuffer(image_bytes, np.uint8),
+                           cv2.IMREAD_GRAYSCALE)
+        if arr is None:
+            return 1, 1
+        return int(arr.shape[1]), int(arr.shape[0])
+
+
 def _pixel_verdict(stats: dict, defects: List[dict]) -> str:
     """
     Reduce per-pixel stats to PASS/WARN/FAIL.
@@ -337,23 +358,33 @@ def inspect(
     master: Master,
     cropped_image_bytes: bytes,
     found_color_hexes: Optional[List[str]] = None,
+    ocr_image_bytes: Optional[bytes] = None,
 ) -> InspectionReport:
     """
     Full inspection pipeline.  All phases run in sequence; failures in any
     single stage are isolated so the overall report is always returned.
+
+    ``ocr_image_bytes`` — optional higher-resolution variant of the same
+    crop (identical content/aspect, long edge up to 4096).  When provided
+    it feeds only the OCR stage, so small label text stays legible while
+    alignment / ΔE / visual diff keep the bounded ``cropped_image_bytes``.
     """
     captured_rgb = _decode_image_to_rgb(cropped_image_bytes)
 
     # ────────────────────────────────────────────────────────────────────────
-    # Stage 1a: OCR the captured image
+    # Stage 1a: OCR the captured image (high-res variant when available)
     # ────────────────────────────────────────────────────────────────────────
-    ocr = vertex_client.ocr_image(cropped_image_bytes)
+    ocr = vertex_client.ocr_image(ocr_image_bytes or cropped_image_bytes)
     ocr_text       = ocr.get("text", "")
     captured_blocks: List[dict] = ocr.get("blocks") or []
-    captured_h, captured_w = (
-        (int(captured_rgb.shape[0]), int(captured_rgb.shape[1]))
-        if captured_rgb is not None else (1, 1)
-    )
+    # Block bboxes live in the coordinate space of the image the OCR engine
+    # actually saw — use that image's dimensions for bbox normalisation.
+    if ocr_image_bytes:
+        captured_w, captured_h = _image_dims(ocr_image_bytes)
+    elif captured_rgb is not None:
+        captured_h, captured_w = int(captured_rgb.shape[0]), int(captured_rgb.shape[1])
+    else:
+        captured_h, captured_w = 1, 1
 
     # ────────────────────────────────────────────────────────────────────────
     # Stage 1b: OCR the master PDF (Phase 1 — symmetric OCR)

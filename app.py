@@ -22,7 +22,7 @@ from modes import registry as mode_registry
 # Label Paper Inspection (PDF master + manual crop + Vertex AI).
 # Kept independent of the YOLO mode-switcher above on purpose.
 from modes import label_paper as label_paper_cfg
-from inspectors import master_loader, label_pipeline
+from inspectors import master_loader, label_pipeline, perspective
 
 # Setup centralized logging
 logger = setup_logger(__name__)
@@ -454,11 +454,16 @@ def api_label_paper_skus():
 @app.route('/api/label_paper/inspect', methods=['POST'])
 def api_label_paper_inspect():
     """
-    Inspect a cropped label image against its SKU master.
+    Inspect a label photo against its SKU master.
 
     multipart/form-data:
         sku_code: str   — must match a directory under SKUS_DIR
-        image:    file  — already-cropped JPG/PNG from the browser
+        image:    file  — label photo (EXIF orientation baked by the browser)
+        corners:  str   — optional JSON [[x,y],[x,y],[x,y],[x,y]] marking the
+                          label quad (TL, TR, BR, BL of the upright label) in
+                          the uploaded image's pixel space.  When present the
+                          server perspective-warps the quad; when absent the
+                          image is treated as already cropped (legacy client).
     """
     sku_code = (request.form.get("sku_code") or "").strip()
     upload = request.files.get("image")
@@ -479,8 +484,19 @@ def api_label_paper_inspect():
     if not image_bytes:
         return jsonify({"error": "empty image"}), 400
 
+    # Perspective-warp the marked quad (when corners are sent) and produce
+    # two resolutions from the same crop: high-res for OCR, bounded for ΔE.
     try:
-        report = label_pipeline.inspect(master, image_bytes)
+        corners = perspective.parse_corners(request.form.get("corners"))
+        ocr_bytes, pixel_bytes = perspective.prepare_inspection_images(
+            image_bytes, corners)
+    except ValueError as e:
+        logger.warning(f"[label_paper] bad crop for {sku_code}: {e}")
+        return jsonify({"error": f"invalid crop: {e}"}), 400
+
+    try:
+        report = label_pipeline.inspect(master, pixel_bytes,
+                                        ocr_image_bytes=ocr_bytes)
     except Exception as e:
         logger.error(f"[label_paper] inspection failed for {sku_code}: {e}")
         return jsonify({"error": f"inspection failed: {e}"}), 500

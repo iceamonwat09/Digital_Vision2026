@@ -22,6 +22,11 @@ import numpy as np
 
 _DEFAULT_DPI = 300
 
+# Long-edge cap for the pixel-ΔE master render. Captured images are aligned
+# (resized) to exactly this size, so capture variants should match it — see
+# perspective.PIXEL_MAX_EDGE.
+MASTER_MAX_EDGE = 2400
+
 
 def _cache_path(pdf_path: str, dpi: int) -> str:
     base, _ = os.path.splitext(pdf_path)
@@ -48,7 +53,7 @@ def render_pdf_to_rgb(pdf_path: str, dpi: int = _DEFAULT_DPI,
 
 def get_master_image(pdf_path: str, dpi: int = _DEFAULT_DPI,
                      use_cache: bool = True,
-                     max_long_edge: Optional[int] = 2400) -> np.ndarray:
+                     max_long_edge: Optional[int] = MASTER_MAX_EDGE) -> np.ndarray:
     """
     Return the rendered master, using ``master_<dpi>dpi.png`` cache when it
     exists. Optionally downscale so the long edge ≤ ``max_long_edge`` to keep
