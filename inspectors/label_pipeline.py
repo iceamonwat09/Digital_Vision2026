@@ -19,6 +19,7 @@ Stages (revised with Phase 1-5 improvements):
 from __future__ import annotations
 
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field
 from typing import List, Optional, Tuple
 
@@ -221,31 +222,33 @@ def _pixel_verdict(stats: dict, defects: List[dict], cfg=None) -> str:
     return "PASS"
 
 
-# ── Phase 3: shared render + align helper ────────────────────────────────────
+# ── Parallel-I/O safe wrappers (never raise inside a worker thread) ──────────
 
-def _render_and_align(
-    master: Master,
-    captured_rgb: np.ndarray,
-) -> Tuple[Optional[np.ndarray], Optional[np.ndarray], dict]:
-    """
-    Render the master PDF to RGB and align the captured image to it.
-
-    Returns (master_rgb, aligned_rgb, align_info).
-    All three are None / {} on failure so callers can skip gracefully.
-    Calling this once and passing the results to both pixel_inspect and
-    extract_brand_colors avoids double-rendering the master PDF.
-    """
-    if not master.pdf_path or captured_rgb is None:
-        return None, None, {}
+def _safe_master_rgb(pdf_path: str) -> Optional[np.ndarray]:
     try:
-        master_rgb = master_renderer.get_master_image(master.pdf_path)
+        return master_renderer.get_master_image(pdf_path)
     except Exception as e:
-        logger.warning("_render_and_align: master render failed: %s", e)
-        return None, None, {}
+        logger.warning("master render (RGB) failed: %s", e)
+        return None
 
+
+def _safe_master_jpeg(pdf_path: str) -> Optional[bytes]:
+    try:
+        return master_renderer.render_master_to_jpeg_bytes(pdf_path)
+    except Exception as e:
+        logger.warning("master render (JPEG) failed: %s", e)
+        return None
+
+
+def _align_to_master(
+    master_rgb: Optional[np.ndarray],
+    captured_rgb: Optional[np.ndarray],
+) -> Tuple[Optional[np.ndarray], dict]:
+    """Calibrate + align a captured image to an already-rendered master."""
+    if master_rgb is None or captured_rgb is None:
+        return None, {}
     calibrated = calibration.calibrate(captured_rgb, master=master_rgb)
-    aligned, align_info = registration.align(master_rgb, calibrated)
-    return master_rgb, aligned, align_info
+    return registration.align(master_rgb, calibrated)
 
 
 # ── Pixel inspection stage ───────────────────────────────────────────────────
@@ -396,11 +399,33 @@ def inspect(
     alignment / ΔE / visual diff keep the bounded ``cropped_image_bytes``.
     """
     captured_rgb = _decode_image_to_rgb(cropped_image_bytes)
+    ocr_bytes = ocr_image_bytes or cropped_image_bytes
+    vd_enabled = bool(master.pdf_path
+                      and getattr(config, "VISUAL_DIFF_ENABLED", False))
 
     # ────────────────────────────────────────────────────────────────────────
-    # Stage 1a: OCR the captured image (high-res variant when available)
+    # Parallel I/O phase: these calls are independent, so the two network OCR
+    # round-trips (captured + master), the barcode decode, and the master
+    # render(s) all run concurrently instead of one-after-another. On a cold
+    # SKU this removes a full OCR round-trip from the wall-clock time.
     # ────────────────────────────────────────────────────────────────────────
-    ocr = vertex_client.ocr_image(ocr_image_bytes or cropped_image_bytes)
+    with ThreadPoolExecutor(max_workers=5) as pool:
+        f_cap_ocr  = pool.submit(vertex_client.ocr_image, ocr_bytes)
+        f_barcode  = pool.submit(barcode_decoder.decode_barcodes, ocr_bytes)
+        f_mas_ocr  = (pool.submit(master_ocr.get_master_ocr, master.pdf_path)
+                      if master.pdf_path else None)
+        f_mas_rgb  = (pool.submit(_safe_master_rgb, master.pdf_path)
+                      if master.pdf_path else None)
+        f_mas_jpeg = (pool.submit(_safe_master_jpeg, master.pdf_path)
+                      if vd_enabled else None)
+
+        ocr               = f_cap_ocr.result()
+        decoded_barcodes  = f_barcode.result()
+        master_ocr_result = f_mas_ocr.result() if f_mas_ocr else {}
+        master_rgb        = f_mas_rgb.result() if f_mas_rgb else None
+        master_jpeg_bytes = f_mas_jpeg.result() if f_mas_jpeg else None
+
+    # Stage 1a: captured OCR results
     ocr_text       = ocr.get("text", "")
     captured_blocks: List[dict] = ocr.get("blocks") or []
     # Block bboxes live in the coordinate space of the image the OCR engine
@@ -412,27 +437,20 @@ def inspect(
     else:
         captured_h, captured_w = 1, 1
 
-    # ────────────────────────────────────────────────────────────────────────
-    # Stage 1b: OCR the master PDF (Phase 1 — symmetric OCR)
-    # ────────────────────────────────────────────────────────────────────────
-    master_ocr_result: dict = {}
+    # Stage 1b: master OCR results (Phase 1 — symmetric OCR)
     master_blocks: List[dict] = []
     master_ocr_text: str = master.raw_text or ""  # fallback: PDF text layer
-
-    if master.pdf_path:
-        master_ocr_result = master_ocr.get_master_ocr(master.pdf_path)
-        if not master_ocr_result.get("stub"):
-            _mo_text = master_ocr_result.get("text", "")
-            if _mo_text:
-                master_ocr_text = _mo_text
-            master_blocks = master_ocr_result.get("blocks") or []
-
-    master_h, master_w = (1, 1)  # updated below after render
+    if master_ocr_result and not master_ocr_result.get("stub"):
+        _mo_text = master_ocr_result.get("text", "")
+        if _mo_text:
+            master_ocr_text = _mo_text
+        master_blocks = master_ocr_result.get("blocks") or []
 
     # ────────────────────────────────────────────────────────────────────────
-    # Stage 4 / Phase 3: Render master + align (shared by ΔE and color)
+    # Stage 4 / Phase 3: align captured to the pre-rendered master (CPU-local)
     # ────────────────────────────────────────────────────────────────────────
-    master_rgb, aligned_rgb, align_info = _render_and_align(master, captured_rgb)
+    master_h, master_w = (1, 1)
+    aligned_rgb, align_info = _align_to_master(master_rgb, captured_rgb)
     if master_rgb is not None:
         master_h, master_w = int(master_rgb.shape[0]), int(master_rgb.shape[1])
 
@@ -454,59 +472,52 @@ def inspect(
                     len(block_diff_result.get("extra",   [])))
 
     # ────────────────────────────────────────────────────────────────────────
-    # Phase 5: Color sampling from aligned image (replaces hex placeholders)
+    # Phase 4: kick off the Gemini visual diff (network) in the background so
+    # it overlaps the local CPU work below (align/ΔE/colour/text). It is
+    # grounded with block_diff_summary, which is now available.
     # ────────────────────────────────────────────────────────────────────────
-    if master_rgb is not None and aligned_rgb is not None and master.colors:
-        found_color_hexes = extract_brand_colors(
-            master_rgb, aligned_rgb, master.colors)
+    vd_pool = ThreadPoolExecutor(max_workers=1)
+    f_visual = vd_pool.submit(
+        visual_inspect, master, cropped_image_bytes,
+        master_jpeg_bytes, block_diff_summary)
 
-    # ── 2. Named brand color compare ─────────────────────────────────────
-    color_results = (
-        compare_colors(master.colors, found_color_hexes)
-        if found_color_hexes else []
-    )
+    try:
+        # ── Phase 5: Color sampling from aligned image ───────────────────
+        if master_rgb is not None and aligned_rgb is not None and master.colors:
+            found_color_hexes = extract_brand_colors(
+                master_rgb, aligned_rgb, master.colors)
 
-    # ── Barcode decode (authoritative for barcode fields; falls back to OCR) ─
-    # Decode from the high-res OCR variant — the bars need resolution.
-    decoded_barcodes = barcode_decoder.decode_barcodes(
-        ocr_image_bytes or cropped_image_bytes)
+        # ── 2. Named brand color compare ─────────────────────────────────
+        color_results = (
+            compare_colors(master.colors, found_color_hexes)
+            if found_color_hexes else []
+        )
 
-    # ── 3. Field-aware text compare (Phase 2: block-guided + symmetric OCR) ─
-    field_results = compare_all(
-        master.fields, ocr_text,
-        master_ocr_text=master_ocr_text,   # symmetric: master_found per field
-        master_blocks=master_blocks,
-        captured_blocks=captured_blocks,
-        master_img_w=master_w,
-        master_img_h=master_h,
-        captured_img_w=captured_w,
-        captured_img_h=captured_h,
-        decoded_barcodes=decoded_barcodes,
-    )
+        # ── 3. Field-aware text compare (block-guided + symmetric OCR) ────
+        field_results = compare_all(
+            master.fields, ocr_text,
+            master_ocr_text=master_ocr_text,   # symmetric: master_found per field
+            master_blocks=master_blocks,
+            captured_blocks=captured_blocks,
+            master_img_w=master_w,
+            master_img_h=master_h,
+            captured_img_w=captured_w,
+            captured_img_h=captured_h,
+            decoded_barcodes=decoded_barcodes,
+        )
 
-    # ── 6. Pixel inspection (Phase 3: pre-computed alignment) ────────────
-    px_report = pixel_inspect(
-        master, captured_rgb,
-        master_rgb=master_rgb,
-        aligned_rgb=aligned_rgb,
-        align_info=align_info,
-    )
+        # ── 6. Pixel inspection (pre-computed alignment) ─────────────────
+        px_report = pixel_inspect(
+            master, captured_rgb,
+            master_rgb=master_rgb,
+            aligned_rgb=aligned_rgb,
+            align_info=align_info,
+        )
+    finally:
+        # Always collect the visual-diff result (and shut the pool down).
+        vd_payload = f_visual.result()
+        vd_pool.shutdown(wait=True)
 
-    # Pre-render master JPEG once for visual diff (reuse if already rendered)
-    master_jpeg_bytes: Optional[bytes] = None
-    if master.pdf_path and getattr(config, "VISUAL_DIFF_ENABLED", False):
-        try:
-            master_jpeg_bytes = master_renderer.render_master_to_jpeg_bytes(
-                master.pdf_path)
-        except Exception:
-            pass
-
-    # ── 7. Gemini visual diff (Phase 4: grounded with block-diff context) ─
-    vd_payload = visual_inspect(
-        master, cropped_image_bytes,
-        master_jpeg_bytes=master_jpeg_bytes,
-        block_diff=block_diff_summary,
-    )
     vd_verdict = _visual_diff_verdict(vd_payload)
 
     # ── 8. Gemini context check (ambiguous fields; still stubbed) ─────────

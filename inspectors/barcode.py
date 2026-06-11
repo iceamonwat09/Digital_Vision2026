@@ -46,23 +46,41 @@ def _decode_pyzbar(bgr: np.ndarray) -> Optional[List[dict]]:
     return out
 
 
+def _clean_type(raw) -> str:
+    """cv2's return tuple order varies by build; only keep a tidy type string
+    (drop anything that is actually a points array)."""
+    s = str(raw).strip()
+    if not s or "\n" in s or "[" in s:
+        return ""
+    return s
+
+
 def _decode_cv2(bgr: np.ndarray) -> Optional[List[dict]]:
     barcode_mod = getattr(cv2, "barcode", None)
     if barcode_mod is None or not hasattr(barcode_mod, "BarcodeDetector"):
         return None
     try:
         detector = barcode_mod.BarcodeDetector()
-        ok, decoded, types, _ = detector.detectAndDecodeMulti(bgr)
+        ret = detector.detectAndDecodeMulti(bgr)
     except Exception as e:
         logger.debug("cv2.barcode decode failed: %s", e)
         return None
-    if not ok or decoded is None:
+
+    # Builds differ: (ok, decoded, types, points) or (ok, decoded, points).
+    if not ret or not ret[0]:
         return []
+    decoded = ret[1] if len(ret) > 1 else []
+    types = ret[2] if len(ret) > 2 else []
+    if decoded is None:
+        return []
+
     out: List[dict] = []
-    for data, btype in zip(decoded, list(types) + [""] * len(decoded)):
+    types = list(types) if hasattr(types, "__iter__") else []
+    for i, data in enumerate(decoded):
         data = (data or "").strip()
         if data:
-            out.append({"data": data, "type": str(btype), "engine": "cv2.barcode"})
+            btype = _clean_type(types[i]) if i < len(types) else ""
+            out.append({"data": data, "type": btype, "engine": "cv2.barcode"})
     return out
 
 
