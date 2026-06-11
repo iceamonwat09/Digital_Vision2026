@@ -36,6 +36,9 @@ class FieldSpec:
     tolerance: int = 0
     method: str = "exact"          # "exact" | "levenshtein" | "regex"
     critical: bool = True
+    anchor: str = ""               # label text that precedes the value in OCR output
+    value_regex: str = ""          # regex to extract value from/near the anchor line
+    normalize: str = ""            # "digits" | "lower" | "nospace" | ""
 
 
 @dataclass
@@ -77,7 +80,8 @@ def load_master(sku_dir: str) -> Master:
 
     # Tolerate extra documentation keys in spec.json (e.g. ``cmyk``, ``note``)
     # by filtering each row down to the dataclass-known field names.
-    _field_keys = {"name", "expected", "tolerance", "method", "critical"}
+    _field_keys = {"name", "expected", "tolerance", "method", "critical",
+                   "anchor", "value_regex", "normalize"}
     _color_keys = {"name", "hex", "delta_e_tolerance"}
     fields = [FieldSpec(**{k: v for k, v in fd.items() if k in _field_keys})
               for fd in spec.get("fields", [])]

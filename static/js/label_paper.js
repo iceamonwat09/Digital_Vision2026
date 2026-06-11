@@ -145,11 +145,19 @@
 
     html += `<h4 style="margin:14px 0 6px;">ผลตรวจตัวอักษรแยกตาม Field</h4>`;
     if (r.field_results && r.field_results.length) {
-      html += '<table class="lp-tbl"><tr><th>Field</th><th>Master (คาดหวัง)</th><th>พบใน OCR</th><th>ความต่าง</th><th>Δ</th><th>สถานะ</th></tr>';
+      html += '<table class="lp-tbl"><tr><th>Field</th><th>Spec (คาดหวัง)</th><th>Master (OCR)</th><th>พบใน OCR</th><th>ความต่าง</th><th>Δ</th><th>สถานะ</th></tr>';
       for (const f of r.field_results) {
+        const mf = f.master_found || '';
+        // Highlight master_found: green = matches spec, orange = differs from spec
+        const mfStyle = !mf ? 'color:#b0bec5'
+                      : (mf === f.expected ? 'color:#2e7d32' : 'color:#e65100');
+        const mfCell  = mf
+          ? `<span style="${mfStyle}">${escapeHtml(mf)}</span>`
+          : '<span style="color:#b0bec5;">—</span>';
         html += `<tr>
           <td><b>${escapeHtml(f.name)}</b>${f.critical ? ' <span style="color:#c62828;font-size:11px;">[critical]</span>' : ''}<br><span style="color:#90a4ae;font-size:11px;">${escapeHtml(f.method)}</span></td>
           <td>${escapeHtml(f.expected)}</td>
+          <td>${mfCell}</td>
           <td>${escapeHtml(f.found || '—')}</td>
           <td>${renderCharDiff(f)}</td>
           <td>${f.distance}</td>

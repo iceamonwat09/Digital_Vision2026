@@ -30,6 +30,11 @@ logger = setup_logger(__name__)
 # Initialize Flask app
 app = Flask(__name__, template_folder=config.TEMPLATES_DIR, static_folder=config.STATIC_DIR)
 
+# Inject CONFIG_VERSION into every template automatically
+@app.context_processor
+def inject_config():
+    return {"config_version": config.CONFIG_VERSION}
+
 # Pre-computed JPEG encode params (avoids re-creating each frame)
 _JPEG_PARAMS = [cv2.IMWRITE_JPEG_QUALITY, 80]
 
@@ -515,6 +520,12 @@ if __name__ == '__main__':
     except Exception as e:
         logger.error(f"Error during system initialization: {e}")
         logger.warning("Flask server will start but some features may be unavailable.")
+
+    print("=" * 64)
+    print(f"  CONFIG_VERSION      : {config.CONFIG_VERSION}")
+    print(f"  OCR_BACKEND         : {config.OCR_BACKEND or '(auto)'}")
+    print(f"  N8N_OCR_WEBHOOK_URL : {config.N8N_OCR_WEBHOOK_URL}")
+    print("=" * 64)
 
     try:
         logger.info(f"Starting Flask server at http://{config.FLASK_HOST}:{config.FLASK_PORT}")
