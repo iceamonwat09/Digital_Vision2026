@@ -2,8 +2,6 @@
 {% block title %}ตรวจฉลากกระดาษ — Label Paper Inspection{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet"
-      href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.1/cropper.min.css">
 <style>
   .lp-wrap   { max-width: 1180px; margin: 24px auto; padding: 0 16px; }
   .lp-head   { display:flex; align-items:baseline; justify-content:space-between; flex-wrap:wrap; gap:12px; margin-bottom:8px; }
@@ -21,8 +19,18 @@
   .lp-input:focus { outline:none; border-color:#1976d2; }
 
   .lp-img-box { background:#f5f7fa; border:1px dashed #cfd8dc; border-radius:6px; min-height:280px; display:flex; align-items:center; justify-content:center; overflow:hidden; }
-  .lp-img-box img { max-width:100%; display:block; }
+  .lp-img-box img,
+  .lp-img-box canvas { max-width:100%; display:block; }
   .lp-empty   { color:#90a4ae; padding:40px; text-align:center; font-size:14px; }
+
+  /* 4-point perspective crop */
+  .lp-loupe   { position:absolute; top:8px; right:8px; border:2px solid #00e5ff;
+                border-radius:8px; overflow:hidden; box-shadow:0 2px 8px rgba(0,0,0,.35);
+                pointer-events:none; z-index:5; background:#000; }
+  .lp-hint    { background:#e3f2fd; border-left:4px solid #1976d2; padding:8px 12px;
+                border-radius:4px; margin:10px 0 0; font-size:13px; color:#0d47a1; }
+  .lp-hint ul { margin:4px 0 0; padding-left:18px; }
+  .lp-hint li { margin:2px 0; }
 
   .lp-row    { display:flex; gap:8px; flex-wrap:wrap; margin-top:12px; }
   .lp-btn    { padding:8px 16px; border-radius:6px; border:1px solid #cfd8dc; background:#fff; color:#37474f; cursor:pointer; font-size:14px; font-weight:500; }
@@ -49,6 +57,21 @@
 
   .lp-swatch { display:inline-block; width:14px; height:14px; border:1px solid #b0bec5; vertical-align:middle; margin-right:4px; }
   .lp-stub   { background:#fff3e0; border-left:4px solid #fb8c00; padding:8px 12px; border-radius:4px; margin:10px 0; font-size:13px; color:#6d4c00; }
+
+  /* Master ↔ captured compare slider */
+  .lp-cmp        { position:relative; max-width:100%; border:1px solid #cfd8dc;
+                   border-radius:6px; overflow:hidden; user-select:none; line-height:0; }
+  .lp-cmp-base   { display:block; width:100%; }
+  .lp-cmp-top    { position:absolute; top:0; left:0; height:100%; width:50%;
+                   overflow:hidden; border-right:2px solid #ffd600; }
+  .lp-cmp-top img{ display:block; height:100%; max-width:none; }
+  .lp-cmp-divider{ position:absolute; top:0; left:50%; width:2px; height:100%;
+                   background:#ffd600; transform:translateX(-1px); pointer-events:none; }
+  .lp-cmp-range  { position:absolute; bottom:8px; left:5%; width:90%; margin:0; cursor:ew-resize; }
+  .lp-cmp-lbl    { position:absolute; top:6px; font-size:11px; font-weight:700; color:#fff;
+                   background:rgba(0,0,0,.45); padding:2px 6px; border-radius:3px; line-height:1.2; }
+  .lp-cmp-lbl-l  { left:6px; }
+  .lp-cmp-lbl-r  { right:6px; }
 
   details > summary { cursor:pointer; color:#1976d2; margin-top:10px; }
   pre.lp-pre { background:#263238; color:#cfd8dc; padding:10px; border-radius:6px; max-height:200px; overflow:auto; white-space:pre-wrap; font-size:12px; }
@@ -106,14 +129,15 @@
 
   <div class="lp-head">
     <h2>ตรวจฉลากกระดาษ</h2>
-    <span class="lp-sub">เลือก SKU → อัปโหลด/ถ่ายภาพ → <b>ครอปฉลากเอง</b> → ส่งตรวจ</span>
+    <span class="lp-sub">เลือก SKU → อัปโหลด/ถ่ายภาพ → <b>ลากมุม 4 จุดให้ตรงมุมฉลาก</b> → ส่งตรวจ
+      &nbsp;|&nbsp; <a href="/label_paper/history">📋 ประวัติการตรวจ</a></span>
   </div>
 
   <div class="lp-grid">
 
-    <!-- LEFT: input + manual crop -->
+    <!-- LEFT: input + 4-point perspective crop -->
     <div class="lp-panel">
-      <h3>① เลือก SKU และครอปฉลาก</h3>
+      <h3>① เลือก SKU และลากมุมฉลาก 4 จุด</h3>
 
       <label class="lp-label">SKU</label>
       <select id="skuSelect" class="lp-input">
@@ -130,8 +154,21 @@
 
       <div class="lp-row">
         <button id="rotateBtn" class="lp-btn" disabled>หมุน 90°</button>
-        <button id="resetBtn"  class="lp-btn" disabled>รีเซ็ตครอป</button>
+        <button id="resetBtn"  class="lp-btn" disabled>รีเซ็ตมุม</button>
         <button id="inspectBtn" class="lp-btn lp-btn-primary" disabled>ส่งตรวจสอบ →</button>
+        <button id="refreshMasterBtn" class="lp-btn"
+                title="ล้าง cache OCR ของ master — ใช้เมื่อเปลี่ยน artwork revision">🔄 ล้าง cache master</button>
+      </div>
+
+      <div class="lp-hint">
+        📸 <b>เคล็ดลับให้ผลตรวจแม่นที่สุด</b>
+        <ul>
+          <li>ถ่ายให้ฉลาก<b>เต็มเฟรมที่สุด</b> — ยิ่งใกล้ ตัวอักษรยิ่งคมชัด</li>
+          <li>แสงสม่ำเสมอ ไม่ย้อนแสง ไม่มีเงา/แสงสะท้อนบนฉลาก</li>
+          <li>ถ้าภาพเอียง กด "หมุน 90°" ให้ฉลากตั้งตรงก่อน แล้วค่อยลากมุม</li>
+          <li>ลากจุด <b>1=บนซ้าย 2=บนขวา 3=ล่างขวา 4=ล่างซ้าย</b> ให้แนบมุมฉลากพอดี
+              (มีแว่นขยายช่วยตอนลาก) — ระบบจะดึงภาพให้ตรงเหมือนสแกนเอง</li>
+        </ul>
       </div>
     </div>
 
@@ -148,6 +185,6 @@
 {% endblock %}
 
 {% block extra_js %}
-<script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.1/cropper.min.js"></script>
+<script src="{{ url_for('static', filename='js/label_report.js') }}"></script>
 <script src="{{ url_for('static', filename='js/label_paper.js') }}"></script>
 {% endblock %}

@@ -7,6 +7,7 @@ import cv2
 import logging
 import numpy as np
 import os
+import time
 from typing import List, Dict, Tuple, Optional
 from ultralytics import YOLO
 import config
@@ -123,6 +124,9 @@ class YOLODetector:
         self.confidence_threshold = config.CONFIDENCE_THRESHOLD
         self.iou_threshold = config.IOU_THRESHOLD
         self.mode_config = mode_config
+        # Rolling inference-time accounting (throttled log every 30 frames)
+        self._infer_count = 0
+        self._infer_ms_accum = 0.0
 
     @property
     def is_bestx_mode(self) -> bool:
@@ -180,6 +184,27 @@ class YOLODetector:
             if hasattr(self.model, 'names'):
                 logger.info(f"Model classes ({len(self.model.names)}): {list(self.model.names.values())}")
 
+            # Log model size + device. A heavy model (yolov8m/l/x) on CPU is the
+            # other half of the "bestX.pt stutters" story — if avg inference time
+            # stays high after the conf/vectorise fixes, the weights themselves
+            # are the bottleneck and should be retrained/exported smaller
+            # (yolov8n/s, or ONNX/OpenVINO/TensorRT).
+            try:
+                n_params = sum(p.numel() for p in self.model.model.parameters())
+                size_mb = os.path.getsize(model_path) / (1024 * 1024) \
+                    if os.path.exists(model_path) else 0.0
+                device = getattr(self.model, "device", "cpu")
+                logger.info(
+                    "Model stats: %.1fM params, %.1f MB on disk, device=%s",
+                    n_params / 1e6, size_mb, device)
+                if n_params > 20e6 and str(device) in ("cpu", "cpu:0"):
+                    logger.warning(
+                        "Heavy model (%.1fM params) running on CPU — expect low FPS. "
+                        "Consider a smaller variant (yolov8n/s) or ONNX/OpenVINO export.",
+                        n_params / 1e6)
+            except Exception as e:
+                logger.debug(f"Could not introspect model stats: {e}")
+
             return True
 
         except Exception as e:
@@ -203,10 +228,10 @@ class YOLODetector:
     def detect(self, frame: np.ndarray) -> List[Dict]:
         """
         Perform defect detection on a frame.
-        
+
         Args:
             frame: Input frame as numpy array (BGR format)
-            
+
         Returns:
             List of detection dictionaries with keys:
             - class_id: YOLO class ID
@@ -218,73 +243,99 @@ class YOLODetector:
         if self.model is None:
             logger.error("Model not loaded. Call load_model() first.")
             return []
-        
+
         try:
-            # Run YOLO inference (low conf=0.01 to capture ALL raw detections for debug)
+            # Confidence passed to the model itself. Normally we let the model's
+            # NMS prune at our real threshold — this is the single biggest
+            # live-feed speedup, because a low floor (0.01) let NMS emit up to
+            # ``max_det`` junk boxes per frame that Python then had to walk one
+            # tensor at a time. The 0.01 floor is only used when DEBUG logging
+            # is on (so raw detections can still be inspected).
+            debug_on = logger.isEnabledFor(logging.DEBUG)
+            model_conf = 0.01 if debug_on else self.confidence_threshold
+
+            t0 = time.perf_counter()
             results = self.model(
                 frame,
-                conf=0.01,
+                conf=model_conf,
                 iou=self.iou_threshold,
+                max_det=config.YOLO_MAX_DET,
                 verbose=False
             )
+            infer_ms = (time.perf_counter() - t0) * 1000.0
 
-            detections = []
+            detections: List[Dict] = []
+            names = getattr(self.model, "names", {})
+            known = set(self._class_names().keys())
 
             for result in results:
                 boxes = result.boxes
-                if boxes is not None and len(boxes) > 0:
-                    for box in boxes:
-                        x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
-                        class_id   = int(box.cls[0].cpu().numpy())
-                        confidence = float(box.conf[0].cpu().numpy())
+                if boxes is None or len(boxes) == 0:
+                    continue
 
-                        # Debug: log every raw detection so we can see what model finds.
-                        # Kept at DEBUG level — at INFO this fired for every raw box
-                        # (conf=0.01 → many boxes/frame) and the synchronous I/O
-                        # was a major cause of live-feed stutter.
-                        if logger.isEnabledFor(logging.DEBUG):
-                            raw_name = (self.model.names.get(class_id, str(class_id))
-                                        if hasattr(self.model, 'names') else str(class_id))
-                            logger.debug(
-                                f"RAW detect → class_id={class_id} name='{raw_name}' "
-                                f"conf={confidence:.3f} (threshold={self.confidence_threshold})"
-                            )
+                # Vectorised GPU→CPU transfer: pull all coords/cls/conf in ONE
+                # sync each instead of 3 per box. At conf=0.01 with many boxes
+                # the old per-box .cpu() calls dominated frame time and were a
+                # primary cause of stutter on the two-class bestX.pt model.
+                xyxy = boxes.xyxy.cpu().numpy()
+                confs = boxes.conf.cpu().numpy()
+                clss  = boxes.cls.cpu().numpy().astype(int)
 
-                        # Apply our confidence threshold
-                        if confidence < self.confidence_threshold:
-                            continue
+                for (x1, y1, x2, y2), confidence, class_id in zip(xyxy, confs, clss):
+                    confidence = float(confidence)
+                    class_id = int(class_id)
 
-                        # ใช้ชื่อ class จากโมเดลโดยตรง (ตรงกับ data.yaml เสมอ)
-                        class_name = (self.model.names.get(class_id, str(class_id))
-                                      if hasattr(self.model, 'names')
-                                      else config.DEFECT_CLASSES.get(class_id, str(class_id)))
-                        # Normalize to lower-case so palette/CLASS_NAMES keys stay
-                        # simple no matter how the model was annotated
-                        # (Good / GOOD / good all match the same entry).
-                        class_name = str(class_name).lower()
+                    if debug_on:
+                        raw_name = names.get(class_id, str(class_id)) if names else str(class_id)
+                        logger.debug(
+                            f"RAW detect → class_id={class_id} name='{raw_name}' "
+                            f"conf={confidence:.3f} (threshold={self.confidence_threshold})"
+                        )
 
-                        # กรองเฉพาะ class ที่กำหนดใน mode/config
-                        # known ว่าง = accept ทุก class (เช่น Label mode ก่อนเติม wording)
-                        known = set(self._class_names().keys())
-                        if known and class_name not in known:
+                    # When DEBUG lowered the model floor, re-apply our real
+                    # threshold here so behaviour matches production.
+                    if confidence < self.confidence_threshold:
+                        continue
+
+                    # ใช้ชื่อ class จากโมเดลโดยตรง (ตรงกับ data.yaml เสมอ)
+                    class_name = (names.get(class_id, str(class_id)) if names
+                                  else config.DEFECT_CLASSES.get(class_id, str(class_id)))
+                    # Normalize to lower-case so palette/CLASS_NAMES keys stay
+                    # simple no matter how the model was annotated
+                    # (Good / GOOD / good all match the same entry).
+                    class_name = str(class_name).lower()
+
+                    # กรองเฉพาะ class ที่กำหนดใน mode/config
+                    # known ว่าง = accept ทุก class (เช่น Label mode ก่อนเติม wording)
+                    if known and class_name not in known:
+                        if debug_on:
                             logger.debug(f"  SKIP unknown class: '{class_name}'")
-                            continue
+                        continue
 
-                        detection = {
-                            "class_id":   class_id,
-                            "class_name": class_name,
-                            "confidence": confidence,
-                            "bbox":   [int(x1), int(y1), int(x2), int(y2)],
-                            "center": [int((x1 + x2) / 2), int((y1 + y2) / 2)]
-                        }
-                        detections.append(detection)
+                    detections.append({
+                        "class_id":   class_id,
+                        "class_name": class_name,
+                        "confidence": confidence,
+                        "bbox":   [int(x1), int(y1), int(x2), int(y2)],
+                        "center": [int((x1 + x2) / 2), int((y1 + y2) / 2)],
+                    })
+
+            # Throttled timing log so slow inference (the real stutter cause on
+            # heavy weights) is visible without flooding the log every frame.
+            self._infer_count += 1
+            self._infer_ms_accum += infer_ms
+            if self._infer_count % 30 == 0:
+                avg = self._infer_ms_accum / 30.0
+                logger.info("YOLO inference avg %.1f ms/frame (~%.1f FPS) over last 30 frames",
+                            avg, 1000.0 / avg if avg > 0 else 0.0)
+                self._infer_ms_accum = 0.0
 
             return _suppress_false_dent_spots(detections)
-            
+
         except Exception as e:
             logger.error(f"Detection error: {str(e)}")
             return []
-    
+
     def draw_detections(self, frame: np.ndarray, detections: List[Dict]) -> np.ndarray:
         """
         Draw bounding boxes and labels on frame.

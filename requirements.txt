@@ -26,6 +26,13 @@ scikit-image>=0.22.0      # CIE2000 ΔE per-pixel (skimage.color.deltaE_ciede200
 # OCR backend — POSTs cropped images to an N8N webhook (Gemini / Vision)
 requests>=2.31.0
 
+# Barcode decoding (EAN-13 etc.) — authoritative for the barcode field and
+# proves the symbol is machine-scannable. Optional: the code falls back to
+# cv2.barcode.BarcodeDetector (bundled with opencv) and then to OCR if neither
+# pyzbar nor the system zbar lib is present.
+# To enable: `apt-get install libzbar0` then `pip install pyzbar`.
+# pyzbar>=0.1.9
+
 # Vertex AI — uncomment when OCR_BACKEND=vertex and credentials are wired
 # google-cloud-aiplatform>=1.60.0
 # google-cloud-documentai>=2.27.0

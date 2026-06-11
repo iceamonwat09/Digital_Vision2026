@@ -7,7 +7,7 @@ import os
 
 # Bump this whenever a config default changes so a running deployment can
 # print it on startup and confirm it is actually executing the new code.
-CONFIG_VERSION = "2026.05.27-n8n-prod"
+CONFIG_VERSION = "2026.06.11-label-accuracy+perf"
 
 # ====================
 # CAMERA CONFIGURATION
@@ -42,6 +42,12 @@ CONFIDENCE_THRESHOLD = 0.25
 
 # IoU threshold for NMS (Non-Maximum Suppression)
 IOU_THRESHOLD = 0.45
+
+# Hard cap on detections returned per frame by the model's NMS. A can-inspection
+# frame never holds more than a handful of objects, so capping this keeps the
+# per-frame post-processing bounded and prevents low-confidence junk boxes from
+# stalling the live feed (was unbounded at the old conf=0.01 debug floor).
+YOLO_MAX_DET = 20
 
 # ====================
 # DEFECT CLASS MAPPING  (Can Dent Detection)

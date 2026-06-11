@@ -79,6 +79,45 @@ def white_patch_awb(captured: np.ndarray,
     return np.clip(captured.astype(np.float32) * scale, 0.0, 255.0).astype(np.uint8)
 
 
+def auto_white_balance_from_master(
+    aligned: np.ndarray,
+    master: np.ndarray,
+    white_thresh: int = 235,
+    min_pixels: int = 50,
+    max_gain: float = 1.8,
+) -> Tuple[np.ndarray, Optional[dict]]:
+    """
+    White-balance an *already-aligned* capture using the master's own white
+    regions as the reference — an automatic, location-free version of
+    white_patch_awb that needs no operator click.
+
+    The master is rendered ground truth, so pixels that are near-white there
+    are exactly the spots that should read neutral white in the photo. We
+    sample the aligned capture at those positions and apply the per-channel
+    gain that pulls them to ~250. Gain is clamped to ``max_gain`` so a tiny
+    or mislocated white region can't blow the image out.
+
+    Returns ``(balanced, info)``; ``info`` is None (and the image returned
+    unchanged) when there isn't enough white reference to trust.
+    """
+    if aligned is None or master is None or aligned.shape != master.shape:
+        return aligned, None
+
+    mask = master.min(axis=2) >= white_thresh   # near-white in all channels
+    n = int(mask.sum())
+    if n < min_pixels:
+        return aligned, None
+
+    means = aligned[mask].reshape(-1, 3).astype(np.float32).mean(axis=0)
+    scale = np.clip(250.0 / np.maximum(means, 1e-3), 1.0 / max_gain, max_gain)
+    balanced = np.clip(aligned.astype(np.float32) * scale, 0, 255).astype(np.uint8)
+    return balanced, {
+        "applied": True,
+        "white_pixels": n,
+        "gain": [round(float(s), 3) for s in scale],
+    }
+
+
 def calibrate(captured: np.ndarray,
               master: Optional[np.ndarray] = None,
               white_patch_xywh: Optional[Tuple[int, int, int, int]] = None
