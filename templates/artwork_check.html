@@ -1,0 +1,209 @@
+{% extends "base.html" %}
+{% block title %}ตรวจ Artwork — Artwork Proof Check{% endblock %}
+
+{% block extra_css %}
+<style>
+  .aw-wrap   { max-width: 1380px; margin: 24px auto; padding: 0 16px; }
+  .aw-head   { display:flex; align-items:baseline; justify-content:space-between; flex-wrap:wrap; gap:12px; margin-bottom:8px; }
+  .aw-head h2{ margin:0; }
+  .aw-sub    { color:#666; font-size:14px; }
+
+  .aw-grid   { display:grid; grid-template-columns: 7fr 5fr; gap:20px; }
+  @media (max-width: 1000px) { .aw-grid { grid-template-columns: 1fr; } }
+
+  .aw-panel  { background:#fff; border:1px solid #e3e7ec; border-radius:8px; padding:16px 18px; }
+  .aw-panel h3 { margin:0 0 12px 0; font-size:16px; color:#0d47a1; }
+
+  .aw-label  { display:block; font-size:13px; color:#555; margin: 8px 0 4px; }
+  .aw-input  { width:100%; padding:8px 10px; border:1px solid #cfd8dc; border-radius:6px; background:#fff; font-size:14px; box-sizing:border-box; }
+  .aw-input:focus { outline:none; border-color:#1976d2; }
+  .aw-row    { display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; align-items:center; }
+  .aw-row .aw-input { width:auto; flex:1; min-width:120px; }
+
+  .aw-btn    { padding:8px 16px; border-radius:6px; border:1px solid #cfd8dc; background:#fff; color:#37474f; cursor:pointer; font-size:14px; font-weight:500; }
+  .aw-btn:hover { background:#f5f7fa; }
+  .aw-btn-primary { background:#1976d2; color:#fff; border-color:#1976d2; }
+  .aw-btn-primary:hover { background:#1565c0; }
+  .aw-btn:disabled, .aw-btn-primary:disabled { background:#b0bec5; border-color:#b0bec5; color:#fff; cursor:not-allowed; }
+  .aw-btn-danger { color:#c62828; border-color:#ef9a9a; }
+
+  /* zone editor */
+  .aw-stage-box { background:#f5f7fa; border:1px dashed #cfd8dc; border-radius:6px; min-height:240px; overflow:auto; }
+  .aw-stage  { position:relative; display:inline-block; line-height:0; }
+  .aw-stage img { display:block; max-width:none; }
+  .aw-empty  { color:#90a4ae; padding:40px; text-align:center; font-size:14px; line-height:1.5; }
+
+  .aw-zone   { position:absolute; border:2px solid rgba(25,118,210,.85); background:rgba(25,118,210,.07);
+               cursor:move; box-sizing:border-box; }
+  .aw-zone.selected { border-color:#e53935; background:rgba(229,57,53,.08); z-index:4; }
+  .aw-zone.t-zoom   { border-style:dashed; border-color:rgba(255,143,0,.9); }
+  .aw-zone.t-header { border-color:rgba(106,27,154,.85); }
+  .aw-zone.t-ignore { border-color:rgba(120,144,156,.6); background:rgba(120,144,156,.12); }
+  .aw-zone-tag { position:absolute; top:-1px; left:-1px; background:rgba(25,118,210,.9); color:#fff;
+                 font-size:10px; line-height:1; padding:2px 5px; border-radius:0 0 4px 0; pointer-events:none; white-space:nowrap; }
+  .aw-zone.selected .aw-zone-tag { background:rgba(229,57,53,.92); }
+  .aw-handle { position:absolute; right:-6px; bottom:-6px; width:12px; height:12px; background:#fff;
+               border:2px solid #1976d2; border-radius:50%; cursor:nwse-resize; }
+  .aw-zone.selected .aw-handle { border-color:#e53935; }
+
+  .aw-props  { background:#f8fafc; border:1px solid #e3e7ec; border-radius:6px; padding:10px 12px; margin-top:10px; font-size:13px; }
+  .aw-props b{ color:#0d47a1; }
+  .aw-props .aw-row { margin-top:6px; }
+
+  .aw-hint   { background:#e3f2fd; border-left:4px solid #1976d2; padding:8px 12px; border-radius:4px; margin:10px 0 0; font-size:13px; color:#0d47a1; }
+  .aw-hint ul{ margin:4px 0 0; padding-left:18px; }
+  .aw-warn   { background:#fff3e0; border-left:4px solid #fb8c00; padding:8px 12px; border-radius:4px; margin:10px 0 0; font-size:13px; color:#6d4c00; }
+
+  /* results */
+  .aw-verdict { font-size:22px; font-weight:700; padding:10px 14px; border-radius:6px; display:inline-block; }
+  .aw-v-pass   { background:#e8f5e9; color:#2e7d32; }
+  .aw-v-review { background:#fff8e1; color:#ef6c00; }
+  .aw-v-fail   { background:#ffebee; color:#c62828; }
+
+  .aw-summary { display:flex; flex-wrap:wrap; gap:8px; margin:12px 0; }
+  .aw-sumcard { flex:1 1 130px; min-width:130px; background:#f8fafc; border:1px solid #e3e7ec;
+                border-radius:6px; padding:8px 10px; font-size:12px; color:#37474f; }
+  .aw-sumcard b { display:block; font-size:18px; color:#2e7d32; margin-top:2px; }
+  .aw-sumcard.hit b { color:#c62828; }
+
+  .aw-defect { border-left:4px solid #cfd8dc; background:#fff; padding:8px 12px; margin-bottom:8px;
+               border-radius:0 4px 4px 0; font-size:13px; border:1px solid #eceff1; }
+  .aw-defect.critical { border-left-color:#c62828; background:#fff8f8; }
+  .aw-defect.warning  { border-left-color:#ef6c00; background:#fffaf2; }
+  .aw-defect-class { display:inline-block; padding:1px 7px; border-radius:8px; background:#eceff1;
+                     color:#37474f; font-size:10px; font-weight:700; letter-spacing:.4px; margin-right:6px; }
+  .aw-defect .found { background:#ffebee; color:#b71c1c; padding:0 4px; border-radius:3px; font-family:ui-monospace,Menlo,monospace; }
+  .aw-defect .ref   { background:#e8f5e9; color:#1b5e20; padding:0 4px; border-radius:3px; font-family:ui-monospace,Menlo,monospace; }
+  .aw-defect img { max-width:100%; max-height:130px; border:1px solid #e0e0e0; border-radius:4px; margin-top:6px; display:block; }
+  .aw-defect .crop-link { color:#1976d2; cursor:pointer; font-size:12px; }
+
+  .aw-overlay-box { margin-top:10px; border:1px solid #cfd8dc; border-radius:6px; overflow:auto; max-height:520px; }
+  .aw-overlay-box img { display:block; width:100%; }
+
+  details > summary { cursor:pointer; color:#1976d2; margin-top:10px; }
+  pre.aw-pre { background:#263238; color:#cfd8dc; padding:10px; border-radius:6px; max-height:240px; overflow:auto; white-space:pre-wrap; font-size:12px; }
+
+  .aw-spin { display:inline-block; width:14px; height:14px; border:2px solid #90caf9; border-top-color:#1976d2;
+             border-radius:50%; animation:awspin .8s linear infinite; vertical-align:-2px; margin-right:6px; }
+  @keyframes awspin { to { transform: rotate(360deg); } }
+
+  /* vocab manager */
+  .aw-vocab textarea { width:100%; min-height:70px; font-size:13px; box-sizing:border-box;
+                       border:1px solid #cfd8dc; border-radius:6px; padding:8px; font-family:inherit; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="aw-wrap">
+
+  <div class="aw-head">
+    <h2>ตรวจ Artwork (สะกดคำ / ตัวเลข / ความตรงกันของ panel)</h2>
+    <span class="aw-sub">อัปโหลด PDF → ปรับโซน → ส่งตรวจ
+      &nbsp;|&nbsp; <a href="/artwork_check/history">📋 ประวัติการตรวจ</a></span>
+  </div>
+
+  <div class="aw-grid">
+
+    <!-- LEFT: upload + zone editor -->
+    <div class="aw-panel">
+      <h3>① อัปโหลดไฟล์และจัดโซน</h3>
+
+      <div class="aw-row">
+        <div style="flex:2; min-width:200px;">
+          <label class="aw-label">ไฟล์ Artwork (PDF / PNG / JPG)</label>
+          <input id="awFile" type="file" accept=".pdf,.png,.jpg,.jpeg" class="aw-input" style="width:100%;">
+        </div>
+        <div style="flex:1; min-width:140px;">
+          <label class="aw-label">แบรนด์ (สำหรับคลังคำ)</label>
+          <input id="awBrand" type="text" class="aw-input" style="width:100%;" placeholder="เช่น Hidden Bay" list="awBrandList">
+          <datalist id="awBrandList"></datalist>
+        </div>
+      </div>
+
+      <div class="aw-row">
+        <select id="awTemplateSel" class="aw-input" title="โหลดโซนจาก template ที่บันทึกไว้">
+          <option value="">— Template โซน (ต่อ layout โรงพิมพ์) —</option>
+        </select>
+        <button id="awTemplateLoad" class="aw-btn" disabled>โหลด</button>
+        <button id="awTemplateSave" class="aw-btn" disabled>บันทึก template…</button>
+      </div>
+
+      <div class="aw-stage-box" style="margin-top:12px;">
+        <div id="awStageEmpty" class="aw-empty">
+          ยังไม่มีไฟล์ — เลือกไฟล์ Artwork ด้านบน<br>
+          ระบบจะเสนอโซนอัตโนมัติ แล้วคุณปรับ/ย้าย/ลบ ได้ก่อนส่งตรวจ
+        </div>
+        <div id="awStage" class="aw-stage" style="display:none;">
+          <img id="awPreviewImg" alt="artwork preview">
+        </div>
+      </div>
+
+      <div class="aw-row">
+        <label style="font-size:13px; color:#555;">ซูม
+          <input id="awZoomRange" type="range" min="30" max="200" value="100" style="vertical-align:middle;">
+        </label>
+        <button id="awAddZone" class="aw-btn" disabled>+ เพิ่มโซน</button>
+        <button id="awRedetect" class="aw-btn" disabled>↻ เสนอโซนใหม่</button>
+        <button id="awInspect" class="aw-btn aw-btn-primary" disabled>ส่งตรวจสอบ →</button>
+      </div>
+
+      <div id="awProps" class="aw-props" style="display:none;">
+        <b>โซนที่เลือก: <span id="awPropId"></span></b>
+        <div class="aw-row">
+          <select id="awPropType" class="aw-input">
+            <option value="panel">panel — ฉลากจริงบน dieline</option>
+            <option value="zoom">zoom — ส่วนขยายให้คนดู</option>
+            <option value="header">header — ฟอร์ม/รหัสโรงพิมพ์</option>
+            <option value="ignore">ignore — ไม่ต้องตรวจ</option>
+          </select>
+          <input id="awPropGroup" class="aw-input" placeholder="กลุ่ม (โซนกลุ่มเดียวกัน = ข้อความต้องตรงกัน)" maxlength="12">
+        </div>
+        <div class="aw-row">
+          <input id="awPropLabel" class="aw-input" placeholder="ป้ายกำกับ เช่น SIDE 1" maxlength="80">
+          <button id="awPropDelete" class="aw-btn aw-btn-danger">ลบโซนนี้</button>
+        </div>
+      </div>
+
+      <div class="aw-hint">
+        🧭 <b>วิธีจัดโซนให้ตรวจแม่น</b>
+        <ul>
+          <li>panel ที่ซ้ำกัน (เช่น SIDE 1–4) ใส่<b>กลุ่มเดียวกัน</b> — ระบบจะโหวตเสียงข้างมากหา panel ที่สะกดต่าง</li>
+          <li>โซน zoom ใส่กลุ่มเดียวกับ panel ที่มันขยาย — ระบบจะเช็คว่า zoom ตรงกับฉลากจริง</li>
+          <li>เส้น dieline / color bar ตั้งเป็น ignore</li>
+          <li>จัดเสร็จแล้วกด "บันทึก template" — layout เดิมของโรงพิมพ์เดิมจะโหลดมาใช้ซ้ำได้เลย</li>
+        </ul>
+      </div>
+      <div id="awEnvWarn" class="aw-warn" style="display:none;"></div>
+    </div>
+
+    <!-- RIGHT: results -->
+    <div class="aw-panel">
+      <h3>② ผลการตรวจสอบ</h3>
+      <div id="awResult">
+        <div class="aw-empty">ยังไม่มีผลตรวจ</div>
+      </div>
+
+      <details class="aw-vocab">
+        <summary>📚 คลังคำ/วลีของแบรนด์ (Master Vocabulary)</summary>
+        <div class="aw-row">
+          <input id="awVocabBrand" class="aw-input" placeholder="ชื่อแบรนด์" list="awBrandList">
+          <button id="awVocabLoad" class="aw-btn">โหลด</button>
+        </div>
+        <label class="aw-label">คำเฉพาะของแบรนด์ (คั่นด้วยขึ้นบรรทัด) — ไม่ถูกฟ้องว่าสะกดผิด</label>
+        <textarea id="awVocabWords" placeholder="SKIPJACK&#10;ROTAR"></textarea>
+        <label class="aw-label">วลีมาตรฐานที่ approve แล้ว (คั่นด้วยขึ้นบรรทัด) — ถ้าบน artwork สะกดเพี้ยนจะถูกฟ้อง</label>
+        <textarea id="awVocabPhrases" placeholder="¡Para mejor calidad!&#10;PACKED IN WATER • SALT ADDED"></textarea>
+        <div class="aw-row">
+          <button id="awVocabSave" class="aw-btn aw-btn-primary">บันทึกคลังคำ</button>
+          <span id="awVocabMsg" style="font-size:12px;color:#2e7d32;"></span>
+        </div>
+      </details>
+    </div>
+
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/artwork_check.js') }}"></script>
+{% endblock %}

@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}ประวัติการตรวจ Artwork{% endblock %}
+
+{% block extra_css %}
+<style>
+  .aw-wrap { max-width: 1180px; margin: 24px auto; padding: 0 16px; }
+  .aw-head { display:flex; align-items:baseline; justify-content:space-between; flex-wrap:wrap; gap:12px; margin-bottom:14px; }
+  .aw-head h2 { margin:0; }
+  .aw-panel { background:#fff; border:1px solid #e3e7ec; border-radius:8px; padding:16px 18px; margin-bottom:18px; }
+
+  .aw-tbl { width:100%; border-collapse:collapse; font-size:13px; }
+  .aw-tbl th, .aw-tbl td { padding:8px; border-bottom:1px solid #eceff1; text-align:left; }
+  .aw-tbl th { color:#546e7a; font-weight:600; font-size:12px; }
+  .aw-tbl tr.clickable { cursor:pointer; }
+  .aw-tbl tr.clickable:hover { background:#f5f9ff; }
+
+  .aw-badge { display:inline-block; padding:2px 10px; border-radius:10px; font-size:11px; font-weight:700; }
+  .aw-b-pass   { background:#c8e6c9; color:#1b5e20; }
+  .aw-b-review { background:#ffe0b2; color:#e65100; }
+  .aw-b-fail   { background:#ffcdd2; color:#b71c1c; }
+
+  .aw-empty { color:#90a4ae; padding:30px; text-align:center; font-size:14px; }
+  .aw-btn-danger { padding:3px 10px; border-radius:6px; border:1px solid #ef9a9a; background:#fff; color:#c62828; cursor:pointer; font-size:12px; }
+
+  /* result styles shared with the main page */
+  .aw-verdict { font-size:22px; font-weight:700; padding:10px 14px; border-radius:6px; display:inline-block; }
+  .aw-v-pass   { background:#e8f5e9; color:#2e7d32; }
+  .aw-v-review { background:#fff8e1; color:#ef6c00; }
+  .aw-v-fail   { background:#ffebee; color:#c62828; }
+  .aw-summary { display:flex; flex-wrap:wrap; gap:8px; margin:12px 0; }
+  .aw-sumcard { flex:1 1 130px; min-width:130px; background:#f8fafc; border:1px solid #e3e7ec;
+                border-radius:6px; padding:8px 10px; font-size:12px; color:#37474f; }
+  .aw-sumcard b { display:block; font-size:18px; color:#2e7d32; margin-top:2px; }
+  .aw-sumcard.hit b { color:#c62828; }
+  .aw-defect { border-left:4px solid #cfd8dc; background:#fff; padding:8px 12px; margin-bottom:8px;
+               border-radius:0 4px 4px 0; font-size:13px; border:1px solid #eceff1; }
+  .aw-defect.critical { border-left-color:#c62828; background:#fff8f8; }
+  .aw-defect.warning  { border-left-color:#ef6c00; background:#fffaf2; }
+  .aw-defect-class { display:inline-block; padding:1px 7px; border-radius:8px; background:#eceff1;
+                     color:#37474f; font-size:10px; font-weight:700; letter-spacing:.4px; margin-right:6px; }
+  .aw-defect .found { background:#ffebee; color:#b71c1c; padding:0 4px; border-radius:3px; font-family:ui-monospace,Menlo,monospace; }
+  .aw-defect .ref   { background:#e8f5e9; color:#1b5e20; padding:0 4px; border-radius:3px; font-family:ui-monospace,Menlo,monospace; }
+  .aw-defect img { max-width:100%; max-height:130px; border:1px solid #e0e0e0; border-radius:4px; margin-top:6px; display:block; }
+  .aw-defect .crop-link { color:#1976d2; cursor:pointer; font-size:12px; }
+  .aw-overlay-box { margin-top:10px; border:1px solid #cfd8dc; border-radius:6px; overflow:auto; max-height:520px; }
+  .aw-overlay-box img { display:block; width:100%; }
+  details > summary { cursor:pointer; color:#1976d2; margin-top:10px; }
+  pre.aw-pre { background:#263238; color:#cfd8dc; padding:10px; border-radius:6px; max-height:240px; overflow:auto; white-space:pre-wrap; font-size:12px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="aw-wrap">
+  <div class="aw-head">
+    <h2>ประวัติการตรวจ Artwork</h2>
+    <a href="/artwork_check">← กลับหน้าตรวจ</a>
+  </div>
+
+  <div class="aw-panel">
+    <table class="aw-tbl">
+      <thead>
+        <tr><th>วันเวลา</th><th>ไฟล์</th><th>แบรนด์</th><th>ผล</th>
+            <th>จำนวนประเด็น</th><th></th></tr>
+      </thead>
+      <tbody id="awHistBody">
+        <tr><td colspan="6" class="aw-empty">กำลังโหลด…</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="aw-panel" id="awDetailPanel" style="display:none;">
+    <div id="awDetail"></div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/artwork_check.js') }}"></script>
+<script src="{{ url_for('static', filename='js/artwork_check_history.js') }}"></script>
+{% endblock %}

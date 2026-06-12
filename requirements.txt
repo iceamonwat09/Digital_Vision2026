@@ -26,6 +26,10 @@ scikit-image>=0.22.0      # CIE2000 ΔE per-pixel (skimage.color.deltaE_ciede200
 # OCR backend — POSTs cropped images to an N8N webhook (Gemini / Vision)
 requests>=2.31.0
 
+# Artwork Proof Check — dictionary layer (pure Python; en/es bundled).
+# Optional: the mode still runs without it, skipping only SPELL_FAIL.
+pyspellchecker>=0.8.0
+
 # Barcode decoding (EAN-13 etc.) — authoritative for the barcode field and
 # proves the symbol is machine-scannable. Optional: the code falls back to
 # cv2.barcode.BarcodeDetector (bundled with opencv) and then to OCR if neither

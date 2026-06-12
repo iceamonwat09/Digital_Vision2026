@@ -36,6 +36,16 @@ app = Flask(__name__, template_folder=config.TEMPLATES_DIR, static_folder=config
 def inject_config():
     return {"config_version": config.CONFIG_VERSION}
 
+# Artwork Proof Check (ตรวจสะกดคำ/ตัวเลขใน artwork ก่อนพิมพ์).
+# Fully isolated blueprint — a failure here only disables that one mode
+# and can never break Can Dent / Label / Label Paper.
+try:
+    from artwork_check.routes import artwork_bp
+    app.register_blueprint(artwork_bp)
+    logger.info("Artwork Proof Check mode registered (/artwork_check)")
+except Exception as _aw_err:  # noqa: BLE001 — isolation by design
+    logger.warning(f"Artwork Proof Check disabled: {_aw_err}")
+
 # Pre-computed JPEG encode params (avoids re-creating each frame)
 _JPEG_PARAMS = [cv2.IMWRITE_JPEG_QUALITY, 80]
 
