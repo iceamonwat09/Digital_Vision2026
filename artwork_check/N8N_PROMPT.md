@@ -1,5 +1,10 @@
 # การตั้งค่า N8N Workflow สำหรับโหมด Artwork Proof Check
 
+> **ทางลัด:** มี workflow สำเร็จรูปพร้อม import ที่
+> `n8n_artwork_ocr.workflow.json` (วิธีติดตั้งละเอียดอยู่ใน
+> `N8N_WORKFLOW_SETUP.md`) — ข้อบังคับทั้ง 3 ข้อด้านล่างถูกฝังไว้ใน
+> workflow นั้นแล้ว เอกสารนี้ยังจำเป็นเฉพาะเมื่อจะปรับ workflow ที่มีอยู่เดิมเอง
+
 โหมดนี้ใช้ webhook เดิม (`N8N_OCR_WEBHOOK_URL`) และ contract เดิม
 (`{"text": "...", "blocks": [...], "engine": "..."}`) — **ไม่ต้องสร้าง
 workflow ใหม่** แต่ต้องปรับ node Gemini ตาม 3 ข้อบังคับนี้ ไม่งั้นระบบ

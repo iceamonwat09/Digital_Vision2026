@@ -1,0 +1,210 @@
+{
+  "name": "Artwork OCR — Gemini Verbatim Transcription",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "artwork-ocr",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "a1b2c3d4-0001-4000-8000-000000000001",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        304
+      ],
+      "webhookId": "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ===== Code in JavaScript2 : validate input + build Gemini request =====\n// แอป (inspectors/ocr_n8n.py) ส่ง POST form-urlencoded ฟิลด์ 'image_b64'\n// → n8n แปลงให้อยู่ใน $json.body.image_b64\n// โหนดนี้: ตรวจ base64 / ชนิดภาพ / ขนาด แล้วประกอบ request body ของ\n// Gemini ไว้ให้โหนด HTTP Request ใช้ตรงๆ (อย่าลืม: temperature ต้อง = 0)\n\nconst item = $input.first().json;\nconst body = item.body ?? item;            // รองรับทั้ง form และ JSON body\n\nlet b64 = String(body.image_b64 ?? body.image ?? '').trim();\n\n// เผื่อบางตัวส่งมาเป็น data URI (\"data:image/jpeg;base64,....\")\nconst dataUri = b64.match(/^data:image\\/[a-z0-9.+-]+;base64,(.+)$/is);\nif (dataUri) b64 = dataUri[1];\nb64 = b64.replace(/\\s+/g, '');\n// form-urlencoded อาจแปลง '+' เป็นช่องว่างมาแล้ว — ใส่กลับ\n// (requests ฝั่ง Python encode ถูกต้องอยู่แล้ว บรรทัดนี้กันเครื่องมือทดสอบอื่น)\nb64 = b64.replace(/ /g, '+');\n\nlet valid = true;\nlet error = '';\n\nif (!b64) {\n  valid = false;\n  error = \"missing form field 'image_b64'\";\n} else if (b64.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(b64)) {\n  valid = false;\n  error = \"'image_b64' is not valid base64\";\n}\n\n// อ่าน magic bytes เพื่อบอก mimeType ที่ถูกต้องให้ Gemini\nlet mimeType = 'image/jpeg';\nif (valid) {\n  const head = Buffer.from(b64.slice(0, 32), 'base64');\n  if (head[0] === 0x89 && head[1] === 0x50 && head[2] === 0x4e) {\n    mimeType = 'image/png';\n  } else if (head[0] === 0xff && head[1] === 0xd8) {\n    mimeType = 'image/jpeg';\n  } else if (head[0] === 0x52 && head[1] === 0x49 && head[2] === 0x46 &&\n             head[8] === 0x57 && head[9] === 0x45) {\n    mimeType = 'image/webp';\n  } else {\n    valid = false;\n    error = 'unsupported image format (expected JPEG / PNG / WebP)';\n  }\n}\n\nconst sizeBytes = Math.floor(b64.length * 3 / 4);\nif (valid && sizeBytes > 19 * 1024 * 1024) {\n  // เพดาน inline image ของ Gemini ~20MB — กันไว้ก่อนยิงจริง\n  valid = false;\n  error = `image too large: ${(sizeBytes / 1048576).toFixed(1)} MB (limit ~19 MB)`;\n}\n\nconst PROMPT = \"You are a verbatim transcription engine for printed packaging artwork.\\nTranscribe ALL text visible in the image EXACTLY as printed,\\ncharacter-by-character, in every language present (English, Spanish,\\nArabic, Thai, ...).\\n\\nSTRICT RULES:\\n- DO NOT correct spelling, grammar, or punctuation. If a word looks\\n  misspelled, transcribe the misspelling exactly as printed.\\n- DO NOT add, omit, translate, or normalize any character.\\n- Preserve digits, units, and punctuation exactly (e.g. \\\"16.12 LBS.\\\",\\n  \\\"(7.31 kg)\\\", \\\"\\u00a1...!\\\").\\n- Keep reading order top-to-bottom, left-to-right; right-to-left for\\n  Arabic. One text element per line.\\n- If a region is too small/blurry to read with confidence, transcribe\\n  what you can and lower the confidence for that block. Never guess.\\n\\nReturn ONLY JSON:\\n{\\n  \\\"text\\\": \\\"<all text, one element per line>\\\",\\n  \\\"blocks\\\": [\\n    {\\\"text\\\": \\\"<element>\\\", \\\"bbox\\\": [x, y, w, h], \\\"conf\\\": 0.0-1.0}\\n  ],\\n  \\\"engine\\\": \\\"gemini-2.5-flash\\\"\\n}\";\n\n// Structured Output: บังคับ Gemini ตอบ JSON ตาม schema เสมอ\nconst responseSchema = {\n  type: 'OBJECT',\n  properties: {\n    text: { type: 'STRING' },\n    blocks: {\n      type: 'ARRAY',\n      items: {\n        type: 'OBJECT',\n        properties: {\n          text: { type: 'STRING' },\n          bbox: { type: 'ARRAY', items: { type: 'NUMBER' } },\n          conf: { type: 'NUMBER' },\n        },\n        required: ['text', 'conf'],\n      },\n    },\n    engine: { type: 'STRING' },\n  },\n  required: ['text'],\n};\n\nconst geminiRequest = !valid ? null : {\n  contents: [{\n    role: 'user',\n    parts: [\n      { text: PROMPT },\n      { inlineData: { mimeType, data: b64 } },\n    ],\n  }],\n  generationConfig: {\n    temperature: 0,          // ห้ามแก้ — งานถอดความต้อง deterministic\n    topP: 1,\n    maxOutputTokens: 16384,\n    responseMimeType: 'application/json',\n    responseSchema,\n    // gemini-2.5-flash เปิด thinking เป็นค่า default — งาน transcription\n    // ไม่ต้องคิด ปิดเพื่อให้เร็ว/ถูกลง (ลบ 2 บรรทัดนี้ถ้าใช้รุ่นที่ไม่รองรับ)\n    thinkingConfig: { thinkingBudget: 0 },\n  },\n};\n\nreturn [{\n  json: {\n    valid,\n    error,\n    mime_type: mimeType,\n    size_kb: Math.round(sizeBytes / 102.4) / 10,\n    gemini_request: geminiRequest,\n  },\n}];"
+      },
+      "id": "a1b2c3d4-0002-4000-8000-000000000002",
+      "name": "Code in JavaScript2",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "cond-valid",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a1b2c3d4-0003-4000-8000-000000000003",
+      "name": "If",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        448,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://asia-southeast1-aiplatform.googleapis.com/v1/projects/YOUR_GCP_PROJECT_ID/locations/asia-southeast1/publishers/google/models/gemini-2.5-flash:generateContent",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.gemini_request) }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "a1b2c3d4-0004-4000-8000-000000000004",
+      "name": "HTTP Request",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        688,
+        128
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000,
+      "notes": "แก้ URL: แทน YOUR_GCP_PROJECT_ID ด้วย project จริง แล้วผูก credential 'Google API' (service account) หรือสลับเป็น Gemini API key ตาม N8N_WORKFLOW_SETUP.md"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ===== Code in JavaScript : parse Gemini response → app contract =====\n// แอปคาดหวัง JSON: {\"text\": \"...\", \"blocks\": [...], \"engine\": \"...\"}\n// (ดู inspectors/ocr_n8n.py — parser ฝั่งนั้น permissive แต่ส่งให้ตรง\n//  contract ไว้ก่อนดีที่สุด)\n\nconst r = $input.first().json;\n\nif (r.error) {\n  // Vertex/Gemini ตอบ error object (quota, permission, model not found ฯลฯ)\n  // โยนทิ้งให้ n8n คืน HTTP 500 → ฝั่งแอปจะรายงาน \"webhook request failed\"\n  throw new Error(`Gemini API error: ${JSON.stringify(r.error)}`);\n}\n\nconst cand = (r.candidates ?? [])[0] ?? {};\nconst finishReason = cand.finishReason ?? '';\nconst raw = ((cand.content ?? {}).parts ?? [])\n  .map((p) => p.text ?? '')\n  .join('\\n')\n  .trim();\n\n// ปกติ responseMimeType=application/json ทำให้ raw เป็น JSON ตรงๆ อยู่แล้ว\n// แต่กันเหนียว: ตัด code fence / ดึงก้อน {...} แรกออกมา\nlet s = raw.replace(/^```(?:json)?\\s*/i, '').replace(/\\s*```$/, '').trim();\nlet parsed = null;\ntry {\n  parsed = JSON.parse(s);\n} catch (e) {\n  const i = s.indexOf('{');\n  const j = s.lastIndexOf('}');\n  if (i >= 0 && j > i) {\n    try { parsed = JSON.parse(s.slice(i, j + 1)); } catch (e2) { /* noop */ }\n  }\n}\n\nlet text = '';\nlet blocks = [];\nlet warning;\n\nif (parsed && typeof parsed === 'object') {\n  text = typeof parsed.text === 'string' ? parsed.text : '';\n  if (Array.isArray(parsed.blocks)) {\n    blocks = parsed.blocks\n      .filter((b) => b && typeof b === 'object' && String(b.text ?? '').trim())\n      .map((b) => ({\n        text: String(b.text).trim(),\n        bbox: (Array.isArray(b.bbox) && b.bbox.length === 4)\n          ? b.bbox.map(Number)\n          : null,\n        conf: Number(b.conf ?? 0) || 0,\n      }));\n  }\n  if (!text && blocks.length) text = blocks.map((b) => b.text).join('\\n');\n} else {\n  // model ไม่คืน JSON — ส่ง raw text กลับดีกว่าล้มทั้ง request\n  text = raw;\n  warning = 'model did not return valid JSON; raw text passed through';\n}\n\nif (!text && finishReason && finishReason !== 'STOP') {\n  warning = `empty transcription, finishReason=${finishReason}`;\n}\n\nreturn [{\n  json: {\n    text,\n    blocks,\n    engine: (parsed && typeof parsed.engine === 'string' && parsed.engine)\n      ? parsed.engine\n      : 'gemini-2.5-flash',\n    ...(warning ? { warning } : {}),\n    usage: r.usageMetadata ?? null,\n  },\n}];"
+      },
+      "id": "a1b2c3d4-0005-4000-8000-000000000005",
+      "name": "Code in JavaScript",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        912,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ text: $json.text, blocks: $json.blocks, engine: $json.engine, warning: $json.warning }) }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "a1b2c3d4-0006-4000-8000-000000000006",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1136,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ text: '', blocks: [], engine: 'n8n', error: $json.error || 'invalid request' }) }}",
+        "options": {
+          "responseCode": 400
+        }
+      },
+      "id": "a1b2c3d4-0007-4000-8000-000000000007",
+      "name": "Respond to Webhook1",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        688,
+        480
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript2": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond to Webhook1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}
