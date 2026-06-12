@@ -119,8 +119,8 @@
   const resultBox = $("awResult");
   function setBusy(b) {
     busy = b;
-    ["awInspect", "awAddZone", "awRedetect", "awTemplateLoad",
-     "awTemplateSave"].forEach((id) => {
+    ["awInspect", "awAddZone", "awClearZones", "awRedetect",
+     "awTemplateLoad", "awTemplateSave"].forEach((id) => {
       $(id).disabled = b || !inspectionId;
     });
   }
@@ -140,6 +140,7 @@
       natW = res.preview_size[0];
       natH = res.preview_size[1];
       selectedId = null;
+      cancelDraw();
       previewImg.src = "/api/artwork/" + inspectionId + "/preview.png?t=" + Date.now();
       previewImg.onload = () => { applyZoom(); renderZones(); };
       stage.style.display = "inline-block";
@@ -203,6 +204,7 @@
 
   let drag = null;
   function startDrag(ev, zone, el, isResize) {
+    if (drawMode) return;   // ปล่อยให้ event ทะลุไปที่ stage เพื่อวาดโซนใหม่
     ev.preventDefault();
     ev.stopPropagation();
     selectedId = zone.id;
@@ -266,13 +268,95 @@
     renderZones();
   });
 
-  $("awAddZone").addEventListener("click", () => {
+  // ── add zone by drawing a rectangle on the preview ─────────────────
+  const addZoneBtn = $("awAddZone");
+  let drawMode = false;       // ปุ่มถูกกด รอผู้ใช้ลากกรอบ
+  let draw = null;            // {x0, y0, el} ระหว่างกำลังลาก
+
+  function setDrawMode(on) {
+    drawMode = !!on;
+    addZoneBtn.classList.toggle("aw-btn-drawing", drawMode);
+    addZoneBtn.textContent = drawMode
+      ? "✏️ ลากกรอบบนภาพ… (Esc ยกเลิก)"
+      : "+ เพิ่มโซน (ลากวาดบนภาพ)";
+    stage.style.cursor = drawMode ? "crosshair" : "";
+  }
+
+  function cancelDraw() {
+    if (draw) { draw.el.remove(); draw = null; }
+    if (drawMode) setDrawMode(false);
+  }
+
+  addZoneBtn.addEventListener("click", () => {
+    if (busy || !inspectionId) return;
+    setDrawMode(!drawMode);
+  });
+
+  function drawPoint(ev) {
+    const r = previewImg.getBoundingClientRect();
+    return {
+      x: Math.min(Math.max(ev.clientX - r.left, 0), r.width),
+      y: Math.min(Math.max(ev.clientY - r.top, 0), r.height),
+    };
+  }
+  function drawRect(ev) {
+    const p = drawPoint(ev);
+    return {
+      x: Math.min(draw.x0, p.x), y: Math.min(draw.y0, p.y),
+      w: Math.abs(p.x - draw.x0), h: Math.abs(p.y - draw.y0),
+    };
+  }
+
+  stage.addEventListener("mousedown", (ev) => {
+    if (!drawMode || busy || draw) return;
+    ev.preventDefault();
+    const p = drawPoint(ev);
+    draw = { x0: p.x, y0: p.y, el: document.createElement("div") };
+    draw.el.className = "aw-drawbox";
+    stage.appendChild(draw.el);
+  });
+
+  document.addEventListener("mousemove", (ev) => {
+    if (!draw) return;
+    const q = drawRect(ev);
+    draw.el.style.left = q.x + "px";
+    draw.el.style.top = q.y + "px";
+    draw.el.style.width = q.w + "px";
+    draw.el.style.height = q.h + "px";
+  });
+
+  document.addEventListener("mouseup", (ev) => {
+    if (!draw) return;
+    const q = drawRect(ev);
+    draw.el.remove();
+    draw = null;
+    setDrawMode(false);
+    if (q.w < 8 || q.h < 8) return;   // คลิกเฉยๆ/กรอบจิ๋ว = ยกเลิก
+    const W = dispW(), H = dispH();
     let n = zones.length + 1;
     while (zones.some((z) => z.id === "z" + n)) n++;
-    const z = { id: "z" + n, type: "panel", group: "",
-                bbox: [0.4, 0.4, 0.2, 0.12], label: "โซน " + n };
+    const z = {
+      id: "z" + n, type: "panel", group: "",
+      bbox: [q.x / W, q.y / H, q.w / W, q.h / H]
+        .map((v) => Math.round(v * 1e5) / 1e5),
+      label: "โซน " + n,
+    };
     zones.push(z);
     selectedId = z.id;
+    renderZones();
+  });
+
+  document.addEventListener("keydown", (ev) => {
+    if (ev.key === "Escape") cancelDraw();
+  });
+
+  // ── clear all zones ────────────────────────────────────────────────
+  $("awClearZones").addEventListener("click", () => {
+    if (busy || !zones.length) return;
+    if (!confirm("ลบโซนทั้งหมด " + zones.length + " โซน?")) return;
+    zones = [];
+    selectedId = null;
+    cancelDraw();
     renderZones();
   });
 

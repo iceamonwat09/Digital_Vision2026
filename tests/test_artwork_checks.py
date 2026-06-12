@@ -76,6 +76,49 @@ def test_zoom_partial_content_is_ok():
     assert check_group_consistency(zones, texts) == []
 
 
+def test_zoom_forgives_ocr_punctuation_noise():
+    """เคสจริงจากฉลาก Dolphin: zoom กับ panel พิมพ์เหมือนกันทุกตัวอักษร
+    แต่ OCR สองรอบถอดเครื่องหมาย (เว้นวรรครอบขีด, en-dash, ตำแหน่ง %)
+    ไม่เหมือนกัน — ต้องไม่ฟ้องผิด"""
+    zones = [_zone("z8"), _zone("zz", ztype="zoom")]
+    panel = ("Address : ELOBOUR-BLOCK 5 B - SQUARE 13026 - QALYUBIA, EGYPT\n"
+             "الوزن المصفى ٧٠٪ من الوزن الصافي")
+    zoom = ("Address : EL - OBOUR – BLOCK 5 B - SQUARE 13026 - "
+            "QALYUBIA, EGYPT\n"
+            "الوزن المصفى %٧٠% من الوزن الصافي")
+    texts = {"z8": panel, "zz": zoom}
+    assert check_group_consistency(zones, texts) == []
+
+
+def test_zoom_forgives_merged_fields_and_rtl_order():
+    """OCR ของ zoom รวม 2 ฟิลด์เป็นบรรทัดเดียว และอ่านคอลัมน์ RTL
+    คนละลำดับกับ panel (รวมถึงถอดเลขอารบิก ١٦٧٨٥ ↔ 16785 ต่างกัน)"""
+    zones = [_zone("z8"), _zone("zz", ztype="zoom")]
+    panel = ("الخط الساخن : 16785\n"
+             "المنتج : شركة تاي يونيون للتصنيع المحدودة")
+    zoom = "المنتج : شركة تاي يونيون للتصنيع المحدودة الخط الساخن : ١٦٧٨٥"
+    texts = {"z8": panel, "zz": zoom}
+    assert check_group_consistency(zones, texts) == []
+
+
+def test_zoom_real_digit_difference_still_flagged():
+    """ความต่างของตัวเลขจริงต้องยังถูกจับ แม้หลังผ่อนเรื่องเครื่องหมาย"""
+    zones = [_zone("z8"), _zone("zz", ztype="zoom")]
+    texts = {"z8": "Hot Line : 16785", "zz": "Hot Line : 16786"}
+    defects = check_group_consistency(zones, texts)
+    assert any(d["class"] == "MISMATCH_ZOOM" for d in defects)
+
+
+def test_voting_forgives_punctuation_ocr_noise():
+    zones = [_zone("z1"), _zone("z2"), _zone("z3")]
+    texts = {
+        "z1": "EL - OBOUR – BLOCK 5 B",
+        "z2": "ELOBOUR-BLOCK 5 B",
+        "z3": "EL-OBOUR - BLOCK 5 B",
+    }
+    assert check_group_consistency(zones, texts) == []
+
+
 def test_ungrouped_zones_not_compared():
     zones = [_zone("z1", group=""), _zone("z2", group="")]
     texts = {"z1": "AAA", "z2": "BBB"}

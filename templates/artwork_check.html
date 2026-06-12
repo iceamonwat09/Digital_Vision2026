@@ -26,6 +26,12 @@
   .aw-btn-primary:hover { background:#1565c0; }
   .aw-btn:disabled, .aw-btn-primary:disabled { background:#b0bec5; border-color:#b0bec5; color:#fff; cursor:not-allowed; }
   .aw-btn-danger { color:#c62828; border-color:#ef9a9a; }
+  .aw-btn-drawing { background:#1565c0; border-color:#1565c0; color:#fff; }
+
+  /* rubber-band rectangle while drawing a new zone */
+  .aw-drawbox { position:absolute; border:2px dashed #1565c0;
+                background:rgba(21,101,192,.12); pointer-events:none;
+                box-sizing:border-box; z-index:5; }
 
   /* zone editor */
   .aw-stage-box { background:#f5f7fa; border:1px dashed #cfd8dc; border-radius:6px; min-height:240px; overflow:auto; }
@@ -142,7 +148,8 @@
         <label style="font-size:13px; color:#555;">ซูม
           <input id="awZoomRange" type="range" min="30" max="200" value="100" style="vertical-align:middle;">
         </label>
-        <button id="awAddZone" class="aw-btn" disabled>+ เพิ่มโซน</button>
+        <button id="awAddZone" class="aw-btn" disabled>+ เพิ่มโซน (ลากวาดบนภาพ)</button>
+        <button id="awClearZones" class="aw-btn aw-btn-danger" disabled>🗑 ลบโซนทั้งหมด</button>
         <button id="awRedetect" class="aw-btn" disabled>↻ เสนอโซนใหม่</button>
         <button id="awInspect" class="aw-btn aw-btn-primary" disabled>ส่งตรวจสอบ →</button>
       </div>

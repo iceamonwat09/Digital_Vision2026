@@ -60,6 +60,31 @@ def _norm_flat(s: str) -> str:
     return re.sub(r"\s+", "", s).upper()
 
 
+_AR_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹", "01234567890123456789")
+
+
+def _norm_key(s: str) -> str:
+    """
+    Aggressive comparison key: Arabic-Indic digits → ASCII, uppercase,
+    then keep ONLY letters and digits.
+
+    Two OCR passes over the SAME printed text routinely disagree on
+    punctuation: "EL - OBOUR – BLOCK" vs "ELOBOUR-BLOCK", "٧٠٪" vs
+    "%٧٠%" (bidi reordering of the percent sign), en-dash vs hyphen.
+    Those are transcription noise, not print defects, so comparisons
+    fall back to this key. Letter/digit differences — the defects this
+    mode exists to catch — still mismatch ("CALIDDD" ≠ "CALIDAD").
+    """
+    s = s.translate(_AR_DIGITS).upper()
+    return re.sub(r"[\W_]+", "", s)
+
+
+def _key_tokens(line: str, min_len: int = 2) -> List[str]:
+    """Per-word keys of a line (words shorter than min_len dropped)."""
+    return [t for t in (_norm_key(w) for w in line.split())
+            if len(t) >= min_len]
+
+
 def _lines(text: str) -> List[str]:
     return [_norm_line(l) for l in text.splitlines() if _norm_line(l)]
 
@@ -116,6 +141,7 @@ def _vote_panels(gname: str, panels: List[dict],
     majority = n // 2 + 1
     zone_lines = {z["id"]: _lines(texts[z["id"]]) for z in panels}
     zone_flat = {z["id"]: _norm_flat(texts[z["id"]]) for z in panels}
+    zone_key = {z["id"]: _norm_key(texts[z["id"]]) for z in panels}
 
     counts: Counter = Counter()
     for zid, lines in zone_lines.items():
@@ -128,18 +154,23 @@ def _vote_panels(gname: str, panels: List[dict],
         zid = z["id"]
         own = set(zone_lines[zid])
         flat = zone_flat[zid]
-        others_flat = [zone_flat[o["id"]] for o in panels if o["id"] != zid]
+        key = zone_key[zid]
+        others = [o["id"] for o in panels if o["id"] != zid]
 
-        # consensus lines absent here (forgive if present after re-wrap)
+        # consensus lines absent here (forgive if present after re-wrap
+        # or modulo OCR punctuation noise)
         missing = [l for l in consensus
-                   if l not in own and _norm_flat(l) not in flat]
+                   if l not in own and _norm_flat(l) not in flat
+                   and _norm_key(l) not in key]
         # lines only this panel has (forgive if most others contain it
         # flattened — then it was just wrapped differently elsewhere)
         extra = []
         for l in zone_lines[zid]:
             if l in consensus:
                 continue
-            hits = sum(1 for of in others_flat if _norm_flat(l) in of)
+            hits = sum(1 for oid in others
+                       if _norm_flat(l) in zone_flat[oid]
+                       or _norm_key(l) in zone_key[oid])
             if hits + 1 < majority:
                 extra.append(l)
 
@@ -179,6 +210,7 @@ def _check_zooms(gname: str, zooms: List[dict], panels: List[dict],
                  texts: Dict[str, str]) -> List[dict]:
     defects: List[dict] = []
     panel_flat = "".join(_norm_flat(texts[p["id"]]) for p in panels)
+    panel_key = "".join(_norm_key(texts[p["id"]]) for p in panels)
     panel_lines = []
     for p in panels:
         panel_lines.extend(_lines(texts[p["id"]]))
@@ -186,6 +218,15 @@ def _check_zooms(gname: str, zooms: List[dict], panels: List[dict],
     for z in zooms:
         for line in _lines(texts.get(z["id"], "")):
             if _norm_flat(line) in panel_flat:
+                continue
+            key = _norm_key(line)
+            if key and key in panel_key:
+                continue
+            # OCR of the zoom may merge fields that the panel OCR split
+            # into separate lines (or read RTL columns in another order)
+            # — forgive when every word of the line exists in the panels.
+            toks = _key_tokens(line)
+            if toks and all(t in panel_key for t in toks):
                 continue
             best, best_d = None, None
             for pl in panel_lines:
