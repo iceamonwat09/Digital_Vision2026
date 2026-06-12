@@ -251,3 +251,61 @@ def test_levenshtein_basic():
     assert levenshtein("calidad", "caliddd") == 1
     assert levenshtein("", "abc") == 3
     assert levenshtein("same", "same") == 0
+
+
+# ── snap_bbox (ดับเบิลคลิกให้กรอบพอดีเนื้อหา) ─────────────────────────
+
+np = pytest.importorskip("numpy")
+pytest.importorskip("cv2")
+
+
+def _page(dark=False):
+    """หน้า 400×400: พื้นขาว (หรือกลับขั้วเป็นพื้นกรมท่า)"""
+    from artwork_check.zones import snap_bbox  # noqa: F401 (import check)
+    bg = (25, 35, 60) if dark else (255, 255, 255)
+    img = np.zeros((400, 400, 3), np.uint8)
+    img[:] = bg
+    return img
+
+
+def test_snap_shrinks_loose_box_to_panel():
+    """กรอบหลวมรอบ panel แดงบนหน้าขาว → หดเข้าหาขอบ panel"""
+    from artwork_check.zones import snap_bbox
+    img = _page()
+    img[150:260, 120:280] = (40, 40, 180)          # panel แดง
+    snapped = snap_bbox(img, [0.20, 0.30, 0.55, 0.40])
+    x, y, w, h = snapped
+    assert abs(x - 120 / 400) < 0.02 and abs(y - 150 / 400) < 0.02
+    assert abs((x + w) - 280 / 400) < 0.02
+    assert abs((y + h) - 260 / 400) < 0.02
+
+
+def test_snap_works_on_dark_artwork():
+    """ขั้วสีกลับ: บล็อกตัวหนังสือขาวบนพื้นเข้ม → ยังหาขอบได้"""
+    from artwork_check.zones import snap_bbox
+    img = _page(dark=True)
+    img[180:230, 100:300] = (245, 245, 245)        # ข้อความสีขาว
+    snapped = snap_bbox(img, [0.15, 0.35, 0.65, 0.30])
+    x, y, w, h = snapped
+    assert abs(x - 100 / 400) < 0.02 and abs(y - 180 / 400) < 0.02
+    assert abs((x + w) - 300 / 400) < 0.02
+    assert abs((y + h) - 230 / 400) < 0.02
+
+
+def test_snap_repeated_recovers_cut_content():
+    """กรอบที่ตัดท้าย panel — ดับเบิลคลิกซ้ำหลายครั้งต้องขยายจนครบ"""
+    from artwork_check.zones import snap_bbox
+    img = _page()
+    img[150:300, 120:280] = (40, 40, 180)
+    b = [0.30, 0.375, 0.40, 0.25]                  # ตัดล่าง panel ออก ~25%
+    for _ in range(10):
+        b = snap_bbox(img, b)
+    assert abs((b[1] + b[3]) - 300 / 400) < 0.03   # ขอบล่างกลับมาครบ
+
+
+def test_snap_no_content_returns_original():
+    """กรอบบนพื้นเปล่า → คืน bbox เดิม ไม่พัง"""
+    from artwork_check.zones import snap_bbox
+    img = _page()
+    b = [0.05, 0.05, 0.10, 0.10]
+    assert snap_bbox(img, b) == [round(v, 5) for v in b]

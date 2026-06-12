@@ -198,8 +198,34 @@
       el.appendChild(handle);
       stage.appendChild(el);
       el.addEventListener("mousedown", (ev) => startDrag(ev, z, el, ev.target === handle));
+      el.addEventListener("dblclick", (ev) => { ev.preventDefault(); snapZone(z); });
     });
     renderProps();
+  }
+
+  // ── snap-to-content: ดับเบิลคลิกโซน → server ขยับกรอบให้พอดีเนื้อหา ──
+  let snapping = false;
+  async function snapZone(z) {
+    if (busy || snapping || !inspectionId) return;
+    snapping = true;
+    const el = stage.querySelector('.aw-zone[data-zid="' + z.id + '"]');
+    if (el) el.style.opacity = "0.45";
+    try {
+      const res = await api("/api/artwork/" + inspectionId + "/snap", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ bbox: z.bbox }),
+      });
+      if (res.bbox && res.bbox.length === 4) {
+        z.bbox = res.bbox;
+        selectedId = z.id;
+        renderZones();
+      }
+    } catch (e) {
+      if (el) el.style.opacity = "";   // กรอบเดิมคงอยู่ ไม่ต้องรบกวนผู้ใช้
+    } finally {
+      snapping = false;
+    }
   }
 
   let drag = null;

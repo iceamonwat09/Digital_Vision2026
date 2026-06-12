@@ -130,6 +130,60 @@ def propose_zones(preview_bgr: np.ndarray,
     return zones
 
 
+def snap_bbox(preview_bgr: np.ndarray, bbox: List[float],
+              pad: float = 0.08) -> List[float]:
+    """
+    Fit a user-drawn bbox to the content under it (double-click in UI).
+
+    The box is first expanded by ``pad`` (fraction of its own size) so
+    content the user accidentally cut off is recovered, then shrunk to
+    the tight bounds of "non-background" pixels. Background is sampled
+    from the border ring of the expanded crop, which makes the result
+    polarity-independent: a red/navy panel on a white page snaps to the
+    panel edge, while a box inside a flat panel snaps to its text block.
+
+    Repeated calls keep growing toward content cut off farther than one
+    pad step, so double-clicking again refines the fit. Returns the
+    original bbox unchanged when no usable content is found.
+    """
+    H, W = preview_bgr.shape[:2]
+    x, y, w, h = bbox
+    px, py = w * pad, h * pad
+    x0 = max(0, int(round((x - px) * W)))
+    y0 = max(0, int(round((y - py) * H)))
+    x1 = min(W, int(round((x + w + px) * W)))
+    y1 = min(H, int(round((y + h + py) * H)))
+    if x1 - x0 < 8 or y1 - y0 < 8:
+        return [round(float(v), 5) for v in bbox]
+
+    gray = cv2.cvtColor(preview_bgr[y0:y1, x0:x1], cv2.COLOR_BGR2GRAY)
+    ch, cw = gray.shape[:2]
+
+    # background reference = median of the crop's border ring
+    t = max(2, min(ch, cw) // 100)
+    border = np.concatenate([gray[:t].ravel(), gray[-t:].ravel(),
+                             gray[:, :t].ravel(), gray[:, -t:].ravel()])
+    bg = float(np.median(border))
+    mask = (np.abs(gray.astype(np.int16) - bg) > 24).astype(np.uint8)
+
+    # rows/cols with almost no content are specks or neighbour slivers —
+    # they must not stretch the snapped box
+    col_density = mask.sum(axis=0) / float(ch)
+    row_density = mask.sum(axis=1) / float(cw)
+    keep_x = np.where(col_density > 0.01)[0]
+    keep_y = np.where(row_density > 0.01)[0]
+    if keep_x.size < 4 or keep_y.size < 4:
+        return [round(float(v), 5) for v in bbox]
+
+    m = max(2, min(ch, cw) // 150)            # small visual margin
+    nx0 = max(0, int(keep_x[0]) - m) + x0
+    nx1 = min(cw, int(keep_x[-1]) + 1 + m) + x0
+    ny0 = max(0, int(keep_y[0]) - m) + y0
+    ny1 = min(ch, int(keep_y[-1]) + 1 + m) + y0
+    return [round(nx0 / W, 5), round(ny0 / H, 5),
+            round((nx1 - nx0) / W, 5), round((ny1 - ny0) / H, 5)]
+
+
 def sanitize_zones(raw) -> List[dict]:
     """Validate zones arriving from the browser. Raises ValueError."""
     if not isinstance(raw, list) or not raw:

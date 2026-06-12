@@ -108,6 +108,35 @@ def api_crop(rec_id):
     return send_file(io.BytesIO(jpg), mimetype="image/jpeg", max_age=0)
 
 
+@artwork_bp.route("/api/artwork/<rec_id>/snap", methods=["POST"])
+def api_snap(rec_id):
+    """Fit a zone bbox to the content under it (double-click in the UI).
+    Body: {"bbox": [x, y, w, h]} normalized. Returns {"bbox": [...]}."""
+    body = request.get_json(silent=True) or {}
+    raw = body.get("bbox")
+    if not isinstance(raw, (list, tuple)) or len(raw) != 4:
+        return jsonify({"error": "ต้องส่ง bbox [x,y,w,h]"}), 400
+    try:
+        bbox = [float(v) for v in raw]
+    except (TypeError, ValueError):
+        return jsonify({"error": "bbox ไม่ใช่ตัวเลข"}), 400
+    if not (0 <= bbox[0] < 1 and 0 <= bbox[1] < 1
+            and 0 < bbox[2] <= 1 and 0 < bbox[3] <= 1):
+        return jsonify({"error": "bbox นอกช่วง 0..1"}), 400
+    try:
+        d = report.inspection_dir(rec_id)
+    except ValueError:
+        return jsonify({"error": "bad id"}), 400
+    path = os.path.join(d, "preview.png")
+    if not os.path.exists(path):
+        return jsonify({"error": "ไม่พบ preview"}), 404
+    import cv2
+    img = cv2.imread(path)
+    if img is None:
+        return jsonify({"error": "อ่าน preview ไม่ได้"}), 500
+    return jsonify({"bbox": zones_mod.snap_bbox(img, bbox)})
+
+
 @artwork_bp.route("/api/artwork/<rec_id>/report")
 def api_report(rec_id):
     try:
