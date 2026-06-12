@@ -584,3 +584,176 @@ body {
     .defects-list { grid-template-columns: 1fr; }
     .history-controls { flex-direction: column; align-items: stretch; gap: 0.75rem; }
 }
+
+/* ============================================================
+   Live Detection page redesign (index.html)
+   — additive only: เลย์เอาต์ใหม่ของหน้าหลัก ไม่กระทบ class เดิม
+   ============================================================ */
+
+/* Page header */
+.page-title-group h2 { line-height: 1.25; }
+.page-subtitle {
+    color: var(--gray-400);
+    font-size: 0.78rem;
+    margin-top: 1px;
+}
+
+/* Status pill (มุมขวาบน) */
+.status-pill {
+    background: var(--white);
+    border: 1.5px solid var(--gray-200);
+    border-radius: 999px;
+    padding: 0.3rem 0.95rem;
+    box-shadow: var(--shadow-sm);
+    font-size: 0.85rem;
+}
+
+/* 2-column layout: sidebar ควบคุม | จอภาพ+สถิติ */
+.live-layout {
+    display: grid;
+    grid-template-columns: 300px minmax(0, 1fr);
+    gap: 1rem;
+    flex: 1;
+    min-height: 0;
+    align-items: stretch;
+}
+
+/* Control sidebar card */
+.control-card {
+    background: var(--white);
+    border: 1.5px solid var(--gray-200);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-sm);
+    padding: 1rem 1.1rem 1.2rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    overflow-y: auto;
+    min-height: 0;
+}
+
+.control-card-header {
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: var(--navy);
+    padding-bottom: 0.6rem;
+    border-bottom: 2px solid var(--blue-pale);
+}
+
+.control-section {
+    display: flex;
+    flex-direction: column;
+    gap: 0.55rem;
+}
+.control-section + .control-section {
+    border-top: 1px dashed var(--gray-200);
+    padding-top: 0.9rem;
+}
+
+.control-section-title {
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.8px;
+    text-transform: uppercase;
+    color: var(--gray-600);
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+}
+
+.step-badge {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: var(--blue-pale);
+    color: var(--blue);
+    font-size: 0.68rem;
+    font-weight: 800;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.control-label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--gray-600);
+    margin-top: 0.15rem;
+}
+
+/* ทำให้ tabs / select / input เต็มความกว้าง sidebar */
+.src-tabs-fill { width: 100%; flex-wrap: wrap; }
+.src-tabs-fill .src-tab { flex: 1 1 auto; text-align: center; }
+
+.control-card .camera-panel,
+.control-card .camera-select-group,
+.control-card .rtsp-input-group { width: 100%; }
+.control-card .camera-select { flex: 1; width: 100%; min-width: 0; }
+.control-card .rtsp-input { flex: 1; width: auto; min-width: 0; }
+
+/* ปุ่ม Start/Stop เต็มความกว้าง */
+.control-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+.btn-block {
+    width: 100%;
+    padding: 0.6rem 1rem;
+    font-size: 0.9rem;
+}
+
+/* คอลัมน์ขวา: วิดีโอยืดเต็มพื้นที่ + สถิติแถวล่าง */
+.live-main {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    min-height: 0;
+    min-width: 0;
+}
+
+.video-stage {
+    aspect-ratio: auto;
+    flex: 1;
+    min-height: 300px;
+}
+
+.stats-row {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1rem;
+    flex-shrink: 0;
+}
+.stats-row .stat-card-compact {
+    flex: initial;
+    padding: 0.85rem 1rem;
+}
+
+/* Navbar: ไฮไลต์เมนูหน้าปัจจุบัน */
+.nav-link.active {
+    background: rgba(255,255,255,0.18);
+    color: var(--white);
+    font-weight: 600;
+    box-shadow: inset 0 -2px 0 rgba(255,255,255,0.85);
+    border-radius: 6px 6px 4px 4px;
+}
+
+/* โพลิชเล็กๆ ทั้งระบบ (additive) */
+:focus-visible { outline: 2px solid var(--blue-mid); outline-offset: 2px; }
+button, select, input { font-family: inherit; }
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--gray-200); border-radius: 8px; }
+::-webkit-scrollbar-thumb:hover { background: var(--blue-light); }
+
+/* Responsive ของเลย์เอาต์ใหม่ */
+@media (max-width: 1024px) {
+    .live-layout { grid-template-columns: 1fr; }
+    .container { height: auto; }
+    .video-stage { aspect-ratio: 16 / 9; flex: initial; min-height: 0; }
+}
+@media (max-width: 640px) {
+    .stats-row { grid-template-columns: 1fr 1fr; }
+}

@@ -17,12 +17,13 @@
                     <span class="brand-sub">ระบบตรวจสอบบรรจุภัณฑ์ <span class="brand-version">{{ config_version }}</span></span>
                 </div>
             </div>
+            {% set p = request.path %}
             <ul class="nav-menu">
-                <li><a href="/" class="nav-link">ตรวจจับสด</a></li>
-                <li><a href="/label_paper" class="nav-link">ตรวจฉลากกระดาษ</a></li>
-                <li><a href="/artwork_check" class="nav-link">ตรวจ Artwork</a></li>
-                <li><a href="/dashboard" class="nav-link">แดชบอร์ด</a></li>
-                <li><a href="/history" class="nav-link">ประวัติ</a></li>
+                <li><a href="/" class="nav-link{{ ' active' if p == '/' else '' }}">ตรวจจับสด</a></li>
+                <li><a href="/label_paper" class="nav-link{{ ' active' if p.startswith('/label_paper') else '' }}">ตรวจฉลากกระดาษ</a></li>
+                <li><a href="/artwork_check" class="nav-link{{ ' active' if p.startswith('/artwork_check') else '' }}">ตรวจ Artwork</a></li>
+                <li><a href="/dashboard" class="nav-link{{ ' active' if p.startswith('/dashboard') else '' }}">แดชบอร์ด</a></li>
+                <li><a href="/history" class="nav-link{{ ' active' if p == '/history' else '' }}">ประวัติ</a></li>
             </ul>
         </div>
     </nav>
