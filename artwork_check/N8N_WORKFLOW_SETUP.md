@@ -1,4 +1,19 @@
-# คู่มือ Import + ตั้งค่า N8N Workflow "Artwork OCR — Gemini Verbatim Transcription"
+# คู่มือ Import + ตั้งค่า N8N Workflow ของโหมด Artwork
+
+โหมดนี้ใช้ N8N **2 workflow** (import วิธีเดียวกัน ใช้ credential Gemini ตัวเดียวกันได้):
+
+| ไฟล์ import | path | หน้าที่ | จำเป็นไหม |
+|---|---|---|---|
+| `n8n_artwork_ocr.workflow.json` | `/webhook/artwork-ocr` | OCR ถอดข้อความจากภาพโซน (verbatim) | **จำเป็น** — หัวใจของการตรวจ |
+| `n8n_artwork_translate.workflow.json` | `/webhook/artwork-translate` | แปลข้อความเป็น EN สำหรับแท็บ "ข้อความ + คำแปล" | ทางเลือก — ไม่ตั้งก็ตรวจได้ปกติ แค่ไม่มีคำแปล |
+
+> ตัวแปร env ฝั่งแอป: `N8N_OCR_WEBHOOK_URL` (OCR) และ
+> `N8N_TRANSLATE_WEBHOOK_URL` (แปล) — ค่า default ชี้ไปเครื่องคุณ
+> `http://172.32.201.106:5678/...` อยู่แล้ว
+
+---
+
+# 1) Workflow OCR — "Artwork OCR — Gemini Verbatim Transcription"
 
 ไฟล์ workflow พร้อม import: **`n8n_artwork_ocr.workflow.json`** (อยู่ในโฟลเดอร์นี้)
 
@@ -134,3 +149,61 @@ webhook นี้ใช้ contract เดียวกับโหมดเด�
   `/webhook/artwork-ocr` ได้เลย หรือ
 - **แยกคนละ workflow** — เก็บ workflow เดิมไว้ที่ path เดิม แล้วเครื่องที่รัน
   โหมด Artwork ตั้ง env ชี้มาที่ path ใหม่นี้ (โค้ดแอปไม่ต้องแก้)
+
+---
+
+# 2) Workflow แปล EN — "Artwork Translate — Gemini EN (text-only)"
+
+ไฟล์ workflow พร้อม import: **`n8n_artwork_translate.workflow.json`**
+
+โครงสร้าง node เหมือน workflow OCR ทุกประการ ต่างกันแค่ **รับ/ส่งเป็น
+ข้อความล้วน ไม่มีรูป** จึงเร็วและถูกกว่ามาก:
+
+```
+Webhook ──> Code in JavaScript2 ──> If ──true──> HTTP Request (Gemini) ──> Code in JavaScript ──> Respond to Webhook
+(artwork-translate)                    └─false─> Respond to Webhook1 (HTTP 400)
+```
+
+| Node | หน้าที่ |
+|---|---|
+| **Webhook** | รับ `POST` JSON `{"lines": ["บรรทัด1", "บรรทัด2", ...]}` (path: `artwork-translate`) |
+| **Code in JavaScript2** | ตรวจว่า `lines` เป็น array (≤ 400 บรรทัด) แล้วประกอบ Gemini request สั่งแปลทุกบรรทัดเป็น EN — `temperature 0`, responseSchema บังคับตอบ `{"translations":[...]}` |
+| **If / HTTP Request / Code in JavaScript** | เหมือน workflow OCR (ยิง Gemini, retry 2, แกะ JSON, กัน error) |
+| **Respond to Webhook** | ตอบ `{"translations": ["en1", "en2", ...]}` เรียงตรงกับ input |
+
+## ขั้นตอน
+
+1. **Import** `n8n_artwork_translate.workflow.json` (วิธีเดียวกับข้อ 1)
+2. **node HTTP Request** — แก้ URL แทน `YOUR_GCP_PROJECT_ID` และผูก
+   **credential Gemini ตัวเดียวกับ workflow OCR** (ไม่ต้องสร้างใหม่)
+3. **Activate** แล้วก๊อป Production URL — ปกติได้
+   `http://<host>:5678/webhook/artwork-translate` ตรงกับค่า default
+   ของ `N8N_TRANSLATE_WEBHOOK_URL` อยู่แล้ว ถ้า host/port ตรงก็ไม่ต้องตั้ง env
+
+## ทดสอบเร็ว
+
+```bash
+curl -s -X POST "http://172.32.201.106:5678/webhook/artwork-translate" \
+  -H "Content-Type: application/json" \
+  -d '{"lines":["نوع السمك : كاتسوانوس بيلاميس","Net Weight: 200 gm","16785"]}' \
+  | python3 -m json.tool
+```
+
+ผลที่ถูกต้อง — จำนวนรายการเท่ากับ input, บรรทัด EN/ตัวเลขล้วนคืนเดิม:
+
+```json
+{"translations": ["Type of fish: Katsuwonus pelamis", "Net Weight: 200 gm", "16785"]}
+```
+
+## หมายเหตุสำคัญของแท็บ "ข้อความ + คำแปล"
+
+- เป็น **ข้อมูลช่วยอ่านอย่างเดียว** ไม่มีผลต่อ PASS/FAIL — สอดคล้องกฎ
+  "ระบบห้ามให้คำที่เดาขึ้นมาตัดสินผล"
+- คอลัมน์ **"คำที่ควรใช้"** เมื่อสะกดน่าสงสัย มาจาก engine
+  deterministic (พจนานุกรม + คลังคำแบรนด์ + เสียงข้างมากของ panel
+  กลุ่มเดียวกัน) **ไม่ใช่** ตัวแปล — เชื่อถือได้และตรวจที่มาได้
+- ระบบส่ง**ข้อความที่ OCR ได้แล้ว** ไปแปล (ไม่ส่งรูปซ้ำ) ทุกบรรทัดของ
+  ทุกโซนใน **1 request** ต่อการกดปุ่มแปล 1 ครั้ง และ**แคชผล**ไว้ — กดซ้ำ
+  หรือเปิดรายการเดิมไม่เสียค่า Gemini ใหม่ถ้าข้อความไม่เปลี่ยน
+- ถ้าไม่ตั้งค่า `N8N_TRANSLATE_WEBHOOK_URL` หรือบริการแปลล่ม → ตารางยัง
+  แสดงข้อความต้นฉบับ + ไฮไลต์คำสะกด + คำแนะนำได้ตามปกติ แค่คอลัมน์ EN ว่าง

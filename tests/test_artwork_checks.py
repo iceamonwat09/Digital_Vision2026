@@ -309,3 +309,94 @@ def test_snap_no_content_returns_original():
     img = _page()
     b = [0.05, 0.05, 0.10, 0.10]
     assert snap_bbox(img, b) == [round(v, 5) for v in b]
+
+
+# ── translate table (advisory tab — must not touch the verdict) ───────
+
+def test_build_table_skips_ignore_and_blank_lines():
+    from artwork_check import translate
+    zones = [_zone("z1", group=""), _zone("z9", ztype="ignore", group="")]
+    ocr = [{"zone_id": "z1", "text": "Product of Thailand\n\nNet Weight"},
+           {"zone_id": "z9", "text": "COLOR BAR"}]
+    rows = translate.build_table(zones, ocr)
+    assert all(r["zone_id"] != "z9" for r in rows)      # ignore excluded
+    assert [r["src"] for r in rows] == ["Product of Thailand", "Net Weight"]
+
+
+def test_build_table_flags_unknown_word_with_consensus_suggestion():
+    from artwork_check import translate
+    if not checks.spell_layer_available():
+        pytest.skip("pyspellchecker not installed")
+    zones = [_zone("z1", group="A"), _zone("z2", group="A")]
+    ocr = [{"zone_id": "z1", "text": "Para mejor caliddd"},
+           {"zone_id": "z2", "text": "Para mejor calidad"}]
+    rows = translate.build_table(zones, ocr)
+    bad = [r for r in rows if "caliddd" in r["src"]][0]
+    assert bad["status"] == "spell"
+    assert "caliddd" in bad["flagged"]
+    assert "calidad" in bad["suggest"].get("caliddd", [])
+
+
+def test_build_table_respects_vocab():
+    from artwork_check import translate
+    if not checks.spell_layer_available():
+        pytest.skip("pyspellchecker not installed")
+    zones = [_zone("z1", group="")]
+    ocr = [{"zone_id": "z1", "text": "SKIPJACKK brand"}]
+    rows = translate.build_table(zones, ocr, vocab_words={"SKIPJACKK"})
+    assert all(r["status"] == "ok" for r in rows)        # whitelisted
+
+
+def test_translate_lines_alignment(monkeypatch):
+    from artwork_check import translate
+
+    class FakeResp:
+        status_code = 200
+        def raise_for_status(self): pass
+        def json(self): return {"translations": ["a", "b"]}   # too few
+
+    monkeypatch.setattr(translate.requests, "post",
+                        lambda *a, **k: FakeResp())
+    monkeypatch.setattr(translate.config, "N8N_TRANSLATE_WEBHOOK_URL",
+                        "http://x/webhook/artwork-translate")
+    out = translate.translate_lines(["1", "2", "3"])
+    assert out == ["a", "b", ""]                          # padded to len 3
+
+
+def test_translate_lines_network_failure_returns_empty(monkeypatch):
+    from artwork_check import translate
+
+    def boom(*a, **k):
+        raise translate.requests.RequestException("down")
+    monkeypatch.setattr(translate.requests, "post", boom)
+    monkeypatch.setattr(translate.config, "N8N_TRANSLATE_WEBHOOK_URL",
+                        "http://x/webhook/artwork-translate")
+    assert translate.translate_lines(["a"]) == []
+
+
+def test_translate_cache_round_trip(tmp_path, monkeypatch):
+    from artwork_check import translate
+    rows = [{"src": "hola", "status": "ok", "flagged": [], "suggest": {}},
+            {"src": "16785", "status": "ok", "flagged": [], "suggest": {}}]
+    monkeypatch.setattr(translate.config, "N8N_TRANSLATE_WEBHOOK_URL",
+                        "http://x/webhook/artwork-translate")
+    monkeypatch.setattr(translate, "translate_lines",
+                        lambda lines, **k: ["hello", "16785"])
+    r1 = translate.translate_table(str(tmp_path), [dict(x) for x in rows])
+    assert r1["translated"] and r1["rows"][0]["en"] == "hello"
+
+    # second call must hit cache, not the (now exploding) translator
+    monkeypatch.setattr(translate, "translate_lines",
+                        lambda *a, **k: (_ for _ in ()).throw(
+                            AssertionError("cache miss")))
+    r2 = translate.translate_table(str(tmp_path), [dict(x) for x in rows])
+    assert r2.get("cached") is True and r2["rows"][1]["en"] == "16785"
+
+
+def test_translate_table_no_webhook_is_advisory(tmp_path, monkeypatch):
+    from artwork_check import translate
+    monkeypatch.setattr(translate.config, "N8N_TRANSLATE_WEBHOOK_URL", "")
+    rows = [{"src": "x", "status": "ok", "flagged": [], "suggest": {}}]
+    res = translate.translate_table(str(tmp_path), rows)
+    assert res["translated"] is False
+    assert all("en" in r for r in res["rows"])            # still usable

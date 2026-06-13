@@ -60,6 +60,18 @@ WEIGHT_REL_TOLERANCE = float(os.getenv("ARTWORK_WEIGHT_TOL", "0.006"))
 # character edits (but not zero).
 PHRASE_MAX_EDITS = int(os.getenv("ARTWORK_PHRASE_MAX_EDITS", "3"))
 
+# ── Translation (advisory tab — separate from OCR & checks) ──────────
+# Optional N8N webhook that translates the already-OCR'd text to English
+# for the read-only "ข้อความ + คำแปล" tab. It is NEVER used by the check
+# layers and NEVER affects the PASS/FAIL verdict — it only helps a human
+# read a foreign-language label. Leave empty to disable the tab's
+# translate button (the table still shows source text + spell hints).
+N8N_TRANSLATE_WEBHOOK_URL = os.getenv(
+    "N8N_TRANSLATE_WEBHOOK_URL",
+    "http://172.32.201.106:5678/webhook/artwork-translate",
+).strip()
+N8N_TRANSLATE_TIMEOUT_S = float(os.getenv("N8N_TRANSLATE_TIMEOUT_S", "60"))
+
 # ── Defect classes (severity drives the verdict) ─────────────────────
 #   critical → FAIL, warning → REVIEW, info → shown only
 DEFECT_CLASSES = {

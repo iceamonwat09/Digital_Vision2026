@@ -1,0 +1,210 @@
+{
+  "name": "Artwork Translate — Gemini EN (text-only)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "artwork-translate",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "b1c2d3e4-0001-4000-8000-000000000001",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        304
+      ],
+      "webhookId": "c0ffee00-1111-2222-3333-444455556666"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ===== validate input + build Gemini translate request =====\n// แอป (artwork_check/translate.py) ส่ง POST JSON {\"lines\": [...]}\nconst item = $input.first().json;\nconst body = item.body ?? item;\n\nlet lines = body.lines;\nlet valid = true;\nlet error = '';\n\nif (!Array.isArray(lines)) {\n  valid = false;\n  error = \"missing JSON field 'lines' (array of strings)\";\n  lines = [];\n} else {\n  lines = lines.map((l) => (l == null ? '' : String(l)));\n  if (lines.length === 0) { valid = false; error = \"'lines' is empty\"; }\n  if (lines.length > 400) {\n    valid = false;\n    error = `too many lines: ${lines.length} (limit 400)`;\n  }\n}\n\nconst PROMPT = \"You translate food-packaging label text to English for proofing.\\nYou receive a JSON array of text lines in mixed languages (Arabic,\\nSpanish, Thai, English, ...).\\n\\nRULES:\\n- Return EXACTLY one English translation per input line, in the SAME\\n  order, as a JSON array of the SAME length.\\n- If a line is already English, return it unchanged.\\n- If a line is only digits / codes / units (e.g. \\\"16785\\\", \\\"200 gm\\\",\\n  \\\"70%\\\"), return it unchanged.\\n- Translate the meaning faithfully and concisely. No notes, no comments.\\n- Do NOT correct spelling \\u2014 translate the text as written.\\n\\nReturn ONLY JSON: {\\\"translations\\\": [\\\"<en line 1>\\\", \\\"<en line 2>\\\", ...]}\";\n\nconst responseSchema = {\n  type: 'OBJECT',\n  properties: {\n    translations: { type: 'ARRAY', items: { type: 'STRING' } },\n  },\n  required: ['translations'],\n};\n\nconst geminiRequest = !valid ? null : {\n  contents: [{\n    role: 'user',\n    parts: [\n      { text: PROMPT },\n      { text: 'INPUT LINES (JSON array):\\n' + JSON.stringify(lines) },\n    ],\n  }],\n  generationConfig: {\n    temperature: 0,\n    topP: 1,\n    maxOutputTokens: 8192,\n    responseMimeType: 'application/json',\n    responseSchema,\n    thinkingConfig: { thinkingBudget: 0 },\n  },\n};\n\nreturn [{\n  json: { valid, error, line_count: lines.length, gemini_request: geminiRequest },\n}];"
+      },
+      "id": "b1c2d3e4-0002-4000-8000-000000000002",
+      "name": "Code in JavaScript2",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "cond-valid",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b1c2d3e4-0003-4000-8000-000000000003",
+      "name": "If",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        448,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://asia-southeast1-aiplatform.googleapis.com/v1/projects/YOUR_GCP_PROJECT_ID/locations/asia-southeast1/publishers/google/models/gemini-2.5-flash:generateContent",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.gemini_request) }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "b1c2d3e4-0004-4000-8000-000000000004",
+      "name": "HTTP Request",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        688,
+        128
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000,
+      "notes": "แก้ URL: แทน YOUR_GCP_PROJECT_ID แล้วผูก credential เดียวกับ workflow OCR — ดู N8N_WORKFLOW_SETUP.md"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ===== parse Gemini response → {\"translations\": [...]} =====\nconst r = $input.first().json;\nif (r.error) throw new Error(`Gemini API error: ${JSON.stringify(r.error)}`);\n\nconst cand = (r.candidates ?? [])[0] ?? {};\nconst raw = ((cand.content ?? {}).parts ?? [])\n  .map((p) => p.text ?? '').join('\\n').trim();\n\nlet s = raw.replace(/^```(?:json)?\\s*/i, '').replace(/\\s*```$/, '').trim();\nlet parsed = null;\ntry { parsed = JSON.parse(s); }\ncatch (e) {\n  const i = s.indexOf('{'), j = s.lastIndexOf('}');\n  if (i >= 0 && j > i) { try { parsed = JSON.parse(s.slice(i, j + 1)); } catch (e2) {} }\n}\n\nlet translations = [];\nlet warning;\nif (parsed && Array.isArray(parsed.translations)) {\n  translations = parsed.translations.map((t) => (t == null ? '' : String(t)));\n} else if (Array.isArray(parsed)) {\n  translations = parsed.map((t) => (t == null ? '' : String(t)));\n} else {\n  warning = 'model did not return a translations array';\n}\n\nreturn [{\n  json: {\n    translations,\n    ...(warning ? { warning } : {}),\n    usage: r.usageMetadata ?? null,\n  },\n}];"
+      },
+      "id": "b1c2d3e4-0005-4000-8000-000000000005",
+      "name": "Code in JavaScript",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        912,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ translations: $json.translations, warning: $json.warning }) }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "b1c2d3e4-0006-4000-8000-000000000006",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1136,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ translations: [], error: $json.error || 'invalid request' }) }}",
+        "options": {
+          "responseCode": 400
+        }
+      },
+      "id": "b1c2d3e4-0007-4000-8000-000000000007",
+      "name": "Respond to Webhook1",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        688,
+        480
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript2": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond to Webhook1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}

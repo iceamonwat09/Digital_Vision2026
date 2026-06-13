@@ -14,7 +14,7 @@ import os
 from flask import (Blueprint, jsonify, render_template, request,
                    send_file, send_from_directory)
 
-from . import pipeline, report, vocab, zones as zones_mod
+from . import pipeline, report, translate, vocab, zones as zones_mod
 
 logger = logging.getLogger(__name__)
 
@@ -135,6 +135,40 @@ def api_snap(rec_id):
     if img is None:
         return jsonify({"error": "อ่าน preview ไม่ได้"}), 500
     return jsonify({"bbox": zones_mod.snap_bbox(img, bbox)})
+
+
+@artwork_bp.route("/api/artwork/<rec_id>/translate", methods=["POST"])
+def api_translate(rec_id):
+    """Build the per-line text table and (when a translate webhook is
+    configured) attach EN translations. Advisory only — reads the saved
+    report's OCR text, never re-runs OCR and never touches the verdict."""
+    try:
+        d = report.inspection_dir(rec_id)
+    except ValueError:
+        return jsonify({"error": "bad id"}), 400
+    rep = report.load_report(rec_id)
+    if rep is None:
+        return jsonify({"error": "ยังไม่มีผลตรวจของรายการนี้"}), 404
+
+    zone_list = rep.get("zones", [])
+    ocr_results = rep.get("ocr", [])
+    vocab_words: set = set()
+    brand = rep.get("brand", "")
+    if brand:
+        try:
+            vocab_words = set(vocab.load(brand)["words"])
+        except ValueError:
+            pass
+
+    rows = translate.build_table(zone_list, ocr_results,
+                                 vocab_words=vocab_words)
+    try:
+        result = translate.translate_table(d, rows)
+    except Exception as e:
+        logger.exception("[artwork] translate failed for %s", rec_id)
+        return jsonify({"error": f"แปลไม่สำเร็จ: {e}"}), 500
+    result["enabled"] = translate.is_enabled()
+    return jsonify(result)
 
 
 @artwork_bp.route("/api/artwork/<rec_id>/report")

@@ -100,6 +100,58 @@
   }
   window.awRenderReport = renderReport;
 
+  // ── text + translation table (shared with history page) ───────────
+  function reEsc(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
+
+  function highlightFlagged(src, flagged) {
+    let html = esc(src);
+    (flagged || []).forEach((w) => {
+      const re = new RegExp("(^|[^A-Za-z])(" + reEsc(esc(w)) +
+                            ")(?![A-Za-z])", "g");
+      html = html.replace(re, "$1<mark>$2</mark>");
+    });
+    return html;
+  }
+
+  function renderTextTable(result, box, onlyIssues) {
+    const rows = (result && result.rows) || [];
+    let html = "";
+    if (result && result.note)
+      html += '<div class="aw-note">' + esc(result.note) + "</div>";
+    const shown = onlyIssues ? rows.filter((r) => r.status !== "ok") : rows;
+    if (!shown.length) {
+      box.innerHTML = html + '<div class="aw-empty">' +
+        (onlyIssues ? "ไม่มีบรรทัดที่น่าสงสัย" : "ไม่มีข้อความให้แสดง") + "</div>";
+      return;
+    }
+    html += '<table class="aw-ttable"><thead><tr>' +
+      "<th>โซน</th><th>ข้อความบนฉลาก</th><th>คำแปล EN</th><th>สถานะ</th>" +
+      "</tr></thead><tbody>";
+    shown.forEach((r) => {
+      const issue = r.status !== "ok";
+      html += '<tr class="' + (issue ? "has-issue" : "") + '">';
+      html += '<td class="zone-cell">' + esc(r.zone_id) + "</td>";
+      html += '<td class="src-cell">' + highlightFlagged(r.src, r.flagged) + "</td>";
+      const en = r.en || "";
+      html += '<td class="en-cell' + (en ? "" : " empty") + '">' +
+        (en ? esc(en) : "—") + "</td>";
+      let st = '<span class="aw-status-ok">✓</span>';
+      if (issue) {
+        st = '<span class="aw-status-warn">⚠️ สะกดน่าสงสัย</span>';
+        const sug = r.suggest || {};
+        Object.keys(sug).forEach((w) => {
+          if (sug[w] && sug[w].length)
+            st += '<span class="aw-suggest">“' + esc(w) + "” → " +
+              sug[w].map((s) => "<code>" + esc(s) + "</code>").join(" ") + "</span>";
+        });
+      }
+      html += "<td>" + st + "</td></tr>";
+    });
+    html += "</tbody></table>";
+    box.innerHTML = html;
+  }
+  window.awRenderTextTable = renderTextTable;
+
   // history page includes this file only for the renderer above
   if (!$("awFile")) return;
 
@@ -141,6 +193,8 @@
       natH = res.preview_size[1];
       selectedId = null;
       cancelDraw();
+      showTabs(false);
+      resetTextTab();
       previewImg.src = "/api/artwork/" + inspectionId + "/preview.png?t=" + Date.now();
       previewImg.onload = () => { applyZoom(); renderZones(); };
       stage.style.display = "inline-block";
@@ -444,11 +498,66 @@
         body: JSON.stringify({ zones: zones, brand: brandInput.value.trim() }),
       });
       renderReport(rep, resultBox);
+      showTabs(true);
+      switchTab("result");
+      resetTextTab();
     } catch (e) {
       resultBox.innerHTML = '<div class="aw-empty">ตรวจไม่สำเร็จ: ' + esc(e.message) + "</div>";
     } finally {
       setBusy(false);
     }
+  });
+
+  // ── result tabs: [ผลตรวจ] | [ข้อความ + คำแปล] ──────────────────────
+  const resultTabs = $("awResultTabs");
+  const textTab = $("awTextTab");
+  const textTableWrap = $("awTextTableWrap");
+  const textMsg = $("awTextMsg");
+  const onlyIssuesCb = $("awTextOnlyIssues");
+  let textResult = null;     // ผลล่าสุดจาก /translate (กรองโดยไม่ยิงซ้ำ)
+
+  function showTabs(show) {
+    resultTabs.style.display = show ? "" : "none";
+    if (!show) { textTab.style.display = "none"; resultBox.style.display = ""; }
+  }
+  function switchTab(name) {
+    resultTabs.querySelectorAll(".aw-tab").forEach((b) =>
+      b.classList.toggle("aw-tab-active", b.dataset.awtab === name));
+    const isText = name === "text";
+    resultBox.style.display = isText ? "none" : "";
+    textTab.style.display = isText ? "" : "none";
+  }
+  function resetTextTab() {
+    textResult = null;
+    textTableWrap.innerHTML = "";
+    textMsg.textContent = "";
+    onlyIssuesCb.checked = false;
+  }
+  resultTabs.querySelectorAll(".aw-tab").forEach((b) =>
+    b.addEventListener("click", () => switchTab(b.dataset.awtab)));
+
+  $("awTranslateBtn").addEventListener("click", async () => {
+    if (!inspectionId) return;
+    const btn = $("awTranslateBtn");
+    btn.disabled = true;
+    textMsg.innerHTML = '<span class="aw-spin"></span>กำลังสร้างตารางและแปล…';
+    try {
+      textResult = await api("/api/artwork/" + inspectionId + "/translate",
+                             { method: "POST" });
+      renderTextTable(textResult, textTableWrap, onlyIssuesCb.checked);
+      if (textResult.translated)
+        textMsg.textContent = textResult.cached ? "✓ แปลแล้ว (จากแคช)" : "✓ แปลเรียบร้อย";
+      else
+        textMsg.textContent = "";   // note แสดงในตารางอยู่แล้ว
+    } catch (e) {
+      textMsg.textContent = "ทำงานไม่สำเร็จ: " + e.message;
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  onlyIssuesCb.addEventListener("change", () => {
+    if (textResult) renderTextTable(textResult, textTableWrap, onlyIssuesCb.checked);
   });
 
   // ── vocab manager ──────────────────────────────────────────────────
