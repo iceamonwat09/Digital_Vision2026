@@ -69,7 +69,8 @@
   .aw-summary { display:flex; flex-wrap:wrap; gap:8px; margin:12px 0; }
   .aw-sumcard { flex:1 1 130px; min-width:130px; background:#f8fafc; border:1px solid #e3e7ec;
                 border-radius:6px; padding:8px 10px; font-size:12px; color:#37474f; }
-  .aw-sumcard b { display:block; font-size:18px; color:#2e7d32; margin-top:2px; }
+  .aw-sumcard b { display:block; font-size:18px; color:#2e7d32; margin-top:2px;
+                  font-family:var(--font-mono,ui-monospace,monospace); font-variant-numeric:tabular-nums; }
   .aw-sumcard.hit b { color:#c62828; }
 
   .aw-defect { border-left:4px solid #cfd8dc; background:#fff; padding:8px 12px; margin-bottom:8px;
@@ -78,8 +79,8 @@
   .aw-defect.warning  { border-left-color:#ef6c00; background:#fffaf2; }
   .aw-defect-class { display:inline-block; padding:1px 7px; border-radius:8px; background:#eceff1;
                      color:#37474f; font-size:10px; font-weight:700; letter-spacing:.4px; margin-right:6px; }
-  .aw-defect .found { background:#ffebee; color:#b71c1c; padding:0 4px; border-radius:3px; font-family:ui-monospace,Menlo,monospace; }
-  .aw-defect .ref   { background:#e8f5e9; color:#1b5e20; padding:0 4px; border-radius:3px; font-family:ui-monospace,Menlo,monospace; }
+  .aw-defect .found { background:#ffebee; color:#b71c1c; padding:0 4px; border-radius:3px; font-family:var(--font-mono,ui-monospace,Menlo,monospace); }
+  .aw-defect .ref   { background:#e8f5e9; color:#1b5e20; padding:0 4px; border-radius:3px; font-family:var(--font-mono,ui-monospace,Menlo,monospace); }
   .aw-defect img { max-width:100%; max-height:130px; border:1px solid #e0e0e0; border-radius:4px; margin-top:6px; display:block; }
   .aw-defect .crop-link { color:#1976d2; cursor:pointer; font-size:12px; }
 
@@ -87,7 +88,7 @@
   .aw-overlay-box img { display:block; width:100%; }
 
   details > summary { cursor:pointer; color:#1976d2; margin-top:10px; }
-  pre.aw-pre { background:#263238; color:#cfd8dc; padding:10px; border-radius:6px; max-height:240px; overflow:auto; white-space:pre-wrap; font-size:12px; }
+  pre.aw-pre { background:#263238; color:#cfd8dc; padding:10px; border-radius:6px; max-height:240px; overflow:auto; white-space:pre-wrap; font-size:12px; font-family:var(--font-mono,ui-monospace,Menlo,monospace); }
 
   .aw-spin { display:inline-block; width:14px; height:14px; border:2px solid #90caf9; border-top-color:#1976d2;
              border-radius:50%; animation:awspin .8s linear infinite; vertical-align:-2px; margin-right:6px; }
@@ -117,7 +118,7 @@
   .aw-status-ok   { color:#2e7d32; }
   .aw-status-warn { color:#ef6c00; font-weight:600; }
   .aw-suggest { display:block; margin-top:3px; font-size:12px; color:#1b5e20; }
-  .aw-suggest code { background:#e8f5e9; padding:0 4px; border-radius:3px; }
+  .aw-suggest code { background:#e8f5e9; padding:0 4px; border-radius:3px; font-family:var(--font-mono,ui-monospace,monospace); }
   .aw-note { background:#fff3e0; border-left:4px solid #fb8c00; padding:8px 12px; border-radius:4px;
              font-size:13px; color:#6d4c00; margin-bottom:10px; }
 

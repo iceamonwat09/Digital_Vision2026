@@ -20,21 +20,39 @@
     --danger:      #E53935;
     --success:     #2E7D32;
     --warning:     #F57F17;
-    --shadow-sm:   0 1px 4px rgba(13,43,107,.08);
-    --shadow-md:   0 4px 16px rgba(13,43,107,.12);
-    --shadow-lg:   0 8px 32px rgba(13,43,107,.16);
-    --radius:      10px;
+    /* Elevation: committed to a DEFINED EDGE (hairline borders), so
+       resting shadows are near-flat; a gentle lift appears only on hover
+       for affordance. (impeccable: don't use a hard edge AND a soft
+       elevation at once.) */
+    --shadow-sm:   0 1px 2px rgba(13,43,107,.05);
+    --shadow-md:   0 3px 10px rgba(13,43,107,.09);
+    --shadow-lg:   0 16px 40px rgba(13,43,107,.18);
+    --radius:      12px;
+    /* Type system: one humanist sans (Thai+Latin) carries hierarchy via
+       weight/size; its mono sibling marks numbers, codes and readouts.
+       Fallbacks stay Thai-capable so offline deployments still read well. */
+    --font-sans:   'IBM Plex Sans Thai', 'Sarabun', 'Leelawadee UI',
+                   'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+    --font-mono:   'IBM Plex Mono', 'SFMono-Regular', ui-monospace,
+                   Menlo, Consolas, monospace;
 }
 
 body {
-    font-family: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+    font-family: var(--font-sans);
     background: linear-gradient(160deg, #EBF3FB 0%, #F8FAFC 100%);
     color: var(--gray-800);
     min-height: 100vh;
     display: flex;
     flex-direction: column;
     line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
 }
+
+/* Headings carry hierarchy through weight + slightly tighter tracking,
+   so a single humanist family still reads as "designed". */
+h1, h2, h3, h4 { letter-spacing: -0.01em; }
 
 /* ── Navbar ──────────────────────────────────────────────── */
 .navbar {
@@ -100,8 +118,9 @@ body {
     background: rgba(255,255,255,0.2);
     border-radius: 4px;
     padding: 0 5px;
+    font-family: var(--font-mono);
     font-size: 0.62rem;
-    font-weight: 600;
+    font-weight: 500;
     margin-left: 4px;
     vertical-align: middle;
 }
@@ -370,8 +389,10 @@ body {
 }
 .stat-value-compact {
     color: var(--blue);
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
     font-size: 1.75rem;
-    font-weight: 800;
+    font-weight: 600;
     line-height: 1;
 }
 
@@ -398,8 +419,10 @@ body {
 
 .stat-value-large {
     color: var(--blue);
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
     font-size: 2.5rem;
-    font-weight: 800;
+    font-weight: 600;
     margin-top: 0.25rem;
 }
 
