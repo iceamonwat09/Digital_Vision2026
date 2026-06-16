@@ -289,9 +289,8 @@
 
   </div>
 </div>
-{% endblock %}
 
-<!-- Lightbox overlay (shared: ทั้ง artwork_check และ history) -->
+<!-- Lightbox overlay (อยู่ใน block content เพื่อให้ Jinja render จริง) -->
 <div id="awLightbox" class="aw-lightbox" role="dialog" aria-modal="true">
   <span class="aw-lightbox-close" id="awLbClose" title="ปิด (Esc)">✕</span>
   <div class="aw-lightbox-inner" id="awLbInner">
@@ -305,7 +304,8 @@
     <span class="aw-lightbox-label" id="awLbCaption" style="margin-left:12px;"></span>
   </div>
 </div>
+{% endblock %}
 
 {% block extra_js %}
-<script src="{{ url_for('static', filename='js/artwork_check.js') }}"></script>
+<script src="{{ url_for('static', filename='js/artwork_check.js') }}?v={{ config_version }}"></script>
 {% endblock %}

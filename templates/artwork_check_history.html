@@ -75,6 +75,6 @@
 {% endblock %}
 
 {% block extra_js %}
-<script src="{{ url_for('static', filename='js/artwork_check.js') }}"></script>
-<script src="{{ url_for('static', filename='js/artwork_check_history.js') }}"></script>
+<script src="{{ url_for('static', filename='js/artwork_check.js') }}?v={{ config_version }}"></script>
+<script src="{{ url_for('static', filename='js/artwork_check_history.js') }}?v={{ config_version }}"></script>
 {% endblock %}

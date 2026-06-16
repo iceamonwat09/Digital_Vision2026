@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v={{ config_version }}">
     {% block extra_css %}{% endblock %}
 </head>
 <body>
@@ -39,7 +39,7 @@
         <p>&copy; 2026 Thai Union Group PCL. &nbsp;|&nbsp; Can Dent Detection (YOLOv8) + Label Paper Inspection (ΔE2000) &nbsp;|&nbsp; {{ config_version }}</p>
     </footer>
 
-    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/main.js') }}?v={{ config_version }}"></script>
     {% block extra_js %}{% endblock %}
 </body>
 </html>

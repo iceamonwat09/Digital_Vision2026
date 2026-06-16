@@ -149,6 +149,7 @@
   const lbCaption = document.getElementById("awLbCaption");
 
   function lbOpen(src, caption) {
+    if (!lightbox || !lbImg) { window.open(src, "_blank"); return; }
     lbScale = 1;
     lbImg.src = src;
     lbImg.style.transform = "scale(1)";
