@@ -90,8 +90,9 @@ def _lines(text: str) -> List[str]:
 
 
 def _defect(cls: str, zone_id: str, message: str,
-            found: str = "", reference: str = "") -> dict:
-    return {
+            found: str = "", reference: str = "",
+            ref_zone_ids: List[str] = None) -> dict:
+    d = {
         "class": cls,
         "severity": config.DEFECT_CLASSES[cls]["severity"],
         "zone_id": zone_id,
@@ -99,6 +100,9 @@ def _defect(cls: str, zone_id: str, message: str,
         "found": found,
         "reference": reference,
     }
+    if ref_zone_ids:
+        d["ref_zone_ids"] = ref_zone_ids
+    return d
 
 
 # ── Layer 1: cross-panel majority voting ──────────────────────────────
@@ -189,20 +193,23 @@ def _vote_panels(gname: str, panels: List[dict],
                     "MISMATCH_PANELS", z["id"],
                     f"กลุ่ม {gname}: ข้อความใน {z.get('label') or z['id']} "
                     f"ไม่ตรงกับ panel เสียงข้างมาก",
-                    found=line, reference=best))
+                    found=line, reference=best,
+                    ref_zone_ids=others))
             else:
                 defects.append(_defect(
                     "MISMATCH_PANELS", z["id"],
                     f"กลุ่ม {gname}: ข้อความนี้พบเฉพาะใน "
                     f"{z.get('label') or z['id']}",
-                    found=line))
+                    found=line,
+                    ref_zone_ids=others))
         for m in missing:
             if m not in used_missing:
                 defects.append(_defect(
                     "MISMATCH_PANELS", z["id"],
                     f"กลุ่ม {gname}: ข้อความนี้หายไปจาก "
                     f"{z.get('label') or z['id']}",
-                    reference=m))
+                    reference=m,
+                    ref_zone_ids=others))
     return defects
 
 
@@ -239,7 +246,8 @@ def _check_zooms(gname: str, zooms: List[dict], panels: List[dict],
                 found=line,
                 reference=best if (best is not None and best_d is not None
                                    and best_d <= max(4, len(line) // 2))
-                else ""))
+                else "",
+                ref_zone_ids=[p["id"] for p in panels]))
     return defects
 
 

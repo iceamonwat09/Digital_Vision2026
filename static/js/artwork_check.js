@@ -71,20 +71,51 @@
     if ((rep.defects || []).length) {
       html += "<h4 style='margin:14px 0 8px;'>รายการที่พบ (" + rep.defects.length + ")</h4>";
       rep.defects.forEach((d, i) => {
-        const z = zoneById[d.zone_id];
+        const z  = zoneById[d.zone_id];
+        // หาโซนอ้างอิง (panel ที่ใช้เปรียบเทียบ) — ใช้ตัวแรกที่ bbox พร้อม
+        const refZones = (d.ref_zone_ids || [])
+          .map((id) => zoneById[id]).filter(Boolean);
+        const refZ = refZones[0] || null;
+
         html += '<div class="aw-defect ' + esc(d.severity) + '">' +
           '<span class="aw-defect-class">' + esc(d.class) + "</span>" +
           "<b>" + esc(d.zone_id) + (z && z.label ? " · " + esc(z.label) : "") + "</b><br>" +
           esc(d.message);
-        if (d.found) html += '<br>พบ: <span class="found">' + esc(d.found) + "</span>";
+        if (d.found)     html += '<br>พบ: <span class="found">' + esc(d.found) + "</span>";
         if (d.reference) html += ' &nbsp;เทียบกับ: <span class="ref">' + esc(d.reference) + "</span>";
-        if (z) {
+
+        // ── 2-crop comparison (auto-load ทันที ไม่ต้องคลิก) ───────────
+        if (z && refZ) {
+          const qA = "x=" + z.bbox[0] + "&y=" + z.bbox[1] + "&w=" + z.bbox[2] + "&h=" + z.bbox[3];
+          const qB = "x=" + refZ.bbox[0] + "&y=" + refZ.bbox[1] + "&w=" + refZ.bbox[2] + "&h=" + refZ.bbox[3];
+          const cropA = "/api/artwork/" + esc(rep.id) + "/crop?" + qA;
+          const cropB = "/api/artwork/" + esc(rep.id) + "/crop?" + qB;
+          const labelA = d.zone_id + (z.label ? " · " + z.label : "");
+          const labelB = refZ.id + (refZ.label ? " · " + refZ.label : "") + " (อ้างอิง)";
+          html += '<div class="aw-img-pair" style="margin-top:8px;">' +
+            '<div class="aw-img-card">' +
+              '<div class="aw-img-label overlay-label">⚠ ' + esc(labelA) + '</div>' +
+              '<img src="' + esc(cropA) + '" alt="' + esc(labelA) + '"' +
+                ' class="aw-zoomable" data-src="' + esc(cropA) + '" data-caption="' + esc(labelA) + '">' +
+            '</div>' +
+            '<div class="aw-img-card">' +
+              '<div class="aw-img-label">📋 ' + esc(labelB) + '</div>' +
+              '<img src="' + esc(cropB) + '" alt="' + esc(labelB) + '"' +
+                ' class="aw-zoomable" data-src="' + esc(cropB) + '" data-caption="' + esc(labelB) + '">' +
+            '</div>' +
+          '</div>';
+        } else if (z) {
+          // fallback: แค่โซนเดียว (ไม่มี ref zone)
           const q = "x=" + z.bbox[0] + "&y=" + z.bbox[1] + "&w=" + z.bbox[2] + "&h=" + z.bbox[3];
           const cropUrl = "/api/artwork/" + esc(rep.id) + "/crop?" + q;
-          html += '<br><span class="crop-link" data-crop="' + esc(cropUrl) +
-            '" data-idx="' + i + '">🔍 ดูภาพโซนนี้ความละเอียดสูง</span>' +
-            '<div id="awCropSlot' + i + '" style="margin-top:4px;"></div>';
+          const caption = d.zone_id + (z.label ? " · " + z.label : "");
+          html += '<div style="margin-top:8px;">' +
+            '<img src="' + esc(cropUrl) + '" alt="crop"' +
+              ' class="aw-zoomable" data-src="' + esc(cropUrl) + '" data-caption="' + esc(caption) + '"' +
+              ' style="max-width:100%;border-radius:4px;cursor:zoom-in;">' +
+          '</div>';
         }
+
         html += "</div>";
       });
     } else {
@@ -101,24 +132,7 @@
 
     box.innerHTML = html;
 
-    // wire crop-link (inline expand)
-    box.querySelectorAll(".crop-link").forEach((el) => {
-      el.addEventListener("click", () => {
-        const slot = document.getElementById("awCropSlot" + el.dataset.idx);
-        if (slot && !slot.querySelector("img")) {
-          const img = document.createElement("img");
-          img.src = el.dataset.crop;
-          img.style.cssText = "max-width:100%;border-radius:4px;margin-top:4px;cursor:zoom-in;";
-          img.className = "aw-zoomable";
-          img.dataset.caption = "Crop โซน #" + el.dataset.idx;
-          img.dataset.src = el.dataset.crop;
-          slot.appendChild(img);
-          wireZoomable(img);
-        }
-      });
-    });
-
-    // wire lightbox on result images
+    // wire lightbox บน aw-zoomable ทั้งหมด (รูปคู่ + crop fallback)
     box.querySelectorAll(".aw-zoomable").forEach(wireZoomable);
   }
   window.awRenderReport = renderReport;
