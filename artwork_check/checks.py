@@ -153,13 +153,25 @@ def _vote_panels(gname: str, panels: List[dict],
             counts[line] += 1
     consensus = {l for l, c in counts.items() if c >= majority}
 
+    # Real labels (type "panel") are the source of truth; headers come last.
+    def _ref_ids_for(line: str, candidates: List[dict]) -> List[str]:
+        """Panels (real labels first) that actually carry ``line``."""
+        lk = _norm_key(line)
+        lf = _norm_flat(line)
+        hit = [c for c in candidates
+               if lf in zone_flat[c["id"]] or lk in zone_key[c["id"]]]
+        pool = hit or candidates
+        pool = sorted(pool, key=lambda c: 0 if c.get("type") == "panel" else 1)
+        return [c["id"] for c in pool]
+
     defects: List[dict] = []
     for z in panels:
         zid = z["id"]
         own = set(zone_lines[zid])
         flat = zone_flat[zid]
         key = zone_key[zid]
-        others = [o["id"] for o in panels if o["id"] != zid]
+        other_zones = [o for o in panels if o["id"] != zid]
+        others = [o["id"] for o in other_zones]
 
         # consensus lines absent here (forgive if present after re-wrap
         # or modulo OCR punctuation noise)
@@ -194,7 +206,7 @@ def _vote_panels(gname: str, panels: List[dict],
                     f"กลุ่ม {gname}: ข้อความใน {z.get('label') or z['id']} "
                     f"ไม่ตรงกับ panel เสียงข้างมาก",
                     found=line, reference=best,
-                    ref_zone_ids=others))
+                    ref_zone_ids=_ref_ids_for(best, other_zones)))
             else:
                 defects.append(_defect(
                     "MISMATCH_PANELS", z["id"],
@@ -209,18 +221,27 @@ def _vote_panels(gname: str, panels: List[dict],
                     f"กลุ่ม {gname}: ข้อความนี้หายไปจาก "
                     f"{z.get('label') or z['id']}",
                     reference=m,
-                    ref_zone_ids=others))
+                    ref_zone_ids=_ref_ids_for(m, other_zones)))
     return defects
 
 
 def _check_zooms(gname: str, zooms: List[dict], panels: List[dict],
                  texts: Dict[str, str]) -> List[dict]:
     defects: List[dict] = []
-    panel_flat = "".join(_norm_flat(texts[p["id"]]) for p in panels)
-    panel_key = "".join(_norm_key(texts[p["id"]]) for p in panels)
-    panel_lines = []
-    for p in panels:
-        panel_lines.extend(_lines(texts[p["id"]]))
+
+    # Always anchor the comparison on the REAL LABEL (type "panel").
+    # A group can also carry "header" zones (printer form / codes) — those
+    # are never the source of truth, so only fall back to them when the
+    # group has no real-label panel at all.
+    anchors = [p for p in panels if p.get("type") == "panel"] or panels
+    anchor_ids = [p["id"] for p in anchors]
+
+    panel_flat = "".join(_norm_flat(texts[p["id"]]) for p in anchors)
+    panel_key = "".join(_norm_key(texts[p["id"]]) for p in anchors)
+    panel_lines = []                       # (line_text, panel_id)
+    for p in anchors:
+        for pl in _lines(texts[p["id"]]):
+            panel_lines.append((pl, p["id"]))
 
     for z in zooms:
         for line in _lines(texts.get(z["id"], "")):
@@ -235,19 +256,23 @@ def _check_zooms(gname: str, zooms: List[dict], panels: List[dict],
             toks = _key_tokens(line)
             if toks and all(t in panel_key for t in toks):
                 continue
-            best, best_d = None, None
-            for pl in panel_lines:
+            best, best_d, best_pid = None, None, None
+            for pl, pid in panel_lines:
                 d = levenshtein(line.upper(), pl.upper())
                 if best_d is None or d < best_d:
-                    best, best_d = pl, d
+                    best, best_d, best_pid = pl, d, pid
+            close = (best is not None and best_d is not None
+                     and best_d <= max(4, len(line) // 2))
+            # Point the comparison image at the SPECIFIC real-label panel
+            # whose text is the closest match — so the operator always sees
+            # the real label beside the zoom, never another zoom.
+            ref_ids = [best_pid] if (close and best_pid) else anchor_ids
             defects.append(_defect(
                 "MISMATCH_ZOOM", z["id"],
-                f"กลุ่ม {gname}: ข้อความในส่วน zoom ไม่พบบนฉลากจริง",
+                f"กลุ่ม {gname}: ข้อความในส่วน zoom ไม่ตรงกับฉลากจริง",
                 found=line,
-                reference=best if (best is not None and best_d is not None
-                                   and best_d <= max(4, len(line) // 2))
-                else "",
-                ref_zone_ids=[p["id"] for p in panels]))
+                reference=best if close else "",
+                ref_zone_ids=ref_ids))
     return defects
 
 

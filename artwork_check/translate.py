@@ -103,15 +103,42 @@ def _consensus_words(zones: List[dict], texts: Dict[str, str]) -> set:
     return out
 
 
+def _defect_keys_by_zone(defects: Optional[List[dict]]) -> Dict[str, set]:
+    """
+    Map zone_id → set of normalized line keys that the verification
+    pipeline already flagged as wrong (cross-panel / zoom / number /
+    phrase / spell). ``found`` text belongs to the defect's own zone;
+    ``reference`` text belongs to each ref zone (the real label). This
+    lets the advisory table mark the SAME lines the verdict flagged,
+    instead of trusting only the dictionary spell-check.
+    """
+    out: Dict[str, set] = {}
+    for d in (defects or []):
+        if d.get("class") == "UNREADABLE":
+            continue
+        zid = d.get("zone_id")
+        fk = checks._norm_key(d.get("found", ""))
+        if zid and fk:
+            out.setdefault(zid, set()).add(fk)
+        rk = checks._norm_key(d.get("reference", ""))
+        if rk:
+            for rid in (d.get("ref_zone_ids") or []):
+                out.setdefault(rid, set()).add(rk)
+    return out
+
+
 def build_table(zones: List[dict], ocr_results: List[dict],
-                vocab_words: Optional[set] = None) -> List[dict]:
+                vocab_words: Optional[set] = None,
+                defects: Optional[List[dict]] = None) -> List[dict]:
     """
     One row per source line, in zone/reading order:
 
         {"zone_id", "label", "src", "status", "flagged", "suggest"}
 
-    status: "ok"  — no unknown Latin words on this line
-            "spell" — has word(s) not in any dictionary / vocabulary
+    status: "ok"       — clean line
+            "spell"    — word(s) not in any dictionary / vocabulary
+            "mismatch" — this line was flagged by the verification verdict
+                         (cross-panel / zoom / number / phrase). NEVER ✓.
     flagged: list of suspicious words (to highlight in the UI)
     suggest: {word: [candidate, ...]}  (deterministic, may be empty)
     """
@@ -120,12 +147,14 @@ def build_table(zones: List[dict], ocr_results: List[dict],
     vocab = {w.lower() for w in (vocab_words or set())}
     consensus = _consensus_words(zones, texts)
     checkers = checks._get_spellcheckers()
+    defect_keys = _defect_keys_by_zone(defects)
 
     rows: List[dict] = []
     for z in zones:
         if z.get("type") == "ignore":
             continue
         zid = z["id"]
+        zone_dkeys = defect_keys.get(zid, set())
         for raw in texts.get(zid, "").splitlines():
             line = raw.strip()
             if not line:
@@ -148,12 +177,28 @@ def build_table(zones: List[dict], ocr_results: List[dict],
                         s = _suggest(w, vocab, consensus)
                         if s:
                             suggest[w] = s
+
+            # Does the verdict already flag this exact line? (substring
+            # both ways so a single flagged word inside a longer line, or
+            # a line inside a merged OCR block, still matches.)
+            rkey = checks._norm_key(line)
+            mismatch = bool(rkey) and any(
+                dk and (dk in rkey or rkey in dk) for dk in zone_dkeys)
+
+            if flagged:
+                status = "spell"
+            elif mismatch:
+                status = "mismatch"
+            else:
+                status = "ok"
+
             rows.append({
                 "zone_id": zid,
                 "label": zlabel.get(zid, zid),
                 "src": line,
-                "status": "spell" if flagged else "ok",
+                "status": status,
                 "flagged": flagged,
+                "mismatch": mismatch,
                 "suggest": suggest,
             })
     return rows

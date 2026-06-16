@@ -161,12 +161,24 @@ def api_translate(rec_id):
             pass
 
     rows = translate.build_table(zone_list, ocr_results,
-                                 vocab_words=vocab_words)
+                                 vocab_words=vocab_words,
+                                 defects=rep.get("defects", []))
     try:
         result = translate.translate_table(d, rows)
     except Exception as e:
         logger.exception("[artwork] translate failed for %s", rec_id)
         return jsonify({"error": f"แปลไม่สำเร็จ: {e}"}), 500
+
+    # translate_table may return rows from an older cache that predates the
+    # mismatch cross-check. Keep the freshly-built status/flags authoritative
+    # and only borrow the EN strings (which are what the cache really saves).
+    en_by_src: dict = {}
+    for rr in result.get("rows", []):
+        en_by_src.setdefault(rr.get("src", ""), rr.get("en", ""))
+    for r in rows:
+        r["en"] = en_by_src.get(r["src"], r.get("en", ""))
+    result["rows"] = rows
+
     result["enabled"] = translate.is_enabled()
     return jsonify(result)
 

@@ -243,7 +243,10 @@
         (en ? esc(en) : "—") + "</td>";
       let st = '<span class="aw-status-ok">✓</span>';
       if (issue) {
-        st = '<span class="aw-status-warn">⚠️ สะกดน่าสงสัย</span>';
+        if (r.status === "mismatch")
+          st = '<span class="aw-status-warn">❌ ไม่ตรงกับฉลากจริง</span>';
+        else
+          st = '<span class="aw-status-warn">⚠️ สะกดน่าสงสัย</span>';
         const sug = r.suggest || {};
         Object.keys(sug).forEach((w) => {
           if (sug[w] && sug[w].length)
