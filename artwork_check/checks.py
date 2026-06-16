@@ -227,24 +227,34 @@ def _vote_panels(gname: str, panels: List[dict],
 
 def _check_zooms(gname: str, zooms: List[dict], panels: List[dict],
                  texts: Dict[str, str]) -> List[dict]:
+    """
+    Compare each zoom against the real-label panels.
+
+    The ZOOM (ส่วนขยาย) is the enlarged, human-readable REFERENCE — the
+    version that shows clearly what the text is meant to be. The REAL
+    LABEL (type "panel") is the artwork that actually gets printed, so it
+    is the SUBJECT under inspection: when a real-label line differs from
+    the zoom reference, the defect is attributed to the REAL LABEL (so it
+    is the thing flagged, spell-checked and translated), with the zoom as
+    the reference of what it should say.
+    """
     defects: List[dict] = []
 
-    # Always anchor the comparison on the REAL LABEL (type "panel").
-    # A group can also carry "header" zones (printer form / codes) — those
-    # are never the source of truth, so only fall back to them when the
-    # group has no real-label panel at all.
-    anchors = [p for p in panels if p.get("type") == "panel"] or panels
-    anchor_ids = [p["id"] for p in anchors]
+    # Real labels = the printed artwork we inspect. Fall back to whatever
+    # panels exist only when the group has no explicit "panel" zone.
+    real = [p for p in panels if p.get("type") == "panel"] or panels
+    real_ids = [p["id"] for p in real]
 
-    panel_flat = "".join(_norm_flat(texts[p["id"]]) for p in anchors)
-    panel_key = "".join(_norm_key(texts[p["id"]]) for p in anchors)
+    panel_flat = "".join(_norm_flat(texts[p["id"]]) for p in real)
+    panel_key = "".join(_norm_key(texts[p["id"]]) for p in real)
     panel_lines = []                       # (line_text, panel_id)
-    for p in anchors:
+    for p in real:
         for pl in _lines(texts[p["id"]]):
             panel_lines.append((pl, p["id"]))
 
     for z in zooms:
-        for line in _lines(texts.get(z["id"], "")):
+        zid = z["id"]
+        for line in _lines(texts.get(zid, "")):
             if _norm_flat(line) in panel_flat:
                 continue
             key = _norm_key(line)
@@ -256,6 +266,7 @@ def _check_zooms(gname: str, zooms: List[dict], panels: List[dict],
             toks = _key_tokens(line)
             if toks and all(t in panel_key for t in toks):
                 continue
+            # Closest real-label line to this zoom reference line.
             best, best_d, best_pid = None, None, None
             for pl, pid in panel_lines:
                 d = levenshtein(line.upper(), pl.upper())
@@ -263,16 +274,23 @@ def _check_zooms(gname: str, zooms: List[dict], panels: List[dict],
                     best, best_d, best_pid = pl, d, pid
             close = (best is not None and best_d is not None
                      and best_d <= max(4, len(line) // 2))
-            # Point the comparison image at the SPECIFIC real-label panel
-            # whose text is the closest match — so the operator always sees
-            # the real label beside the zoom, never another zoom.
-            ref_ids = [best_pid] if (close and best_pid) else anchor_ids
-            defects.append(_defect(
-                "MISMATCH_ZOOM", z["id"],
-                f"กลุ่ม {gname}: ข้อความในส่วน zoom ไม่ตรงกับฉลากจริง",
-                found=line,
-                reference=best if close else "",
-                ref_zone_ids=ref_ids))
+            if close:
+                # The real label is misspelled relative to the zoom
+                # reference → flag the REAL LABEL, show the zoom as the
+                # correct text.
+                defects.append(_defect(
+                    "MISMATCH_ZOOM", best_pid,
+                    f"กลุ่ม {gname}: ข้อความบนฉลากจริงไม่ตรงกับส่วนขยาย (อ้างอิง)",
+                    found=best, reference=line,
+                    ref_zone_ids=[zid]))
+            else:
+                # The zoom shows text that does not appear on the real
+                # label at all (label may be missing it).
+                defects.append(_defect(
+                    "MISMATCH_ZOOM", zid,
+                    f"กลุ่ม {gname}: ข้อความในส่วน zoom ไม่พบบนฉลากจริง",
+                    found=line, reference="",
+                    ref_zone_ids=real_ids))
     return defects
 
 
