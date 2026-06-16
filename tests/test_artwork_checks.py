@@ -58,15 +58,31 @@ def test_voting_reports_missing_line():
 
 
 def test_zoom_mismatch_detected():
+    # The printed real labels carry the typo; the zoom is the correct,
+    # human-readable reference. The defect must be attributed to the REAL
+    # LABEL (the artwork that gets printed and corrected), with the zoom
+    # as the reference of what it should say.
     zones = [_zone("z1"), _zone("z2"),
              _zone("zz", ztype="zoom", label="zoom-1")]
-    texts = {"z1": "¡Para mejor calidad!", "z2": "¡Para mejor calidad!",
-             "zz": "¡Para mejor caliddd"}
+    texts = {"z1": "¡Para mejor caliddd", "z2": "¡Para mejor caliddd",
+             "zz": "¡Para mejor calidad!"}
     defects = check_group_consistency(zones, texts)
     zoom_hits = [d for d in defects if d["class"] == "MISMATCH_ZOOM"]
-    assert len(zoom_hits) == 1
-    assert zoom_hits[0]["zone_id"] == "zz"
-    assert "caliddd" in zoom_hits[0]["found"]
+    assert zoom_hits
+    assert zoom_hits[0]["zone_id"] in ("z1", "z2")     # real label, not zoom
+    assert "caliddd" in zoom_hits[0]["found"]          # the printed typo
+    assert "calidad" in zoom_hits[0]["reference"]      # zoom = correct ref
+    assert zoom_hits[0]["ref_zone_ids"] == ["zz"]
+
+
+def test_zoom_pure_symbol_line_ignored():
+    """OCR ของ zoom จับสัญลักษณ์ลูกศร ↑ (จากการลากโซนเกิน) มาเป็นบรรทัด
+    หนึ่ง — ต้องไม่ถูกจับคู่กับคำจริงบนฉลาก (เช่น TUNA) จนฟ้องผิด"""
+    zones = [_zone("z4"), _zone("zz", ztype="zoom")]
+    panel = "Dolphin\nTUNA\nSHREDDED CHILI"
+    zoom = "Dolphin\nTUNA\nSHREDDED CHILI\n↑"
+    texts = {"z4": panel, "zz": zoom}
+    assert check_group_consistency(zones, texts) == []
 
 
 def test_zoom_partial_content_is_ok():

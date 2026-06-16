@@ -143,7 +143,12 @@ def _vote_panels(gname: str, panels: List[dict],
                  texts: Dict[str, str]) -> List[dict]:
     n = len(panels)
     majority = n // 2 + 1
-    zone_lines = {z["id"]: _lines(texts[z["id"]]) for z in panels}
+    # Drop pure-symbol / non-text lines (arrows ↑, bullets, dimension
+    # ticks) — OCR picks these up when a zone is dragged a little wide,
+    # and they have no textual content to verify, so they must never
+    # enter the consensus vote or be flagged as a mismatch.
+    zone_lines = {z["id"]: [l for l in _lines(texts[z["id"]]) if _norm_key(l)]
+                  for z in panels}
     zone_flat = {z["id"]: _norm_flat(texts[z["id"]]) for z in panels}
     zone_key = {z["id"]: _norm_key(texts[z["id"]]) for z in panels}
 
@@ -255,10 +260,15 @@ def _check_zooms(gname: str, zooms: List[dict], panels: List[dict],
     for z in zooms:
         zid = z["id"]
         for line in _lines(texts.get(zid, "")):
+            key = _norm_key(line)
+            # Pure symbol / arrow / punctuation line (key collapses to
+            # empty) — not text, never comparable. Skip so it can't be
+            # mis-paired with a real word like "TUNA".
+            if not key:
+                continue
             if _norm_flat(line) in panel_flat:
                 continue
-            key = _norm_key(line)
-            if key and key in panel_key:
+            if key in panel_key:
                 continue
             # OCR of the zoom may merge fields that the panel OCR split
             # into separate lines (or read RTL columns in another order)
@@ -266,14 +276,25 @@ def _check_zooms(gname: str, zooms: List[dict], panels: List[dict],
             toks = _key_tokens(line)
             if toks and all(t in panel_key for t in toks):
                 continue
-            # Closest real-label line to this zoom reference line.
-            best, best_d, best_pid = None, None, None
+            # Closest real-label line, compared on normalized keys so
+            # punctuation/case noise does not inflate the distance.
+            best, best_d, best_pid, best_key = None, None, None, ""
             for pl, pid in panel_lines:
-                d = levenshtein(line.upper(), pl.upper())
+                pk = _norm_key(pl)
+                if not pk:
+                    continue
+                d = levenshtein(key, pk)
                 if best_d is None or d < best_d:
-                    best, best_d, best_pid = pl, d, pid
-            close = (best is not None and best_d is not None
-                     and best_d <= max(4, len(line) // 2))
+                    best, best_d, best_pid, best_key = pl, d, pid, pk
+            # A genuine misspelling shares MOST of its characters with its
+            # match (small distance relative to length); a stray fragment
+            # captured by an imprecise zone does not. Using a ratio gates
+            # out short-junk-vs-real-word false matches (e.g. "↑"→"TUNA"),
+            # while still catching real typos like "REDDED"→"SHREDDED".
+            span = max(len(key), len(best_key)) if best is not None else 0
+            close = (best is not None and span > 0
+                     and best_d < span
+                     and best_d <= max(2, int(span * 0.4)))
             if close:
                 # The real label is misspelled relative to the zoom
                 # reference → flag the REAL LABEL, show the zoom as the
