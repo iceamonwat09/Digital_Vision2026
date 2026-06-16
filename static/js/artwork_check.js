@@ -199,6 +199,7 @@
       previewImg.onload = () => { applyZoom(); renderZones(); };
       stage.style.display = "inline-block";
       stageEmpty.style.display = "none";
+      $("awZoomBar").style.display = "";
       setBusy(false);
       resultBox.innerHTML = '<div class="aw-empty">ปรับโซนแล้วกด "ส่งตรวจสอบ"</div>';
 
@@ -218,11 +219,46 @@
   });
 
   // ── zoom ───────────────────────────────────────────────────────────
-  $("awZoomRange").addEventListener("input", (ev) => {
+  const zoomRange = $("awZoomRange");
+  const zoomLabel = $("awZoomLabel");
+
+  zoomRange.addEventListener("input", (ev) => {
     zoomPct = parseInt(ev.target.value, 10) || 100;
+    zoomLabel.textContent = zoomPct + "%";
     applyZoom();
     renderZones();
   });
+
+  // ดับเบิลคลิกที่ slider = reset 100%
+  zoomRange.addEventListener("dblclick", () => {
+    zoomRange.value = 100;
+    zoomPct = 100;
+    zoomLabel.textContent = "100%";
+    applyZoom();
+    renderZones();
+  });
+
+  // ปุ่ม reset
+  $("awZoomReset").addEventListener("click", () => {
+    zoomRange.value = 100;
+    zoomPct = 100;
+    zoomLabel.textContent = "100%";
+    applyZoom();
+    renderZones();
+  });
+
+  // scroll wheel บน stage-box = zoom (Ctrl ไม่ต้องกด)
+  zoomRange.closest(".aw-stage-box").addEventListener("wheel", (ev) => {
+    if (!natW) return;
+    ev.preventDefault();
+    const delta = ev.deltaY > 0 ? -5 : 5;
+    zoomPct = Math.min(300, Math.max(30, zoomPct + delta));
+    zoomRange.value = zoomPct;
+    zoomLabel.textContent = zoomPct + "%";
+    applyZoom();
+    renderZones();
+  }, { passive: false });
+
   function applyZoom() {
     if (!natW) return;
     previewImg.style.width = Math.round(natW * zoomPct / 100) + "px";

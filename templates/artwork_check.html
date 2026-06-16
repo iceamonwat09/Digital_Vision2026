@@ -34,7 +34,11 @@
                 box-sizing:border-box; z-index:5; }
 
   /* zone editor */
-  .aw-stage-box { background:#f5f7fa; border:1px dashed #cfd8dc; border-radius:6px; min-height:240px; overflow:auto; }
+  .aw-stage-box { background:#f5f7fa; border:1px dashed #cfd8dc; border-radius:6px; min-height:240px;
+                  overflow:auto; max-height:70vh; position:relative; }
+  .aw-zoom-bar  { display:flex; align-items:center; gap:8px; padding:5px 8px; background:#eef2f7;
+                  border-bottom:1px solid #d8dde4; font-size:12px; color:#546e7a; position:sticky;
+                  top:0; z-index:10; }
   .aw-stage  { position:relative; display:inline-block; line-height:0; }
   .aw-stage img { display:block; max-width:none; }
   .aw-empty  { color:#90a4ae; padding:40px; text-align:center; font-size:14px; line-height:1.5; }
@@ -164,6 +168,13 @@
       </div>
 
       <div class="aw-stage-box" style="margin-top:12px;">
+        <div id="awZoomBar" class="aw-zoom-bar" style="display:none;">
+          <span>🔍 ซูม</span>
+          <input id="awZoomRange" type="range" min="30" max="300" value="100"
+                 style="width:120px; vertical-align:middle;" title="ดับเบิลคลิกเพื่อกลับ 100%">
+          <span id="awZoomLabel" style="min-width:36px; font-weight:600; color:#0d47a1;">100%</span>
+          <button id="awZoomReset" class="aw-btn" style="padding:2px 8px; font-size:12px;">↺ 100%</button>
+        </div>
         <div id="awStageEmpty" class="aw-empty">
           ยังไม่มีไฟล์ — เลือกไฟล์ Artwork ด้านบน<br>
           ระบบจะเสนอโซนอัตโนมัติ แล้วคุณปรับ/ย้าย/ลบ ได้ก่อนส่งตรวจ
@@ -174,9 +185,6 @@
       </div>
 
       <div class="aw-row">
-        <label style="font-size:13px; color:#555;">ซูม
-          <input id="awZoomRange" type="range" min="30" max="200" value="100" style="vertical-align:middle;">
-        </label>
         <button id="awAddZone" class="aw-btn" disabled>+ เพิ่มโซน (ลากวาดบนภาพ)</button>
         <button id="awClearZones" class="aw-btn aw-btn-danger" disabled>🗑 ลบโซนทั้งหมด</button>
         <button id="awRedetect" class="aw-btn" disabled>↻ เสนอโซนใหม่</button>
