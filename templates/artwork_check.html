@@ -88,8 +88,34 @@
   .aw-defect img { max-width:100%; max-height:130px; border:1px solid #e0e0e0; border-radius:4px; margin-top:6px; display:block; }
   .aw-defect .crop-link { color:#1976d2; cursor:pointer; font-size:12px; }
 
-  .aw-overlay-box { margin-top:10px; border:1px solid #cfd8dc; border-radius:6px; overflow:auto; max-height:520px; }
-  .aw-overlay-box img { display:block; width:100%; }
+  /* ── ผลตรวจ: 2 รูปเคียงกัน ─────────────────────────────────────── */
+  .aw-img-pair   { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:10px; }
+  @media (max-width:700px) { .aw-img-pair { grid-template-columns:1fr; } }
+  .aw-img-card   { border:1px solid #cfd8dc; border-radius:6px; overflow:hidden; }
+  .aw-img-label  { background:#f0f4f8; padding:4px 10px; font-size:11px; font-weight:600;
+                   color:#546e7a; text-transform:uppercase; letter-spacing:.4px;
+                   border-bottom:1px solid #cfd8dc; display:flex; align-items:center; gap:6px; }
+  .aw-img-label.overlay-label { background:#fff3e0; color:#8d4f00; border-bottom-color:#ffe0b2; }
+  .aw-img-card img { display:block; width:100%; cursor:zoom-in; transition:opacity .15s; }
+  .aw-img-card img:hover { opacity:.88; }
+
+  /* ── Lightbox ───────────────────────────────────────────────────── */
+  .aw-lightbox { display:none; position:fixed; inset:0; background:rgba(0,0,0,.88);
+                 z-index:9999; align-items:center; justify-content:center; flex-direction:column; }
+  .aw-lightbox.open { display:flex; }
+  .aw-lightbox-inner { position:relative; max-width:96vw; max-height:92vh; overflow:auto;
+                       border-radius:6px; cursor:grab; }
+  .aw-lightbox-inner:active { cursor:grabbing; }
+  .aw-lightbox-inner img { display:block; max-width:none; transition:transform .1s; transform-origin:0 0; }
+  .aw-lightbox-bar { display:flex; gap:10px; align-items:center; margin-top:10px;
+                     background:rgba(255,255,255,.1); border-radius:20px; padding:6px 14px; }
+  .aw-lightbox-bar button { background:rgba(255,255,255,.18); border:none; color:#fff;
+                             border-radius:16px; padding:4px 14px; cursor:pointer; font-size:14px; }
+  .aw-lightbox-bar button:hover { background:rgba(255,255,255,.32); }
+  .aw-lightbox-label { color:rgba(255,255,255,.7); font-size:12px; min-width:60px; text-align:center; }
+  .aw-lightbox-close { position:absolute; top:12px; right:16px; font-size:26px; color:#fff;
+                       cursor:pointer; line-height:1; opacity:.7; }
+  .aw-lightbox-close:hover { opacity:1; }
 
   details > summary { cursor:pointer; color:#1976d2; margin-top:10px; }
   pre.aw-pre { background:#263238; color:#cfd8dc; padding:10px; border-radius:6px; max-height:240px; overflow:auto; white-space:pre-wrap; font-size:12px; font-family:var(--font-mono,ui-monospace,Menlo,monospace); }
@@ -263,6 +289,21 @@
   </div>
 </div>
 {% endblock %}
+
+<!-- Lightbox overlay (shared: ทั้ง artwork_check และ history) -->
+<div id="awLightbox" class="aw-lightbox" role="dialog" aria-modal="true">
+  <span class="aw-lightbox-close" id="awLbClose" title="ปิด (Esc)">✕</span>
+  <div class="aw-lightbox-inner" id="awLbInner">
+    <img id="awLbImg" src="" alt="ขยาย">
+  </div>
+  <div class="aw-lightbox-bar">
+    <button id="awLbZoomOut">− ย่อ</button>
+    <span class="aw-lightbox-label" id="awLbPct">100%</span>
+    <button id="awLbZoomIn">+ ขยาย</button>
+    <button id="awLbReset">↺ reset</button>
+    <span class="aw-lightbox-label" id="awLbCaption" style="margin-left:12px;"></span>
+  </div>
+</div>
 
 {% block extra_js %}
 <script src="{{ url_for('static', filename='js/artwork_check.js') }}"></script>

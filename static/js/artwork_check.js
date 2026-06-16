@@ -50,8 +50,20 @@
     });
     html += "</div>";
 
-    html += '<div class="aw-overlay-box"><img src="/api/artwork/' +
-      esc(rep.id) + '/overlay.png?t=' + Date.now() + '" alt="overlay"></div>';
+    // ── 2 รูปเคียงกัน: Artwork ต้นฉบับ + ผลตรวจ (overlay) ──────────
+    const ts = Date.now();
+    const previewUrl = "/api/artwork/" + esc(rep.id) + "/preview.png?t=" + ts;
+    const overlayUrl = "/api/artwork/" + esc(rep.id) + "/overlay.png?t=" + ts;
+    html += '<div class="aw-img-pair">' +
+      '<div class="aw-img-card">' +
+        '<div class="aw-img-label">🖼 Artwork ต้นฉบับ <span style="font-weight:400;opacity:.7;">(คลิกขยาย)</span></div>' +
+        '<img src="' + previewUrl + '" alt="artwork preview" class="aw-zoomable" data-caption="Artwork ต้นฉบับ" data-src="' + previewUrl + '">' +
+      '</div>' +
+      '<div class="aw-img-card">' +
+        '<div class="aw-img-label overlay-label">🔍 ผลตรวจ — โซนที่พบปัญหา <span style="font-weight:400;opacity:.7;">(คลิกขยาย)</span></div>' +
+        '<img src="' + overlayUrl + '" alt="overlay" class="aw-zoomable" data-caption="ผลตรวจ (Overlay)" data-src="' + overlayUrl + '">' +
+      '</div>' +
+    '</div>';
 
     const zoneById = {};
     (rep.zones || []).forEach((z) => { zoneById[z.id] = z; });
@@ -68,9 +80,10 @@
         if (d.reference) html += ' &nbsp;เทียบกับ: <span class="ref">' + esc(d.reference) + "</span>";
         if (z) {
           const q = "x=" + z.bbox[0] + "&y=" + z.bbox[1] + "&w=" + z.bbox[2] + "&h=" + z.bbox[3];
-          html += '<br><span class="crop-link" data-crop="/api/artwork/' + esc(rep.id) +
-            '/crop?' + q + '" data-idx="' + i + '">🔍 ดูภาพโซนนี้ความละเอียดสูง</span>' +
-            '<span id="awCropSlot' + i + '"></span>';
+          const cropUrl = "/api/artwork/" + esc(rep.id) + "/crop?" + q;
+          html += '<br><span class="crop-link" data-crop="' + esc(cropUrl) +
+            '" data-idx="' + i + '">🔍 ดูภาพโซนนี้ความละเอียดสูง</span>' +
+            '<div id="awCropSlot' + i + '" style="margin-top:4px;"></div>';
         }
         html += "</div>";
       });
@@ -87,18 +100,96 @@
     html += "</details>";
 
     box.innerHTML = html;
+
+    // wire crop-link (inline expand)
     box.querySelectorAll(".crop-link").forEach((el) => {
       el.addEventListener("click", () => {
         const slot = document.getElementById("awCropSlot" + el.dataset.idx);
         if (slot && !slot.querySelector("img")) {
           const img = document.createElement("img");
           img.src = el.dataset.crop;
+          img.style.cssText = "max-width:100%;border-radius:4px;margin-top:4px;cursor:zoom-in;";
+          img.className = "aw-zoomable";
+          img.dataset.caption = "Crop โซน #" + el.dataset.idx;
+          img.dataset.src = el.dataset.crop;
           slot.appendChild(img);
+          wireZoomable(img);
         }
       });
     });
+
+    // wire lightbox on result images
+    box.querySelectorAll(".aw-zoomable").forEach(wireZoomable);
   }
   window.awRenderReport = renderReport;
+
+  // ── Lightbox ───────────────────────────────────────────────────────
+  let lbScale = 1;
+  let lbDrag = null;
+  let lbScrollStart = null;
+
+  const lightbox  = document.getElementById("awLightbox");
+  const lbImg     = document.getElementById("awLbImg");
+  const lbInner   = document.getElementById("awLbInner");
+  const lbPct     = document.getElementById("awLbPct");
+  const lbCaption = document.getElementById("awLbCaption");
+
+  function lbOpen(src, caption) {
+    lbScale = 1;
+    lbImg.src = src;
+    lbImg.style.transform = "scale(1)";
+    lbPct.textContent = "100%";
+    lbCaption.textContent = caption || "";
+    lbInner.scrollLeft = 0;
+    lbInner.scrollTop  = 0;
+    lightbox.classList.add("open");
+    document.body.style.overflow = "hidden";
+  }
+  function lbClose() {
+    lightbox.classList.remove("open");
+    document.body.style.overflow = "";
+    lbImg.src = "";
+  }
+  function lbSetScale(s) {
+    lbScale = Math.min(8, Math.max(0.2, s));
+    lbImg.style.transform = "scale(" + lbScale + ")";
+    lbImg.style.transformOrigin = "top left";
+    lbPct.textContent = Math.round(lbScale * 100) + "%";
+  }
+
+  if (lightbox) {
+    document.getElementById("awLbClose").addEventListener("click", lbClose);
+    lightbox.addEventListener("click", (e) => { if (e.target === lightbox) lbClose(); });
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape") lbClose(); });
+
+    document.getElementById("awLbZoomIn").addEventListener("click",  () => lbSetScale(lbScale * 1.3));
+    document.getElementById("awLbZoomOut").addEventListener("click", () => lbSetScale(lbScale / 1.3));
+    document.getElementById("awLbReset").addEventListener("click",   () => lbSetScale(1));
+
+    // scroll wheel = zoom
+    lbInner.addEventListener("wheel", (e) => {
+      e.preventDefault();
+      lbSetScale(lbScale * (e.deltaY < 0 ? 1.1 : 0.9));
+    }, { passive: false });
+
+    // drag to pan
+    lbInner.addEventListener("mousedown", (e) => {
+      lbDrag = { x: e.clientX + lbInner.scrollLeft, y: e.clientY + lbInner.scrollTop };
+    });
+    document.addEventListener("mousemove", (e) => {
+      if (!lbDrag) return;
+      lbInner.scrollLeft = lbDrag.x - e.clientX;
+      lbInner.scrollTop  = lbDrag.y - e.clientY;
+    });
+    document.addEventListener("mouseup", () => { lbDrag = null; });
+  }
+
+  function wireZoomable(img) {
+    img.addEventListener("click", () => {
+      lbOpen(img.dataset.src || img.src, img.dataset.caption || img.alt);
+    });
+  }
+  window.awWireZoomable = wireZoomable;
 
   // ── text + translation table (shared with history page) ───────────
   function reEsc(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
