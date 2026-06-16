@@ -68,7 +68,14 @@ latest_raw_frame = None           # newest raw BGR frame from the camera
 raw_frame_seq = 0                 # increments on every new captured frame
 raw_lock = threading.Lock()
 
-latest_detections = []            # newest detection list from the model
+# The inference thread publishes its detections *together with the exact frame
+# they were computed on* (and that frame's seq). The MJPEG generator then draws
+# each detection on its own frame — so the box always sits on the can where the
+# model actually saw it, instead of being pasted onto a newer frame where the
+# can has already moved on (that mismatch was the "box lags the can" bug).
+latest_detections = []            # detections for latest_det_frame
+latest_det_frame = None           # the exact frame those detections came from
+latest_det_seq = -1               # seq of latest_det_frame (drives re-encode)
 det_lock = threading.Lock()
 
 detection_stats = {
@@ -162,7 +169,8 @@ def inference_loop():
     draws it) and handles cooldown-gated DB logging. Skips frames it has
     already processed so it never blocks waiting for new ones.
     """
-    global latest_detections, detection_stats, defect_log_cooldown
+    global latest_detections, latest_det_frame, latest_det_seq
+    global detection_stats, defect_log_cooldown
 
     logger.info("Inference loop started")
     last_seq = -1
@@ -183,8 +191,12 @@ def inference_loop():
             else:
                 detections = []
 
+            # Publish the detections together with the frame they ran on so the
+            # generator can draw them in sync (see latest_det_frame comment).
             with det_lock:
                 latest_detections = detections
+                latest_det_frame = frame
+                latest_det_seq = seq
 
             detection_stats["current_defects"] = len(detections)
             if detections:
@@ -219,10 +231,11 @@ def inference_loop():
 
 def generate_frames():
     """
-    MJPEG generator. Composites the newest detections onto the newest raw
-    frame at the stream rate, independent of the (possibly slower) inference
-    rate. Re-encodes JPEG only when a new camera frame has arrived, so a
-    stalled or idle feed costs nothing.
+    MJPEG generator. Draws each detection on the exact frame the model ran it
+    on (published together by inference_loop), so the box stays locked to the
+    can instead of trailing behind a newer frame. The displayed feed therefore
+    refreshes at the inference rate; re-encodes JPEG only when a new inference
+    frame has arrived, so a stalled or idle feed costs nothing.
     """
     # Placeholder frame (created once)
     placeholder = np.zeros((480, 640, 3), dtype=np.uint8)
@@ -235,15 +248,15 @@ def generate_frames():
     frame_bytes = placeholder_bytes
 
     while True:
-        with raw_lock:
-            frame = latest_raw_frame
-            seq = raw_frame_seq
+        with det_lock:
+            frame = latest_det_frame
+            detections = latest_detections
+            seq = latest_det_seq
 
-        # Only redo work when the camera produced a new frame.
+        # Only redo work when a fresh inference frame (frame + its detections)
+        # is available.
         if frame is not None and seq != last_encoded_seq:
             last_encoded_seq = seq
-            with det_lock:
-                detections = latest_detections
 
             if detector is not None and detector.model is not None:
                 annotated = detector.draw_detections(frame, detections)
@@ -311,6 +324,7 @@ def start_detection():
     """Start defect detection with the selected camera."""
     global detection_active, capture_thread, inference_thread, camera
     global latest_raw_frame, raw_frame_seq, latest_detections
+    global latest_det_frame, latest_det_seq
 
     if detection_active:
         return jsonify({"status": "already_running", "message": "Detection already active"}), 200
@@ -353,6 +367,8 @@ def start_detection():
         raw_frame_seq = 0
     with det_lock:
         latest_detections = []
+        latest_det_frame = None
+        latest_det_seq = -1
 
     detection_active = True
     capture_thread = threading.Thread(target=capture_loop, daemon=True)
@@ -368,7 +384,7 @@ def start_detection():
 def stop_detection():
     """Stop defect detection and release camera."""
     global detection_active, camera, capture_thread, inference_thread
-    global latest_raw_frame, latest_detections
+    global latest_raw_frame, latest_detections, latest_det_frame, latest_det_seq
 
     detection_active = False
 
@@ -388,6 +404,8 @@ def stop_detection():
         latest_raw_frame = None
     with det_lock:
         latest_detections = []
+        latest_det_frame = None
+        latest_det_seq = -1
 
     logger.info("Detection stopped")
     return jsonify({"status": "stopped", "message": "Detection stopped successfully"})

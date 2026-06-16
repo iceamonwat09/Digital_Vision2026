@@ -259,6 +259,7 @@ class YOLODetector:
                 frame,
                 conf=model_conf,
                 iou=self.iou_threshold,
+                imgsz=config.YOLO_IMGSZ,
                 max_det=config.YOLO_MAX_DET,
                 verbose=False
             )

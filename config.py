@@ -49,6 +49,12 @@ IOU_THRESHOLD = 0.45
 # stalling the live feed (was unbounded at the old conf=0.01 debug floor).
 YOLO_MAX_DET = 20
 
+# Inference image size passed to the model. Lower = faster inference = the box
+# tracks the moving can more closely (less temporal lag). 640 is the YOLO
+# default; 480 roughly doubles FPS on CPU with negligible accuracy loss for
+# can-body dents at this camera resolution. Drop to 320 for even more speed.
+YOLO_IMGSZ = 480
+
 # ====================
 # DEFECT CLASS MAPPING  (Can Dent Detection)
 # ====================
