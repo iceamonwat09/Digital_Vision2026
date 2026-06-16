@@ -61,3 +61,7 @@ data/label_paper/inspections/
 data/label_paper/reports/
 # Rendered-master cache: regenerated on first inspect, no need to track
 data/label_paper/skus/*/master_*dpi.png
+
+# Artwork Proof Check — runtime data, not source
+# (zone templates + brand vocab are kept in git so the team shares them)
+data/artwork_check/inspections/

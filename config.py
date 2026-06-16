@@ -7,7 +7,7 @@ import os
 
 # Bump this whenever a config default changes so a running deployment can
 # print it on startup and confirm it is actually executing the new code.
-CONFIG_VERSION = "2026.06.11-label-accuracy+perf"
+CONFIG_VERSION = "2026.06.16-artwork-compare-images"
 
 # ====================
 # CAMERA CONFIGURATION
@@ -128,7 +128,7 @@ OCR_BACKEND = os.getenv("OCR_BACKEND", "").strip().lower()
 # `blocks` is optional — when missing, only line-level text comparison is possible.
 N8N_OCR_WEBHOOK_URL = os.getenv(
     "N8N_OCR_WEBHOOK_URL",
-    "http://172.32.201.106:5678/webhook/3d597970-f7de-4a8c-85eb-c9ad8c1e0877",
+    "http://172.32.201.106:5678/webhook/artwork-ocr",
 ).strip()
 N8N_OCR_TIMEOUT_S = float(os.getenv("N8N_OCR_TIMEOUT_S", "60"))
 

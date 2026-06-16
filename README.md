@@ -1,504 +1,303 @@
-# Water Bottle Defect Detection System
+# Thai Union — ระบบตรวจสอบบรรจุภัณฑ์ (Packaging Inspection System)
 
-A production-ready, real-time YOLO-based defect detection system for packaged water bottle production lines. The system uses an external USB webcam for live video capture and YOLOv8 for defect detection.
+ระบบตรวจสอบบรรจุภัณฑ์แบบครบวงจรสำหรับสายการผลิต Thai Union รวม **3 โหมด**
+ไว้ในเว็บแอปเดียว โดยแต่ละโหมดทำงานแยกอิสระจากกัน (โหมดหนึ่งล่มไม่กระทบอีกโหมด):
 
-## Features
+| โหมด | งานที่ตรวจ | เทคนิคหลัก |
+|---|---|---|
+| **ตรวจจับสด** (Live Detection) | ตำหนิกระป๋อง/บรรจุภัณฑ์แบบเรียลไทม์จากกล้อง | YOLOv8 (Ultralytics) |
+| **ตรวจฉลากกระดาษ** (Label Paper) | เทียบฉลากที่พิมพ์จริงกับ master PDF (สี ΔE2000 + ข้อความ) | PyMuPDF + scikit-image + OCR |
+| **ตรวจ Artwork** (Artwork Proof Check) | สะกดคำ / ตัวเลข / ความตรงกันของ panel บนไฟล์ artwork ก่อนพิมพ์ | OCR (N8N→Gemini) + 4 ชั้นตรวจ + คำแปล |
 
-- **Real-time Detection**: Live video streaming with YOLO object detection
-- **External USB Webcam Support**: Configurable camera index for external webcams
-- **Defect Classification**: Bottle shape (i.e. crumbled, not-crumbled), missing labels, bottle cap (i.e. cap, no cap)
-- **Web Dashboard**: Interactive web interface with live feed, analytics, and defect history
-- **Database Logging**: MongoDB integration for defect storage and analysis
-- **Dark Theme UI**: Modern, responsive dark theme interface
+> เดิมโปรเจกต์นี้เริ่มจากระบบตรวจขวดน้ำด้วย YOLO และถูกพัฒนาต่อเป็นระบบตรวจ
+> บรรจุภัณฑ์หลายโหมดของ Thai Union ฐานข้อมูลย้ายจาก MongoDB → **SQL Server (VisionIQ)**
 
-## System Architecture
+---
 
-### Components
+## สารบัญ
 
-1. **Camera Module** (`camera.py`): Handles external USB webcam initialization and frame capture
-2. **YOLO Detector** (`yolo_detector.py`): YOLOv8 model loading, inference, and visualization
-3. **Database Module** (`database.py`): MongoDB operations for defect logging and retrieval
-4. **Flask Application** (`app.py`): Web server with MJPEG streaming and API endpoints
-5. **Frontend**: HTML/CSS/JavaScript for live detection, dashboard, and history pages
+1. [สถาปัตยกรรมระบบ](#สถาปัตยกรรมระบบ)
+2. [การติดตั้ง](#การติดตั้ง)
+3. [การตั้งค่า (config.py)](#การตั้งค่า-configpy)
+4. [การรันแอป](#การรันแอป)
+5. [โหมดที่ 1 — ตรวจจับสด (YOLO)](#โหมดที่-1--ตรวจจับสด-yolo)
+6. [โหมดที่ 2 — ตรวจฉลากกระดาษ (ΔE2000)](#โหมดที่-2--ตรวจฉลากกระดาษ-δe2000)
+7. [โหมดที่ 3 — ตรวจ Artwork (OCR + 4 ชั้น)](#โหมดที่-3--ตรวจ-artwork-ocr--4-ชั้น)
+8. [การตั้งค่า N8N → Gemini](#การตั้งค่า-n8n--gemini)
+9. [API Endpoints](#api-endpoints)
+10. [โครงสร้างโปรเจกต์](#โครงสร้างโปรเจกต์)
+11. [Test](#test)
+
+---
+
+## สถาปัตยกรรมระบบ
 
 ### Technology Stack
 
-- **Backend**: Python, Flask, OpenCV, Ultralytics YOLOv8
-- **Frontend**: HTML5, CSS3, JavaScript, Chart.js
-- **Database**: MongoDB
-- **Camera**: External USB Webcam (configurable index)
+- **Backend**: Python 3.8+, Flask, OpenCV
+- **Detection**: Ultralytics YOLOv8 (โหมดตรวจจับสด)
+- **Label/Artwork**: PyMuPDF (render PDF + text layer), scikit-image (ΔE CIEDE2000),
+  python-Levenshtein, pyspellchecker
+- **OCR / แปลภาษา**: N8N webhook ที่หน้า Gemini 2.5 Flash (Vertex AI หรือ AI Studio)
+- **Database**: SQL Server 2014 (`pyodbc`) — เก็บประวัติการตรวจ
+- **Frontend**: HTML5 / CSS3 / JavaScript (Jinja2 templates), Chart.js
+- **Typography**: IBM Plex Sans Thai + IBM Plex Mono (มี fallback ฟอนต์ระบบเมื่อ offline)
 
-## Installation
+### หลักการออกแบบสำคัญ
+
+- **แยกโหมดเด็ดขาด** — โหมด Artwork ลงทะเบียนเป็น Flask blueprint ใน `try/except`
+  ความผิดพลาดในโหมดนี้ปิดได้เฉพาะตัวมันเอง ไม่ล้มโหมด Can Dent / Label
+- **ข้อมูลแต่ละโหมดแยกโฟลเดอร์** — `data/artwork_check/` ลบทิ้งทั้งก้อนได้โดยไม่กระทบฟีเจอร์อื่น
+- **กฎเหล็กของโหมด Artwork**: ระบบ **ห้ามเดา/เสนอคำเองในส่วนที่ตัดสิน PASS/FAIL**
+  — การตรวจบอกได้แค่ "คำนี้ไม่อยู่ในพจนานุกรม" ส่วนคำแปล/คำแนะนำเป็น advisory แยกแท็บ
+
+---
+
+## การติดตั้ง
 
 ### Prerequisites
 
-1. **Python 3.8 or higher**
-2. **MongoDB** (Install from https://www.mongodb.com/try/download/community)
-3. **External USB Webcam**
+1. **Python 3.8+**
+2. **SQL Server** (สำหรับเก็บประวัติ — ดู `Connection_sql/`)
+3. **ODBC Driver for SQL Server** (เช่น `msodbcsql17`/`18`)
+4. **กล้อง USB หรือ IP (RTSP)** สำหรับโหมดตรวจจับสด
+5. **N8N + Gemini** (สำหรับโหมด Artwork / ฟีเจอร์ OCR) — ดูหัวข้อ N8N
 
-### Step 1: Install Dependencies
+### ติดตั้ง dependencies
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### Step 2: Install MongoDB
-
-**Windows:**
-1. Download MongoDB Community Server from https://www.mongodb.com/try/download/community
-2. Install and start MongoDB service
-3. MongoDB will run on `localhost:27017` by default
-
-**Linux/macOS:**
-```bash
-# Ubuntu/Debian
-sudo apt-get install mongodb
-
-# macOS (using Homebrew)
-brew install mongodb-community
-brew services start mongodb-community
-
-# Start MongoDB
-sudo systemctl start mongodb  # Linux
-# or
-mongod  # If not running as service
-```
-
-### Step 3: Configure External USB Webcam
-
-## CRITICAL: External USB Webcam Setup
-
-The system is configured to use an **EXTERNAL USB WEBCAM** (not your laptop's built-in camera).
-
-### Finding Your Camera Index
-
-1. **Connect your external USB webcam** to your computer
-
-2. **List available cameras:**
-   ```bash
-   python camera.py
-   ```
-   
-   Or run this Python command:
-   ```bash
-   python -c "import cv2; [print(f'Index {i}: Available') if cv2.VideoCapture(i).read()[0] else print(f'Index {i}: Not available') for i in range(5)]"
-   ```
-
-3. **Identify your external webcam:**
-   - Index 0 is typically the built-in/laptop camera
-   - Index 1, 2, 3, etc. are usually external USB webcams
-   - Try opening each index to confirm which is your external webcam
-
-4. **Update configuration:**
-   Open `config.py` and set the `CAMERA_INDEX`:
-   ```python
-   CAMERA_INDEX = 1  # Change this to your external webcam index
-   ```
-
-### Testing Camera Access
-
-Run this test script to verify your camera works:
-```python
-import cv2
-from camera import Camera
-
-cam = Camera(camera_index=1)  # Use your camera index
-if cam.initialize():
-    print("Camera initialized successfully!")
-    frame = cam.get_frame()
-    if frame is not None:
-        print(f"Frame captured: {frame.shape}")
-    cam.release()
-else:
-    print("Camera initialization failed!")
-```
-
-### Switching Between Webcams
-
-1. Open `config.py`
-2. Change `CAMERA_INDEX` to the desired camera index
-3. Restart the application
-
-### Troubleshooting Camera Issues
-
-**Problem: Camera not detected**
-- Ensure the external webcam is connected and powered on
-- Try a different USB port
-- Check if the camera works in other applications (e.g., Windows Camera app)
-- Run `python camera.py` to list available cameras
-
-**Problem: Camera index wrong**
-- List all available cameras using the methods above
-- Try different indices (1, 2, 3, etc.)
-- Restart the application after changing the index
-
-**Problem: Permission denied (Linux)**
-- Add your user to the `video` group: `sudo usermod -a -G video $USER`
-- Log out and log back in
-- On Ubuntu, you may need to grant camera permissions in system settings
-
-**Problem: Camera already in use**
-- Close other applications using the camera
-- Restart the application
-
-## Configuration
-
-Edit `config.py` to configure:
-
-- **Camera Settings**:
-  - `CAMERA_INDEX`: External USB webcam index (default: 1)
-  - `CAMERA_WIDTH`, `CAMERA_HEIGHT`: Video resolution
-  - `CAMERA_FPS`: Frame rate
-
-- **YOLO Model**:
-  - `MODEL_PATH`: Path to YOLO model (default: "yolov8n.pt" - will download automatically)
-  - `CONFIDENCE_THRESHOLD`: Detection confidence threshold (0.0-1.0)
-  - `IOU_THRESHOLD`: Non-maximum suppression threshold
-
-- **Database**:
-  - `MONGODB_URI`: MongoDB connection string
-  - `DATABASE_NAME`: Database name
-  - `COLLECTION_NAME`: Collection name
-
-- **Defect Logging**:
-  - `DEFECT_LOGGING_COOLDOWN`: Cooldown period to avoid duplicate logging (seconds)
-
-## Running the Application
-
-### Step 1: Start MongoDB
-
-Ensure MongoDB is running:
+แพ็กเกจเสริม (ไม่บังคับ — ระบบทำงานได้โดยข้ามฟีเจอร์ที่เกี่ยวข้องถ้าไม่ติดตั้ง):
 
 ```bash
-# Windows: MongoDB should start automatically as a service
-# Or start manually:
-mongod
-
-# Linux/macOS:
-sudo systemctl start mongodb
-# or
-mongod
+pip install pyspellchecker      # โหมด Artwork: ชั้นตรวจ dictionary (SPELL_FAIL)
+apt-get install libzbar0 && pip install pyzbar   # ถอดบาร์โค้ด EAN-13 แม่นขึ้น
 ```
-
-### Step 2: Run the Application
-
-```bash
-python app.py
-```
-
-The application will:
-1. Initialize the external USB webcam
-2. Load the YOLO model
-3. Connect to MongoDB
-4. Start the Flask web server
-
-### Step 3: Access the Web Interface
-
-Open your web browser and navigate to:
-
-```
-http://localhost:5000
-```
-
-## Usage
-
-### Live Detection Page
-
-1. Navigate to the **Live Detection** page (home page)
-2. Click **Start Detection** to begin real-time defect detection
-3. View live video feed with bounding boxes around detected defects
-4. Monitor active defect count and total detected defects
-5. Click **Stop Detection** to pause detection
-
-### Analysis Dashboard
-
-1. Navigate to the **Dashboard** page
-2. View overall statistics:
-   - Total bottles inspected
-   - Total defects detected
-   - Recent defects (24 hours)
-3. View defect distribution by type (pie chart)
-4. View defect trends over time (line chart)
-5. Click **Refresh Data** to update statistics
-
-### Defect History
-
-1. Navigate to the **History** page
-2. Browse all detected defects with thumbnail previews
-3. Filter by defect type using the dropdown
-4. Click on a defect card to view full-size image and details
-5. Use pagination to browse through defects
-
-## YOLO Model Configuration
-
-### Using Pretrained Model (Demo)
-
-The system uses YOLOv8n (nano) by default, which will download automatically on first run. This is suitable for demonstration purposes.
-
-**Note**: The pretrained YOLOv8 model is trained on COCO dataset and may not detect water bottle defects accurately. For production use, you need a custom-trained model.
-
-### Training a Custom Model
-
-> **Important**: Custom trained models are not included in this repository (`.gitignore`). If you clone this project, you'll need to train your own model or use the pretrained YOLOv8 model for demonstration.
-
-This project includes two training scripts optimized for different dataset sizes:
-
-#### Option 1: Standard Training Script (Recommended for 200+ images)
-
-Use `train_custom_model.py` for standard datasets:
-
-**Step 1: Prepare Your Dataset**
-
-Organize your dataset in YOLO format:
-```
-bottle_defect_dataset/
-  ├── images/
-  │   ├── train/          # Training images
-  │   └── val/            # Validation images
-  ├── labels/
-  │   ├── train/          # Training labels (.txt files)
-  │   └── val/            # Validation labels (.txt files)
-  └── data.yaml           # Dataset configuration
-```
-
-**Step 2: Create `data.yaml`**
-
-Create a `data.yaml` file in your dataset directory:
-```yaml
-# Dataset paths (relative to data.yaml location)
-path: .
-train: images/train
-val: images/val
-
-# Number of classes
-nc: 5
-
-# class names
-names:
-  0: cap
-  1: crumbled
-  2: label
-  3: no-cap
-  4: not-crumbled
-```
-
-**Step 3: Collect and Annotate Images**
-
-1. **Collect Images**: Gather images of water bottles with various defects
-   - Recommended: 100-200+ images per defect class
-   - Include normal bottles and various lighting conditions
-   - Use diverse backgrounds and angles
-
-2. **Annotate Images**: Use annotation tools to label defects
-   - **Roboflow** (recommended): https://roboflow.com - Web-based, easy export to YOLO format
-   - **LabelImg**: https://github.com/heartexlabs/labelImg - Desktop tool
-   - **CVAT**: https://www.cvat.ai - Advanced web-based tool
-   
-3. **Export in YOLO Format**: Ensure labels are in YOLO format (.txt files)
-
-**Step 4: Run Training**
-
-```bash
-python train_custom_model.py
-```
-
-The script will:
-- Automatically detect your dataset size
-- Configure optimal training parameters (epochs, batch size, augmentation)
-- Train the model with progress updates
-- Save the best model automatically
-
-**Training Output**:
-- Best model: `runs/detect/bottle_defects/weights/best.pt`
-- Last checkpoint: `runs/detect/bottle_defects/weights/last.pt`
-- Training plots: `runs/detect/bottle_defects/results.png`
-
-#### Option 2: Few-Shot Learning (For 10-100 images)
-
-Use `train_fewshot.py` for limited datasets:
-
-```bash
-python train_fewshot.py
-```
-
-This script uses aggressive data augmentation to maximize performance with limited data:
-- Mosaic augmentation (combines 4 images)
-- Mixup augmentation (blends images)
-- Copy-paste augmentation
-- Enhanced color/geometric transformations
-
-#### Step 5: Configure the Application
-
-After training completes, update `config.py`:
-
-```python
-# Update this line with your trained model path
-MODEL_PATH = r"runs/detect/bottle_defects/weights/best.pt"
-
-# Ensure class names match your data.yaml
-DEFECT_CLASSES = {
-  0: "cap"
-  1: "crumbled"
-  2: "label"
-  3: "no-cap"
-  4: "not-crumbled"
-}
-```
-
-#### Step 6: Test Your Model
-
-```bash
-python app.py
-```
-
-Navigate to `http://localhost:5000` and test detection on the Live Detection page.
-
-#### Training Tips
-
-**For Best Results**:
-- Use at least 100 images per class
-- Include variety: different angles, lighting, backgrounds
-- Balance your dataset (similar number of images per class)
-- Use validation set (20% of total images)
-
-**Hardware Recommendations**:
-- **GPU**: NVIDIA GPU with CUDA support (10x faster training)
-- **CPU**: Training possible but slower (1-10 hours depending on dataset)
-- **RAM**: 8GB minimum, 16GB recommended
-
-**Troubleshooting**:
-- If training is slow: Reduce batch size in the script
-- If out of memory: Reduce batch size or image size
-- If poor accuracy: Collect more diverse images, check annotations
-- If overfitting: Increase dataset size or augmentation
-
-## API Endpoints
-
-### Detection Control
-
-- `POST /api/detection/start`: Start defect detection
-- `POST /api/detection/stop`: Stop defect detection
-- `GET /api/detection/status`: Get detection status and statistics
-
-### Data Retrieval
-
-- `GET /api/stats`: Get defect statistics and time series data
-- `GET /api/defects?limit=100&skip=0&type=<defect_type>`: Get defect history
-- `GET /api/camera/list`: List available cameras
-
-### Video Streaming
-
-- `GET /video_feed`: MJPEG video stream
-
-## Project Structure
-
-```
-.
-├── app.py                  # Flask application (main entry point)
-├── camera.py               # External USB webcam handling
-├── yolo_detector.py        # YOLO model and inference
-├── database.py             # MongoDB operations
-├── config.py               # Configuration file
-├── requirements.txt        # Python dependencies
-├── README.md              # This file
-├── templates/             # HTML templates
-│   ├── base.html
-│   ├── index.html         # Live detection page
-│   ├── dashboard.html     # Analytics dashboard
-│   └── history.html       # Defect history page
-└── static/                # Static assets
-    ├── css/
-    │   └── style.css      # Dark theme styles
-    └── js/
-        └── main.js        # Common JavaScript
-```
-
-## Troubleshooting
-
-### Application Won't Start
-
-**Issue**: Camera initialization failed
-- **Solution**: Check camera index in `config.py`, ensure external webcam is connected, try different USB port
-
-**Issue**: MongoDB connection failed
-- **Solution**: Ensure MongoDB is running (`mongod`), check connection string in `config.py`
-
-**Issue**: YOLO model not found
-- **Solution**: Model will download automatically on first run. Ensure internet connection is available.
-
-### Video Feed Not Showing
-
-**Issue**: Black screen or "Waiting for camera"
-- **Solution**: 
-  - Verify camera index is correct
-  - Check if camera is being used by another application
-  - Restart the application
-  - Check camera permissions (Linux/macOS)
-
-**Issue**: Video feed is from wrong camera
-- **Solution**: Change `CAMERA_INDEX` in `config.py` and restart
-
-### Detection Not Working
-
-**Issue**: No defects detected
-- **Solution**: 
-  - The pretrained YOLOv8 model may not detect water bottle defects
-  - Train a custom model with your specific defect classes
-  - Lower confidence threshold in `config.py`
-  - Ensure good lighting and camera positioning
-
-**Issue**: Too many false positives
-- **Solution**: 
-  - Increase confidence threshold in `config.py`
-  - Train a custom model with more diverse data
-  - Adjust camera angle and lighting
-
-### Database Issues
-
-**Issue**: Defects not being logged
-- **Solution**: 
-  - Verify MongoDB is running
-  - Check MongoDB connection in `config.py`
-  - Check database logs for errors
-
-**Issue**: Database connection timeout
-- **Solution**: 
-  - Ensure MongoDB is accessible at configured URI
-  - Check firewall settings
-  - Verify MongoDB service is running
-
-## Performance Optimization
-
-- **Model Size**: Use YOLOv8n (nano) for faster inference, YOLOv8x for better accuracy
-- **Resolution**: Lower camera resolution for better FPS
-- **Frame Rate**: Adjust `STREAM_FPS` in `config.py` to reduce bandwidth
-- **GPU**: Install PyTorch with CUDA support for GPU acceleration (optional)
-
-## License
-
-This project is provided as-is for educational and demonstration purposes.
-
-## Support
-
-For issues related to:
-- **YOLO**: https://github.com/ultralytics/ultralytics
-- **OpenCV**: https://opencv.org/
-- **MongoDB**: https://www.mongodb.com/docs/
-- **Flask**: https://flask.palletsprojects.com/
-
-## Notes
-
-- The system uses a pretrained YOLOv8 model by default, which may not accurately detect water bottle defects
-- For production use, train a custom YOLO model with your specific defect classes
-- Ensure proper lighting and camera positioning for best results
-- The external USB webcam configuration is critical - always verify the camera index before use
 
 ---
 
-## 👨‍💻 Author
+## การตั้งค่า (config.py)
 
-**Mayank Agrawal**
+แก้ไฟล์ `config.py` (ค่าที่ใช้บ่อย):
 
-[![GitHub Profile](https://img.shields.io/badge/GitHub-MayankAgrawal099-181717?style=flat-square&logo=github&logoColor=white)](https://github.com/MayankAgrawal099)
+```python
+# กล้อง
+CAMERA_INDEX = 0            # index กล้อง USB (รัน/api/camera/scan เพื่อหา)
 
-> *If you found this project helpful, please consider giving it a ⭐️!*
+# SQL Server (เก็บประวัติ)
+SQL_SERVER   = "172.32.0.50"
+SQL_DATABASE = "VisionIQ"
+SQL_USER     = "sa"
+SQL_PASSWORD = "********"
+
+# Flask
+FLASK_HOST = "0.0.0.0"
+FLASK_PORT = 5000
+FLASK_DEBUG = False
+```
+
+### Environment variables (โหมด Artwork / OCR)
+
+ตั้งผ่าน env ได้โดยไม่ต้องแก้โค้ด:
+
+| ตัวแปร | ค่า default | หน้าที่ |
+|---|---|---|
+| `N8N_OCR_WEBHOOK_URL` | `http://172.32.201.106:5678/webhook/artwork-ocr` | OCR ถอดข้อความจากภาพโซน |
+| `N8N_TRANSLATE_WEBHOOK_URL` | `http://172.32.201.106:5678/webhook/artwork-translate` | แปลข้อความเป็น EN (แท็บคำแปล) |
+| `OCR_BACKEND` | (ว่าง) | `n8n` / `stub` / `vertex` — ว่างไว้ระบบเลือก n8n ให้เมื่อมี URL |
+| `ARTWORK_OCR_DPI` | `450` | ความละเอียดที่ render โซนส่ง OCR |
+| `ARTWORK_PREVIEW_DPI` | `150` | ความละเอียด preview ในเบราว์เซอร์ |
+| `ARTWORK_SPELL_LANGS` | `en,es` | ภาษาที่ชั้น dictionary ตรวจ |
+
+---
+
+## การรันแอป
+
+```bash
+python app.py
+```
+
+เปิดเบราว์เซอร์ไปที่ `http://localhost:5000` (หรือ IP เครื่อง:5000)
+
+เมนูบนสุด: **ตรวจจับสด · ตรวจฉลากกระดาษ · ตรวจ Artwork · แดชบอร์ด · ประวัติ**
+
+---
+
+## โหมดที่ 1 — ตรวจจับสด (YOLO)
+
+ตรวจตำหนิบรรจุภัณฑ์แบบเรียลไทม์จากกล้อง
+
+**หน้าใช้งาน** (`/`) จัดเป็นแผงควบคุม 3 ขั้น:
+1. **โหมดตรวจสอบ** — เลือกโมเดล (`can_dent` / `label`) และไฟล์ `.pt`
+2. **แหล่งสัญญาณภาพ** — กล้อง USB หรือ IP (RTSP)
+3. **เริ่ม/หยุด** — Start/Stop Detection พร้อมสถิติ Active/Total
+
+**โมเดล** เก็บไฟล์ `.pt` ในโฟลเดอร์ weights ต่อโหมด (ดู `modes/registry.py`)
+สลับโมเดล/โหมดได้จาก UI ไม่ต้องรีสตาร์ต
+
+---
+
+## โหมดที่ 2 — ตรวจฉลากกระดาษ (ΔE2000)
+
+เทียบฉลากที่พิมพ์จริง (ถ่ายจากกล้อง/สแกน) กับ **master PDF** ที่ approve แล้ว
+
+- **สี**: เทียบ per-pixel ด้วย ΔE CIEDE2000 (`scikit-image`) หลัง registration/perspective
+- **ข้อความ**: OCR แล้วเทียบด้วย Levenshtein + diff
+- **บาร์โค้ด**: ถอดและตรวจ check digit
+- **Visual diff**: (ตัวเลือก) ให้ Gemini เทียบ 2 ภาพผ่าน N8N — เปิด/ปิดด้วย `VISUAL_DIFF_ENABLED`
+
+master PDF ต่อ SKU เก็บใน `data/label_paper/skus/` (ดู README ในโฟลเดอร์นั้น)
+
+---
+
+## โหมดที่ 3 — ตรวจ Artwork (OCR + 4 ชั้น)
+
+โหมดหลักที่พัฒนาเข้มข้น — ตรวจไฟล์ **artwork ก่อนส่งโรงพิมพ์** ว่าสะกดถูก
+ตัวเลขสอดคล้อง และ panel ที่ควรเหมือนกันตรงกันจริง
+
+### ขั้นตอนใช้งาน
+
+```
+อัปโหลด PDF/PNG/JPG → จัดโซน → ส่งตรวจ → อ่านรายงาน (+ แท็บคำแปล)
+```
+
+1. **อัปโหลดไฟล์** — ระบบ render preview และ **เสนอโซนอัตโนมัติ**
+2. **จัดโซน** บน preview:
+   - **ลากวาดกรอบ** บนภาพเพื่อสร้างโซนใหม่ (กดปุ่ม "เพิ่มโซน" แล้วลากเมาส์)
+   - **ดับเบิลคลิกที่โซน** → ระบบขยับกรอบให้พอดีเนื้อหาเอง (snap-to-content,
+     คลิกซ้ำได้ถ้ายังไม่พอดี — รองรับทั้งฉลากพื้นสว่างและพื้นเข้ม)
+   - **ลบโซนทั้งหมด** ได้ในคลิกเดียว
+   - กำหนด **type** ต่อโซน: `panel` (ฉลากจริง) / `zoom` (ส่วนขยาย) /
+     `header` (ฟอร์มโรงพิมพ์) / `ignore` (ไม่ตรวจ)
+   - **group** — โซนกลุ่มเดียวกัน = ข้อความต้องตรงกัน (ใช้โหวตหา panel ที่สะกดต่าง)
+   - **บันทึก template** ต่อ layout โรงพิมพ์ — ครั้งหน้าโหลดมาใช้ซ้ำได้เลย
+3. **ส่งตรวจ** — ระบบ OCR ทีละโซน (PDF text layer ถ้ามี ไม่งั้นยิง N8N→Gemini)
+   แล้วรันทุกชั้นตรวจ
+4. **อ่านผล** ในแผงขวา มี 2 แท็บ:
+   - **🔍 ผลตรวจ** — verdict (PASS/REVIEW/FAIL), สรุปต่อชนิด, overlay ไฮไลต์โซนผิด,
+     รายการ defect พร้อมภาพ crop ความละเอียดสูง
+   - **📖 ข้อความ + คำแปล** — ตารางต่อบรรทัด: ข้อความบนฉลาก | คำแปล EN | สถานะ
+     (ไฮไลต์คำที่สะกดน่าสงสัย + คำแนะนำ) — กดปุ่ม "แปล/อธิบาย" เพื่อแปล
+
+### 4 ชั้นตรวจ (`artwork_check/checks.py`)
+
+| ชั้น | คลาส defect | ตรวจอะไร |
+|---|---|---|
+| 1 | `MISMATCH_PANELS` | panel กลุ่มเดียวกันข้อความไม่ตรง (โหวตเสียงข้างมาก) |
+| 1b | `MISMATCH_ZOOM` | ส่วน zoom ไม่ตรงกับฉลากจริง |
+| 2 | `NUMBER_FAIL` | น้ำหนัก (count×oz, LBS↔kg, OZ↔g), check digit บาร์โค้ด GS1 |
+| 3 | `SPELL_FAIL` / `PHRASE_FAIL` | คำไม่อยู่ใน dictionary / วลีแบรนด์สะกดเพี้ยน |
+| 4 | `UNREADABLE` | OCR อ่านไม่ชัด (conf ต่ำ) — ขอให้คนดูเอง |
+
+**ทนต่อ noise ของ OCR**: ชั้นเทียบจะให้อภัยความต่างของ *เครื่องหมาย/ช่องว่าง/
+เลขอารบิก↔อารบิก* (เช่น `EL - OBOUR` vs `ELOBOUR`, `٧٠٪` vs `%70%`) แต่ยังจับ
+ความต่างระดับ *ตัวอักษร/ตัวเลขจริง* (`16785` vs `16786`, `CALIDAD` vs `CALIDDD`)
+
+### กฎเรื่องการเสนอคำ (สำคัญ)
+
+ระบบ **ไม่เดาคำในส่วนที่ตัดสินผล** คอลัมน์ "คำที่ควรใช้" ในแท็บคำแปลมาจากแหล่ง
+**deterministic** เท่านั้น (พจนานุกรม pyspellchecker + คลังคำแบรนด์ + เสียงข้างมาก
+ของ panel) ไม่ใช่จากตัวแปล LLM — เป็นข้อมูล advisory ไม่มีผลต่อ PASS/FAIL
+
+### คลังคำแบรนด์ (Master Vocabulary)
+
+ต่อแบรนด์เก็บได้ 2 อย่าง: **คำเฉพาะ** (ไม่ถูกฟ้องว่าสะกดผิด) และ **วลีมาตรฐานที่
+approve** (ถ้าบน artwork สะกดเพี้ยนจะถูกฟ้อง `PHRASE_FAIL`)
+
+---
+
+## การตั้งค่า N8N → Gemini
+
+โหมด Artwork ใช้ N8N **2 workflow** มีไฟล์พร้อม import ในโฟลเดอร์ `artwork_check/`:
+
+| ไฟล์ | path | หน้าที่ | จำเป็น |
+|---|---|---|---|
+| `n8n_artwork_ocr.workflow.json` | `/webhook/artwork-ocr` | OCR ถอดข้อความ (verbatim) | **ใช่** |
+| `n8n_artwork_translate.workflow.json` | `/webhook/artwork-translate` | แปล EN (แท็บคำแปล) | ทางเลือก |
+
+**คู่มือ import + ตั้ง credential + ทดสอบ ละเอียดอยู่ใน
+[`artwork_check/N8N_WORKFLOW_SETUP.md`](artwork_check/N8N_WORKFLOW_SETUP.md)**
+และ prompt OCR อยู่ใน [`artwork_check/N8N_PROMPT.md`](artwork_check/N8N_PROMPT.md)
+
+จุดสำคัญที่ workflow ล็อกไว้: `temperature 0`, prompt ห้ามแก้คำสะกด, responseSchema
+บังคับ JSON — ถ้า LLM แอบแก้ "caliddd"→"calidad" โหมดนี้จะตาบอด
+
+---
+
+## API Endpoints
+
+### โหมดตรวจจับสด
+- `POST /api/detection/start` · `POST /api/detection/stop` · `GET /api/detection/status`
+- `GET /api/camera/scan` — สแกนกล้อง
+- `GET /api/modes` · `GET /api/models?mode=` · `POST /api/mode/switch`
+- `GET /video_feed` — MJPEG stream
+- `GET /api/stats` · `GET /api/defects`
+
+### โหมดฉลากกระดาษ
+- `GET /api/label_paper/skus` · `POST /api/label_paper/inspect`
+- `GET /api/label_paper/history` · `.../history/<id>` · `.../history/<id>/crop`
+- `POST /api/label_paper/master/refresh`
+
+### โหมด Artwork (`artwork_check/routes.py`)
+- `POST /api/artwork/upload` — อัปโหลด + เสนอโซน
+- `POST /api/artwork/<id>/inspect` — ตรวจทุกชั้น
+- `POST /api/artwork/<id>/snap` — ขยับกรอบโซนให้พอดีเนื้อหา
+- `POST /api/artwork/<id>/translate` — สร้างตารางข้อความ + แปล EN
+- `GET /api/artwork/<id>/preview.png` · `.../overlay.png` · `.../crop` · `.../report`
+- `GET/POST /api/artwork/templates` · `GET /api/artwork/templates/<name>`
+- `GET /api/artwork/vocab` · `GET/POST /api/artwork/vocab/<brand>`
+- `GET /api/artwork/history` · `DELETE /api/artwork/<id>`
+
+---
+
+## โครงสร้างโปรเจกต์
+
+```
+.
+├── app.py                       # Flask app — entry point, ลงทะเบียนทุกโหมด
+├── config.py                    # ตั้งค่ากลาง (กล้อง, SQL, Flask, N8N)
+├── camera.py / yolo_detector.py # โหมดตรวจจับสด
+├── database.py                  # SQL Server (pyodbc)
+├── modes/                       # registry + config ต่อโหมด YOLO
+│   ├── registry.py · can_dent.py · label.py · label_paper.py
+├── inspectors/                  # โหมดฉลากกระดาษ (ΔE2000, OCR, barcode, ...)
+│   ├── ocr_n8n.py · vertex_client.py · color_compare.py · deltae_map.py · ...
+├── artwork_check/               # โหมด Artwork (แยกอิสระทั้งก้อน)
+│   ├── routes.py                #   Flask blueprint
+│   ├── pipeline.py              #   upload → zones → inspect
+│   ├── zones.py                 #   เสนอโซน / snap / template
+│   ├── ocr.py                   #   อ่านข้อความต่อโซน (PDF text / N8N)
+│   ├── checks.py                #   4 ชั้นตรวจ
+│   ├── translate.py             #   ตารางข้อความ + แปล EN + คำแนะนำ
+│   ├── vocab.py · report.py · pdf_ingest.py · config.py
+│   ├── n8n_artwork_ocr.workflow.json        # import เข้า N8N
+│   ├── n8n_artwork_translate.workflow.json  # import เข้า N8N
+│   ├── N8N_WORKFLOW_SETUP.md · N8N_PROMPT.md
+├── templates/                   # หน้าเว็บ (base, index, label_paper, artwork_check, ...)
+├── static/css/style.css         # ธีม Thai Union (navy/blue) + type system
+├── static/js/                   # artwork_check.js, label_paper.js, main.js, ...
+├── data/                        # ข้อมูลรันไทม์ (artwork inspections, SKU masters)
+└── tests/                       # pytest (รวม test_artwork_checks.py)
+```
+
+---
+
+## Test
+
+```bash
+python -m pytest tests/ -q
+```
+
+ชุดเทสต์ของโหมด Artwork (`tests/test_artwork_checks.py`) ครอบคลุม 4 ชั้นตรวจ,
+ความทนต่อ OCR noise, snap-to-content, ตารางคำแปล + คำแนะนำ + cache
+
+---
+
+## หมายเหตุ / Acknowledgements
+
+- ระบบนี้พัฒนาต่อยอดจากฐานระบบตรวจจับด้วย YOLO (เดิมตรวจขวดน้ำ) มาเป็นระบบตรวจ
+  บรรจุภัณฑ์หลายโหมดของ Thai Union
+- ฟอนต์ IBM Plex โหลดจาก Google Fonts หากเครื่องไม่มีอินเทอร์เน็ต ระบบจะ fallback
+  เป็นฟอนต์ระบบที่รองรับไทยอัตโนมัติ

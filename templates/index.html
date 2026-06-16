@@ -5,25 +5,47 @@
 {% block content %}
 <div class="container">
     <div class="page-header-compact">
-        <h2>Live Defect Detection</h2>
-        <div class="detection-controls-compact">
-            <div class="control-group">
+        <div class="page-title-group">
+            <h2>Live Defect Detection</h2>
+            <p class="page-subtitle">ตรวจจับตำหนิบรรจุภัณฑ์แบบเรียลไทม์</p>
+        </div>
+        <div class="status-indicator status-pill">
+            <span id="statusDot" class="status-dot status-inactive"></span>
+            <span id="statusText">Inactive</span>
+        </div>
+    </div>
+
+    <div class="live-layout">
+
+        <!-- ── แผงควบคุม (ซ้าย) ─────────────────────────────── -->
+        <aside class="control-card">
+            <div class="control-card-header">ตั้งค่าการตรวจจับ</div>
+
+            <!-- ขั้นที่ 1: โหมด + โมเดล -->
+            <section class="control-section">
+                <div class="control-section-title"><span class="step-badge">1</span>โหมดตรวจสอบ</div>
 
                 <!-- Inspection mode tabs -->
-                <div class="src-tabs" id="modeTabs">
+                <div class="src-tabs src-tabs-fill" id="modeTabs">
                     <!-- populated from /api/modes -->
                 </div>
 
                 <!-- Model file picker (per-mode) -->
+                <label class="control-label" for="modelSelect">ไฟล์โมเดล (.pt)</label>
                 <div class="camera-select-group">
                     <select id="modelSelect" class="camera-select" title="เลือกไฟล์โมเดล (.pt)">
                         <option value="" disabled selected>Loading models…</option>
                     </select>
                     <button id="refreshModelsBtn" class="btn btn-icon" title="รีเฟรชรายการโมเดล">&#x1F504;</button>
                 </div>
+            </section>
+
+            <!-- ขั้นที่ 2: แหล่งภาพ -->
+            <section class="control-section">
+                <div class="control-section-title"><span class="step-badge">2</span>แหล่งสัญญาณภาพ</div>
 
                 <!-- Source type tabs -->
-                <div class="src-tabs">
+                <div class="src-tabs src-tabs-fill">
                     <button id="tabUsb"  class="src-tab src-tab-active" onclick="switchSource('usb')">กล้อง USB</button>
                     <button id="tabRtsp" class="src-tab" onclick="switchSource('rtsp')">กล้อง IP (RTSP)</button>
                 </div>
@@ -47,36 +69,37 @@
                         <button class="btn btn-icon" onclick="saveRtsp()" title="บันทึก URL">&#x1F4BE;</button>
                     </div>
                 </div>
+            </section>
 
-                <button id="startBtn" class="btn btn-primary">Start Detection</button>
-                <button id="stopBtn" class="btn btn-danger" disabled>Stop Detection</button>
-            </div>
-            <div class="status-indicator">
-                <span id="statusDot" class="status-dot status-inactive"></span>
-                <span id="statusText">Inactive</span>
-            </div>
-        </div>
-    </div>
+            <!-- ขั้นที่ 3: เริ่ม/หยุด -->
+            <section class="control-section">
+                <div class="control-section-title"><span class="step-badge">3</span>ควบคุมการทำงาน</div>
+                <div class="control-actions">
+                    <button id="startBtn" class="btn btn-primary btn-block">Start Detection</button>
+                    <button id="stopBtn" class="btn btn-danger btn-block" disabled>Stop Detection</button>
+                </div>
+            </section>
+        </aside>
 
-    <div class="detection-layout">
-        <div class="video-container-compact">
-            <div class="video-wrapper-compact">
+        <!-- ── จอภาพ + สถิติ (ขวา) ──────────────────────────── -->
+        <div class="live-main">
+            <div class="video-wrapper-compact video-stage">
                 <img id="videoStream" src="{{ url_for('video_feed') }}" alt="Video Stream">
             </div>
-        </div>
 
-        <div class="stats-panel-compact">
-            <div class="stat-card-compact">
-                <div class="stat-label">Active Defects</div>
-                <div class="stat-value-compact" id="activeDefects">0</div>
-            </div>
-            <div class="stat-card-compact">
-                <div class="stat-label">Total Detected</div>
-                <div class="stat-value-compact" id="totalDetected">0</div>
-            </div>
-            <div class="stat-card-compact">
-                <div class="stat-label">Detection Status</div>
-                <div class="stat-value-compact" id="detectionStatus">Ready</div>
+            <div class="stats-row">
+                <div class="stat-card-compact">
+                    <div class="stat-label">Active Defects</div>
+                    <div class="stat-value-compact" id="activeDefects">0</div>
+                </div>
+                <div class="stat-card-compact">
+                    <div class="stat-label">Total Detected</div>
+                    <div class="stat-value-compact" id="totalDetected">0</div>
+                </div>
+                <div class="stat-card-compact">
+                    <div class="stat-label">Detection Status</div>
+                    <div class="stat-value-compact" id="detectionStatus">Ready</div>
+                </div>
             </div>
         </div>
     </div>
