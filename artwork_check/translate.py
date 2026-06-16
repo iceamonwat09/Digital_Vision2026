@@ -106,11 +106,11 @@ def _consensus_words(zones: List[dict], texts: Dict[str, str]) -> set:
 def _defect_keys_by_zone(defects: Optional[List[dict]]) -> Dict[str, set]:
     """
     Map zone_id → set of normalized line keys that the verification
-    pipeline already flagged as wrong (cross-panel / zoom / number /
-    phrase / spell). ``found`` text belongs to the defect's own zone;
-    ``reference`` text belongs to each ref zone (the real label). This
-    lets the advisory table mark the SAME lines the verdict flagged,
-    instead of trusting only the dictionary spell-check.
+    pipeline already flagged as WRONG in that zone.
+
+    Only the defect's OWN zone (zone_id) and its ``found`` text are
+    marked bad. ref_zone_ids are the CORRECT reference panels — they
+    must never be marked as mismatch.
     """
     out: Dict[str, set] = {}
     for d in (defects or []):
@@ -120,10 +120,6 @@ def _defect_keys_by_zone(defects: Optional[List[dict]]) -> Dict[str, set]:
         fk = checks._norm_key(d.get("found", ""))
         if zid and fk:
             out.setdefault(zid, set()).add(fk)
-        rk = checks._norm_key(d.get("reference", ""))
-        if rk:
-            for rid in (d.get("ref_zone_ids") or []):
-                out.setdefault(rid, set()).add(rk)
     return out
 
 
