@@ -99,20 +99,21 @@ defect_log_cooldown = {}
 
 
 # ── Viewfinder (snapshot live preview) ─────────────────────────────────
-# A lightweight raw-camera preview used by snapshot mode so the operator can
-# aim before pressing the shutter. It runs NO detection (just grabs and shows
-# raw frames), so it stays smooth and never competes with the model. It owns
-# the camera only while the snapshot overlay is open, and is mutually exclusive
-# with live detection (single camera handle).
+# A raw-camera preview used by snapshot mode so the operator can aim before
+# pressing the shutter. The camera is opened ONCE at the capture resolution
+# (the highest mode it supports, picked at start) and stays open for the whole
+# snapshot session; the read loop publishes full-resolution frames and the
+# MJPEG generator downscales them for a smooth aim stream. The shutter then
+# simply grabs the newest already-captured full-res frame — it never touches
+# the camera handle, so there is no fragile mid-session release/reopen. Snapshot
+# mode is mutually exclusive with live detection (single camera handle).
 viewfinder_active = False
 viewfinder_camera = None
 viewfinder_thread = None
-viewfinder_frame = None
+viewfinder_frame = None          # newest RAW (full-res) frame from the camera
 viewfinder_seq = 0
 vf_lock = threading.Lock()       # guards the published viewfinder frame
-# Serialises access to the camera HANDLE between the viewfinder read loop and
-# the shutter's temporary 5MP resolution switch (not thread-safe to overlap).
-cap_lock = threading.Lock()
+viewfinder_capture_size = None   # (w, h) actually opened, for status/diagnostics
 
 
 def _load_detector_for(mode_name: str, model_filename=None):
@@ -307,10 +308,7 @@ def viewfinder_loop():
     logger.info("Viewfinder loop started")
     while viewfinder_active:
         try:
-            # Hold cap_lock only for the read so the shutter can take over the
-            # handle to switch to 5MP (the viewfinder briefly freezes then).
-            with cap_lock:
-                result = viewfinder_camera.read_frame() if viewfinder_camera else None
+            result = viewfinder_camera.read_frame() if viewfinder_camera else None
             if result is None:
                 time.sleep(0.02)
                 continue
@@ -523,12 +521,14 @@ def get_detection_status():
 
 
 # ── Snapshot inspection (viewfinder + shutter) ─────────
-# Flow: open the snapshot overlay → a raw viewfinder streams so the operator
-# can aim (no detection, stays smooth) → press the shutter → the newest
-# viewfinder frame is run through the model once → annotated still + verdict.
-# Snapshot mode is mutually exclusive with live detection (single camera handle)
-# and reuses the pure detect()/draw_detections() helpers — the live streaming
-# threads are never touched.
+# Flow: open the snapshot overlay → the camera opens ONCE at the highest
+# resolution it supports and a downscaled viewfinder streams so the operator can
+# aim → press the shutter → the newest full-resolution frame already in the
+# buffer is run through the model once → annotated still + verdict. The shutter
+# never reopens the camera (the old release→reopen-at-5MP step was the source of
+# the "ถ่ายไม่สำเร็จ" failures on UVC cameras). Snapshot mode is mutually
+# exclusive with live detection (single camera handle) and reuses the pure
+# detect()/draw_detections() helpers — the live streaming threads are untouched.
 
 # Classes that are NOT a dent defect (a "good"/"can" box is never an NG reason).
 _NON_DEFECT_CLASSES = {"good", "can"}
@@ -582,85 +582,56 @@ def _open_camera(cam_index, width, height, fps, retries=3, settle=0.4):
     return None
 
 
-def _grab_snapshot_highres():
+def _open_camera_ladder(cam_index):
     """
-    Capture the best-quality still available for the shutter, then restore the
-    smooth viewfinder. Designed so the shutter NEVER hard-fails while the
-    viewfinder is running — many UVC drivers refuse to reopen at 5MP right
-    after a release, so a single fixed mode is too fragile.
-
-    Strategy (most → least preferred):
-      1. Snapshot the newest viewfinder frame up front — a guaranteed fallback.
-      2. Release the handle and walk config.SNAPSHOT_RESOLUTION_LADDER (5MP →
-         1080p). The first mode that actually delivers a frame wins.
-      3. If every high-res open fails, fall back to the viewfinder frame from (1)
-         instead of returning an error.
-      4. Always reopen the smooth viewfinder so aiming resumes.
-
-    Returns a BGR frame, or None only if even the viewfinder had no frame yet.
-    MUST be called while holding cap_lock (so the viewfinder read loop is paused
-    and the global handle swap is safe).
+    Open the camera at the highest resolution it actually supports, walking
+    config.SNAPSHOT_RESOLUTION_LADDER (5MP → 1080p → 720p) and returning the
+    first mode that opens AND delivers a frame. This single handle is then used
+    for the whole snapshot session — both aiming and the shutter grab — so there
+    is no fragile mid-session reopen. Returns (camera, (width, height)) or
+    (None, None).
     """
-    global viewfinder_camera
-
-    cam = viewfinder_camera
-    if cam is None:
-        return None
-    cam_index = cam.camera_index
-
-    # 1) Guaranteed-good baseline: the exact frame the viewfinder is showing.
-    #    The viewfinder loop is paused on cap_lock, so this is safe to read.
-    with vf_lock:
-        baseline = viewfinder_frame.copy() if viewfinder_frame is not None else None
-
-    frame = None
-    try:
-        # 2) free the USB handle so a high-res open can grab it
-        cam.release()
-        time.sleep(0.4)   # let the OS fully release the device before reopening
-
-        # 3) walk the resolution ladder; first mode that yields a frame wins
-        for width, height, fps in config.SNAPSHOT_RESOLUTION_LADDER:
-            snap = _open_camera(cam_index, width, height, fps, retries=2)
-            if snap is None:
-                logger.warning(f"Snapshot: could not open camera at {width}x{height}; "
-                               "trying next mode")
-                continue
-            grabbed = None
-            for _ in range(3):            # extra reads for a fresh, settled frame
-                result = snap.read_frame()
-                if result and result[0]:
-                    grabbed = result[1]
-            snap.release()
-            time.sleep(0.3)
-            if grabbed is not None:
-                ah, aw = grabbed.shape[:2]
-                logger.info(f"Snapshot captured at {aw}x{ah} (requested {width}x{height})")
-                frame = grabbed
-                break
-            logger.warning(f"Snapshot: opened {width}x{height} but got no frame; "
+    for width, height, fps in config.SNAPSHOT_RESOLUTION_LADDER:
+        cam = _open_camera(cam_index, width, height, fps, retries=2)
+        if cam is None:
+            logger.warning(f"Viewfinder: could not open camera at {width}x{height}; "
                            "trying next mode")
-    finally:
-        # 4) always reopen the smooth viewfinder so aiming resumes after the shot
-        viewfinder_camera = _open_camera(
-            cam_index, config.VIEWFINDER_CAMERA_WIDTH,
-            config.VIEWFINDER_CAMERA_HEIGHT, config.VIEWFINDER_CAMERA_FPS)
-        if viewfinder_camera is None:
-            logger.error("Snapshot: failed to reopen viewfinder after grab")
+            continue
+        # Confirm it actually streams a frame at this mode before committing.
+        result = cam.read_frame()
+        if result and result[0] and result[1] is not None:
+            ah, aw = result[1].shape[:2]
+            logger.info(f"Snapshot camera opened at {aw}x{ah} (requested {width}x{height})")
+            return cam, (aw, ah)
+        logger.warning(f"Viewfinder: opened {width}x{height} but got no frame; "
+                       "trying next mode")
+        cam.release()
+        time.sleep(0.2)
+    return None, None
 
-    # 5) graceful degrade — a 720p verdict beats "ถ่ายไม่ได้"
-    if frame is None and baseline is not None:
-        logger.warning("Snapshot: high-res capture failed — using viewfinder frame instead")
-        frame = baseline
 
-    return frame
+def _grab_latest_frame(timeout=2.0):
+    """
+    Return a copy of the newest viewfinder frame (full resolution), waiting up
+    to ``timeout`` seconds for the read loop to publish its first one. The
+    shutter never touches the camera handle — it just reads this buffer — so it
+    cannot fail on a camera reopen. Returns a BGR frame or None on timeout.
+    """
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        with vf_lock:
+            frame = viewfinder_frame.copy() if viewfinder_frame is not None else None
+        if frame is not None:
+            return frame
+        time.sleep(0.05)
+    return None
 
 
 @app.route('/api/viewfinder/start', methods=['POST'])
 def api_viewfinder_start():
     """Open the camera and start the raw viewfinder for snapshot aiming."""
     global viewfinder_active, viewfinder_camera, viewfinder_thread
-    global viewfinder_frame, viewfinder_seq
+    global viewfinder_frame, viewfinder_seq, viewfinder_capture_size
 
     if detection_active:
         return jsonify({
@@ -673,21 +644,18 @@ def api_viewfinder_start():
     data = request.get_json(silent=True) or {}
     camera_index = _parse_camera_index(data.get("camera_index", config.CAMERA_INDEX))
 
-    # Open at the smooth viewfinder resolution (720p@30) for fluid aiming. The
-    # shutter switches this same handle to 5MP for the actual capture.
-    cam = Camera(
-        camera_index=camera_index,
-        width=config.VIEWFINDER_CAMERA_WIDTH,
-        height=config.VIEWFINDER_CAMERA_HEIGHT,
-        fps=config.VIEWFINDER_CAMERA_FPS,
-    )
-    if not cam.initialize():
+    # Open ONCE at the highest resolution the camera supports (ladder fallback).
+    # The same handle serves both aiming (downscaled) and the shutter grab, so
+    # the camera is never reopened mid-session.
+    cam, size = _open_camera_ladder(camera_index)
+    if cam is None:
         return jsonify({
             "status": "error",
             "message": f"เปิดกล้อง {camera_index} ไม่ได้ หรือกล้องถูกใช้งานอยู่"
         }), 500
 
     viewfinder_camera = cam
+    viewfinder_capture_size = size
     with vf_lock:
         viewfinder_frame = None
         viewfinder_seq = 0
@@ -695,14 +663,15 @@ def api_viewfinder_start():
     viewfinder_thread = threading.Thread(target=viewfinder_loop, daemon=True)
     viewfinder_thread.start()
 
-    logger.info(f"Viewfinder started on camera {camera_index}")
-    return jsonify({"status": "started"})
+    logger.info(f"Viewfinder started on camera {camera_index} at {size[0]}x{size[1]}")
+    return jsonify({"status": "started", "capture_size": f"{size[0]}x{size[1]}"})
 
 
 @app.route('/api/viewfinder/stop', methods=['POST'])
 def api_viewfinder_stop():
     """Stop the viewfinder and release the camera."""
     global viewfinder_active, viewfinder_camera, viewfinder_thread, viewfinder_frame
+    global viewfinder_capture_size
 
     viewfinder_active = False
     if viewfinder_thread is not None:
@@ -711,6 +680,7 @@ def api_viewfinder_stop():
     if viewfinder_camera:
         viewfinder_camera.release()
         viewfinder_camera = None
+    viewfinder_capture_size = None
     with vf_lock:
         viewfinder_frame = None
 
@@ -730,13 +700,11 @@ def api_snapshot():
             "message": "กรุณาเปิดโหมดถ่ายรูป (viewfinder) ก่อนกดถ่าย"
         }), 409
 
-    # Switch to full 5MP for this single grab, then restore the smooth 720p
-    # viewfinder. cap_lock serialises this against the viewfinder read loop
-    # (which briefly freezes). Many UVC cameras refuse a mid-stream resolution
-    # change, so we release the handle and reopen it at each resolution.
+    # Grab the newest full-resolution frame already captured by the viewfinder
+    # loop. The shutter never touches the camera handle, so it cannot fail on a
+    # camera reopen — it only waits briefly for the first frame after start.
     try:
-        with cap_lock:
-            frame = _grab_snapshot_highres()
+        frame = _grab_latest_frame(timeout=2.0)
         if frame is None:
             return jsonify({
                 "status": "error",

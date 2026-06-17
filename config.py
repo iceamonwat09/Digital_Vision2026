@@ -7,7 +7,7 @@ import os
 
 # Bump this whenever a config default changes so a running deployment can
 # print it on startup and confirm it is actually executing the new code.
-CONFIG_VERSION = "2026.06.17-snapshot-resolution-fallback"
+CONFIG_VERSION = "2026.06.17-snapshot-single-handle"
 
 # ====================
 # CAMERA CONFIGURATION
@@ -44,20 +44,22 @@ SNAPSHOT_CAMERA_HEIGHT = 1944
 SNAPSHOT_CAMERA_FPS = 15
 
 # ── Snapshot resolution fallback ladder ─────────────────────────────
-# กล้อง/ไดรเวอร์ UVC บางรุ่นเปิดที่ 5MP ผ่าน release→reopen ไม่ติดเสมอไป
-# (อุปกรณ์ยังไม่ว่าง หรือไม่รองรับโหมดนั้นใน MJPG). แทนที่จะ "ถ่ายไม่ได้"
-# ให้ไล่ลองจากคมสุดลงมา — โหมดแรกที่ส่งเฟรมได้จริงเป็นผู้ชนะ. ถ้าทั้งหมด
-# ล้มเหลว snapshot จะ fall back ไปใช้เฟรม viewfinder (720p) แทนการ error.
+# โหมดถ่ายรูป "เปิดกล้องครั้งเดียว" ที่ความละเอียดสูงสุดที่กล้องรองรับจริง
+# แล้วใช้แฮนเดิลเดียวนั้นทั้งเล็ง (ย่อแสดง) และตอนกดชัตเตอร์ — ไม่มีการ
+# release→reopen กลางทาง (ซึ่งเป็นต้นเหตุ "ถ่ายไม่สำเร็จ" บนกล้อง UVC).
+# ระบบไล่ลองจากคมสุดลงมา โหมดแรกที่เปิดได้ + ส่งเฟรมจริงเป็นผู้ชนะ.
 # (width, height, fps) เรียงจากความละเอียดสูง → ต่ำ.
 SNAPSHOT_RESOLUTION_LADDER = [
     (SNAPSHOT_CAMERA_WIDTH, SNAPSHOT_CAMERA_HEIGHT, SNAPSHOT_CAMERA_FPS),  # 2592x1944 (5MP)
-    (1920, 1080, 30),  # 1080p — มาตรฐานเกือบทุกกล้อง รองรับเมื่อ 5MP ไม่ติด
+    (1920, 1080, 30),  # 1080p — มาตรฐานเกือบทุกกล้อง
+    (1280, 720, 30),   # 720p — รับประกันเปิดได้เกือบทุกกล้อง (ขั้นสุดท้าย)
 ]
 
 # ── Viewfinder (อาการเล็งก่อนกดชัตเตอร์) ──────────────────────────────
-# โหมด 5MP วิ่งได้แค่ 15fps (เพดานฮาร์ดแวร์) ทำให้เล็งไม่ลื่น. จึงเปิด
-# viewfinder ที่ 720p@30fps ให้เล็งลื่น แล้วค่อย "สลับ" เป็น 5MP เฉพาะ
-# ตอนกดชัตเตอร์ (ดู Camera.capture_at) — ได้ทั้งเล็งลื่นและภาพตรวจ 5MP เต็ม.
+# หมายเหตุ: ตั้งแต่เปลี่ยนเป็นสถาปัตยกรรม "เปิดกล้องครั้งเดียว" viewfinder
+# ใช้แฮนเดิลเดียวกับชัตเตอร์ (เปิดที่ความละเอียดจาก SNAPSHOT_RESOLUTION_LADDER
+# แล้วย่อแสดงผลด้วย _VIEWFINDER_MAX_W ใน app.py). ค่าด้านล่างเก็บไว้เพื่อความ
+# เข้ากันได้กับโค้ดเดิม แต่ปัจจุบันไม่ได้ใช้เปิดกล้องแล้ว.
 VIEWFINDER_CAMERA_WIDTH  = 1280
 VIEWFINDER_CAMERA_HEIGHT = 720
 VIEWFINDER_CAMERA_FPS = 30
