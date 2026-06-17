@@ -109,7 +109,10 @@ viewfinder_camera = None
 viewfinder_thread = None
 viewfinder_frame = None
 viewfinder_seq = 0
-vf_lock = threading.Lock()
+vf_lock = threading.Lock()       # guards the published viewfinder frame
+# Serialises access to the camera HANDLE between the viewfinder read loop and
+# the shutter's temporary 5MP resolution switch (not thread-safe to overlap).
+cap_lock = threading.Lock()
 
 
 def _load_detector_for(mode_name: str, model_filename=None):
@@ -304,7 +307,10 @@ def viewfinder_loop():
     logger.info("Viewfinder loop started")
     while viewfinder_active:
         try:
-            result = viewfinder_camera.read_frame() if viewfinder_camera else None
+            # Hold cap_lock only for the read so the shutter can take over the
+            # handle to switch to 5MP (the viewfinder briefly freezes then).
+            with cap_lock:
+                result = viewfinder_camera.read_frame() if viewfinder_camera else None
             if result is None:
                 time.sleep(0.02)
                 continue
@@ -580,13 +586,13 @@ def api_viewfinder_start():
     data = request.get_json(silent=True) or {}
     camera_index = _parse_camera_index(data.get("camera_index", config.CAMERA_INDEX))
 
-    # Open at the high snapshot resolution so the shutter captures full detail.
-    # The viewfinder stream itself is downscaled for smooth aiming.
+    # Open at the smooth viewfinder resolution (720p@30) for fluid aiming. The
+    # shutter switches this same handle to 5MP for the actual capture.
     cam = Camera(
         camera_index=camera_index,
-        width=config.SNAPSHOT_CAMERA_WIDTH,
-        height=config.SNAPSHOT_CAMERA_HEIGHT,
-        fps=config.SNAPSHOT_CAMERA_FPS,
+        width=config.VIEWFINDER_CAMERA_WIDTH,
+        height=config.VIEWFINDER_CAMERA_HEIGHT,
+        fps=config.VIEWFINDER_CAMERA_FPS,
     )
     if not cam.initialize():
         return jsonify({
@@ -637,13 +643,20 @@ def api_snapshot():
             "message": "กรุณาเปิดโหมดถ่ายรูป (viewfinder) ก่อนกดถ่าย"
         }), 409
 
-    with vf_lock:
-        frame = viewfinder_frame
-    frame = frame.copy() if frame is not None else None
+    # Take over the camera handle and switch to full 5MP for this single grab;
+    # capture_at restores the smooth 720p viewfinder mode afterwards. cap_lock
+    # serialises this against the viewfinder read loop (which briefly freezes).
+    with cap_lock:
+        cam = viewfinder_camera
+        frame = cam.capture_at(
+            config.SNAPSHOT_CAMERA_WIDTH,
+            config.SNAPSHOT_CAMERA_HEIGHT,
+            config.SNAPSHOT_CAMERA_FPS,
+        ) if cam is not None else None
     if frame is None:
         return jsonify({
             "status": "error",
-            "message": "ยังไม่มีภาพจากกล้อง รอสักครู่แล้วลองใหม่"
+            "message": "ถ่ายภาพไม่สำเร็จ ลองใหม่อีกครั้ง"
         }), 500
 
     # Snapshot runs once per shutter press, so use the high-accuracy image size

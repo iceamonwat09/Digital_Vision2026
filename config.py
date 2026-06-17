@@ -43,6 +43,14 @@ SNAPSHOT_CAMERA_HEIGHT = 1944
 # ตั้งให้ตรงโหมดจริงเพื่อให้ไดรเวอร์ไม่ต้องเดา และพอสำหรับการเล็งภาพนิ่ง.
 SNAPSHOT_CAMERA_FPS = 15
 
+# ── Viewfinder (อาการเล็งก่อนกดชัตเตอร์) ──────────────────────────────
+# โหมด 5MP วิ่งได้แค่ 15fps (เพดานฮาร์ดแวร์) ทำให้เล็งไม่ลื่น. จึงเปิด
+# viewfinder ที่ 720p@30fps ให้เล็งลื่น แล้วค่อย "สลับ" เป็น 5MP เฉพาะ
+# ตอนกดชัตเตอร์ (ดู Camera.capture_at) — ได้ทั้งเล็งลื่นและภาพตรวจ 5MP เต็ม.
+VIEWFINDER_CAMERA_WIDTH  = 1280
+VIEWFINDER_CAMERA_HEIGHT = 720
+VIEWFINDER_CAMERA_FPS = 30
+
 # Enable this to test available cameras at startup
 # Set to False for faster startup (skips camera scanning)
 TEST_CAMERAS_ON_STARTUP = False

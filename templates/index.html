@@ -518,6 +518,7 @@
     // Shutter: run the model once on the newest viewfinder frame.
     function pressShutter() {
         snapShutter.disabled = true;
+        snapShutter.textContent = '⏳ กำลังถ่าย…';   // viewfinder ค้างชั่วครู่ขณะสลับเป็น 5MP
         fetch('/api/snapshot', {
             method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}'
         })
@@ -534,7 +535,7 @@
             showResultState();
         })
         .catch(err => { console.error('Snapshot error:', err); alert('ถ่ายรูปไม่สำเร็จ'); })
-        .finally(() => { snapShutter.disabled = false; });
+        .finally(() => { snapShutter.disabled = false; snapShutter.textContent = '📸 ถ่าย'; });
     }
 
     snapBtn.addEventListener('click', openSnapshot);
