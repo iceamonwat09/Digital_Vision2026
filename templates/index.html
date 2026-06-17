@@ -132,6 +132,12 @@
                 <!-- สถานะ 1: เล็งกล้อง -->
                 <div id="snapLivePanel">
                     <p class="snap-aim-hint">เล็งให้กระป๋องอยู่ในกรอบ<br>แล้วกดปุ่มถ่าย</p>
+                    <label class="snap-q-label" for="snapQuality">ความคมชัด ↔ ความลื่นของภาพเล็ง</label>
+                    <select id="snapQuality" class="camera-select snap-quality">
+                        <option value="smooth">ลื่นที่สุด · 720p (เล็งนิ่มสุด)</option>
+                        <option value="balanced" selected>สมดุล · 1080p (แนะนำ)</option>
+                        <option value="sharp">คมชัด · 5MP (เล็งกระตุก แต่ภาพคม)</option>
+                    </select>
                     <button id="snapShutter" class="btn btn-primary btn-block snap-shutter">📸 ถ่าย</button>
                 </div>
                 <!-- สถานะ 2: ผลการตรวจ -->
@@ -194,6 +200,8 @@
     .snap-info-pane .btn { margin-top: auto; }
     #snapLivePanel, #snapResultPanel { display: flex; flex-direction: column; flex: 1; }
     .snap-aim-hint { color: #475569; font-size: 15px; line-height: 1.6; text-align: center; margin: 6px 0 0; }
+    .snap-q-label { display:block; font-size:13px; color:#64748b; margin: 14px 0 4px; }
+    .snap-quality { width:100%; }
     .snap-shutter { margin-top: auto; font-size: 18px; padding: 14px 0; }
     .control-hint { margin: 8px 0 0; font-size: 12px; color: #94a3b8; text-align: center; }
 </style>
@@ -452,6 +460,7 @@
     const snapLivePanel   = document.getElementById('snapLivePanel');
     const snapResultPanel = document.getElementById('snapResultPanel');
     const snapShutter     = document.getElementById('snapShutter');
+    const snapQuality     = document.getElementById('snapQuality');
     const snapVerdict     = document.getElementById('snapVerdict');
     const snapDents       = document.getElementById('snapDents');
     const snapConf        = document.getElementById('snapConf');
@@ -497,7 +506,7 @@
         fetch('/api/viewfinder/start', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ camera_index: cameraIndex })
+            body: JSON.stringify({ camera_index: cameraIndex, quality: snapQuality.value })
         })
         .then(r => r.json())
         .then(data => {
@@ -509,6 +518,21 @@
         .catch(err => { console.error('Viewfinder start error:', err); alert('เปิดกล้องไม่สำเร็จ'); })
         .finally(() => { snapBtn.disabled = false; });
     }
+
+    // Remember the operator's quality choice, and apply it live: if the overlay
+    // is already open, restart the viewfinder at the new resolution.
+    const savedQuality = localStorage.getItem('snapQuality');
+    if (savedQuality) snapQuality.value = savedQuality;
+    snapQuality.addEventListener('change', () => {
+        localStorage.setItem('snapQuality', snapQuality.value);
+        if (snapOverlay.style.display !== 'none' && snapLivePanel.style.display !== 'none') {
+            // Re-open at the new quality (switching to a lower mode is quick).
+            snapViewfinder.removeAttribute('src');
+            fetch('/api/viewfinder/stop', { method: 'POST' })
+                .catch(() => {})
+                .finally(openSnapshot);
+        }
+    });
 
     // Close snapshot mode: drop the MJPEG connection + release the camera.
     function closeSnapshot() {

@@ -353,7 +353,8 @@ def generate_viewfinder():
                 frame_bytes = buffer.tobytes()
         yield (b'--frame\r\n'
                b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
-        time.sleep(1.0 / config.STREAM_FPS)
+        # Aim stream runs faster than the live feed for fluid aiming.
+        time.sleep(1.0 / config.VIEWFINDER_STREAM_FPS)
 
 
 # ── Routes ─────────────────────────────────────────────
@@ -582,16 +583,37 @@ def _open_camera(cam_index, width, height, fps, retries=3, settle=0.4):
     return None
 
 
-def _open_camera_ladder(cam_index):
+def _ladder_for_quality(quality):
     """
-    Open the camera at the highest resolution it actually supports, walking
-    config.SNAPSHOT_RESOLUTION_LADDER (5MP → 1080p → 720p) and returning the
-    first mode that opens AND delivers a frame. This single handle is then used
-    for the whole snapshot session — both aiming and the shutter grab — so there
-    is no fragile mid-session reopen. Returns (camera, (width, height)) or
+    Build the resolution ladder for a chosen quality preset: the preset itself
+    first, then every standard fallback rung with fewer pixels (so a camera that
+    can't deliver the preset still opens at something lower), always ending with
+    a 720p safety net. Unknown quality → the default preset.
+    """
+    presets = config.SNAPSHOT_QUALITY_PRESETS
+    chosen = presets.get(quality, presets[config.SNAPSHOT_QUALITY_DEFAULT])
+    rungs = [chosen]
+    for rung in config.SNAPSHOT_RESOLUTION_LADDER:
+        if rung[0] * rung[1] < chosen[0] * chosen[1] and rung not in rungs:
+            rungs.append(rung)
+    safety = (1280, 720, 30)
+    if safety not in rungs:
+        rungs.append(safety)
+    return rungs
+
+
+def _open_camera_ladder(cam_index, ladder=None):
+    """
+    Open the camera at the highest resolution it actually supports, walking the
+    given ladder (defaults to config.SNAPSHOT_RESOLUTION_LADDER) and returning
+    the first mode that opens AND delivers a frame. This single handle is then
+    used for the whole snapshot session — both aiming and the shutter grab — so
+    there is no fragile mid-session reopen. Returns (camera, (width, height)) or
     (None, None).
     """
-    for width, height, fps in config.SNAPSHOT_RESOLUTION_LADDER:
+    if ladder is None:
+        ladder = config.SNAPSHOT_RESOLUTION_LADDER
+    for width, height, fps in ladder:
         cam = _open_camera(cam_index, width, height, fps, retries=2)
         if cam is None:
             logger.warning(f"Viewfinder: could not open camera at {width}x{height}; "
@@ -643,11 +665,12 @@ def api_viewfinder_start():
 
     data = request.get_json(silent=True) or {}
     camera_index = _parse_camera_index(data.get("camera_index", config.CAMERA_INDEX))
+    quality = data.get("quality", config.SNAPSHOT_QUALITY_DEFAULT)
 
-    # Open ONCE at the highest resolution the camera supports (ladder fallback).
-    # The same handle serves both aiming (downscaled) and the shutter grab, so
-    # the camera is never reopened mid-session.
-    cam, size = _open_camera_ladder(camera_index)
+    # Open ONCE at the chosen quality (ladder fallback to lower modes). The same
+    # handle serves both aiming (downscaled) and the shutter grab, so the camera
+    # is never reopened mid-session. Lower quality = higher fps = smoother aim.
+    cam, size = _open_camera_ladder(camera_index, _ladder_for_quality(quality))
     if cam is None:
         return jsonify({
             "status": "error",

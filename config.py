@@ -7,7 +7,7 @@ import os
 
 # Bump this whenever a config default changes so a running deployment can
 # print it on startup and confirm it is actually executing the new code.
-CONFIG_VERSION = "2026.06.17-artwork-compare-images"
+CONFIG_VERSION = "2026.06.17-viewfinder-smooth-quality"
 
 # ====================
 # CAMERA CONFIGURATION
@@ -54,6 +54,17 @@ SNAPSHOT_RESOLUTION_LADDER = [
     (1920, 1080, 30),  # 1080p — มาตรฐานเกือบทุกกล้อง
     (1280, 720, 30),   # 720p — รับประกันเปิดได้เกือบทุกกล้อง (ขั้นสุดท้าย)
 ]
+
+# ── Snapshot quality presets (ให้ผู้ใช้เลือกได้จากหน้าเว็บ) ──────────────
+# แลกระหว่าง "เล็งลื่น" (ความละเอียดต่ำ = fps สูง + ย่อภาพถูก = ลื่น) กับ
+# "ภาพคม" (5MP = จับ dent เล็กได้ดีแต่ 15fps เล็งกระตุก). โหมดที่เลือกใช้
+# ทั้งตอนเล็งและตอนถ่าย (แฮนเดิลเดียว ไม่ reopen).
+SNAPSHOT_QUALITY_PRESETS = {
+    "smooth":   (1280, 720, 30),   # ลื่นที่สุด
+    "balanced": (1920, 1080, 30),  # สมดุล (ค่าเริ่มต้น)
+    "sharp":    (SNAPSHOT_CAMERA_WIDTH, SNAPSHOT_CAMERA_HEIGHT, SNAPSHOT_CAMERA_FPS),  # คม 5MP
+}
+SNAPSHOT_QUALITY_DEFAULT = "balanced"
 
 # ── Viewfinder (อาการเล็งก่อนกดชัตเตอร์) ──────────────────────────────
 # หมายเหตุ: ตั้งแต่เปลี่ยนเป็นสถาปัตยกรรม "เปิดกล้องครั้งเดียว" viewfinder
@@ -155,7 +166,13 @@ FLASK_PORT = 5000
 FLASK_DEBUG = False
 
 # Video streaming configuration
-STREAM_FPS = 15  # FPS for MJPEG stream (lower = less bandwidth)
+STREAM_FPS = 15  # FPS for the live-detection MJPEG stream (lower = less bandwidth)
+
+# Viewfinder (snapshot aiming) stream rate. Higher than STREAM_FPS so aiming
+# feels fluid — the live feed is deliberately 15fps to save bandwidth, but the
+# operator aiming a can needs a smooth preview. Capped by the camera's own fps
+# at the chosen resolution (e.g. 5MP tops out at 15fps regardless).
+VIEWFINDER_STREAM_FPS = 30
 
 # Application directories
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
