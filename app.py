@@ -599,7 +599,9 @@ def api_snapshot():
             "message": "ยังไม่มีภาพจากกล้อง รอสักครู่แล้วลองใหม่"
         }), 500
 
-    detections = detector.detect(frame)
+    # Snapshot runs once per shutter press, so use the high-accuracy image size
+    # (favour precision over speed — unlike the live stream).
+    detections = detector.detect(frame, imgsz=config.SNAPSHOT_IMGSZ)
     annotated = detector.draw_detections(frame, detections)
 
     dents = [d for d in detections if d["class_name"] not in _NON_DEFECT_CLASSES]

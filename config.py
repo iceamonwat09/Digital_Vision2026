@@ -55,6 +55,15 @@ YOLO_MAX_DET = 20
 # can-body dents at this camera resolution. Drop to 320 for even more speed.
 YOLO_IMGSZ = 480
 
+# Snapshot inference image size. Snapshot runs the model ONCE per shutter press
+# (not a live stream), so speed is irrelevant — we trade it for accuracy. 960
+# recovers all detail the 640x480 camera provides (vs the 480 live size that
+# downscales it) plus headroom that helps the model catch small/shallow dents.
+# Going much higher than the camera's native resolution gives diminishing
+# returns (it only upscales an already-captured image). For a real accuracy
+# jump, also raise the snapshot capture resolution (see SNAPSHOT_CAMERA_*).
+SNAPSHOT_IMGSZ = 960
+
 # ====================
 # DEFECT CLASS MAPPING  (Can Dent Detection)
 # ====================
