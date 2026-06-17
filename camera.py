@@ -109,7 +109,15 @@ class Camera:
         """Open a local USB/built-in camera by index."""
         logger.info(f"Initializing USB camera index={self.camera_index} ...")
 
-        attempts = [None] + _BACKENDS
+        # On Windows the default (MSMF) backend silently ignores the MJPG FourCC
+        # and caps UVC cameras at ~720p, so try the explicit backends FIRST
+        # (DSHOW leads on Windows — it honours MJPG and unlocks full resolution).
+        # The ambiguous default is kept last as a fallback. Linux is unchanged
+        # (CAP_ANY ≈ default and already works).
+        if os.name == 'nt':
+            attempts = _BACKENDS + [None]
+        else:
+            attempts = [None] + _BACKENDS
 
         for backend in attempts:
             cap = (cv2.VideoCapture(self.camera_index) if backend is None
@@ -138,9 +146,12 @@ class Camera:
                 self.is_initialized = True
                 bname = "Default" if backend is None else _BACKEND_NAMES.get(backend, str(backend))
                 ah, aw = frame.shape[:2]
+                raw_cc = int(cap.get(cv2.CAP_PROP_FOURCC))
+                cc = "".join(chr((raw_cc >> (8 * i)) & 0xFF) for i in range(4)).strip()
                 logger.info(
                     f"USB camera ready (index={self.camera_index}, backend={bname}, "
-                    f"requested={self.width}x{self.height}, actual={aw}x{ah})"
+                    f"fourcc={cc or '?'}, requested={self.width}x{self.height}, "
+                    f"actual={aw}x{ah})"
                 )
                 if (aw, ah) != (self.width, self.height):
                     logger.warning(
