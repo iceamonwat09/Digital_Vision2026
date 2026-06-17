@@ -35,6 +35,11 @@ CAMERA_FOURCC = "MJPG"
 SNAPSHOT_CAMERA_WIDTH  = 2592
 SNAPSHOT_CAMERA_HEIGHT = 1944
 
+# FPS ตอนความละเอียดสูง — ตั้งต่ำเพราะกล้องเป็น USB 2.0 (~480 Mbps). ที่ 5MP
+# การขอ 30 fps จะกินแบนด์วิดท์เกินจน MJPEG เฟรมขาด/เพี้ยนเป็น "ลูกคลื่น".
+# 10 fps เหลือเฟือสำหรับเล็งภาพนิ่ง และทำให้สตรีมเสถียร. ลองเพิ่ม/ลดได้.
+SNAPSHOT_CAMERA_FPS = 10
+
 # Enable this to test available cameras at startup
 # Set to False for faster startup (skips camera scanning)
 TEST_CAMERAS_ON_STARTUP = False

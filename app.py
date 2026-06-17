@@ -342,7 +342,8 @@ def generate_viewfinder():
             h, w = frame.shape[:2]
             if w > _VIEWFINDER_MAX_W:
                 scale = _VIEWFINDER_MAX_W / float(w)
-                disp = cv2.resize(frame, (_VIEWFINDER_MAX_W, int(h * scale)))
+                disp = cv2.resize(frame, (_VIEWFINDER_MAX_W, int(h * scale)),
+                                  interpolation=cv2.INTER_AREA)
             ret, buffer = cv2.imencode('.jpg', disp, _JPEG_PARAMS)
             if ret:
                 frame_bytes = buffer.tobytes()
@@ -546,7 +547,10 @@ def _scale_for_display(frame, detections, max_w):
     if w <= max_w:
         return frame, detections
     scale = max_w / float(w)
-    disp = cv2.resize(frame, (max_w, int(h * scale)))
+    # INTER_AREA is the correct (anti-aliasing) filter for shrinking — it avoids
+    # the moiré/ripple artifacts that INTER_LINEAR produces on fine detail like
+    # a can lid's concentric ridges.
+    disp = cv2.resize(frame, (max_w, int(h * scale)), interpolation=cv2.INTER_AREA)
     scaled = []
     for d in detections:
         x1, y1, x2, y2 = d["bbox"]
@@ -582,6 +586,7 @@ def api_viewfinder_start():
         camera_index=camera_index,
         width=config.SNAPSHOT_CAMERA_WIDTH,
         height=config.SNAPSHOT_CAMERA_HEIGHT,
+        fps=config.SNAPSHOT_CAMERA_FPS,
     )
     if not cam.initialize():
         return jsonify({
