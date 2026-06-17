@@ -86,6 +86,7 @@
                 <div class="control-actions">
                     <button id="snapBtn" class="btn btn-secondary btn-block">📷 ถ่ายรูปตรวจ</button>
                 </div>
+                <p class="control-hint">ใช้ได้เมื่อหยุดสตรีมสด (Stop Detection) ก่อน</p>
             </section>
         </aside>
 
@@ -179,6 +180,7 @@
     .snap-meta dt { color: #64748b; font-size: 13px; margin-top: 12px; }
     .snap-meta dd { margin: 2px 0 0; font-size: 18px; font-weight: 600; color: #0f172a; }
     .snap-info-pane .btn { margin-top: auto; }
+    .control-hint { margin: 8px 0 0; font-size: 12px; color: #94a3b8; text-align: center; }
 </style>
 {% endblock %}
 
@@ -270,6 +272,13 @@
                 modelSelect.disabled       = isActive || modelSelect.options.length === 0;
                 refreshModelsBtn.disabled  = isActive;
                 Array.from(modeTabs.children).forEach(b => b.disabled = isActive);
+
+                // Snapshot is exclusive with live streaming (shared camera = slow),
+                // so it's only available when detection is stopped.
+                snapBtn.disabled = isActive;
+                snapBtn.title = isActive
+                    ? 'หยุดสตรีม (Stop Detection) ก่อนถ่ายรูปตรวจ'
+                    : 'ถ่ายภาพนิ่งมาตรวจ Dent';
 
                 activeDefects.textContent   = data.stats.current_defects || 0;
                 totalDetected.textContent   = data.stats.total_detected  || 0;
@@ -445,11 +454,14 @@
     function closeSnapOverlay() { snapOverlay.style.display = 'none'; }
 
     function captureSnapshot() {
+        // Snapshot opens the camera fresh, so it can't run while streaming.
+        if (stopBtn.disabled === false) {
+            alert('กรุณากด Stop Detection ก่อน แล้วจึงถ่ายรูปตรวจ');
+            return;
+        }
         const cameraIndex = resolveCameraIndex();
-        // When idle we need a camera; while streaming the server uses the live frame.
-        const statusActive = stopBtn.disabled === false;
-        if (!statusActive && cameraIndex === null) {
-            alert('กรุณาเลือกกล้อง/ใส่ RTSP URL ก่อน หรือกด Start Detection');
+        if (cameraIndex === null) {
+            alert('กรุณาเลือกกล้อง/ใส่ RTSP URL ก่อนถ่ายรูป');
             return;
         }
 

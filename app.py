@@ -427,10 +427,12 @@ def get_detection_status():
 
 
 # ── Snapshot inspection (still-photo capture) ──────────
-# Single-shot capture: grab one frame, run the current model on it, and return
-# the annotated still + verdict. Fully isolated from the live streaming threads
-# — it only *reads* the shared frame (under the existing lock) and reuses the
-# pure detect()/draw_detections() helpers, so it can never disturb live mode.
+# Single-shot capture: open the camera fresh, grab one full-rate frame, run the
+# current model on it, and return the annotated still + verdict. Deliberately
+# NOT usable while live streaming — sharing the camera with the live pipeline
+# yields a slower/laggier frame than a clean dedicated grab, so snapshot mode
+# requires detection to be stopped first. Reuses the pure detect()/
+# draw_detections() helpers and never touches the streaming threads.
 
 # Classes that are NOT a dent defect (a "good"/"can" box is never an NG reason).
 _NON_DEFECT_CLASSES = {"good", "can"}
@@ -438,18 +440,10 @@ _NON_DEFECT_CLASSES = {"good", "can"}
 
 def _grab_snapshot_frame(camera_index):
     """
-    Return a single BGR frame for snapshot inspection, or None.
-
-    - While live detection runs we MUST NOT open the camera again (USB cameras
-      allow only one handle), so we reuse the newest frame from the pipeline.
-    - When idle we open the camera briefly, warm it up, grab one frame, and
-      release immediately.
+    Open the camera briefly, warm it up, grab one frame, release. Returns a BGR
+    frame or None. Only called when live detection is stopped (the camera is
+    free), so it always gets a clean full-speed capture.
     """
-    if detection_active:
-        with raw_lock:
-            frame = latest_raw_frame
-        return frame.copy() if frame is not None else None
-
     snap_cam = Camera(camera_index=camera_index)
     if not snap_cam.initialize():
         return None
@@ -470,6 +464,14 @@ def api_snapshot():
     if detector is None or detector.model is None:
         return jsonify({"status": "error", "message": "ยังไม่ได้โหลดโมเดล"}), 400
 
+    # Snapshot and live streaming must not share the camera (a shared grab is
+    # slower/laggier than a dedicated one) — require the live feed to be stopped.
+    if detection_active:
+        return jsonify({
+            "status": "error",
+            "message": "กรุณากด Stop Detection ก่อน แล้วจึงถ่ายรูปตรวจ"
+        }), 409
+
     data = request.get_json(silent=True) or {}
     camera_index_raw = data.get("camera_index", config.CAMERA_INDEX)
     if isinstance(camera_index_raw, str) and camera_index_raw.isdigit():
@@ -481,9 +483,10 @@ def api_snapshot():
 
     frame = _grab_snapshot_frame(camera_index)
     if frame is None:
-        msg = ("ดึงภาพจากสตรีมไม่ได้ ลองใหม่อีกครั้ง" if detection_active
-               else f"เปิดกล้อง {camera_index} ไม่ได้ หรือกล้องถูกใช้งานอยู่")
-        return jsonify({"status": "error", "message": msg}), 500
+        return jsonify({
+            "status": "error",
+            "message": f"เปิดกล้อง {camera_index} ไม่ได้ หรือกล้องถูกใช้งานอยู่"
+        }), 500
 
     detections = detector.detect(frame)
     annotated = detector.draw_detections(frame, detections)
