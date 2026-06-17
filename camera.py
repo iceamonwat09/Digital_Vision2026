@@ -83,12 +83,18 @@ class Camera:
     Camera handler supporting USB webcams (index) and IP cameras (RTSP URL).
     """
 
-    def __init__(self, camera_index: Union[int, str] = None):
+    def __init__(self, camera_index: Union[int, str] = None,
+                 width: int = None, height: int = None, fps: int = None):
         raw = camera_index if camera_index is not None else config.CAMERA_INDEX
         # Normalise numeric strings ("0", "1") → int
         if isinstance(raw, str) and raw.isdigit():
             raw = int(raw)
         self.camera_index = raw
+        # Per-instance capture resolution. Defaults to the live-stream config;
+        # snapshot mode passes the high-res SNAPSHOT_CAMERA_* values.
+        self.width  = width  if width  is not None else config.CAMERA_WIDTH
+        self.height = height if height is not None else config.CAMERA_HEIGHT
+        self.fps    = fps    if fps    is not None else config.CAMERA_FPS
         self.cap: Optional[cv2.VideoCapture] = None
         self.is_initialized = False
 
@@ -112,9 +118,15 @@ class Camera:
                 cap.release()
                 continue
 
-            cap.set(cv2.CAP_PROP_FRAME_WIDTH,  config.CAMERA_WIDTH)
-            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, config.CAMERA_HEIGHT)
-            cap.set(cv2.CAP_PROP_FPS,          config.CAMERA_FPS)
+            # FourCC MUST be set before width/height for most UVC cameras —
+            # MJPEG is what lets this 8MP camera reach high resolution over
+            # USB 2.0 (YUY2 is uncompressed and bandwidth-capped to ~640x480).
+            fourcc = getattr(config, "CAMERA_FOURCC", None)
+            if fourcc:
+                cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*fourcc))
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH,  self.width)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
+            cap.set(cv2.CAP_PROP_FPS,          self.fps)
             cap.set(cv2.CAP_PROP_BUFFERSIZE,   1)
 
             for _ in range(5):
@@ -125,7 +137,17 @@ class Camera:
                 self.cap = cap
                 self.is_initialized = True
                 bname = "Default" if backend is None else _BACKEND_NAMES.get(backend, str(backend))
-                logger.info(f"USB camera ready (index={self.camera_index}, backend={bname})")
+                ah, aw = frame.shape[:2]
+                logger.info(
+                    f"USB camera ready (index={self.camera_index}, backend={bname}, "
+                    f"requested={self.width}x{self.height}, actual={aw}x{ah})"
+                )
+                if (aw, ah) != (self.width, self.height):
+                    logger.warning(
+                        f"Camera delivered {aw}x{ah} (asked {self.width}x{self.height}). "
+                        "If lower than expected, the camera may have ignored the mode — "
+                        "check MJPEG support / USB bandwidth."
+                    )
                 return True
 
             cap.release()

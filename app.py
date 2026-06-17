@@ -50,6 +50,12 @@ except Exception as _aw_err:  # noqa: BLE001 — isolation by design
 # Pre-computed JPEG encode params (avoids re-creating each frame)
 _JPEG_PARAMS = [cv2.IMWRITE_JPEG_QUALITY, 80]
 
+# Max width (px) for transport-sized images. The high-res snapshot capture is
+# decoded/detected at full resolution, but the viewfinder stream and the
+# returned preview are downscaled to these so the browser stays responsive.
+_VIEWFINDER_MAX_W = 960
+_SNAPSHOT_DISPLAY_MAX_W = 1280
+
 # Global variables for detection system
 camera = None
 detector = None
@@ -330,7 +336,14 @@ def generate_viewfinder():
             seq = viewfinder_seq
         if frame is not None and seq != last_seq:
             last_seq = seq
-            ret, buffer = cv2.imencode('.jpg', frame, _JPEG_PARAMS)
+            # Downscale the high-res (5MP) frame for a smooth aiming stream —
+            # the full-res frame is kept untouched for the shutter capture.
+            disp = frame
+            h, w = frame.shape[:2]
+            if w > _VIEWFINDER_MAX_W:
+                scale = _VIEWFINDER_MAX_W / float(w)
+                disp = cv2.resize(frame, (_VIEWFINDER_MAX_W, int(h * scale)))
+            ret, buffer = cv2.imencode('.jpg', disp, _JPEG_PARAMS)
             if ret:
                 frame_bytes = buffer.tobytes()
         yield (b'--frame\r\n'
@@ -523,6 +536,29 @@ def _parse_camera_index(camera_index_raw):
     return camera_index_raw
 
 
+def _scale_for_display(frame, detections, max_w):
+    """
+    Downscale a frame to ``max_w`` and scale detection boxes to match, so a
+    high-res capture renders with readable box thickness and a small payload.
+    Returns (display_frame, display_detections). No-op when already small.
+    """
+    h, w = frame.shape[:2]
+    if w <= max_w:
+        return frame, detections
+    scale = max_w / float(w)
+    disp = cv2.resize(frame, (max_w, int(h * scale)))
+    scaled = []
+    for d in detections:
+        x1, y1, x2, y2 = d["bbox"]
+        sd = dict(d)
+        sd["bbox"] = [int(x1 * scale), int(y1 * scale),
+                      int(x2 * scale), int(y2 * scale)]
+        cx, cy = d["center"]
+        sd["center"] = [int(cx * scale), int(cy * scale)]
+        scaled.append(sd)
+    return disp, scaled
+
+
 @app.route('/api/viewfinder/start', methods=['POST'])
 def api_viewfinder_start():
     """Open the camera and start the raw viewfinder for snapshot aiming."""
@@ -540,7 +576,13 @@ def api_viewfinder_start():
     data = request.get_json(silent=True) or {}
     camera_index = _parse_camera_index(data.get("camera_index", config.CAMERA_INDEX))
 
-    cam = Camera(camera_index=camera_index)
+    # Open at the high snapshot resolution so the shutter captures full detail.
+    # The viewfinder stream itself is downscaled for smooth aiming.
+    cam = Camera(
+        camera_index=camera_index,
+        width=config.SNAPSHOT_CAMERA_WIDTH,
+        height=config.SNAPSHOT_CAMERA_HEIGHT,
+    )
     if not cam.initialize():
         return jsonify({
             "status": "error",
@@ -600,13 +642,18 @@ def api_snapshot():
         }), 500
 
     # Snapshot runs once per shutter press, so use the high-accuracy image size
-    # (favour precision over speed — unlike the live stream).
+    # (favour precision over speed — unlike the live stream). Detection runs on
+    # the full-resolution frame; we then downscale to a display size and scale
+    # the boxes with it, so the preview has readable box thickness/text and a
+    # lightweight payload.
     detections = detector.detect(frame, imgsz=config.SNAPSHOT_IMGSZ)
-    annotated = detector.draw_detections(frame, detections)
 
     dents = [d for d in detections if d["class_name"] not in _NON_DEFECT_CLASSES]
     verdict = "ng" if dents else "ok"
     max_conf = max((d["confidence"] for d in dents), default=0.0)
+
+    disp_frame, disp_dets = _scale_for_display(frame, detections, _SNAPSHOT_DISPLAY_MAX_W)
+    annotated = detector.draw_detections(disp_frame, disp_dets)
 
     ret, buffer = cv2.imencode('.jpg', annotated, _JPEG_PARAMS)
     if not ret:

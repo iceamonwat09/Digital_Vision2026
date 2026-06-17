@@ -16,9 +16,24 @@ CONFIG_VERSION = "2026.06.16-artwork-compare-images"
 # Default camera indices: 0 = built-in/laptop camera, 1+ = external USB webcams
 # To find your external webcam index, run: python -c "import cv2; [print(f'Index {i}: {cv2.VideoCapture(i).read()[0]}') for i in range(5)]"
 CAMERA_INDEX = 0  # ผลจาก test_camera.py: กล้องอยู่ที่ index 0
-CAMERA_WIDTH  = 640   # 640x480 ใช้ได้กับทุกกล้อง (notebook + USB)
-CAMERA_HEIGHT = 480   # เปลี่ยนเป็น 1280x720 ได้ถ้าต้องการ HD
+
+# ── Live stream resolution ──────────────────────────────────────────
+# 1280x720 บนกล้อง ELP 8MP (IMX179). ต้องใช้ MJPEG (ดู CAMERA_FOURCC)
+# เพราะ USB 2.0 ส่ง YUY2 ความละเอียดสูงไม่ไหว.
+CAMERA_WIDTH  = 1280
+CAMERA_HEIGHT = 720
 CAMERA_FPS = 30
+
+# FourCC ที่สั่งกล้องให้ส่งภาพแบบ MJPEG (บีบอัด ~10:1). จำเป็นมากบน USB 2.0
+# ไม่งั้น OpenCV จะ default เป็น YUY2 (ไม่บีบอัด) แล้วถูกจำกัดที่ ~640x480.
+# ตั้งเป็น None เพื่อปิด (กลับไปใช้ default ของกล้อง).
+CAMERA_FOURCC = "MJPG"
+
+# ── Snapshot capture resolution ─────────────────────────────────────
+# โหมดถ่ายรูปถ่ายครั้งเดียวต่อชัตเตอร์ จึงไม่ต้องห่วง fps — ดันความละเอียด
+# ให้สูงเพื่อจับรอยบุบเล็ก/ตื้นได้แม่นที่สุด (กล้องนี้สูงสุด 3264x2448 / 8MP).
+SNAPSHOT_CAMERA_WIDTH  = 2592
+SNAPSHOT_CAMERA_HEIGHT = 1944
 
 # Enable this to test available cameras at startup
 # Set to False for faster startup (skips camera scanning)
@@ -56,13 +71,11 @@ YOLO_MAX_DET = 20
 YOLO_IMGSZ = 480
 
 # Snapshot inference image size. Snapshot runs the model ONCE per shutter press
-# (not a live stream), so speed is irrelevant — we trade it for accuracy. 960
-# recovers all detail the 640x480 camera provides (vs the 480 live size that
-# downscales it) plus headroom that helps the model catch small/shallow dents.
-# Going much higher than the camera's native resolution gives diminishing
-# returns (it only upscales an already-captured image). For a real accuracy
-# jump, also raise the snapshot capture resolution (see SNAPSHOT_CAMERA_*).
-SNAPSHOT_IMGSZ = 960
+# (not a live stream), so speed is irrelevant — we trade it for accuracy. With
+# the high-resolution snapshot capture (SNAPSHOT_CAMERA_* = 5MP) there is real
+# detail to work with, so 1280 lets the model resolve small/shallow dents that
+# were lost at the downscaled live size.
+SNAPSHOT_IMGSZ = 1280
 
 # ====================
 # DEFECT CLASS MAPPING  (Can Dent Detection)
