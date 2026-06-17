@@ -584,12 +584,22 @@ def _open_camera(cam_index, width, height, fps, retries=3, settle=0.4):
 
 def _grab_snapshot_highres():
     """
-    Capture one full-resolution (5MP) frame for the shutter, then restore the
-    smooth 720p viewfinder. Reliable across UVC drivers that refuse a
-    mid-stream resolution switch: release the viewfinder handle, open a fresh
-    handle at 5MP, grab, release, then reopen the viewfinder. Returns a BGR
-    frame or None. MUST be called while holding cap_lock (so the viewfinder
-    read loop is paused and the global swap is safe).
+    Capture the best-quality still available for the shutter, then restore the
+    smooth viewfinder. Designed so the shutter NEVER hard-fails while the
+    viewfinder is running — many UVC drivers refuse to reopen at 5MP right
+    after a release, so a single fixed mode is too fragile.
+
+    Strategy (most → least preferred):
+      1. Snapshot the newest viewfinder frame up front — a guaranteed fallback.
+      2. Release the handle and walk config.SNAPSHOT_RESOLUTION_LADDER (5MP →
+         1080p). The first mode that actually delivers a frame wins.
+      3. If every high-res open fails, fall back to the viewfinder frame from (1)
+         instead of returning an error.
+      4. Always reopen the smooth viewfinder so aiming resumes.
+
+    Returns a BGR frame, or None only if even the viewfinder had no frame yet.
+    MUST be called while holding cap_lock (so the viewfinder read loop is paused
+    and the global handle swap is safe).
     """
     global viewfinder_camera
 
@@ -598,32 +608,50 @@ def _grab_snapshot_highres():
         return None
     cam_index = cam.camera_index
 
+    # 1) Guaranteed-good baseline: the exact frame the viewfinder is showing.
+    #    The viewfinder loop is paused on cap_lock, so this is safe to read.
+    with vf_lock:
+        baseline = viewfinder_frame.copy() if viewfinder_frame is not None else None
+
     frame = None
     try:
-        # 1) free the USB handle so the 5MP open can grab it
+        # 2) free the USB handle so a high-res open can grab it
         cam.release()
         time.sleep(0.4)   # let the OS fully release the device before reopening
 
-        # 2) one clean full-res grab (Camera.initialize already warms up 5 frames)
-        snap = _open_camera(cam_index, config.SNAPSHOT_CAMERA_WIDTH,
-                            config.SNAPSHOT_CAMERA_HEIGHT, config.SNAPSHOT_CAMERA_FPS)
-        if snap is not None:
-            for _ in range(2):            # extra reads for a fresh, settled frame
+        # 3) walk the resolution ladder; first mode that yields a frame wins
+        for width, height, fps in config.SNAPSHOT_RESOLUTION_LADDER:
+            snap = _open_camera(cam_index, width, height, fps, retries=2)
+            if snap is None:
+                logger.warning(f"Snapshot: could not open camera at {width}x{height}; "
+                               "trying next mode")
+                continue
+            grabbed = None
+            for _ in range(3):            # extra reads for a fresh, settled frame
                 result = snap.read_frame()
                 if result and result[0]:
-                    frame = result[1]
+                    grabbed = result[1]
             snap.release()
-            time.sleep(0.4)
-        else:
-            logger.error("Snapshot: could not open camera at 5MP "
-                         f"({config.SNAPSHOT_CAMERA_WIDTH}x{config.SNAPSHOT_CAMERA_HEIGHT})")
+            time.sleep(0.3)
+            if grabbed is not None:
+                ah, aw = grabbed.shape[:2]
+                logger.info(f"Snapshot captured at {aw}x{ah} (requested {width}x{height})")
+                frame = grabbed
+                break
+            logger.warning(f"Snapshot: opened {width}x{height} but got no frame; "
+                           "trying next mode")
     finally:
-        # 3) always reopen the smooth viewfinder so aiming resumes after the shot
+        # 4) always reopen the smooth viewfinder so aiming resumes after the shot
         viewfinder_camera = _open_camera(
             cam_index, config.VIEWFINDER_CAMERA_WIDTH,
             config.VIEWFINDER_CAMERA_HEIGHT, config.VIEWFINDER_CAMERA_FPS)
         if viewfinder_camera is None:
             logger.error("Snapshot: failed to reopen viewfinder after grab")
+
+    # 5) graceful degrade — a 720p verdict beats "ถ่ายไม่ได้"
+    if frame is None and baseline is not None:
+        logger.warning("Snapshot: high-res capture failed — using viewfinder frame instead")
+        frame = baseline
 
     return frame
 
@@ -712,7 +740,7 @@ def api_snapshot():
         if frame is None:
             return jsonify({
                 "status": "error",
-                "message": "ถ่ายภาพไม่สำเร็จ — เปิดกล้องที่ความละเอียดสูงไม่ได้ ลองใหม่อีกครั้ง"
+                "message": "ถ่ายภาพไม่สำเร็จ — ยังไม่มีภาพจากกล้อง รอ viewfinder ขึ้นภาพก่อนแล้วลองใหม่"
             }), 500
 
         # Snapshot runs once per shutter press, so use the high-accuracy image
@@ -733,6 +761,7 @@ def api_snapshot():
             return jsonify({"status": "error", "message": "เข้ารหัสภาพไม่สำเร็จ"}), 500
         image_b64 = "data:image/jpeg;base64," + base64.b64encode(buffer.tobytes()).decode("ascii")
 
+        cap_h, cap_w = frame.shape[:2]
         return jsonify({
             "status": "ok",
             "image": image_b64,
@@ -742,6 +771,7 @@ def api_snapshot():
             "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "line": config.LINE_NUMBER,
             "plant": config.PLANT_CODE,
+            "capture_size": f"{cap_w}x{cap_h}",
         })
     except Exception as e:
         logger.error(f"Snapshot failed: {e}", exc_info=True)

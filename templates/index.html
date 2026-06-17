@@ -141,6 +141,7 @@
                         <dt>จำนวน Dent</dt><dd id="snapDents">0</dd>
                         <dt>Confidence สูงสุด</dt><dd id="snapConf">—</dd>
                         <dt>เวลา</dt><dd id="snapTime">—</dd>
+                        <dt>ความละเอียดภาพ</dt><dd id="snapRes">—</dd>
                         <dt>Line / Plant</dt><dd id="snapLine">—</dd>
                     </dl>
                     <button id="snapRetake" class="btn btn-primary btn-block">📷 ถ่ายใหม่</button>
@@ -455,6 +456,7 @@
     const snapDents       = document.getElementById('snapDents');
     const snapConf        = document.getElementById('snapConf');
     const snapTime        = document.getElementById('snapTime');
+    const snapRes         = document.getElementById('snapRes');
     const snapLine        = document.getElementById('snapLine');
 
     function resolveCameraIndex() {
@@ -531,6 +533,7 @@
             snapDents.textContent = data.dent_count;
             snapConf.textContent  = data.dent_count > 0 ? data.max_confidence : '—';
             snapTime.textContent  = data.timestamp;
+            snapRes.textContent   = data.capture_size || '—';
             snapLine.textContent  = data.line + ' / ' + data.plant;
             showResultState();
         })

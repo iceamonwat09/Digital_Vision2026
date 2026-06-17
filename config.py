@@ -7,7 +7,7 @@ import os
 
 # Bump this whenever a config default changes so a running deployment can
 # print it on startup and confirm it is actually executing the new code.
-CONFIG_VERSION = "2026.06.16-artwork-compare-images"
+CONFIG_VERSION = "2026.06.17-snapshot-resolution-fallback"
 
 # ====================
 # CAMERA CONFIGURATION
@@ -42,6 +42,17 @@ SNAPSHOT_CAMERA_HEIGHT = 1944
 # FPS ของโหมด 5MP — กล้องรองรับ 2592x1944 ที่ 15fps (โหมดมาตรฐาน UVC).
 # ตั้งให้ตรงโหมดจริงเพื่อให้ไดรเวอร์ไม่ต้องเดา และพอสำหรับการเล็งภาพนิ่ง.
 SNAPSHOT_CAMERA_FPS = 15
+
+# ── Snapshot resolution fallback ladder ─────────────────────────────
+# กล้อง/ไดรเวอร์ UVC บางรุ่นเปิดที่ 5MP ผ่าน release→reopen ไม่ติดเสมอไป
+# (อุปกรณ์ยังไม่ว่าง หรือไม่รองรับโหมดนั้นใน MJPG). แทนที่จะ "ถ่ายไม่ได้"
+# ให้ไล่ลองจากคมสุดลงมา — โหมดแรกที่ส่งเฟรมได้จริงเป็นผู้ชนะ. ถ้าทั้งหมด
+# ล้มเหลว snapshot จะ fall back ไปใช้เฟรม viewfinder (720p) แทนการ error.
+# (width, height, fps) เรียงจากความละเอียดสูง → ต่ำ.
+SNAPSHOT_RESOLUTION_LADDER = [
+    (SNAPSHOT_CAMERA_WIDTH, SNAPSHOT_CAMERA_HEIGHT, SNAPSHOT_CAMERA_FPS),  # 2592x1944 (5MP)
+    (1920, 1080, 30),  # 1080p — มาตรฐานเกือบทุกกล้อง รองรับเมื่อ 5MP ไม่ติด
+]
 
 # ── Viewfinder (อาการเล็งก่อนกดชัตเตอร์) ──────────────────────────────
 # โหมด 5MP วิ่งได้แค่ 15fps (เพดานฮาร์ดแวร์) ทำให้เล็งไม่ลื่น. จึงเปิด
