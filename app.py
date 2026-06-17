@@ -92,6 +92,20 @@ current_model_file = None     # filename inside weights/<mode>/, None = auto
 defect_log_cooldown = {}
 
 
+# ── Viewfinder (snapshot live preview) ─────────────────────────────────
+# A lightweight raw-camera preview used by snapshot mode so the operator can
+# aim before pressing the shutter. It runs NO detection (just grabs and shows
+# raw frames), so it stays smooth and never competes with the model. It owns
+# the camera only while the snapshot overlay is open, and is mutually exclusive
+# with live detection (single camera handle).
+viewfinder_active = False
+viewfinder_camera = None
+viewfinder_thread = None
+viewfinder_frame = None
+viewfinder_seq = 0
+vf_lock = threading.Lock()
+
+
 def _load_detector_for(mode_name: str, model_filename=None):
     """
     Build a YOLODetector for the given mode and load its weights.
@@ -277,6 +291,53 @@ def generate_frames():
         time.sleep(1.0 / config.STREAM_FPS)
 
 
+def viewfinder_loop():
+    """Viewfinder capture thread: grab raw frames (no detection) at camera rate."""
+    global viewfinder_frame, viewfinder_seq
+
+    logger.info("Viewfinder loop started")
+    while viewfinder_active:
+        try:
+            result = viewfinder_camera.read_frame() if viewfinder_camera else None
+            if result is None:
+                time.sleep(0.02)
+                continue
+            success, frame = result
+            if not success or frame is None:
+                time.sleep(0.02)
+                continue
+            with vf_lock:
+                viewfinder_frame = frame
+                viewfinder_seq += 1
+        except Exception as e:
+            logger.error(f"Error in viewfinder loop: {e}")
+            time.sleep(0.05)
+    logger.info("Viewfinder loop stopped")
+
+
+def generate_viewfinder():
+    """MJPEG generator for the raw viewfinder (no boxes, no model)."""
+    placeholder = np.zeros((480, 640, 3), dtype=np.uint8)
+    cv2.putText(placeholder, "Starting camera...", (170, 240),
+                cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+    _, ph_buf = cv2.imencode('.jpg', placeholder, _JPEG_PARAMS)
+    frame_bytes = ph_buf.tobytes()
+    last_seq = -1
+
+    while viewfinder_active:
+        with vf_lock:
+            frame = viewfinder_frame
+            seq = viewfinder_seq
+        if frame is not None and seq != last_seq:
+            last_seq = seq
+            ret, buffer = cv2.imencode('.jpg', frame, _JPEG_PARAMS)
+            if ret:
+                frame_bytes = buffer.tobytes()
+        yield (b'--frame\r\n'
+               b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+        time.sleep(1.0 / config.STREAM_FPS)
+
+
 # ── Routes ─────────────────────────────────────────────
 
 @app.route('/')
@@ -306,6 +367,15 @@ def video_feed():
     )
 
 
+@app.route('/viewfinder_feed')
+def viewfinder_feed():
+    """Raw viewfinder stream (MJPEG, no detection) for snapshot aiming."""
+    return Response(
+        generate_viewfinder(),
+        mimetype='multipart/x-mixed-replace; boundary=frame'
+    )
+
+
 # ── API Endpoints ──────────────────────────────────────
 
 @app.route('/api/camera/scan', methods=['GET'])
@@ -329,6 +399,12 @@ def start_detection():
 
     if detection_active:
         return jsonify({"status": "already_running", "message": "Detection already active"}), 200
+
+    if viewfinder_active:
+        return jsonify({
+            "status": "error",
+            "message": "ปิดโหมดถ่ายรูปก่อน แล้วจึงเริ่มตรวจสด"
+        }), 409
 
     model_ready = detector is not None and detector.model is not None
     if not model_ready:
@@ -426,66 +502,101 @@ def get_detection_status():
     })
 
 
-# ── Snapshot inspection (still-photo capture) ──────────
-# Single-shot capture: open the camera fresh, grab one full-rate frame, run the
-# current model on it, and return the annotated still + verdict. Deliberately
-# NOT usable while live streaming — sharing the camera with the live pipeline
-# yields a slower/laggier frame than a clean dedicated grab, so snapshot mode
-# requires detection to be stopped first. Reuses the pure detect()/
-# draw_detections() helpers and never touches the streaming threads.
+# ── Snapshot inspection (viewfinder + shutter) ─────────
+# Flow: open the snapshot overlay → a raw viewfinder streams so the operator
+# can aim (no detection, stays smooth) → press the shutter → the newest
+# viewfinder frame is run through the model once → annotated still + verdict.
+# Snapshot mode is mutually exclusive with live detection (single camera handle)
+# and reuses the pure detect()/draw_detections() helpers — the live streaming
+# threads are never touched.
 
 # Classes that are NOT a dent defect (a "good"/"can" box is never an NG reason).
 _NON_DEFECT_CLASSES = {"good", "can"}
 
 
-def _grab_snapshot_frame(camera_index):
-    """
-    Open the camera briefly, warm it up, grab one frame, release. Returns a BGR
-    frame or None. Only called when live detection is stopped (the camera is
-    free), so it always gets a clean full-speed capture.
-    """
-    snap_cam = Camera(camera_index=camera_index)
-    if not snap_cam.initialize():
-        return None
-    try:
-        frame = None
-        for _ in range(3):                 # flush stale buffered frames
-            result = snap_cam.read_frame()
-            if result and result[0]:
-                frame = result[1]
-        return frame.copy() if frame is not None else None
-    finally:
-        snap_cam.release()
+def _parse_camera_index(camera_index_raw):
+    """Normalise a request camera_index: numeric → int, else keep (RTSP URL)."""
+    if isinstance(camera_index_raw, str) and camera_index_raw.isdigit():
+        return int(camera_index_raw)
+    if isinstance(camera_index_raw, (int, float)):
+        return int(camera_index_raw)
+    return camera_index_raw
+
+
+@app.route('/api/viewfinder/start', methods=['POST'])
+def api_viewfinder_start():
+    """Open the camera and start the raw viewfinder for snapshot aiming."""
+    global viewfinder_active, viewfinder_camera, viewfinder_thread
+    global viewfinder_frame, viewfinder_seq
+
+    if detection_active:
+        return jsonify({
+            "status": "error",
+            "message": "กรุณากด Stop Detection ก่อน แล้วจึงเปิดโหมดถ่ายรูป"
+        }), 409
+    if viewfinder_active:
+        return jsonify({"status": "already_running"}), 200
+
+    data = request.get_json(silent=True) or {}
+    camera_index = _parse_camera_index(data.get("camera_index", config.CAMERA_INDEX))
+
+    cam = Camera(camera_index=camera_index)
+    if not cam.initialize():
+        return jsonify({
+            "status": "error",
+            "message": f"เปิดกล้อง {camera_index} ไม่ได้ หรือกล้องถูกใช้งานอยู่"
+        }), 500
+
+    viewfinder_camera = cam
+    with vf_lock:
+        viewfinder_frame = None
+        viewfinder_seq = 0
+    viewfinder_active = True
+    viewfinder_thread = threading.Thread(target=viewfinder_loop, daemon=True)
+    viewfinder_thread.start()
+
+    logger.info(f"Viewfinder started on camera {camera_index}")
+    return jsonify({"status": "started"})
+
+
+@app.route('/api/viewfinder/stop', methods=['POST'])
+def api_viewfinder_stop():
+    """Stop the viewfinder and release the camera."""
+    global viewfinder_active, viewfinder_camera, viewfinder_thread, viewfinder_frame
+
+    viewfinder_active = False
+    if viewfinder_thread is not None:
+        viewfinder_thread.join(timeout=1.0)
+    viewfinder_thread = None
+    if viewfinder_camera:
+        viewfinder_camera.release()
+        viewfinder_camera = None
+    with vf_lock:
+        viewfinder_frame = None
+
+    logger.info("Viewfinder stopped")
+    return jsonify({"status": "stopped"})
 
 
 @app.route('/api/snapshot', methods=['POST'])
 def api_snapshot():
-    """Capture one frame, run detection, return annotated JPEG + verdict."""
+    """Run the model on the newest viewfinder frame; return annotated JPEG + verdict."""
     if detector is None or detector.model is None:
         return jsonify({"status": "error", "message": "ยังไม่ได้โหลดโมเดล"}), 400
 
-    # Snapshot and live streaming must not share the camera (a shared grab is
-    # slower/laggier than a dedicated one) — require the live feed to be stopped.
-    if detection_active:
+    if not viewfinder_active:
         return jsonify({
             "status": "error",
-            "message": "กรุณากด Stop Detection ก่อน แล้วจึงถ่ายรูปตรวจ"
+            "message": "กรุณาเปิดโหมดถ่ายรูป (viewfinder) ก่อนกดถ่าย"
         }), 409
 
-    data = request.get_json(silent=True) or {}
-    camera_index_raw = data.get("camera_index", config.CAMERA_INDEX)
-    if isinstance(camera_index_raw, str) and camera_index_raw.isdigit():
-        camera_index = int(camera_index_raw)
-    elif isinstance(camera_index_raw, (int, float)):
-        camera_index = int(camera_index_raw)
-    else:
-        camera_index = camera_index_raw   # RTSP URL string
-
-    frame = _grab_snapshot_frame(camera_index)
+    with vf_lock:
+        frame = viewfinder_frame
+    frame = frame.copy() if frame is not None else None
     if frame is None:
         return jsonify({
             "status": "error",
-            "message": f"เปิดกล้อง {camera_index} ไม่ได้ หรือกล้องถูกใช้งานอยู่"
+            "message": "ยังไม่มีภาพจากกล้อง รอสักครู่แล้วลองใหม่"
         }), 500
 
     detections = detector.detect(frame)

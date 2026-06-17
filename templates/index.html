@@ -114,26 +114,37 @@
     </div>
 </div>
 
-<!-- ── Snapshot Preview Overlay ──────────────────────────── -->
+<!-- ── Snapshot Overlay (viewfinder + ชัตเตอร์) ──────────── -->
 <div id="snapOverlay" class="snap-overlay" style="display:none">
     <div class="snap-modal">
         <div class="snap-modal-head">
-            <span>ผลการตรวจ (Snapshot)</span>
+            <span id="snapTitle">ถ่ายรูปตรวจ</span>
             <button id="snapClose" class="snap-x" title="ปิด">&times;</button>
         </div>
         <div class="snap-body">
             <div class="snap-image-pane">
-                <img id="snapImage" alt="Snapshot result">
+                <!-- live viewfinder (raw camera, no detection) -->
+                <img id="snapViewfinder" alt="Viewfinder">
+                <!-- captured result (shown after shutter) -->
+                <img id="snapImage" alt="Snapshot result" style="display:none">
             </div>
             <div class="snap-info-pane">
-                <div id="snapVerdict" class="snap-verdict">—</div>
-                <dl class="snap-meta">
-                    <dt>จำนวน Dent</dt><dd id="snapDents">0</dd>
-                    <dt>Confidence สูงสุด</dt><dd id="snapConf">—</dd>
-                    <dt>เวลา</dt><dd id="snapTime">—</dd>
-                    <dt>Line / Plant</dt><dd id="snapLine">—</dd>
-                </dl>
-                <button id="snapRetake" class="btn btn-primary btn-block">📷 ถ่ายใหม่</button>
+                <!-- สถานะ 1: เล็งกล้อง -->
+                <div id="snapLivePanel">
+                    <p class="snap-aim-hint">เล็งให้กระป๋องอยู่ในกรอบ<br>แล้วกดปุ่มถ่าย</p>
+                    <button id="snapShutter" class="btn btn-primary btn-block snap-shutter">📸 ถ่าย</button>
+                </div>
+                <!-- สถานะ 2: ผลการตรวจ -->
+                <div id="snapResultPanel" style="display:none">
+                    <div id="snapVerdict" class="snap-verdict">—</div>
+                    <dl class="snap-meta">
+                        <dt>จำนวน Dent</dt><dd id="snapDents">0</dd>
+                        <dt>Confidence สูงสุด</dt><dd id="snapConf">—</dd>
+                        <dt>เวลา</dt><dd id="snapTime">—</dd>
+                        <dt>Line / Plant</dt><dd id="snapLine">—</dd>
+                    </dl>
+                    <button id="snapRetake" class="btn btn-primary btn-block">📷 ถ่ายใหม่</button>
+                </div>
             </div>
         </div>
     </div>
@@ -180,6 +191,9 @@
     .snap-meta dt { color: #64748b; font-size: 13px; margin-top: 12px; }
     .snap-meta dd { margin: 2px 0 0; font-size: 18px; font-weight: 600; color: #0f172a; }
     .snap-info-pane .btn { margin-top: auto; }
+    #snapLivePanel, #snapResultPanel { display: flex; flex-direction: column; flex: 1; }
+    .snap-aim-hint { color: #475569; font-size: 15px; line-height: 1.6; text-align: center; margin: 6px 0 0; }
+    .snap-shutter { margin-top: auto; font-size: 18px; padding: 14px 0; }
     .control-hint { margin: 8px 0 0; font-size: 12px; color: #94a3b8; text-align: center; }
 </style>
 {% endblock %}
@@ -429,18 +443,20 @@
         if (currentMode) loadModels(currentMode);
     });
 
-    // ── Snapshot (ถ่ายรูปตรวจ) ─────────────────────────
-    const snapBtn     = document.getElementById('snapBtn');
-    const snapOverlay = document.getElementById('snapOverlay');
-    const snapImage   = document.getElementById('snapImage');
-    const snapVerdict = document.getElementById('snapVerdict');
-    const snapDents   = document.getElementById('snapDents');
-    const snapConf    = document.getElementById('snapConf');
-    const snapTime    = document.getElementById('snapTime');
-    const snapLine    = document.getElementById('snapLine');
+    // ── Snapshot (viewfinder + ชัตเตอร์) ──────────────
+    const snapBtn         = document.getElementById('snapBtn');
+    const snapOverlay     = document.getElementById('snapOverlay');
+    const snapViewfinder  = document.getElementById('snapViewfinder');
+    const snapImage       = document.getElementById('snapImage');
+    const snapLivePanel   = document.getElementById('snapLivePanel');
+    const snapResultPanel = document.getElementById('snapResultPanel');
+    const snapShutter     = document.getElementById('snapShutter');
+    const snapVerdict     = document.getElementById('snapVerdict');
+    const snapDents       = document.getElementById('snapDents');
+    const snapConf        = document.getElementById('snapConf');
+    const snapTime        = document.getElementById('snapTime');
+    const snapLine        = document.getElementById('snapLine');
 
-    // Resolve the camera the snapshot should use. While streaming the server
-    // reuses the live frame and ignores this; when idle it opens this camera.
     function resolveCameraIndex() {
         if (currentSource === 'usb') {
             const val = cameraSelect.value;
@@ -450,11 +466,22 @@
         return url || null;
     }
 
-    function openSnapOverlay() { snapOverlay.style.display = 'flex'; }
-    function closeSnapOverlay() { snapOverlay.style.display = 'none'; }
+    // Toggle the overlay between "aim" (live viewfinder) and "result" states.
+    function showLiveState() {
+        snapImage.style.display = 'none';
+        snapViewfinder.style.display = '';
+        snapResultPanel.style.display = 'none';
+        snapLivePanel.style.display = 'flex';
+    }
+    function showResultState() {
+        snapViewfinder.style.display = 'none';
+        snapImage.style.display = '';
+        snapLivePanel.style.display = 'none';
+        snapResultPanel.style.display = 'flex';
+    }
 
-    function captureSnapshot() {
-        // Snapshot opens the camera fresh, so it can't run while streaming.
+    // Open snapshot mode: start the raw viewfinder so the operator can aim.
+    function openSnapshot() {
         if (stopBtn.disabled === false) {
             alert('กรุณากด Stop Detection ก่อน แล้วจึงถ่ายรูปตรวจ');
             return;
@@ -464,26 +491,39 @@
             alert('กรุณาเลือกกล้อง/ใส่ RTSP URL ก่อนถ่ายรูป');
             return;
         }
-
-        openSnapOverlay();
-        snapVerdict.className = 'snap-verdict busy';
-        snapVerdict.textContent = 'กำลังตรวจ…';
-        snapImage.removeAttribute('src');
         snapBtn.disabled = true;
-
-        fetch('/api/snapshot', {
+        fetch('/api/viewfinder/start', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ camera_index: cameraIndex })
         })
         .then(r => r.json())
         .then(data => {
-            if (data.status !== 'ok') {
-                snapVerdict.className = 'snap-verdict ng';
-                snapVerdict.textContent = 'ผิดพลาด';
-                alert(data.message || 'ถ่ายรูปไม่สำเร็จ');
-                return;
-            }
+            if (data.status === 'error') { alert(data.message); return; }
+            snapViewfinder.src = '/viewfinder_feed?t=' + Date.now();
+            showLiveState();
+            snapOverlay.style.display = 'flex';
+        })
+        .catch(err => { console.error('Viewfinder start error:', err); alert('เปิดกล้องไม่สำเร็จ'); })
+        .finally(() => { snapBtn.disabled = false; });
+    }
+
+    // Close snapshot mode: drop the MJPEG connection + release the camera.
+    function closeSnapshot() {
+        snapOverlay.style.display = 'none';
+        snapViewfinder.removeAttribute('src');
+        fetch('/api/viewfinder/stop', { method: 'POST' }).catch(() => {});
+    }
+
+    // Shutter: run the model once on the newest viewfinder frame.
+    function pressShutter() {
+        snapShutter.disabled = true;
+        fetch('/api/snapshot', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}'
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.status !== 'ok') { alert(data.message || 'ถ่ายรูปไม่สำเร็จ'); return; }
             snapImage.src = data.image;
             snapVerdict.className = 'snap-verdict ' + data.verdict;
             snapVerdict.textContent = data.verdict === 'ng' ? 'NG' : 'OK';
@@ -491,21 +531,18 @@
             snapConf.textContent  = data.dent_count > 0 ? data.max_confidence : '—';
             snapTime.textContent  = data.timestamp;
             snapLine.textContent  = data.line + ' / ' + data.plant;
+            showResultState();
         })
-        .catch(err => {
-            console.error('Snapshot error:', err);
-            snapVerdict.className = 'snap-verdict ng';
-            snapVerdict.textContent = 'ผิดพลาด';
-            alert('ถ่ายรูปไม่สำเร็จ');
-        })
-        .finally(() => { snapBtn.disabled = false; });
+        .catch(err => { console.error('Snapshot error:', err); alert('ถ่ายรูปไม่สำเร็จ'); })
+        .finally(() => { snapShutter.disabled = false; });
     }
 
-    snapBtn.addEventListener('click', captureSnapshot);
-    document.getElementById('snapRetake').addEventListener('click', captureSnapshot);
-    document.getElementById('snapClose').addEventListener('click', closeSnapOverlay);
+    snapBtn.addEventListener('click', openSnapshot);
+    snapShutter.addEventListener('click', pressShutter);
+    document.getElementById('snapRetake').addEventListener('click', showLiveState);
+    document.getElementById('snapClose').addEventListener('click', closeSnapshot);
     snapOverlay.addEventListener('click', (e) => {
-        if (e.target === snapOverlay) closeSnapOverlay();
+        if (e.target === snapOverlay) closeSnapshot();
     });
 
     // ── Init ──────────────────────────────────────────
