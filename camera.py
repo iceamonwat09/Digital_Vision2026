@@ -211,47 +211,6 @@ class Camera:
 
         return (True, frame)
 
-    def capture_at(self, width: int, height: int, fps: int = None,
-                   warmup: int = 6) -> Optional[any]:
-        """
-        Temporarily switch the OPEN camera to a higher resolution, grab one
-        frame, then restore the original (viewfinder) resolution. Used by
-        snapshot mode so aiming stays smooth at 720p but the shutter captures
-        full 5MP detail. Returns a BGR frame or None.
-
-        Caller must serialise this against any other reads on the same handle
-        (the capture loop) — switching resolution mid-stream is not thread-safe.
-        """
-        if not self.is_initialized or self.cap is None:
-            return None
-        cap = self.cap
-        # Remember what to restore (fall back to this instance's config values).
-        prev_w = self.width
-        prev_h = self.height
-        prev_fps = self.fps
-        try:
-            cap.set(cv2.CAP_PROP_FRAME_WIDTH,  width)
-            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
-            if fps:
-                cap.set(cv2.CAP_PROP_FPS, fps)
-            # Flush stale/transition frames so we return a real high-res frame.
-            frame = None
-            for _ in range(warmup):
-                ret, f = cap.read()
-                if ret and f is not None:
-                    frame = f
-            if frame is not None:
-                ah, aw = frame.shape[:2]
-                logger.info(f"Snapshot grab at {aw}x{ah} (requested {width}x{height})")
-            return frame
-        finally:
-            # Restore the smooth viewfinder mode and flush the transition.
-            cap.set(cv2.CAP_PROP_FRAME_WIDTH,  prev_w)
-            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, prev_h)
-            cap.set(cv2.CAP_PROP_FPS,          prev_fps)
-            for _ in range(2):
-                cap.read()
-
     def release(self):
         """Release camera resources."""
         if self.cap is not None:

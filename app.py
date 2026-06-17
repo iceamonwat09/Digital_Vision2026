@@ -569,6 +569,52 @@ def _scale_for_display(frame, detections, max_w):
     return disp, scaled
 
 
+def _grab_snapshot_highres():
+    """
+    Capture one full-resolution (5MP) frame for the shutter, then restore the
+    smooth 720p viewfinder. Reliable across UVC drivers that refuse a
+    mid-stream resolution switch: release the viewfinder handle, open a fresh
+    handle at 5MP, grab, release, then reopen the viewfinder. Returns a BGR
+    frame or None. MUST be called while holding cap_lock (so the viewfinder
+    read loop is paused and the global swap is safe).
+    """
+    global viewfinder_camera
+
+    cam = viewfinder_camera
+    if cam is None:
+        return None
+    cam_index = cam.camera_index
+
+    # 1) free the USB handle so the 5MP open can grab it
+    cam.release()
+
+    # 2) one clean full-res grab (Camera.initialize already warms up 5 frames)
+    frame = None
+    snap = Camera(camera_index=cam_index,
+                  width=config.SNAPSHOT_CAMERA_WIDTH,
+                  height=config.SNAPSHOT_CAMERA_HEIGHT,
+                  fps=config.SNAPSHOT_CAMERA_FPS)
+    if snap.initialize():
+        for _ in range(2):                 # extra reads for a fresh, settled frame
+            result = snap.read_frame()
+            if result and result[0]:
+                frame = result[1]
+        snap.release()
+    else:
+        logger.error("Snapshot: failed to open camera at 5MP")
+
+    # 3) reopen the smooth viewfinder so aiming resumes after the shot
+    vf = Camera(camera_index=cam_index,
+                width=config.VIEWFINDER_CAMERA_WIDTH,
+                height=config.VIEWFINDER_CAMERA_HEIGHT,
+                fps=config.VIEWFINDER_CAMERA_FPS)
+    viewfinder_camera = vf if vf.initialize() else None
+    if viewfinder_camera is None:
+        logger.error("Snapshot: failed to reopen viewfinder after grab")
+
+    return frame
+
+
 @app.route('/api/viewfinder/start', methods=['POST'])
 def api_viewfinder_start():
     """Open the camera and start the raw viewfinder for snapshot aiming."""
@@ -643,16 +689,12 @@ def api_snapshot():
             "message": "กรุณาเปิดโหมดถ่ายรูป (viewfinder) ก่อนกดถ่าย"
         }), 409
 
-    # Take over the camera handle and switch to full 5MP for this single grab;
-    # capture_at restores the smooth 720p viewfinder mode afterwards. cap_lock
-    # serialises this against the viewfinder read loop (which briefly freezes).
+    # Switch to full 5MP for this single grab, then restore the smooth 720p
+    # viewfinder. cap_lock serialises this against the viewfinder read loop
+    # (which briefly freezes). Many UVC cameras refuse a mid-stream resolution
+    # change, so we release the handle and reopen it at each resolution.
     with cap_lock:
-        cam = viewfinder_camera
-        frame = cam.capture_at(
-            config.SNAPSHOT_CAMERA_WIDTH,
-            config.SNAPSHOT_CAMERA_HEIGHT,
-            config.SNAPSHOT_CAMERA_FPS,
-        ) if cam is not None else None
+        frame = _grab_snapshot_highres()
     if frame is None:
         return jsonify({
             "status": "error",
