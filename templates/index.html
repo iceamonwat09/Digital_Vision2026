@@ -79,6 +79,14 @@
                     <button id="stopBtn" class="btn btn-danger btn-block" disabled>Stop Detection</button>
                 </div>
             </section>
+
+            <!-- ขั้นที่ 4: ถ่ายรูปตรวจ (Snapshot) -->
+            <section class="control-section">
+                <div class="control-section-title"><span class="step-badge">4</span>ถ่ายรูปตรวจ</div>
+                <div class="control-actions">
+                    <button id="snapBtn" class="btn btn-secondary btn-block">📷 ถ่ายรูปตรวจ</button>
+                </div>
+            </section>
         </aside>
 
         <!-- ── จอภาพ + สถิติ (ขวา) ──────────────────────────── -->
@@ -104,6 +112,74 @@
         </div>
     </div>
 </div>
+
+<!-- ── Snapshot Preview Overlay ──────────────────────────── -->
+<div id="snapOverlay" class="snap-overlay" style="display:none">
+    <div class="snap-modal">
+        <div class="snap-modal-head">
+            <span>ผลการตรวจ (Snapshot)</span>
+            <button id="snapClose" class="snap-x" title="ปิด">&times;</button>
+        </div>
+        <div class="snap-body">
+            <div class="snap-image-pane">
+                <img id="snapImage" alt="Snapshot result">
+            </div>
+            <div class="snap-info-pane">
+                <div id="snapVerdict" class="snap-verdict">—</div>
+                <dl class="snap-meta">
+                    <dt>จำนวน Dent</dt><dd id="snapDents">0</dd>
+                    <dt>Confidence สูงสุด</dt><dd id="snapConf">—</dd>
+                    <dt>เวลา</dt><dd id="snapTime">—</dd>
+                    <dt>Line / Plant</dt><dd id="snapLine">—</dd>
+                </dl>
+                <button id="snapRetake" class="btn btn-primary btn-block">📷 ถ่ายใหม่</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+    .snap-overlay {
+        position: fixed; inset: 0; z-index: 1000;
+        background: rgba(15, 23, 42, .72);
+        display: flex; align-items: center; justify-content: center;
+        padding: 20px;
+    }
+    .snap-modal {
+        background: #fff; border-radius: 14px; overflow: hidden;
+        width: min(960px, 96vw); max-height: 92vh;
+        box-shadow: 0 24px 60px rgba(0,0,0,.35); display: flex; flex-direction: column;
+    }
+    .snap-modal-head {
+        display: flex; align-items: center; justify-content: space-between;
+        padding: 14px 18px; background: #0f172a; color: #fff; font-weight: 600;
+    }
+    .snap-x {
+        background: none; border: none; color: #fff; font-size: 26px;
+        line-height: 1; cursor: pointer; opacity: .8;
+    }
+    .snap-x:hover { opacity: 1; }
+    .snap-body { display: flex; gap: 0; flex-wrap: wrap; }
+    .snap-image-pane {
+        flex: 1 1 560px; background: #0b1220; display: flex;
+        align-items: center; justify-content: center; min-height: 320px;
+    }
+    .snap-image-pane img { max-width: 100%; max-height: 70vh; display: block; }
+    .snap-info-pane {
+        flex: 1 1 260px; padding: 22px; display: flex; flex-direction: column; gap: 18px;
+    }
+    .snap-verdict {
+        font-size: 56px; font-weight: 800; text-align: center;
+        border-radius: 12px; padding: 16px 0; letter-spacing: 2px;
+    }
+    .snap-verdict.ok { background: #e6f7ea; color: #1b8a3a; }
+    .snap-verdict.ng { background: #fdeaea; color: #d12626; }
+    .snap-verdict.busy { background: #eef2f7; color: #64748b; font-size: 24px; }
+    .snap-meta { margin: 0; }
+    .snap-meta dt { color: #64748b; font-size: 13px; margin-top: 12px; }
+    .snap-meta dd { margin: 2px 0 0; font-size: 18px; font-weight: 600; color: #0f172a; }
+    .snap-info-pane .btn { margin-top: auto; }
+</style>
 {% endblock %}
 
 {% block extra_js %}
@@ -342,6 +418,82 @@
     modelSelect.addEventListener('change', applyModeOnServer);
     refreshModelsBtn.addEventListener('click', () => {
         if (currentMode) loadModels(currentMode);
+    });
+
+    // ── Snapshot (ถ่ายรูปตรวจ) ─────────────────────────
+    const snapBtn     = document.getElementById('snapBtn');
+    const snapOverlay = document.getElementById('snapOverlay');
+    const snapImage   = document.getElementById('snapImage');
+    const snapVerdict = document.getElementById('snapVerdict');
+    const snapDents   = document.getElementById('snapDents');
+    const snapConf    = document.getElementById('snapConf');
+    const snapTime    = document.getElementById('snapTime');
+    const snapLine    = document.getElementById('snapLine');
+
+    // Resolve the camera the snapshot should use. While streaming the server
+    // reuses the live frame and ignores this; when idle it opens this camera.
+    function resolveCameraIndex() {
+        if (currentSource === 'usb') {
+            const val = cameraSelect.value;
+            return (val === '' || val === null) ? null : parseInt(val);
+        }
+        const url = rtspUrlInput.value.trim();
+        return url || null;
+    }
+
+    function openSnapOverlay() { snapOverlay.style.display = 'flex'; }
+    function closeSnapOverlay() { snapOverlay.style.display = 'none'; }
+
+    function captureSnapshot() {
+        const cameraIndex = resolveCameraIndex();
+        // When idle we need a camera; while streaming the server uses the live frame.
+        const statusActive = stopBtn.disabled === false;
+        if (!statusActive && cameraIndex === null) {
+            alert('กรุณาเลือกกล้อง/ใส่ RTSP URL ก่อน หรือกด Start Detection');
+            return;
+        }
+
+        openSnapOverlay();
+        snapVerdict.className = 'snap-verdict busy';
+        snapVerdict.textContent = 'กำลังตรวจ…';
+        snapImage.removeAttribute('src');
+        snapBtn.disabled = true;
+
+        fetch('/api/snapshot', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ camera_index: cameraIndex })
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.status !== 'ok') {
+                snapVerdict.className = 'snap-verdict ng';
+                snapVerdict.textContent = 'ผิดพลาด';
+                alert(data.message || 'ถ่ายรูปไม่สำเร็จ');
+                return;
+            }
+            snapImage.src = data.image;
+            snapVerdict.className = 'snap-verdict ' + data.verdict;
+            snapVerdict.textContent = data.verdict === 'ng' ? 'NG' : 'OK';
+            snapDents.textContent = data.dent_count;
+            snapConf.textContent  = data.dent_count > 0 ? data.max_confidence : '—';
+            snapTime.textContent  = data.timestamp;
+            snapLine.textContent  = data.line + ' / ' + data.plant;
+        })
+        .catch(err => {
+            console.error('Snapshot error:', err);
+            snapVerdict.className = 'snap-verdict ng';
+            snapVerdict.textContent = 'ผิดพลาด';
+            alert('ถ่ายรูปไม่สำเร็จ');
+        })
+        .finally(() => { snapBtn.disabled = false; });
+    }
+
+    snapBtn.addEventListener('click', captureSnapshot);
+    document.getElementById('snapRetake').addEventListener('click', captureSnapshot);
+    document.getElementById('snapClose').addEventListener('click', closeSnapOverlay);
+    snapOverlay.addEventListener('click', (e) => {
+        if (e.target === snapOverlay) closeSnapOverlay();
     });
 
     // ── Init ──────────────────────────────────────────

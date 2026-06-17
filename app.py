@@ -6,6 +6,7 @@ Main application file with routes, video streaming, and API endpoints.
 import os
 import threading
 import time
+import base64
 from datetime import datetime
 import cv2
 import numpy as np
@@ -422,6 +423,89 @@ def get_detection_status():
         "database_connected": db.is_connected if db else False,
         "mode": current_mode,
         "model_file": current_model_file,
+    })
+
+
+# ── Snapshot inspection (still-photo capture) ──────────
+# Single-shot capture: grab one frame, run the current model on it, and return
+# the annotated still + verdict. Fully isolated from the live streaming threads
+# — it only *reads* the shared frame (under the existing lock) and reuses the
+# pure detect()/draw_detections() helpers, so it can never disturb live mode.
+
+# Classes that are NOT a dent defect (a "good"/"can" box is never an NG reason).
+_NON_DEFECT_CLASSES = {"good", "can"}
+
+
+def _grab_snapshot_frame(camera_index):
+    """
+    Return a single BGR frame for snapshot inspection, or None.
+
+    - While live detection runs we MUST NOT open the camera again (USB cameras
+      allow only one handle), so we reuse the newest frame from the pipeline.
+    - When idle we open the camera briefly, warm it up, grab one frame, and
+      release immediately.
+    """
+    if detection_active:
+        with raw_lock:
+            frame = latest_raw_frame
+        return frame.copy() if frame is not None else None
+
+    snap_cam = Camera(camera_index=camera_index)
+    if not snap_cam.initialize():
+        return None
+    try:
+        frame = None
+        for _ in range(3):                 # flush stale buffered frames
+            result = snap_cam.read_frame()
+            if result and result[0]:
+                frame = result[1]
+        return frame.copy() if frame is not None else None
+    finally:
+        snap_cam.release()
+
+
+@app.route('/api/snapshot', methods=['POST'])
+def api_snapshot():
+    """Capture one frame, run detection, return annotated JPEG + verdict."""
+    if detector is None or detector.model is None:
+        return jsonify({"status": "error", "message": "ยังไม่ได้โหลดโมเดล"}), 400
+
+    data = request.get_json(silent=True) or {}
+    camera_index_raw = data.get("camera_index", config.CAMERA_INDEX)
+    if isinstance(camera_index_raw, str) and camera_index_raw.isdigit():
+        camera_index = int(camera_index_raw)
+    elif isinstance(camera_index_raw, (int, float)):
+        camera_index = int(camera_index_raw)
+    else:
+        camera_index = camera_index_raw   # RTSP URL string
+
+    frame = _grab_snapshot_frame(camera_index)
+    if frame is None:
+        msg = ("ดึงภาพจากสตรีมไม่ได้ ลองใหม่อีกครั้ง" if detection_active
+               else f"เปิดกล้อง {camera_index} ไม่ได้ หรือกล้องถูกใช้งานอยู่")
+        return jsonify({"status": "error", "message": msg}), 500
+
+    detections = detector.detect(frame)
+    annotated = detector.draw_detections(frame, detections)
+
+    dents = [d for d in detections if d["class_name"] not in _NON_DEFECT_CLASSES]
+    verdict = "ng" if dents else "ok"
+    max_conf = max((d["confidence"] for d in dents), default=0.0)
+
+    ret, buffer = cv2.imencode('.jpg', annotated, _JPEG_PARAMS)
+    if not ret:
+        return jsonify({"status": "error", "message": "เข้ารหัสภาพไม่สำเร็จ"}), 500
+    image_b64 = "data:image/jpeg;base64," + base64.b64encode(buffer.tobytes()).decode("ascii")
+
+    return jsonify({
+        "status": "ok",
+        "image": image_b64,
+        "verdict": verdict,
+        "dent_count": len(dents),
+        "max_confidence": round(max_conf, 2),
+        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "line": config.LINE_NUMBER,
+        "plant": config.PLANT_CODE,
     })
 
 
