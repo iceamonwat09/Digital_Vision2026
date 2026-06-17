@@ -18,10 +18,13 @@ CONFIG_VERSION = "2026.06.16-artwork-compare-images"
 CAMERA_INDEX = 0  # ผลจาก test_camera.py: กล้องอยู่ที่ index 0
 
 # ── Live stream resolution ──────────────────────────────────────────
-# 1280x720 บนกล้อง ELP 8MP (IMX179). ต้องใช้ MJPEG (ดู CAMERA_FOURCC)
-# เพราะ USB 2.0 ส่ง YUY2 ความละเอียดสูงไม่ไหว.
-CAMERA_WIDTH  = 1280
-CAMERA_HEIGHT = 720
+# 640x480 @ 30fps บนกล้อง ELP 8MP (IMX179). เลือกความละเอียดต่ำสำหรับ live
+# โดยตั้งใจ เพราะ sensor เป็น rolling shutter — ความละเอียดต่ำ = อ่านเฟรมเร็ว
+# = วัตถุที่เคลื่อน (กระป๋องบนสายพาน) บิดเป็น "ลูกคลื่น" น้อยที่สุด. อีกทั้ง
+# โมเดล live รันที่ imgsz=480 อยู่แล้ว ป้อน 720p เข้าไปก็ถูกย่อทิ้ง ไม่ได้ประโยชน์.
+# งานตรวจละเอียดเป็นหน้าที่ของ snapshot (5MP) แทน.
+CAMERA_WIDTH  = 640
+CAMERA_HEIGHT = 480
 CAMERA_FPS = 30
 
 # FourCC ที่สั่งกล้องให้ส่งภาพแบบ MJPEG (บีบอัด ~10:1). จำเป็นมากบน USB 2.0
@@ -32,13 +35,13 @@ CAMERA_FOURCC = "MJPG"
 # ── Snapshot capture resolution ─────────────────────────────────────
 # โหมดถ่ายรูปถ่ายครั้งเดียวต่อชัตเตอร์ จึงไม่ต้องห่วง fps — ดันความละเอียด
 # ให้สูงเพื่อจับรอยบุบเล็ก/ตื้นได้แม่นที่สุด (กล้องนี้สูงสุด 3264x2448 / 8MP).
+# rolling shutter ไม่กระทบเพราะตอนกดชัตเตอร์กระป๋องวางนิ่งอยู่แล้ว.
 SNAPSHOT_CAMERA_WIDTH  = 2592
 SNAPSHOT_CAMERA_HEIGHT = 1944
 
-# FPS ตอนความละเอียดสูง — ตั้งต่ำเพราะกล้องเป็น USB 2.0 (~480 Mbps). ที่ 5MP
-# การขอ 30 fps จะกินแบนด์วิดท์เกินจน MJPEG เฟรมขาด/เพี้ยนเป็น "ลูกคลื่น".
-# 10 fps เหลือเฟือสำหรับเล็งภาพนิ่ง และทำให้สตรีมเสถียร. ลองเพิ่ม/ลดได้.
-SNAPSHOT_CAMERA_FPS = 10
+# FPS ของโหมด 5MP — กล้องรองรับ 2592x1944 ที่ 15fps (โหมดมาตรฐาน UVC).
+# ตั้งให้ตรงโหมดจริงเพื่อให้ไดรเวอร์ไม่ต้องเดา และพอสำหรับการเล็งภาพนิ่ง.
+SNAPSHOT_CAMERA_FPS = 15
 
 # Enable this to test available cameras at startup
 # Set to False for faster startup (skips camera scanning)
