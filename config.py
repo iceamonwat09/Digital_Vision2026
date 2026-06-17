@@ -72,13 +72,11 @@ IOU_THRESHOLD = 0.45
 # stalling the live feed (was unbounded at the old conf=0.01 debug floor).
 YOLO_MAX_DET = 20
 
-# Inference image size passed to the model. Lower = faster inference. Because
-# the live display now refreshes in lock-step with detection (so the box stays
-# on the can), inference speed IS the live smoothness — 320 lets the model run
-# ~2x faster than 480 for a noticeably smoother feed. Live accuracy drops a
-# little (tiny dents may be missed) but that is snapshot's job. Snapshot uses
-# its own SNAPSHOT_IMGSZ and is unaffected.
-YOLO_IMGSZ = 320
+# Inference image size passed to the model. Lower = faster inference = the box
+# tracks the moving can more closely (less temporal lag). 640 is the YOLO
+# default; 480 roughly doubles FPS on CPU with negligible accuracy loss for
+# can-body dents at this camera resolution. Drop to 320 for even more speed.
+YOLO_IMGSZ = 480
 
 # Snapshot inference image size. Snapshot runs the model ONCE per shutter press
 # (not a live stream), so speed is irrelevant — we trade it for accuracy. With
@@ -135,10 +133,8 @@ FLASK_HOST = "0.0.0.0"
 FLASK_PORT = 5000
 FLASK_DEBUG = False
 
-# Video streaming configuration. This caps how often the MJPEG stream emits a
-# frame; keep it at/above the inference rate so it never throttles the (now
-# faster) detection feed. 25 lets the smoother 320-imgsz inference through.
-STREAM_FPS = 25  # FPS cap for MJPEG stream
+# Video streaming configuration
+STREAM_FPS = 15  # FPS for MJPEG stream (lower = less bandwidth)
 
 # Application directories
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
