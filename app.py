@@ -569,6 +569,19 @@ def _scale_for_display(frame, detections, max_w):
     return disp, scaled
 
 
+def _open_camera(cam_index, width, height, fps, retries=3, settle=0.4):
+    """Open a USB/RTSP camera at a given mode, retrying — a USB camera that was
+    just released often needs a moment before it can be reopened."""
+    for attempt in range(retries):
+        cam = Camera(camera_index=cam_index, width=width, height=height, fps=fps)
+        if cam.initialize():
+            return cam
+        logger.warning(f"Camera open attempt {attempt + 1}/{retries} failed "
+                       f"({width}x{height}); retrying in {settle}s")
+        time.sleep(settle)
+    return None
+
+
 def _grab_snapshot_highres():
     """
     Capture one full-resolution (5MP) frame for the shutter, then restore the
@@ -585,32 +598,32 @@ def _grab_snapshot_highres():
         return None
     cam_index = cam.camera_index
 
-    # 1) free the USB handle so the 5MP open can grab it
-    cam.release()
-
-    # 2) one clean full-res grab (Camera.initialize already warms up 5 frames)
     frame = None
-    snap = Camera(camera_index=cam_index,
-                  width=config.SNAPSHOT_CAMERA_WIDTH,
-                  height=config.SNAPSHOT_CAMERA_HEIGHT,
-                  fps=config.SNAPSHOT_CAMERA_FPS)
-    if snap.initialize():
-        for _ in range(2):                 # extra reads for a fresh, settled frame
-            result = snap.read_frame()
-            if result and result[0]:
-                frame = result[1]
-        snap.release()
-    else:
-        logger.error("Snapshot: failed to open camera at 5MP")
+    try:
+        # 1) free the USB handle so the 5MP open can grab it
+        cam.release()
+        time.sleep(0.4)   # let the OS fully release the device before reopening
 
-    # 3) reopen the smooth viewfinder so aiming resumes after the shot
-    vf = Camera(camera_index=cam_index,
-                width=config.VIEWFINDER_CAMERA_WIDTH,
-                height=config.VIEWFINDER_CAMERA_HEIGHT,
-                fps=config.VIEWFINDER_CAMERA_FPS)
-    viewfinder_camera = vf if vf.initialize() else None
-    if viewfinder_camera is None:
-        logger.error("Snapshot: failed to reopen viewfinder after grab")
+        # 2) one clean full-res grab (Camera.initialize already warms up 5 frames)
+        snap = _open_camera(cam_index, config.SNAPSHOT_CAMERA_WIDTH,
+                            config.SNAPSHOT_CAMERA_HEIGHT, config.SNAPSHOT_CAMERA_FPS)
+        if snap is not None:
+            for _ in range(2):            # extra reads for a fresh, settled frame
+                result = snap.read_frame()
+                if result and result[0]:
+                    frame = result[1]
+            snap.release()
+            time.sleep(0.4)
+        else:
+            logger.error("Snapshot: could not open camera at 5MP "
+                         f"({config.SNAPSHOT_CAMERA_WIDTH}x{config.SNAPSHOT_CAMERA_HEIGHT})")
+    finally:
+        # 3) always reopen the smooth viewfinder so aiming resumes after the shot
+        viewfinder_camera = _open_camera(
+            cam_index, config.VIEWFINDER_CAMERA_WIDTH,
+            config.VIEWFINDER_CAMERA_HEIGHT, config.VIEWFINDER_CAMERA_FPS)
+        if viewfinder_camera is None:
+            logger.error("Snapshot: failed to reopen viewfinder after grab")
 
     return frame
 
@@ -693,43 +706,46 @@ def api_snapshot():
     # viewfinder. cap_lock serialises this against the viewfinder read loop
     # (which briefly freezes). Many UVC cameras refuse a mid-stream resolution
     # change, so we release the handle and reopen it at each resolution.
-    with cap_lock:
-        frame = _grab_snapshot_highres()
-    if frame is None:
+    try:
+        with cap_lock:
+            frame = _grab_snapshot_highres()
+        if frame is None:
+            return jsonify({
+                "status": "error",
+                "message": "ถ่ายภาพไม่สำเร็จ — เปิดกล้องที่ความละเอียดสูงไม่ได้ ลองใหม่อีกครั้ง"
+            }), 500
+
+        # Snapshot runs once per shutter press, so use the high-accuracy image
+        # size. Detection runs on the full-resolution frame; we then downscale
+        # to a display size and scale the boxes with it, so the preview has
+        # readable box thickness/text and a lightweight payload.
+        detections = detector.detect(frame, imgsz=config.SNAPSHOT_IMGSZ)
+
+        dents = [d for d in detections if d["class_name"] not in _NON_DEFECT_CLASSES]
+        verdict = "ng" if dents else "ok"
+        max_conf = max((d["confidence"] for d in dents), default=0.0)
+
+        disp_frame, disp_dets = _scale_for_display(frame, detections, _SNAPSHOT_DISPLAY_MAX_W)
+        annotated = detector.draw_detections(disp_frame, disp_dets)
+
+        ret, buffer = cv2.imencode('.jpg', annotated, _JPEG_PARAMS)
+        if not ret:
+            return jsonify({"status": "error", "message": "เข้ารหัสภาพไม่สำเร็จ"}), 500
+        image_b64 = "data:image/jpeg;base64," + base64.b64encode(buffer.tobytes()).decode("ascii")
+
         return jsonify({
-            "status": "error",
-            "message": "ถ่ายภาพไม่สำเร็จ ลองใหม่อีกครั้ง"
-        }), 500
-
-    # Snapshot runs once per shutter press, so use the high-accuracy image size
-    # (favour precision over speed — unlike the live stream). Detection runs on
-    # the full-resolution frame; we then downscale to a display size and scale
-    # the boxes with it, so the preview has readable box thickness/text and a
-    # lightweight payload.
-    detections = detector.detect(frame, imgsz=config.SNAPSHOT_IMGSZ)
-
-    dents = [d for d in detections if d["class_name"] not in _NON_DEFECT_CLASSES]
-    verdict = "ng" if dents else "ok"
-    max_conf = max((d["confidence"] for d in dents), default=0.0)
-
-    disp_frame, disp_dets = _scale_for_display(frame, detections, _SNAPSHOT_DISPLAY_MAX_W)
-    annotated = detector.draw_detections(disp_frame, disp_dets)
-
-    ret, buffer = cv2.imencode('.jpg', annotated, _JPEG_PARAMS)
-    if not ret:
-        return jsonify({"status": "error", "message": "เข้ารหัสภาพไม่สำเร็จ"}), 500
-    image_b64 = "data:image/jpeg;base64," + base64.b64encode(buffer.tobytes()).decode("ascii")
-
-    return jsonify({
-        "status": "ok",
-        "image": image_b64,
-        "verdict": verdict,
-        "dent_count": len(dents),
-        "max_confidence": round(max_conf, 2),
-        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "line": config.LINE_NUMBER,
-        "plant": config.PLANT_CODE,
-    })
+            "status": "ok",
+            "image": image_b64,
+            "verdict": verdict,
+            "dent_count": len(dents),
+            "max_confidence": round(max_conf, 2),
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "line": config.LINE_NUMBER,
+            "plant": config.PLANT_CODE,
+        })
+    except Exception as e:
+        logger.error(f"Snapshot failed: {e}", exc_info=True)
+        return jsonify({"status": "error", "message": f"ถ่ายรูปไม่สำเร็จ: {e}"}), 500
 
 
 @app.route('/api/stats', methods=['GET'])
