@@ -7,7 +7,7 @@ import os
 
 # Bump this whenever a config default changes so a running deployment can
 # print it on startup and confirm it is actually executing the new code.
-CONFIG_VERSION = "2026.06.17-viewfinder-smooth-quality"
+CONFIG_VERSION = "2026.06.18-camera-stability"
 
 # ====================
 # CAMERA CONFIGURATION
@@ -64,7 +64,10 @@ SNAPSHOT_QUALITY_PRESETS = {
     "balanced": (1920, 1080, 30),  # สมดุล (ค่าเริ่มต้น)
     "sharp":    (SNAPSHOT_CAMERA_WIDTH, SNAPSHOT_CAMERA_HEIGHT, SNAPSHOT_CAMERA_FPS),  # คม 5MP
 }
-SNAPSHOT_QUALITY_DEFAULT = "balanced"
+# Default to the smoothest mode (720p). It is the most stable across UVC stacks
+# (no high-res mode negotiation) and matches cameras that cap at 720p over USB.
+# Operators can step up to balanced/sharp from the dropdown when they need detail.
+SNAPSHOT_QUALITY_DEFAULT = "smooth"
 
 # ── Viewfinder (อาการเล็งก่อนกดชัตเตอร์) ──────────────────────────────
 # หมายเหตุ: ตั้งแต่เปลี่ยนเป็นสถาปัตยกรรม "เปิดกล้องครั้งเดียว" viewfinder

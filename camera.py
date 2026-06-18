@@ -32,22 +32,29 @@ def _is_url(value) -> bool:
 
 
 def _probe_index(index: int) -> bool:
-    """Return True if the camera index is readable."""
-    cap = cv2.VideoCapture(index)
-    if cap.isOpened():
-        ret, _ = cap.read()
-        cap.release()
-        if ret:
-            return True
+    """
+    Return True if the camera index is readable.
 
-    for backend in _BACKENDS:
-        cap = cv2.VideoCapture(index, backend)
-        if cap.isOpened():
+    Defensive on purpose: a SINGLE guarded open with the platform default
+    backend. The old version fell back through every backend (incl. CAP_DSHOW
+    and CAP_ANY) for each index, which on some Windows + OpenCV 4.x builds spams
+    the obsensor probe and throws native DSHOW C++ exceptions when probing
+    non-existent indices — repeated on every page load this could abort the
+    whole process. One backend, wrapped in try/except, keeps scanning safe.
+    """
+    cap = None
+    try:
+        cap = cv2.VideoCapture(index)
+        if cap is not None and cap.isOpened():
             ret, _ = cap.read()
+            return bool(ret)
+        return False
+    except Exception as e:  # cv2.error and friends — never let a probe crash us
+        logger.warning(f"Probe of camera index {index} failed: {e}")
+        return False
+    finally:
+        if cap is not None:
             cap.release()
-            if ret:
-                return True
-    return False
 
 
 def scan_cameras_fast(max_index: int = 4, skip_indices: list = None) -> List[Dict]:
@@ -109,19 +116,22 @@ class Camera:
         """Open a local USB/built-in camera by index."""
         logger.info(f"Initializing USB camera index={self.camera_index} ...")
 
-        # On Windows the default (MSMF) backend silently ignores the MJPG FourCC
-        # and caps UVC cameras at ~720p, so try the explicit backends FIRST
-        # (DSHOW leads on Windows — it honours MJPG and unlocks full resolution).
-        # The ambiguous default is kept last as a fallback. Linux is unchanged
-        # (CAP_ANY ≈ default and already works).
-        if os.name == 'nt':
-            attempts = _BACKENDS + [None]
-        else:
-            attempts = [None] + _BACKENDS
+        # Try the platform default backend FIRST. On Windows that is MSMF, which
+        # is the one that reliably opens UVC cameras here; the explicit backends
+        # (DSHOW, …) are only a fallback. NOTE: forcing DSHOW first was tried to
+        # unlock >720p via MJPG, but on this deployment DSHOW raises native
+        # "unknown C++ exception" and can't capture by index — so default-first
+        # is both the stable AND the working order. (Camera tops out at 720p over
+        # USB here regardless; high-res is not worth crashing for.)
+        attempts = [None] + _BACKENDS
 
         for backend in attempts:
-            cap = (cv2.VideoCapture(self.camera_index) if backend is None
-                   else cv2.VideoCapture(self.camera_index, backend))
+            try:
+                cap = (cv2.VideoCapture(self.camera_index) if backend is None
+                       else cv2.VideoCapture(self.camera_index, backend))
+            except Exception as e:  # never let a backend's native error crash us
+                logger.warning(f"Opening camera with backend {backend} raised: {e}")
+                continue
             if not cap.isOpened():
                 cap.release()
                 continue
