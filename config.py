@@ -7,7 +7,7 @@ import os
 
 # Bump this whenever a config default changes so a running deployment can
 # print it on startup and confirm it is actually executing the new code.
-CONFIG_VERSION = "2026.06.18-camera-stability"
+CONFIG_VERSION = "2026.06.18-disable-mjpg-fix-tearing"
 
 # ====================
 # CAMERA CONFIGURATION
@@ -27,10 +27,14 @@ CAMERA_WIDTH  = 640
 CAMERA_HEIGHT = 480
 CAMERA_FPS = 30
 
-# FourCC ที่สั่งกล้องให้ส่งภาพแบบ MJPEG (บีบอัด ~10:1). จำเป็นมากบน USB 2.0
-# ไม่งั้น OpenCV จะ default เป็น YUY2 (ไม่บีบอัด) แล้วถูกจำกัดที่ ~640x480.
-# ตั้งเป็น None เพื่อปิด (กลับไปใช้ default ของกล้อง).
-CAMERA_FOURCC = "MJPG"
+# FourCC ของกล้อง. ตั้งเป็น None = ใช้ฟอร์แมต default ของกล้อง (มักเป็น YUY2
+# uncompressed) ซึ่ง MSMF บน Windows ถอดรหัสได้ "สะอาด" ไม่มีเฟรมแตก.
+#
+# ⚠️ เคยตั้งเป็น "MJPG" เพื่อปลดล็อกความละเอียดสูงบน USB 2.0 แต่บนเครื่องสถานี
+# (MSMF) มันส่ง JPEG ออกมาไม่สมบูรณ์ → ภาพแตกเป็นคลื่นสีรุ้ง (เฟรมขาด) กระทบ
+# ทั้งจอแสดงผลและผลตรวจ. กล้องตัวนี้ cap ที่ 720p อยู่แล้ว จึงไม่ต้องใช้ MJPG.
+# ถ้าย้ายไปกล้อง/เครื่องที่ MJPG ทำงานสะอาดและต้องการ >720p ค่อยเปิดกลับเป็น "MJPG".
+CAMERA_FOURCC = None
 
 # ── Snapshot capture resolution ─────────────────────────────────────
 # โหมดถ่ายรูปถ่ายครั้งเดียวต่อชัตเตอร์ จึงไม่ต้องห่วง fps — ดันความละเอียด
