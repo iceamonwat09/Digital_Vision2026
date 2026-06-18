@@ -7,7 +7,7 @@ import os
 
 # Bump this whenever a config default changes so a running deployment can
 # print it on startup and confirm it is actually executing the new code.
-CONFIG_VERSION = "2026.06.18-disable-mjpg-fix-tearing"
+CONFIG_VERSION = "2026.06.18-snapshot-hardening"
 
 # ====================
 # CAMERA CONFIGURATION
@@ -72,6 +72,13 @@ SNAPSHOT_QUALITY_PRESETS = {
 # (no high-res mode negotiation) and matches cameras that cap at 720p over USB.
 # Operators can step up to balanced/sharp from the dropdown when they need detail.
 SNAPSHOT_QUALITY_DEFAULT = "smooth"
+
+# Max age (seconds) of the viewfinder frame the shutter is allowed to inspect.
+# If the camera freezes/unplugs, the read loop stops publishing new frames and
+# the last good one goes stale — the shutter must REFUSE rather than return a
+# verdict on an old image (this is a QC system). Tune up if the chosen mode runs
+# at a very low fps.
+SNAPSHOT_MAX_FRAME_AGE_S = 1.0
 
 # ── Viewfinder (อาการเล็งก่อนกดชัตเตอร์) ──────────────────────────────
 # หมายเหตุ: ตั้งแต่เปลี่ยนเป็นสถาปัตยกรรม "เปิดกล้องครั้งเดียว" viewfinder
