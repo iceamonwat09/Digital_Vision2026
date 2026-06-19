@@ -45,5 +45,9 @@ data/label_paper/skus/
 | `critical`           | `true` → mismatch ทำให้ verdict = FAIL ทันที                  |
 | `delta_e_tolerance`  | ΔE สูงสุดที่ยังถือว่าผ่าน (typical: 6–10)                      |
 
-## SAMPLE-001
-มี spec.json แบบทดสอบให้แล้ว ใช้ดูหน้า UI ได้ทันที (ยังไม่ใส่ master.pdf)
+## SKU ตัวอย่างที่มีให้แล้ว
+
+| SKU | ไฟล์ที่มี | ใช้ทำอะไร |
+|---|---|---|
+| `SAMPLE-001`     | `spec.json` (ยังไม่มี `master.pdf`) | ดูหน้า UI / โครง spec ได้ทันที — แต่ pixel & visual diff จะถูกข้ามเพราะไม่มี master |
+| `AQUA-CHUNK-140` | `master.pdf` + `spec.json`          | ตัวอย่างครบชุด ตรวจได้จริงทั้งข้อความ / สี / pixel |

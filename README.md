@@ -356,7 +356,7 @@ approve** (ถ้าบน artwork สะกดเพี้ยนจะถูก
 ├── static/css/style.css         # ธีม Thai Union (navy/blue) + type system
 ├── static/js/                   # artwork_check.js, label_paper.js, main.js, ...
 ├── data/                        # ข้อมูลรันไทม์ (artwork inspections, SKU masters)
-└── tests/                       # pytest (รวม test_artwork_checks.py)
+└── tests/                       # pytest (artwork, barcode, perspective, pixel masks, white-balance, golden)
 ```
 
 ---
@@ -418,7 +418,7 @@ python diagnose_snapshot.py
 
 > การเปลี่ยนแปลงทั้งหมด **คง API / JSON response / UI เดิม** (frontend ไม่ต้องแก้) และผ่าน
 > การทดสอบด้วย harness จำลองกล้อง (ทุก state transition, mutual-exclusion, staleness) +
-> test suite เดิม 27/27
+> test suite เดิมทั้งหมด (ดูหัวข้อ [Test](#test))
 
 ---
 
@@ -428,8 +428,16 @@ python diagnose_snapshot.py
 python -m pytest tests/ -q
 ```
 
-ชุดเทสต์ของโหมด Artwork (`tests/test_artwork_checks.py`) ครอบคลุม 4 ชั้นตรวจ,
-ความทนต่อ OCR noise, snap-to-content, ตารางคำแปล + คำแนะนำ + cache
+ชุดเทสต์ครอบคลุมทั้งโหมดฉลากกระดาษและ Artwork (~146 ฟังก์ชันทดสอบใน 6 ไฟล์):
+
+| ไฟล์ | ครอบคลุม |
+|---|---|
+| `test_artwork_checks.py` | 4 ชั้นตรวจ Artwork, ความทนต่อ OCR noise, snap-to-content, ตารางคำแปล + คำแนะนำ + cache |
+| `test_barcode.py` | ถอดบาร์โค้ด + ตรวจ check digit (GS1) |
+| `test_perspective.py` | perspective warp / parse corners ของโหมดฉลากกระดาษ |
+| `test_pixel_masks.py` | edge/glare ignore mask ก่อนคิด ΔE |
+| `test_white_balance.py` | auto white-balance เทียบ master |
+| `test_inspection_golden.py` | golden test ของ pipeline ตรวจฉลากแบบ end-to-end |
 
 ---
 
