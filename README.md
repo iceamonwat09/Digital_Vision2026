@@ -21,12 +21,15 @@
 3. [การตั้งค่า (config.py)](#การตั้งค่า-configpy)
 4. [การรันแอป](#การรันแอป)
 5. [โหมดที่ 1 — ตรวจจับสด (YOLO)](#โหมดที่-1--ตรวจจับสด-yolo)
-6. [โหมดที่ 2 — ตรวจฉลากกระดาษ (ΔE2000)](#โหมดที่-2--ตรวจฉลากกระดาษ-δe2000)
-7. [โหมดที่ 3 — ตรวจ Artwork (OCR + 4 ชั้น)](#โหมดที่-3--ตรวจ-artwork-ocr--4-ชั้น)
-8. [การตั้งค่า N8N → Gemini](#การตั้งค่า-n8n--gemini)
-9. [API Endpoints](#api-endpoints)
-10. [โครงสร้างโปรเจกต์](#โครงสร้างโปรเจกต์)
-11. [Test](#test)
+6. [ถ่ายรูปตรวจ (Snapshot Inspection)](#ถ่ายรูปตรวจ-snapshot-inspection)
+7. [โหมดที่ 2 — ตรวจฉลากกระดาษ (ΔE2000)](#โหมดที่-2--ตรวจฉลากกระดาษ-δe2000)
+8. [โหมดที่ 3 — ตรวจ Artwork (OCR + 4 ชั้น)](#โหมดที่-3--ตรวจ-artwork-ocr--4-ชั้น)
+9. [การตั้งค่า N8N → Gemini](#การตั้งค่า-n8n--gemini)
+10. [API Endpoints](#api-endpoints)
+11. [โครงสร้างโปรเจกต์](#โครงสร้างโปรเจกต์)
+12. [การปรับแต่งกล้อง & แก้ปัญหา (Camera Tuning & Troubleshooting)](#การปรับแต่งกล้อง--แก้ปัญหา-camera-tuning--troubleshooting)
+13. [สรุปการปรับปรุงล่าสุด (Changelog)](#สรุปการปรับปรุงล่าสุด-changelog)
+14. [Test](#test)
 
 ---
 
@@ -83,20 +86,35 @@ apt-get install libzbar0 && pip install pyzbar   # ถอดบาร์โค�
 แก้ไฟล์ `config.py` (ค่าที่ใช้บ่อย):
 
 ```python
-# กล้อง
-CAMERA_INDEX = 0            # index กล้อง USB (รัน/api/camera/scan เพื่อหา)
+# ── กล้อง (live stream) ──────────────────────────────
+CAMERA_INDEX  = 0          # index กล้อง USB (รัน /api/camera/scan เพื่อหา)
+CAMERA_WIDTH  = 640        # ความละเอียดสตรีมสด (640x480 ลด rolling-shutter)
+CAMERA_HEIGHT = 480
+CAMERA_FPS    = 30
+CAMERA_FOURCC = None       # None = YUY2 (สะอาด, แนะนำ) | "MJPG" = บีบอัด (เสี่ยงภาพแตกบาง MSMF)
 
-# SQL Server (เก็บประวัติ)
+# ── ถ่ายรูปตรวจ (snapshot) ───────────────────────────
+SNAPSHOT_IMGSZ           = 1280   # imgsz ตอน detect (สูงกว่า live เพราะรันครั้งเดียว)
+SNAPSHOT_MAX_FRAME_AGE_S = 1.0    # เฟรมเก่ากว่านี้ = ปฏิเสธการถ่าย (กันตัดสินภาพค้าง)
+SNAPSHOT_QUALITY_DEFAULT = "smooth"   # ค่าเริ่มต้น: smooth(720p)/balanced(1080p)/sharp(5MP)
+VIEWFINDER_STREAM_FPS    = 30     # fps สตรีม viewfinder (สูงกว่า live ให้เล็งลื่น)
+
+# ── SQL Server (เก็บประวัติ) ─────────────────────────
 SQL_SERVER   = "172.32.0.50"
 SQL_DATABASE = "VisionIQ"
 SQL_USER     = "sa"
 SQL_PASSWORD = "********"
 
-# Flask
+# ── Flask ────────────────────────────────────────────
 FLASK_HOST = "0.0.0.0"
 FLASK_PORT = 5000
 FLASK_DEBUG = False
 ```
+
+> **CAMERA_FOURCC**: บน Windows (MSMF) การบังคับ `"MJPG"` อาจทำให้ JPEG ออกมาไม่ครบ →
+> ภาพแตกเป็นคลื่นสีรุ้ง ค่าเริ่มต้นจึงเป็น `None` (YUY2 สะอาดกว่า) เปิด `"MJPG"` เฉพาะ
+> เครื่องที่ทดสอบแล้วว่าให้ภาพสะอาดและต้องการความละเอียด >720p — ดูหัวข้อ
+> [การปรับแต่งกล้อง & แก้ปัญหา](#การปรับแต่งกล้อง--แก้ปัญหา-camera-tuning--troubleshooting)
 
 ### Environment variables (โหมด Artwork / OCR)
 
@@ -136,6 +154,55 @@ python app.py
 
 **โมเดล** เก็บไฟล์ `.pt` ในโฟลเดอร์ weights ต่อโหมด (ดู `modes/registry.py`)
 สลับโมเดล/โหมดได้จาก UI ไม่ต้องรีสตาร์ต
+
+---
+
+## ถ่ายรูปตรวจ (Snapshot Inspection)
+
+โหมด **"📷 ถ่ายรูปตรวจ"** (ขั้นที่ 4 บนหน้าตรวจจับสด) — แทนที่จะตรวจสตรีมต่อเนื่อง
+ผู้ใช้ **เล็งกระป๋องให้นิ่ง → กดชัตเตอร์ → ระบบรันโมเดล 1 ครั้งที่ความละเอียดสูง →
+แสดงผล OK/NG + ภาพพร้อมกรอบ** เหมาะกับการตรวจทีละชิ้นแบบแม่นยำ (ใช้ `imgsz` สูงกว่า
+live เพราะรันครั้งเดียว ไม่ต้องห่วง fps)
+
+> ใช้กล้องตัวเดียวกับตรวจจับสด จึง **exclusive กัน** — ต้องกด **Stop Detection** ก่อน
+> จึงจะเปิดโหมดถ่ายรูปได้ และระบบบังคับเงื่อนไขนี้ให้อัตโนมัติ
+
+### ขั้นตอนใช้งาน
+
+```
+Stop Detection → 📷 ถ่ายรูปตรวจ → (viewfinder เล็ง) → 📸 ถ่าย → ผล OK/NG + ภาพ
+```
+
+### สถาปัตยกรรม "เปิดกล้องครั้งเดียว" (Single-handle)
+
+หัวใจที่ทำให้ถ่ายได้เสถียร: **เปิดกล้องครั้งเดียว** ตอนเข้าโหมด แล้วใช้แฮนเดิลเดียวนั้น
+ทั้งการเล็ง (viewfinder) และตอนกดชัตเตอร์ — **ชัตเตอร์ไม่แตะ handle กล้องเลย** แค่หยิบ
+เฟรมล่าสุดที่เธรด viewfinder จับไว้ใน buffer
+
+> เวอร์ชันแรกใช้วิธี release กล้อง 720p แล้ว reopen ที่ 5MP ตอนกดชัตเตอร์ — แต่ไดรเวอร์
+> UVC หลายตัว reopen ไม่ติด/ช้า ทำให้ **"ถ่ายไม่สำเร็จ"** จึงเปลี่ยนมาเป็น single-handle
+> ที่ตัดการ reopen ทิ้งทั้งหมด
+
+### เลือกความคมชัด ↔ ความลื่น (Quality presets)
+
+มี dropdown ในหน้าต่างถ่ายรูป (จำค่าไว้ใน `localStorage` เปลี่ยนได้ทันที):
+
+| ตัวเลือก | ความละเอียด | เหมาะกับ |
+|---|---|---|
+| **ลื่นที่สุด** (default) | 720p@30 | เล็งนิ่มสุด — ค่าเริ่มต้น เสถียรกับทุกกล้อง |
+| **สมดุล** | 1080p@30 | ลื่น + คมพอจับ dent |
+| **คมชัด** | 5MP@15 | ภาพคมสุด (เล็งกระตุกเพราะ fps ต่ำ) |
+
+ระบบจะ **ไล่ลองจากที่เลือกลงมา** (ladder) — ถ้ากล้องเปิดความละเอียดนั้นไม่ได้ จะตกลง
+ระดับถัดไปอัตโนมัติจนกว่าจะเปิดได้ (ไม่ค้างที่ error) ผลตรวจจะแสดง **"ความละเอียดภาพ"**
+ที่ได้จริงเสมอ
+
+### Staleness guard — กันตัดสินจากภาพเก่า (QC-safe)
+
+ถ้ากล้องค้าง/หลุดสาย เธรด viewfinder จะหยุด publish เฟรมใหม่ → เฟรมใน buffer "เก่า"
+ระบบจะ **ปฏิเสธการถ่าย** (ตอบ error ว่าภาพไม่อัปเดต) แทนการตัดสิน OK/NG จากภาพเก่า —
+เพราะระบบ QC ห้ามให้ verdict จากภาพที่ไม่ใช่ปัจจุบัน เกณฑ์อายุตั้งที่
+`SNAPSHOT_MAX_FRAME_AGE_S` (default `1.0` วินาที)
 
 ---
 
@@ -235,6 +302,15 @@ approve** (ถ้าบน artwork สะกดเพี้ยนจะถูก
 - `GET /video_feed` — MJPEG stream
 - `GET /api/stats` · `GET /api/defects`
 
+### ถ่ายรูปตรวจ (Snapshot)
+- `POST /api/viewfinder/start` — เปิดกล้อง + viewfinder (รับ `camera_index`, `quality`)
+- `POST /api/viewfinder/stop` — ปิด viewfinder + คืนกล้อง
+- `GET  /viewfinder_feed` — MJPEG stream สำหรับเล็ง (encode ครั้งเดียว แชร์ทุก viewer)
+- `POST /api/snapshot` — ถ่าย + ตรวจ คืน `{verdict, dent_count, image(base64), capture_size, ...}`
+
+> ตัวจัดการ transition ของกล้อง (start/stop detection·viewfinder, mode switch) ถูก
+> serialize ด้วย lock เดียว — กัน race "เปิดกล้องซ้อน" เมื่อมีหลายคำขอพร้อมกัน
+
 ### โหมดฉลากกระดาษ
 - `GET /api/label_paper/skus` · `POST /api/label_paper/inspect`
 - `GET /api/label_paper/history` · `.../history/<id>` · `.../history/<id>/crop`
@@ -256,9 +332,10 @@ approve** (ถ้าบน artwork สะกดเพี้ยนจะถูก
 
 ```
 .
-├── app.py                       # Flask app — entry point, ลงทะเบียนทุกโหมด
-├── config.py                    # ตั้งค่ากลาง (กล้อง, SQL, Flask, N8N)
-├── camera.py / yolo_detector.py # โหมดตรวจจับสด
+├── app.py                       # Flask app — entry point, ลงทะเบียนทุกโหมด + snapshot
+├── config.py                    # ตั้งค่ากลาง (กล้อง, snapshot, SQL, Flask, N8N)
+├── camera.py / yolo_detector.py # โหมดตรวจจับสด + จัดการ backend กล้อง (MSMF/DSHOW/V4L2)
+├── diagnose_snapshot.py         # เครื่องมือทดสอบกล้องบนสถานี (ความละเอียด/backend/fourcc)
 ├── database.py                  # SQL Server (pyodbc)
 ├── modes/                       # registry + config ต่อโหมด YOLO
 │   ├── registry.py · can_dent.py · label.py · label_paper.py
@@ -281,6 +358,67 @@ approve** (ถ้าบน artwork สะกดเพี้ยนจะถูก
 ├── data/                        # ข้อมูลรันไทม์ (artwork inspections, SKU masters)
 └── tests/                       # pytest (รวม test_artwork_checks.py)
 ```
+
+---
+
+## การปรับแต่งกล้อง & แก้ปัญหา (Camera Tuning & Troubleshooting)
+
+รวมองค์ความรู้จากการ deploy จริงบนเครื่อง Windows + กล้อง ELP USB (OpenCV/MSMF)
+
+### เครื่องมือวินิจฉัย — `diagnose_snapshot.py`
+
+รัน **บนเครื่องสถานีที่ต่อกล้องจริง** (ปิด `app.py` ก่อน ไม่งั้นกล้องถูกจอง):
+
+```bash
+python diagnose_snapshot.py
+```
+
+จะรายงานว่ากล้องเปิดที่ความละเอียดไหนได้บ้าง, ใช้ backend อะไร (DSHOW/MSMF/V4L2),
+ได้ fourcc อะไร, และความละเอียดจริงที่กล้องส่งออกมา → ใช้เลือกค่าที่เหมาะกับกล้องตัวนั้น
+
+### ตารางอาการ → สาเหตุ → วิธีแก้
+
+| อาการ | สาเหตุ | วิธีแก้ |
+|---|---|---|
+| **กดถ่ายแล้ว "ถ่ายไม่สำเร็จ"** | เดิม reopen กล้องที่ 5MP ตอนชัตเตอร์ไม่ติด | ใช้สถาปัตยกรรม single-handle (เปิดครั้งเดียว) — แก้แล้วในเวอร์ชันปัจจุบัน |
+| **ภาพแตกเป็นคลื่นสีรุ้ง** | บังคับ `MJPG` แล้ว MSMF ส่ง JPEG ไม่ครบ (เฟรมขาด) | ตั้ง `CAMERA_FOURCC = None` (YUY2) |
+| **แอป crash หลุดเอง (ไม่มี traceback)** | `scan` กล้องไล่เปิดทุก backend → ชน DSHOW/obsensor บน OpenCV 4.x | `_probe_index` เปิด backend เดียว + `try/except` — แก้แล้ว |
+| **viewfinder เล็งไม่ลื่น** | กล้องเปิด 5MP@15fps + ย่อภาพใหญ่ทุกเฟรม | เลือก quality **"ลื่นที่สุด 720p"**, encode แชร์ครั้งเดียว, `VIEWFINDER_STREAM_FPS=30` |
+| **กล้องได้แค่ 720p ทั้งที่เป็น 8MP** | MSMF (default Windows) ไม่รองรับ MJPG จึงตัน USB bandwidth | ความละเอียดสูงต้องใช้ DSHOW+MJPG ที่ภาพสะอาด — ถ้ากล้อง/พอร์ตไม่ไหว ใช้ 720p ก็ตรวจ dent ได้ |
+
+### หลักการที่ยึด
+
+- **เสถียร > ความละเอียด** — กล้องตัวนี้ตัน 720p ผ่าน MSMF; ดัน 5MP ผ่าน reopen/MJPG
+  แล้วไม่เสถียร จึงเลือก 720p ที่นิ่งเป็นค่าเริ่มต้น (ตรวจ dent ยังแม่นพอ)
+- **CONFIG_VERSION บน footer** — ใช้ยืนยันว่าเครื่องรันโค้ดใหม่จริง ถ้า footer ไม่เปลี่ยน
+  หลัง `git pull` แปลว่ายังไม่ได้ปิด-เปิด `app.py` ใหม่ (Flask อ่าน config ตอน start เท่านั้น)
+
+---
+
+## สรุปการปรับปรุงล่าสุด (Changelog)
+
+ชุดการปรับปรุงโหมด **ถ่ายรูปตรวจ (Snapshot) + กล้อง** (มิ.ย. 2026):
+
+### ✨ ฟีเจอร์ใหม่
+- **โหมดถ่ายรูปตรวจ (Snapshot)** — เล็ง → ชัตเตอร์ → ตรวจ 1 ครั้งความละเอียดสูง → OK/NG
+- **เลือกความคมชัด/ความลื่น** — preset smooth/balanced/sharp จำค่าไว้ เปลี่ยนได้ทันที
+- **`diagnose_snapshot.py`** — เครื่องมือทดสอบความสามารถกล้องบนสถานี
+
+### 🛠️ การแก้ไขความถูกต้อง & เสถียรภาพ
+- **Single-handle architecture** — เปิดกล้องครั้งเดียว ตัด reopen ที่ทำให้ "ถ่ายไม่สำเร็จ"
+- **Resolution ladder + fallback** — เปิดความละเอียดไม่ได้ก็ตกลงระดับถัดไป ไม่ค้างที่ error
+- **ปิด crash ตอน scan กล้อง** — probe backend เดียว + `try/except` (กัน DSHOW/obsensor abort)
+- **ปิด `MJPG` เป็น `None`** — แก้ภาพแตกคลื่นสีรุ้งบน MSMF
+- **Staleness guard** — ปฏิเสธการถ่ายเมื่อเฟรมเก่ากว่า 1 วิ (กันตัดสินจากภาพค้าง — QC-safe)
+- **Serialize camera transitions** — lock เดียวกัน race "เปิดกล้องซ้อน" จากหลายคำขอ
+
+### ⚡ ประสิทธิภาพ
+- **Shared MJPEG encode** — viewfinder encode ครั้งเดียวต่อเฟรม แชร์ทุก viewer (เดิม encode ซ้ำต่อ client)
+- **VIEWFINDER_STREAM_FPS แยกจาก live** — เล็งลื่นขึ้น (30fps) โดยไม่กระทบ bandwidth สตรีมสด
+
+> การเปลี่ยนแปลงทั้งหมด **คง API / JSON response / UI เดิม** (frontend ไม่ต้องแก้) และผ่าน
+> การทดสอบด้วย harness จำลองกล้อง (ทุก state transition, mutual-exclusion, staleness) +
+> test suite เดิม 27/27
 
 ---
 
