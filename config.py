@@ -7,7 +7,7 @@ import os
 
 # Bump this whenever a config default changes so a running deployment can
 # print it on startup and confirm it is actually executing the new code.
-CONFIG_VERSION = "2026.06.16-artwork-compare-images"
+CONFIG_VERSION = "2026.06.18-snapshot-hardening"
 
 # ====================
 # CAMERA CONFIGURATION
@@ -16,9 +16,78 @@ CONFIG_VERSION = "2026.06.16-artwork-compare-images"
 # Default camera indices: 0 = built-in/laptop camera, 1+ = external USB webcams
 # To find your external webcam index, run: python -c "import cv2; [print(f'Index {i}: {cv2.VideoCapture(i).read()[0]}') for i in range(5)]"
 CAMERA_INDEX = 0  # ผลจาก test_camera.py: กล้องอยู่ที่ index 0
-CAMERA_WIDTH  = 640   # 640x480 ใช้ได้กับทุกกล้อง (notebook + USB)
-CAMERA_HEIGHT = 480   # เปลี่ยนเป็น 1280x720 ได้ถ้าต้องการ HD
+
+# ── Live stream resolution ──────────────────────────────────────────
+# 640x480 @ 30fps บนกล้อง ELP 8MP (IMX179). เลือกความละเอียดต่ำสำหรับ live
+# โดยตั้งใจ เพราะ sensor เป็น rolling shutter — ความละเอียดต่ำ = อ่านเฟรมเร็ว
+# = วัตถุที่เคลื่อน (กระป๋องบนสายพาน) บิดเป็น "ลูกคลื่น" น้อยที่สุด. อีกทั้ง
+# โมเดล live รันที่ imgsz=480 อยู่แล้ว ป้อน 720p เข้าไปก็ถูกย่อทิ้ง ไม่ได้ประโยชน์.
+# งานตรวจละเอียดเป็นหน้าที่ของ snapshot (5MP) แทน.
+CAMERA_WIDTH  = 640
+CAMERA_HEIGHT = 480
 CAMERA_FPS = 30
+
+# FourCC ของกล้อง. ตั้งเป็น None = ใช้ฟอร์แมต default ของกล้อง (มักเป็น YUY2
+# uncompressed) ซึ่ง MSMF บน Windows ถอดรหัสได้ "สะอาด" ไม่มีเฟรมแตก.
+#
+# ⚠️ เคยตั้งเป็น "MJPG" เพื่อปลดล็อกความละเอียดสูงบน USB 2.0 แต่บนเครื่องสถานี
+# (MSMF) มันส่ง JPEG ออกมาไม่สมบูรณ์ → ภาพแตกเป็นคลื่นสีรุ้ง (เฟรมขาด) กระทบ
+# ทั้งจอแสดงผลและผลตรวจ. กล้องตัวนี้ cap ที่ 720p อยู่แล้ว จึงไม่ต้องใช้ MJPG.
+# ถ้าย้ายไปกล้อง/เครื่องที่ MJPG ทำงานสะอาดและต้องการ >720p ค่อยเปิดกลับเป็น "MJPG".
+CAMERA_FOURCC = None
+
+# ── Snapshot capture resolution ─────────────────────────────────────
+# โหมดถ่ายรูปถ่ายครั้งเดียวต่อชัตเตอร์ จึงไม่ต้องห่วง fps — ดันความละเอียด
+# ให้สูงเพื่อจับรอยบุบเล็ก/ตื้นได้แม่นที่สุด (กล้องนี้สูงสุด 3264x2448 / 8MP).
+# rolling shutter ไม่กระทบเพราะตอนกดชัตเตอร์กระป๋องวางนิ่งอยู่แล้ว.
+SNAPSHOT_CAMERA_WIDTH  = 2592
+SNAPSHOT_CAMERA_HEIGHT = 1944
+
+# FPS ของโหมด 5MP — กล้องรองรับ 2592x1944 ที่ 15fps (โหมดมาตรฐาน UVC).
+# ตั้งให้ตรงโหมดจริงเพื่อให้ไดรเวอร์ไม่ต้องเดา และพอสำหรับการเล็งภาพนิ่ง.
+SNAPSHOT_CAMERA_FPS = 15
+
+# ── Snapshot resolution fallback ladder ─────────────────────────────
+# โหมดถ่ายรูป "เปิดกล้องครั้งเดียว" ที่ความละเอียดสูงสุดที่กล้องรองรับจริง
+# แล้วใช้แฮนเดิลเดียวนั้นทั้งเล็ง (ย่อแสดง) และตอนกดชัตเตอร์ — ไม่มีการ
+# release→reopen กลางทาง (ซึ่งเป็นต้นเหตุ "ถ่ายไม่สำเร็จ" บนกล้อง UVC).
+# ระบบไล่ลองจากคมสุดลงมา โหมดแรกที่เปิดได้ + ส่งเฟรมจริงเป็นผู้ชนะ.
+# (width, height, fps) เรียงจากความละเอียดสูง → ต่ำ.
+SNAPSHOT_RESOLUTION_LADDER = [
+    (SNAPSHOT_CAMERA_WIDTH, SNAPSHOT_CAMERA_HEIGHT, SNAPSHOT_CAMERA_FPS),  # 2592x1944 (5MP)
+    (1920, 1080, 30),  # 1080p — มาตรฐานเกือบทุกกล้อง
+    (1280, 720, 30),   # 720p — รับประกันเปิดได้เกือบทุกกล้อง (ขั้นสุดท้าย)
+]
+
+# ── Snapshot quality presets (ให้ผู้ใช้เลือกได้จากหน้าเว็บ) ──────────────
+# แลกระหว่าง "เล็งลื่น" (ความละเอียดต่ำ = fps สูง + ย่อภาพถูก = ลื่น) กับ
+# "ภาพคม" (5MP = จับ dent เล็กได้ดีแต่ 15fps เล็งกระตุก). โหมดที่เลือกใช้
+# ทั้งตอนเล็งและตอนถ่าย (แฮนเดิลเดียว ไม่ reopen).
+SNAPSHOT_QUALITY_PRESETS = {
+    "smooth":   (1280, 720, 30),   # ลื่นที่สุด
+    "balanced": (1920, 1080, 30),  # สมดุล (ค่าเริ่มต้น)
+    "sharp":    (SNAPSHOT_CAMERA_WIDTH, SNAPSHOT_CAMERA_HEIGHT, SNAPSHOT_CAMERA_FPS),  # คม 5MP
+}
+# Default to the smoothest mode (720p). It is the most stable across UVC stacks
+# (no high-res mode negotiation) and matches cameras that cap at 720p over USB.
+# Operators can step up to balanced/sharp from the dropdown when they need detail.
+SNAPSHOT_QUALITY_DEFAULT = "smooth"
+
+# Max age (seconds) of the viewfinder frame the shutter is allowed to inspect.
+# If the camera freezes/unplugs, the read loop stops publishing new frames and
+# the last good one goes stale — the shutter must REFUSE rather than return a
+# verdict on an old image (this is a QC system). Tune up if the chosen mode runs
+# at a very low fps.
+SNAPSHOT_MAX_FRAME_AGE_S = 1.0
+
+# ── Viewfinder (อาการเล็งก่อนกดชัตเตอร์) ──────────────────────────────
+# หมายเหตุ: ตั้งแต่เปลี่ยนเป็นสถาปัตยกรรม "เปิดกล้องครั้งเดียว" viewfinder
+# ใช้แฮนเดิลเดียวกับชัตเตอร์ (เปิดที่ความละเอียดจาก SNAPSHOT_RESOLUTION_LADDER
+# แล้วย่อแสดงผลด้วย _VIEWFINDER_MAX_W ใน app.py). ค่าด้านล่างเก็บไว้เพื่อความ
+# เข้ากันได้กับโค้ดเดิม แต่ปัจจุบันไม่ได้ใช้เปิดกล้องแล้ว.
+VIEWFINDER_CAMERA_WIDTH  = 1280
+VIEWFINDER_CAMERA_HEIGHT = 720
+VIEWFINDER_CAMERA_FPS = 30
 
 # Enable this to test available cameras at startup
 # Set to False for faster startup (skips camera scanning)
@@ -48,6 +117,19 @@ IOU_THRESHOLD = 0.45
 # per-frame post-processing bounded and prevents low-confidence junk boxes from
 # stalling the live feed (was unbounded at the old conf=0.01 debug floor).
 YOLO_MAX_DET = 20
+
+# Inference image size passed to the model. Lower = faster inference = the box
+# tracks the moving can more closely (less temporal lag). 640 is the YOLO
+# default; 480 roughly doubles FPS on CPU with negligible accuracy loss for
+# can-body dents at this camera resolution. Drop to 320 for even more speed.
+YOLO_IMGSZ = 480
+
+# Snapshot inference image size. Snapshot runs the model ONCE per shutter press
+# (not a live stream), so speed is irrelevant — we trade it for accuracy. With
+# the high-resolution snapshot capture (SNAPSHOT_CAMERA_* = 5MP) there is real
+# detail to work with, so 1280 lets the model resolve small/shallow dents that
+# were lost at the downscaled live size.
+SNAPSHOT_IMGSZ = 1280
 
 # ====================
 # DEFECT CLASS MAPPING  (Can Dent Detection)
@@ -98,7 +180,13 @@ FLASK_PORT = 5000
 FLASK_DEBUG = False
 
 # Video streaming configuration
-STREAM_FPS = 15  # FPS for MJPEG stream (lower = less bandwidth)
+STREAM_FPS = 15  # FPS for the live-detection MJPEG stream (lower = less bandwidth)
+
+# Viewfinder (snapshot aiming) stream rate. Higher than STREAM_FPS so aiming
+# feels fluid — the live feed is deliberately 15fps to save bandwidth, but the
+# operator aiming a can needs a smooth preview. Capped by the camera's own fps
+# at the chosen resolution (e.g. 5MP tops out at 15fps regardless).
+VIEWFINDER_STREAM_FPS = 30
 
 # Application directories
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))

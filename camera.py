@@ -32,22 +32,29 @@ def _is_url(value) -> bool:
 
 
 def _probe_index(index: int) -> bool:
-    """Return True if the camera index is readable."""
-    cap = cv2.VideoCapture(index)
-    if cap.isOpened():
-        ret, _ = cap.read()
-        cap.release()
-        if ret:
-            return True
+    """
+    Return True if the camera index is readable.
 
-    for backend in _BACKENDS:
-        cap = cv2.VideoCapture(index, backend)
-        if cap.isOpened():
+    Defensive on purpose: a SINGLE guarded open with the platform default
+    backend. The old version fell back through every backend (incl. CAP_DSHOW
+    and CAP_ANY) for each index, which on some Windows + OpenCV 4.x builds spams
+    the obsensor probe and throws native DSHOW C++ exceptions when probing
+    non-existent indices — repeated on every page load this could abort the
+    whole process. One backend, wrapped in try/except, keeps scanning safe.
+    """
+    cap = None
+    try:
+        cap = cv2.VideoCapture(index)
+        if cap is not None and cap.isOpened():
             ret, _ = cap.read()
+            return bool(ret)
+        return False
+    except Exception as e:  # cv2.error and friends — never let a probe crash us
+        logger.warning(f"Probe of camera index {index} failed: {e}")
+        return False
+    finally:
+        if cap is not None:
             cap.release()
-            if ret:
-                return True
-    return False
 
 
 def scan_cameras_fast(max_index: int = 4, skip_indices: list = None) -> List[Dict]:
@@ -83,12 +90,18 @@ class Camera:
     Camera handler supporting USB webcams (index) and IP cameras (RTSP URL).
     """
 
-    def __init__(self, camera_index: Union[int, str] = None):
+    def __init__(self, camera_index: Union[int, str] = None,
+                 width: int = None, height: int = None, fps: int = None):
         raw = camera_index if camera_index is not None else config.CAMERA_INDEX
         # Normalise numeric strings ("0", "1") → int
         if isinstance(raw, str) and raw.isdigit():
             raw = int(raw)
         self.camera_index = raw
+        # Per-instance capture resolution. Defaults to the live-stream config;
+        # snapshot mode passes the high-res SNAPSHOT_CAMERA_* values.
+        self.width  = width  if width  is not None else config.CAMERA_WIDTH
+        self.height = height if height is not None else config.CAMERA_HEIGHT
+        self.fps    = fps    if fps    is not None else config.CAMERA_FPS
         self.cap: Optional[cv2.VideoCapture] = None
         self.is_initialized = False
 
@@ -103,18 +116,35 @@ class Camera:
         """Open a local USB/built-in camera by index."""
         logger.info(f"Initializing USB camera index={self.camera_index} ...")
 
+        # Try the platform default backend FIRST. On Windows that is MSMF, which
+        # is the one that reliably opens UVC cameras here; the explicit backends
+        # (DSHOW, …) are only a fallback. NOTE: forcing DSHOW first was tried to
+        # unlock >720p via MJPG, but on this deployment DSHOW raises native
+        # "unknown C++ exception" and can't capture by index — so default-first
+        # is both the stable AND the working order. (Camera tops out at 720p over
+        # USB here regardless; high-res is not worth crashing for.)
         attempts = [None] + _BACKENDS
 
         for backend in attempts:
-            cap = (cv2.VideoCapture(self.camera_index) if backend is None
-                   else cv2.VideoCapture(self.camera_index, backend))
+            try:
+                cap = (cv2.VideoCapture(self.camera_index) if backend is None
+                       else cv2.VideoCapture(self.camera_index, backend))
+            except Exception as e:  # never let a backend's native error crash us
+                logger.warning(f"Opening camera with backend {backend} raised: {e}")
+                continue
             if not cap.isOpened():
                 cap.release()
                 continue
 
-            cap.set(cv2.CAP_PROP_FRAME_WIDTH,  config.CAMERA_WIDTH)
-            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, config.CAMERA_HEIGHT)
-            cap.set(cv2.CAP_PROP_FPS,          config.CAMERA_FPS)
+            # FourCC MUST be set before width/height for most UVC cameras —
+            # MJPEG is what lets this 8MP camera reach high resolution over
+            # USB 2.0 (YUY2 is uncompressed and bandwidth-capped to ~640x480).
+            fourcc = getattr(config, "CAMERA_FOURCC", None)
+            if fourcc:
+                cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*fourcc))
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH,  self.width)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
+            cap.set(cv2.CAP_PROP_FPS,          self.fps)
             cap.set(cv2.CAP_PROP_BUFFERSIZE,   1)
 
             for _ in range(5):
@@ -125,7 +155,20 @@ class Camera:
                 self.cap = cap
                 self.is_initialized = True
                 bname = "Default" if backend is None else _BACKEND_NAMES.get(backend, str(backend))
-                logger.info(f"USB camera ready (index={self.camera_index}, backend={bname})")
+                ah, aw = frame.shape[:2]
+                raw_cc = int(cap.get(cv2.CAP_PROP_FOURCC))
+                cc = "".join(chr((raw_cc >> (8 * i)) & 0xFF) for i in range(4)).strip()
+                logger.info(
+                    f"USB camera ready (index={self.camera_index}, backend={bname}, "
+                    f"fourcc={cc or '?'}, requested={self.width}x{self.height}, "
+                    f"actual={aw}x{ah})"
+                )
+                if (aw, ah) != (self.width, self.height):
+                    logger.warning(
+                        f"Camera delivered {aw}x{ah} (asked {self.width}x{self.height}). "
+                        "If lower than expected, the camera may have ignored the mode — "
+                        "check MJPEG support / USB bandwidth."
+                    )
                 return True
 
             cap.release()

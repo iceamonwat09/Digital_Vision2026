@@ -6,6 +6,8 @@ Main application file with routes, video streaming, and API endpoints.
 import os
 import threading
 import time
+import base64
+import functools
 from datetime import datetime
 import cv2
 import numpy as np
@@ -49,6 +51,12 @@ except Exception as _aw_err:  # noqa: BLE001 — isolation by design
 # Pre-computed JPEG encode params (avoids re-creating each frame)
 _JPEG_PARAMS = [cv2.IMWRITE_JPEG_QUALITY, 80]
 
+# Max width (px) for transport-sized images. The high-res snapshot capture is
+# decoded/detected at full resolution, but the viewfinder stream and the
+# returned preview are downscaled to these so the browser stays responsive.
+_VIEWFINDER_MAX_W = 960
+_SNAPSHOT_DISPLAY_MAX_W = 1280
+
 # Global variables for detection system
 camera = None
 detector = None
@@ -68,7 +76,14 @@ latest_raw_frame = None           # newest raw BGR frame from the camera
 raw_frame_seq = 0                 # increments on every new captured frame
 raw_lock = threading.Lock()
 
-latest_detections = []            # newest detection list from the model
+# The inference thread publishes its detections *together with the exact frame
+# they were computed on* (and that frame's seq). The MJPEG generator then draws
+# each detection on its own frame — so the box always sits on the can where the
+# model actually saw it, instead of being pasted onto a newer frame where the
+# can has already moved on (that mismatch was the "box lags the can" bug).
+latest_detections = []            # detections for latest_det_frame
+latest_det_frame = None           # the exact frame those detections came from
+latest_det_seq = -1               # seq of latest_det_frame (drives re-encode)
 det_lock = threading.Lock()
 
 detection_stats = {
@@ -82,6 +97,44 @@ current_model_file = None     # filename inside weights/<mode>/, None = auto
 
 # Cooldown tracking for defect logging
 defect_log_cooldown = {}
+
+
+# ── Viewfinder (snapshot live preview) ─────────────────────────────────
+# A raw-camera preview used by snapshot mode so the operator can aim before
+# pressing the shutter. The camera is opened ONCE at the capture resolution
+# (the highest mode it supports, picked at start) and stays open for the whole
+# snapshot session; the read loop publishes full-resolution frames and the
+# MJPEG generator downscales them for a smooth aim stream. The shutter then
+# simply grabs the newest already-captured full-res frame — it never touches
+# the camera handle, so there is no fragile mid-session release/reopen. Snapshot
+# mode is mutually exclusive with live detection (single camera handle).
+viewfinder_active = False
+viewfinder_camera = None
+viewfinder_thread = None
+viewfinder_frame = None          # newest RAW (full-res) frame from the camera
+viewfinder_seq = 0
+vf_lock = threading.Lock()       # guards the published viewfinder frame
+viewfinder_capture_size = None   # (w, h) actually opened, for status/diagnostics
+viewfinder_frame_ts = 0.0        # time.monotonic() when viewfinder_frame was published
+viewfinder_jpeg = None           # newest DISPLAY-downscaled JPEG bytes (encoded once,
+                                 # shared by all MJPEG viewers — see generate_viewfinder)
+
+# Serialises camera-ownership transitions (start/stop detection, start/stop
+# viewfinder, mode switch). Flask runs threaded, so without this two concurrent
+# requests (double-click, multiple tabs, status poller) could both pass an
+# `if active` check and open two camera handles / start duplicate threads.
+_cam_state_lock = threading.RLock()
+
+
+def _serialized(fn):
+    """Run a route body holding _cam_state_lock so camera-ownership transitions
+    (start/stop detection, start/stop viewfinder, mode switch) never interleave.
+    Read-only endpoints (status, scan) are intentionally NOT serialized."""
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        with _cam_state_lock:
+            return fn(*args, **kwargs)
+    return wrapper
 
 
 def _load_detector_for(mode_name: str, model_filename=None):
@@ -162,7 +215,8 @@ def inference_loop():
     draws it) and handles cooldown-gated DB logging. Skips frames it has
     already processed so it never blocks waiting for new ones.
     """
-    global latest_detections, detection_stats, defect_log_cooldown
+    global latest_detections, latest_det_frame, latest_det_seq
+    global detection_stats, defect_log_cooldown
 
     logger.info("Inference loop started")
     last_seq = -1
@@ -183,8 +237,12 @@ def inference_loop():
             else:
                 detections = []
 
+            # Publish the detections together with the frame they ran on so the
+            # generator can draw them in sync (see latest_det_frame comment).
             with det_lock:
                 latest_detections = detections
+                latest_det_frame = frame
+                latest_det_seq = seq
 
             detection_stats["current_defects"] = len(detections)
             if detections:
@@ -219,10 +277,11 @@ def inference_loop():
 
 def generate_frames():
     """
-    MJPEG generator. Composites the newest detections onto the newest raw
-    frame at the stream rate, independent of the (possibly slower) inference
-    rate. Re-encodes JPEG only when a new camera frame has arrived, so a
-    stalled or idle feed costs nothing.
+    MJPEG generator. Draws each detection on the exact frame the model ran it
+    on (published together by inference_loop), so the box stays locked to the
+    can instead of trailing behind a newer frame. The displayed feed therefore
+    refreshes at the inference rate; re-encodes JPEG only when a new inference
+    frame has arrived, so a stalled or idle feed costs nothing.
     """
     # Placeholder frame (created once)
     placeholder = np.zeros((480, 640, 3), dtype=np.uint8)
@@ -235,15 +294,15 @@ def generate_frames():
     frame_bytes = placeholder_bytes
 
     while True:
-        with raw_lock:
-            frame = latest_raw_frame
-            seq = raw_frame_seq
+        with det_lock:
+            frame = latest_det_frame
+            detections = latest_detections
+            seq = latest_det_seq
 
-        # Only redo work when the camera produced a new frame.
+        # Only redo work when a fresh inference frame (frame + its detections)
+        # is available.
         if frame is not None and seq != last_encoded_seq:
             last_encoded_seq = seq
-            with det_lock:
-                detections = latest_detections
 
             if detector is not None and detector.model is not None:
                 annotated = detector.draw_detections(frame, detections)
@@ -261,6 +320,78 @@ def generate_frames():
                b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
 
         time.sleep(1.0 / config.STREAM_FPS)
+
+
+def viewfinder_loop():
+    """
+    Viewfinder capture thread: grab raw frames (no detection) at camera rate.
+    Publishes two things under vf_lock:
+      • viewfinder_frame  — the RAW full-res frame (the shutter grabs this)
+      • viewfinder_jpeg   — a display-downscaled JPEG, encoded ONCE here so every
+        MJPEG viewer just copies the bytes instead of each re-encoding the frame.
+    Also stamps viewfinder_frame_ts so the shutter can reject a stale/frozen feed.
+    """
+    global viewfinder_frame, viewfinder_seq, viewfinder_frame_ts, viewfinder_jpeg
+
+    logger.info("Viewfinder loop started")
+    while viewfinder_active:
+        try:
+            result = viewfinder_camera.read_frame() if viewfinder_camera else None
+            if result is None:
+                time.sleep(0.02)
+                continue
+            success, frame = result
+            if not success or frame is None:
+                time.sleep(0.02)
+                continue
+
+            # Downscale + encode the display JPEG once (was per-viewer before).
+            h, w = frame.shape[:2]
+            if w > _VIEWFINDER_MAX_W:
+                scale = _VIEWFINDER_MAX_W / float(w)
+                disp = cv2.resize(frame, (_VIEWFINDER_MAX_W, int(h * scale)),
+                                  interpolation=cv2.INTER_AREA)
+            else:
+                disp = frame
+            ret, buffer = cv2.imencode('.jpg', disp, _JPEG_PARAMS)
+
+            with vf_lock:
+                viewfinder_frame = frame
+                viewfinder_frame_ts = time.monotonic()
+                viewfinder_seq += 1
+                if ret:
+                    viewfinder_jpeg = buffer.tobytes()
+        except Exception as e:
+            logger.error(f"Error in viewfinder loop: {e}")
+            time.sleep(0.05)
+    logger.info("Viewfinder loop stopped")
+
+
+def generate_viewfinder():
+    """
+    MJPEG generator for the viewfinder. Serves the shared JPEG bytes encoded by
+    viewfinder_loop — so N concurrent viewers cost one encode, not N. Re-yields
+    only when a new frame arrived (tracked by viewfinder_seq).
+    """
+    placeholder = np.zeros((480, 640, 3), dtype=np.uint8)
+    cv2.putText(placeholder, "Starting camera...", (170, 240),
+                cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+    _, ph_buf = cv2.imencode('.jpg', placeholder, _JPEG_PARAMS)
+    placeholder_bytes = ph_buf.tobytes()
+    frame_bytes = placeholder_bytes
+    last_seq = -1
+
+    while viewfinder_active:
+        with vf_lock:
+            seq = viewfinder_seq
+            jpeg = viewfinder_jpeg
+        if jpeg is not None and seq != last_seq:
+            last_seq = seq
+            frame_bytes = jpeg
+        yield (b'--frame\r\n'
+               b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+        # Aim stream runs faster than the live feed for fluid aiming.
+        time.sleep(1.0 / config.VIEWFINDER_STREAM_FPS)
 
 
 # ── Routes ─────────────────────────────────────────────
@@ -292,6 +423,15 @@ def video_feed():
     )
 
 
+@app.route('/viewfinder_feed')
+def viewfinder_feed():
+    """Raw viewfinder stream (MJPEG, no detection) for snapshot aiming."""
+    return Response(
+        generate_viewfinder(),
+        mimetype='multipart/x-mixed-replace; boundary=frame'
+    )
+
+
 # ── API Endpoints ──────────────────────────────────────
 
 @app.route('/api/camera/scan', methods=['GET'])
@@ -307,13 +447,21 @@ def api_scan_cameras():
 
 
 @app.route('/api/detection/start', methods=['POST'])
+@_serialized
 def start_detection():
     """Start defect detection with the selected camera."""
     global detection_active, capture_thread, inference_thread, camera
     global latest_raw_frame, raw_frame_seq, latest_detections
+    global latest_det_frame, latest_det_seq
 
     if detection_active:
         return jsonify({"status": "already_running", "message": "Detection already active"}), 200
+
+    if viewfinder_active:
+        return jsonify({
+            "status": "error",
+            "message": "ปิดโหมดถ่ายรูปก่อน แล้วจึงเริ่มตรวจสด"
+        }), 409
 
     model_ready = detector is not None and detector.model is not None
     if not model_ready:
@@ -353,6 +501,8 @@ def start_detection():
         raw_frame_seq = 0
     with det_lock:
         latest_detections = []
+        latest_det_frame = None
+        latest_det_seq = -1
 
     detection_active = True
     capture_thread = threading.Thread(target=capture_loop, daemon=True)
@@ -365,10 +515,11 @@ def start_detection():
 
 
 @app.route('/api/detection/stop', methods=['POST'])
+@_serialized
 def stop_detection():
     """Stop defect detection and release camera."""
     global detection_active, camera, capture_thread, inference_thread
-    global latest_raw_frame, latest_detections
+    global latest_raw_frame, latest_detections, latest_det_frame, latest_det_seq
 
     detection_active = False
 
@@ -388,6 +539,8 @@ def stop_detection():
         latest_raw_frame = None
     with det_lock:
         latest_detections = []
+        latest_det_frame = None
+        latest_det_seq = -1
 
     logger.info("Detection stopped")
     return jsonify({"status": "stopped", "message": "Detection stopped successfully"})
@@ -405,6 +558,267 @@ def get_detection_status():
         "mode": current_mode,
         "model_file": current_model_file,
     })
+
+
+# ── Snapshot inspection (viewfinder + shutter) ─────────
+# Flow: open the snapshot overlay → the camera opens ONCE at the highest
+# resolution it supports and a downscaled viewfinder streams so the operator can
+# aim → press the shutter → the newest full-resolution frame already in the
+# buffer is run through the model once → annotated still + verdict. The shutter
+# never reopens the camera (the old release→reopen-at-5MP step was the source of
+# the "ถ่ายไม่สำเร็จ" failures on UVC cameras). Snapshot mode is mutually
+# exclusive with live detection (single camera handle) and reuses the pure
+# detect()/draw_detections() helpers — the live streaming threads are untouched.
+
+# Classes that are NOT a dent defect (a "good"/"can" box is never an NG reason).
+_NON_DEFECT_CLASSES = {"good", "can"}
+
+
+def _parse_camera_index(camera_index_raw):
+    """Normalise a request camera_index: numeric → int, else keep (RTSP URL)."""
+    if isinstance(camera_index_raw, str) and camera_index_raw.isdigit():
+        return int(camera_index_raw)
+    if isinstance(camera_index_raw, (int, float)):
+        return int(camera_index_raw)
+    return camera_index_raw
+
+
+def _scale_for_display(frame, detections, max_w):
+    """
+    Downscale a frame to ``max_w`` and scale detection boxes to match, so a
+    high-res capture renders with readable box thickness and a small payload.
+    Returns (display_frame, display_detections). No-op when already small.
+    """
+    h, w = frame.shape[:2]
+    if w <= max_w:
+        return frame, detections
+    scale = max_w / float(w)
+    # INTER_AREA is the correct (anti-aliasing) filter for shrinking — it avoids
+    # the moiré/ripple artifacts that INTER_LINEAR produces on fine detail like
+    # a can lid's concentric ridges.
+    disp = cv2.resize(frame, (max_w, int(h * scale)), interpolation=cv2.INTER_AREA)
+    scaled = []
+    for d in detections:
+        x1, y1, x2, y2 = d["bbox"]
+        sd = dict(d)
+        sd["bbox"] = [int(x1 * scale), int(y1 * scale),
+                      int(x2 * scale), int(y2 * scale)]
+        cx, cy = d["center"]
+        sd["center"] = [int(cx * scale), int(cy * scale)]
+        scaled.append(sd)
+    return disp, scaled
+
+
+def _open_camera(cam_index, width, height, fps, retries=3, settle=0.4):
+    """Open a USB/RTSP camera at a given mode, retrying — a USB camera that was
+    just released often needs a moment before it can be reopened."""
+    for attempt in range(retries):
+        cam = Camera(camera_index=cam_index, width=width, height=height, fps=fps)
+        if cam.initialize():
+            return cam
+        logger.warning(f"Camera open attempt {attempt + 1}/{retries} failed "
+                       f"({width}x{height}); retrying in {settle}s")
+        time.sleep(settle)
+    return None
+
+
+def _ladder_for_quality(quality):
+    """
+    Build the resolution ladder for a chosen quality preset: the preset itself
+    first, then every standard fallback rung with fewer pixels (so a camera that
+    can't deliver the preset still opens at something lower), always ending with
+    a 720p safety net. Unknown quality → the default preset.
+    """
+    presets = config.SNAPSHOT_QUALITY_PRESETS
+    chosen = presets.get(quality, presets[config.SNAPSHOT_QUALITY_DEFAULT])
+    rungs = [chosen]
+    for rung in config.SNAPSHOT_RESOLUTION_LADDER:
+        if rung[0] * rung[1] < chosen[0] * chosen[1] and rung not in rungs:
+            rungs.append(rung)
+    safety = (1280, 720, 30)
+    if safety not in rungs:
+        rungs.append(safety)
+    return rungs
+
+
+def _open_camera_ladder(cam_index, ladder=None):
+    """
+    Open the camera at the highest resolution it actually supports, walking the
+    given ladder (defaults to config.SNAPSHOT_RESOLUTION_LADDER) and returning
+    the first mode that opens AND delivers a frame. This single handle is then
+    used for the whole snapshot session — both aiming and the shutter grab — so
+    there is no fragile mid-session reopen. Returns (camera, (width, height)) or
+    (None, None).
+    """
+    if ladder is None:
+        ladder = config.SNAPSHOT_RESOLUTION_LADDER
+    for width, height, fps in ladder:
+        cam = _open_camera(cam_index, width, height, fps, retries=2)
+        if cam is None:
+            logger.warning(f"Viewfinder: could not open camera at {width}x{height}; "
+                           "trying next mode")
+            continue
+        # Confirm it actually streams a frame at this mode before committing.
+        result = cam.read_frame()
+        if result and result[0] and result[1] is not None:
+            ah, aw = result[1].shape[:2]
+            logger.info(f"Snapshot camera opened at {aw}x{ah} (requested {width}x{height})")
+            return cam, (aw, ah)
+        logger.warning(f"Viewfinder: opened {width}x{height} but got no frame; "
+                       "trying next mode")
+        cam.release()
+        time.sleep(0.2)
+    return None, None
+
+
+def _grab_latest_frame(timeout=2.0):
+    """
+    Return a copy of the newest viewfinder frame (full resolution), waiting up to
+    ``timeout`` seconds for the read loop to publish a FRESH one. "Fresh" means
+    published within config.SNAPSHOT_MAX_FRAME_AGE_S — a frozen/unplugged camera
+    leaves the last good frame in the buffer, and a QC system must never grade a
+    stale image, so a stale buffer is treated the same as no frame. The shutter
+    never touches the camera handle. Returns a BGR frame, or None on timeout.
+    """
+    max_age = config.SNAPSHOT_MAX_FRAME_AGE_S
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        with vf_lock:
+            fresh = (viewfinder_frame is not None
+                     and (time.monotonic() - viewfinder_frame_ts) <= max_age)
+            frame = viewfinder_frame.copy() if fresh else None
+        if frame is not None:
+            return frame
+        time.sleep(0.05)
+    return None
+
+
+@app.route('/api/viewfinder/start', methods=['POST'])
+@_serialized
+def api_viewfinder_start():
+    """Open the camera and start the raw viewfinder for snapshot aiming."""
+    global viewfinder_active, viewfinder_camera, viewfinder_thread
+    global viewfinder_frame, viewfinder_seq, viewfinder_capture_size
+    global viewfinder_jpeg, viewfinder_frame_ts
+
+    if detection_active:
+        return jsonify({
+            "status": "error",
+            "message": "กรุณากด Stop Detection ก่อน แล้วจึงเปิดโหมดถ่ายรูป"
+        }), 409
+    if viewfinder_active:
+        return jsonify({"status": "already_running"}), 200
+
+    data = request.get_json(silent=True) or {}
+    camera_index = _parse_camera_index(data.get("camera_index", config.CAMERA_INDEX))
+    quality = data.get("quality", config.SNAPSHOT_QUALITY_DEFAULT)
+
+    # Open ONCE at the chosen quality (ladder fallback to lower modes). The same
+    # handle serves both aiming (downscaled) and the shutter grab, so the camera
+    # is never reopened mid-session. Lower quality = higher fps = smoother aim.
+    cam, size = _open_camera_ladder(camera_index, _ladder_for_quality(quality))
+    if cam is None:
+        return jsonify({
+            "status": "error",
+            "message": f"เปิดกล้อง {camera_index} ไม่ได้ หรือกล้องถูกใช้งานอยู่"
+        }), 500
+
+    viewfinder_camera = cam
+    viewfinder_capture_size = size
+    with vf_lock:
+        viewfinder_frame = None
+        viewfinder_jpeg = None
+        viewfinder_frame_ts = 0.0
+        viewfinder_seq = 0
+    viewfinder_active = True
+    viewfinder_thread = threading.Thread(target=viewfinder_loop, daemon=True)
+    viewfinder_thread.start()
+
+    logger.info(f"Viewfinder started on camera {camera_index} at {size[0]}x{size[1]}")
+    return jsonify({"status": "started", "capture_size": f"{size[0]}x{size[1]}"})
+
+
+@app.route('/api/viewfinder/stop', methods=['POST'])
+@_serialized
+def api_viewfinder_stop():
+    """Stop the viewfinder and release the camera."""
+    global viewfinder_active, viewfinder_camera, viewfinder_thread, viewfinder_frame
+    global viewfinder_capture_size, viewfinder_jpeg, viewfinder_frame_ts
+
+    viewfinder_active = False
+    if viewfinder_thread is not None:
+        viewfinder_thread.join(timeout=1.0)
+    viewfinder_thread = None
+    if viewfinder_camera:
+        viewfinder_camera.release()
+        viewfinder_camera = None
+    viewfinder_capture_size = None
+    with vf_lock:
+        viewfinder_frame = None
+        viewfinder_jpeg = None
+        viewfinder_frame_ts = 0.0
+
+    logger.info("Viewfinder stopped")
+    return jsonify({"status": "stopped"})
+
+
+@app.route('/api/snapshot', methods=['POST'])
+def api_snapshot():
+    """Run the model on the newest viewfinder frame; return annotated JPEG + verdict."""
+    if detector is None or detector.model is None:
+        return jsonify({"status": "error", "message": "ยังไม่ได้โหลดโมเดล"}), 400
+
+    if not viewfinder_active:
+        return jsonify({
+            "status": "error",
+            "message": "กรุณาเปิดโหมดถ่ายรูป (viewfinder) ก่อนกดถ่าย"
+        }), 409
+
+    # Grab the newest full-resolution frame already captured by the viewfinder
+    # loop. The shutter never touches the camera handle, so it cannot fail on a
+    # camera reopen — it only waits briefly for the first frame after start.
+    try:
+        frame = _grab_latest_frame(timeout=2.0)
+        if frame is None:
+            return jsonify({
+                "status": "error",
+                "message": "ถ่ายภาพไม่สำเร็จ — ภาพจากกล้องไม่อัปเดต (กล้องค้าง/หลุด หรือยังไม่ขึ้นภาพ) "
+                           "ปฏิเสธการตัดสินเพื่อกันผลตรวจจากภาพเก่า ลองใหม่อีกครั้ง"
+            }), 500
+
+        # Snapshot runs once per shutter press, so use the high-accuracy image
+        # size. Detection runs on the full-resolution frame; we then downscale
+        # to a display size and scale the boxes with it, so the preview has
+        # readable box thickness/text and a lightweight payload.
+        detections = detector.detect(frame, imgsz=config.SNAPSHOT_IMGSZ)
+
+        dents = [d for d in detections if d["class_name"] not in _NON_DEFECT_CLASSES]
+        verdict = "ng" if dents else "ok"
+        max_conf = max((d["confidence"] for d in dents), default=0.0)
+
+        disp_frame, disp_dets = _scale_for_display(frame, detections, _SNAPSHOT_DISPLAY_MAX_W)
+        annotated = detector.draw_detections(disp_frame, disp_dets)
+
+        ret, buffer = cv2.imencode('.jpg', annotated, _JPEG_PARAMS)
+        if not ret:
+            return jsonify({"status": "error", "message": "เข้ารหัสภาพไม่สำเร็จ"}), 500
+        image_b64 = "data:image/jpeg;base64," + base64.b64encode(buffer.tobytes()).decode("ascii")
+
+        cap_h, cap_w = frame.shape[:2]
+        return jsonify({
+            "status": "ok",
+            "image": image_b64,
+            "verdict": verdict,
+            "dent_count": len(dents),
+            "max_confidence": round(max_conf, 2),
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "line": config.LINE_NUMBER,
+            "plant": config.PLANT_CODE,
+            "capture_size": f"{cap_w}x{cap_h}",
+        })
+    except Exception as e:
+        logger.error(f"Snapshot failed: {e}", exc_info=True)
+        return jsonify({"status": "error", "message": f"ถ่ายรูปไม่สำเร็จ: {e}"}), 500
 
 
 @app.route('/api/stats', methods=['GET'])
@@ -462,6 +876,7 @@ def api_list_models():
 
 
 @app.route('/api/mode/switch', methods=['POST'])
+@_serialized
 def api_switch_mode():
     """Swap active mode and/or model file. Refuses while detection running."""
     global detector, current_mode, current_model_file, detection_stats

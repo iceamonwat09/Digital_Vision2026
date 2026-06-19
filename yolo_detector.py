@@ -225,12 +225,16 @@ class YOLODetector:
             return "ok"
         return None
 
-    def detect(self, frame: np.ndarray) -> List[Dict]:
+    def detect(self, frame: np.ndarray, imgsz: int = None) -> List[Dict]:
         """
         Perform defect detection on a frame.
 
         Args:
             frame: Input frame as numpy array (BGR format)
+            imgsz: Optional inference image size override. Defaults to
+                ``config.YOLO_IMGSZ`` (the live-stream size). Snapshot mode
+                passes a larger value (``config.SNAPSHOT_IMGSZ``) to favour
+                accuracy over speed.
 
         Returns:
             List of detection dictionaries with keys:
@@ -259,6 +263,7 @@ class YOLODetector:
                 frame,
                 conf=model_conf,
                 iou=self.iou_threshold,
+                imgsz=imgsz if imgsz is not None else config.YOLO_IMGSZ,
                 max_det=config.YOLO_MAX_DET,
                 verbose=False
             )
