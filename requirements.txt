@@ -13,6 +13,10 @@ numpy>=1.26.0
 pyodbc>=4.0.39           # SQL Server connection driver
 # pymongo==4.6.0         # (เดิม — MongoDB, ไม่ใช้แล้ว)
 
+# Authentication + RBAC (โหมด Login)
+bcrypt>=4.1.0            # password hashing (salt อัตโนมัติ — ห้ามเก็บ plain text)
+PyJWT>=2.8.0            # access / refresh token (httpOnly cookie)
+
 # Utilities
 Pillow==10.1.0
 pygrabber==0.2

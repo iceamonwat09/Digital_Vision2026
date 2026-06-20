@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>เข้าสู่ระบบ · Thai Union Inspector</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v={{ config_version }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/auth.css') }}?v={{ config_version }}">
+</head>
+<body class="auth-body">
+    <div class="auth-card" role="main">
+        <div class="auth-head">
+            <div class="brand-logo">TU</div>
+            <div>
+                <h1 class="auth-title">เข้าสู่ระบบ</h1>
+                <p class="auth-sub">ระบบตรวจสอบบรรจุภัณฑ์ Thai Union</p>
+            </div>
+        </div>
+
+        <form id="login-form" novalidate>
+            <div class="field">
+                <label for="username">ชื่อผู้ใช้ หรือ อีเมล</label>
+                <input id="username" name="username" type="text"
+                       autocomplete="username" required autofocus
+                       placeholder="เช่น admin">
+            </div>
+
+            <div class="field">
+                <label for="password">รหัสผ่าน</label>
+                <div class="pw-wrap">
+                    <input id="password" name="password" type="password"
+                           autocomplete="current-password" required
+                           placeholder="รหัสผ่าน">
+                    <button type="button" id="toggle-pw" class="pw-toggle"
+                            aria-label="แสดง/ซ่อนรหัสผ่าน">แสดง</button>
+                </div>
+                <!-- real-time password strength indicator -->
+                <div class="pw-strength" id="pw-strength" hidden>
+                    <div class="pw-bar"><span id="pw-bar-fill"></span></div>
+                    <span class="pw-label" id="pw-label"></span>
+                </div>
+                <ul class="pw-rules" id="pw-rules" hidden></ul>
+            </div>
+
+            <div class="field-row">
+                <label class="checkbox">
+                    <input type="checkbox" id="remember" name="remember">
+                    <span>จดจำฉันไว้</span>
+                </label>
+            </div>
+
+            <div class="auth-error" id="auth-error" role="alert" hidden></div>
+
+            <button type="submit" id="login-btn" class="btn-primary">
+                <span class="btn-text">เข้าสู่ระบบ</span>
+                <span class="btn-spinner" hidden></span>
+            </button>
+        </form>
+
+        <p class="auth-foot">{{ config_version }}</p>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/login.js') }}?v={{ config_version }}"></script>
+</body>
+</html>
