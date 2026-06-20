@@ -30,7 +30,10 @@ _PUBLIC_PATHS = (
 # Path prefix → required permission. Checked most-specific-first, so
 # "/label_paper/history" (view_history) wins over "/label_paper" (inspect).
 _PERM_RULES = [
+    ("/admin",                   "manage_users"),
     ("/api/auth/users",          "manage_users"),
+    ("/api/auth/roles",          "manage_users"),
+    ("/api/auth/permissions",    "manage_users"),
     # History (pages + their data APIs) — most-specific first so these win
     # over the broader inspect_* prefixes below.
     ("/api/label_paper/history", "view_history"),

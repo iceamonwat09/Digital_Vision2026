@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}จัดการผู้ใช้และสิทธิ์ · Thai Union{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h2>จัดการผู้ใช้และสิทธิ์</h2>
+    <p class="muted">กำหนดว่าแต่ละบัญชีเข้าใช้ฟังก์ชันใดได้ ผ่านการเลือก “บทบาท (role)” —
+        แก้สิทธิ์ของแต่ละ role ได้ในการ์ดด้านล่าง</p>
+</div>
+
+<div id="admin-alert" class="auth-error" role="alert" hidden></div>
+
+<!-- ── Users ─────────────────────────────────────────────── -->
+<section class="control-card admin-card">
+    <div class="control-card-header"><h3>บัญชีผู้ใช้</h3></div>
+
+    <div class="admin-table-wrap">
+        <table class="admin-table" id="users-table">
+            <thead>
+                <tr>
+                    <th>ชื่อผู้ใช้</th><th>อีเมล</th><th>บทบาท (role)</th>
+                    <th>สถานะ</th><th>เข้าใช้ล่าสุด</th><th></th>
+                </tr>
+            </thead>
+            <tbody><!-- filled by JS --></tbody>
+        </table>
+    </div>
+
+    <details class="admin-new">
+        <summary>+ เพิ่มผู้ใช้ใหม่</summary>
+        <div class="admin-new-grid">
+            <input id="nu-username" type="text" placeholder="ชื่อผู้ใช้">
+            <input id="nu-email" type="email" placeholder="อีเมล (ไม่บังคับ)">
+            <input id="nu-password" type="password" placeholder="รหัสผ่าน">
+            <select id="nu-role"></select>
+            <button class="btn btn-primary" id="nu-create">สร้างบัญชี</button>
+        </div>
+        <p class="muted small">รหัสผ่าน: ≥ 8 ตัว มีพิมพ์ใหญ่/พิมพ์เล็ก/ตัวเลข/อักขระพิเศษ (!@#$%^&amp;*)</p>
+    </details>
+</section>
+
+<!-- ── Roles ─────────────────────────────────────────────── -->
+<section class="control-card admin-card">
+    <div class="control-card-header"><h3>บทบาทและสิทธิ์การใช้งาน</h3></div>
+    <p class="muted small">ติ๊กฟังก์ชันที่ role นั้นเข้าใช้ได้ แล้วกด “บันทึก”</p>
+
+    <div id="roles-list"><!-- filled by JS --></div>
+
+    <details class="admin-new">
+        <summary>+ สร้างบทบาทใหม่</summary>
+        <div class="admin-new-grid">
+            <input id="nr-name" type="text" placeholder="ชื่อ role (เช่น CanDentOnly)">
+            <input id="nr-desc" type="text" placeholder="คำอธิบาย (ไม่บังคับ)">
+            <button class="btn btn-primary" id="nr-create">สร้าง role</button>
+        </div>
+        <div id="nr-perms" class="perm-grid"><!-- permission checkboxes --></div>
+    </details>
+</section>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/admin_users.js') }}?v={{ config_version }}"></script>
+{% endblock %}

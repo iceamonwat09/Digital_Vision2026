@@ -250,3 +250,150 @@ def upsert_user(username: str, email: Optional[str], password_hash: str,
         )
         conn.commit()
         return int(existing["user_id"])
+
+
+def set_user_role(username: str, role_id: int) -> bool:
+    """Reassign an account to a different role. Returns True if a row changed."""
+    with _connect() as conn:
+        cur = conn.cursor()
+        cur.execute("UPDATE AuthUsers SET RoleId = ? WHERE Username = ?",
+                    int(role_id), username)
+        conn.commit()
+        return cur.rowcount > 0
+
+
+def set_user_active(username: str, active: bool) -> bool:
+    """Enable/disable an account (disabled accounts cannot log in)."""
+    with _connect() as conn:
+        cur = conn.cursor()
+        cur.execute("UPDATE AuthUsers SET IsActive = ? WHERE Username = ?",
+                    1 if active else 0, username)
+        conn.commit()
+        return cur.rowcount > 0
+
+
+# ── Role / permission management (manage_users) ───────────────────────
+
+def list_permissions() -> List[dict]:
+    """All permission keys + their human label (drives the UI checkboxes)."""
+    try:
+        with _connect() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT PermissionKey, Description FROM AuthPermissions "
+                        "ORDER BY PermissionId")
+            return [{"key": r[0], "label": r[1] or r[0]} for r in cur.fetchall()]
+    except Exception as e:
+        logger.error("list_permissions failed: %s", e)
+        return []
+
+
+def list_roles_with_perms() -> List[dict]:
+    """Every role with its granted permission keys and how many users hold it."""
+    try:
+        with _connect() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT r.RoleId, r.RoleName, r.Description, "
+                "(SELECT COUNT(*) FROM AuthUsers u WHERE u.RoleId = r.RoleId) "
+                "FROM AuthRoles r ORDER BY r.RoleName"
+            )
+            roles = []
+            by_id = {}
+            for rid, name, desc, ucount in cur.fetchall():
+                row = {"role_id": int(rid), "name": name,
+                       "description": desc or "", "user_count": int(ucount),
+                       "permissions": []}
+                roles.append(row)
+                by_id[int(rid)] = row
+            cur.execute(
+                "SELECT rp.RoleId, p.PermissionKey FROM AuthRolePermissions rp "
+                "JOIN AuthPermissions p ON p.PermissionId = rp.PermissionId"
+            )
+            for rid, key in cur.fetchall():
+                if int(rid) in by_id:
+                    by_id[int(rid)]["permissions"].append(key)
+            return roles
+    except Exception as e:
+        logger.error("list_roles_with_perms failed: %s", e)
+        return []
+
+
+def role_names() -> List[str]:
+    try:
+        with _connect() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT RoleName FROM AuthRoles ORDER BY RoleName")
+            return [r[0] for r in cur.fetchall()]
+    except Exception as e:
+        logger.error("role_names failed: %s", e)
+        return []
+
+
+def create_role(name: str, description: str = "") -> int:
+    """Create a role (no permissions yet). Raises on duplicate."""
+    with _connect() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO AuthRoles (RoleName, Description) "
+            "OUTPUT INSERTED.RoleId VALUES (?, ?)",
+            name, description or None,
+        )
+        rid = int(cur.fetchone()[0])
+        conn.commit()
+        return rid
+
+
+def set_role_permissions(role_id: int, perm_keys: List[str],
+                         description: Optional[str] = None) -> None:
+    """Replace a role's permission set (+ optional description) atomically."""
+    with _connect() as conn:
+        cur = conn.cursor()
+        if description is not None:
+            cur.execute("UPDATE AuthRoles SET Description = ? WHERE RoleId = ?",
+                        description or None, int(role_id))
+        cur.execute("DELETE FROM AuthRolePermissions WHERE RoleId = ?",
+                    int(role_id))
+        if perm_keys:
+            placeholders = ",".join("?" for _ in perm_keys)
+            cur.execute(
+                f"INSERT INTO AuthRolePermissions (RoleId, PermissionId) "
+                f"SELECT ?, PermissionId FROM AuthPermissions "
+                f"WHERE PermissionKey IN ({placeholders})",
+                int(role_id), *perm_keys,
+            )
+        conn.commit()
+
+
+def delete_role(role_id: int) -> None:
+    """Delete a role. Caller must ensure no users are assigned first.
+    AuthRolePermissions rows are removed by the ON DELETE CASCADE constraint."""
+    with _connect() as conn:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM AuthRoles WHERE RoleId = ?", int(role_id))
+        conn.commit()
+
+
+def count_users_with_permission(perm_key: str) -> int:
+    """How many ACTIVE users currently hold a given permission (any role).
+    Used to stop an admin from removing the last ``manage_users`` grant."""
+    try:
+        with _connect() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT COUNT(DISTINCT u.UserId) FROM AuthUsers u "
+                "JOIN AuthRolePermissions rp ON rp.RoleId = u.RoleId "
+                "JOIN AuthPermissions p ON p.PermissionId = rp.PermissionId "
+                "WHERE u.IsActive = 1 AND p.PermissionKey = ?",
+                perm_key,
+            )
+            return int(cur.fetchone()[0])
+    except Exception as e:
+        logger.error("count_users_with_permission failed: %s", e)
+        return 0
+
+
+def get_role_by_name(name: str) -> Optional[dict]:
+    for r in list_roles_with_perms():
+        if r["name"] == name:
+            return r
+    return None

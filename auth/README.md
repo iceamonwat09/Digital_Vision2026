@@ -109,8 +109,34 @@ python -m auth.seed_admin --username admin --password 'Str0ng!Pass'
 | `POST /api/auth/refresh` | public (ใช้ refresh cookie) | ขอ access token ใหม่ |
 | `GET /api/auth/me` | login | ข้อมูล user + permissions ปัจจุบัน |
 | `GET /api/auth/policy` | public | กฎรหัสผ่าน (ให้ FE validate) |
+| `GET /admin/users` | `manage_users` | หน้าจัดการผู้ใช้/บทบาท (UI) |
 | `GET /api/auth/users` | `manage_users` | รายชื่อผู้ใช้ |
 | `POST /api/auth/users` | `manage_users` | สร้างผู้ใช้ใหม่ |
+| `POST /api/auth/users/<u>/role` | `manage_users` | เปลี่ยนบทบาทของบัญชี |
+| `POST /api/auth/users/<u>/active` | `manage_users` | เปิด/ปิดบัญชี |
+| `GET /api/auth/permissions` | `manage_users` | รายการสิทธิ์ทั้งหมด |
+| `GET /api/auth/roles` | `manage_users` | role ทั้งหมด + สิทธิ์ |
+| `POST /api/auth/roles` | `manage_users` | สร้าง role ใหม่ |
+| `PUT /api/auth/roles/<id>` | `manage_users` | แก้สิทธิ์/คำอธิบายของ role |
+| `DELETE /api/auth/roles/<id>` | `manage_users` | ลบ role (ต้องไม่มีผู้ใช้ค้าง) |
+
+---
+
+## จัดการผ่านหน้าเว็บ (`/admin/users`)
+
+บัญชีที่มีสิทธิ์ `manage_users` จะเห็นเมนู **“จัดการผู้ใช้”** บน navbar เข้าไปทำได้:
+
+- **บัญชีผู้ใช้** — เปลี่ยน *บทบาท (role)* ของแต่ละคนจาก dropdown, เปิด/ปิดบัญชี,
+  ดูสถานะ (ใช้งานได้/ถูกล็อก) และเวลาเข้าใช้ล่าสุด, เพิ่มผู้ใช้ใหม่
+- **บทบาทและสิทธิ์** — ติ๊ก checkbox ว่าแต่ละ role เข้าใช้ฟังก์ชันใดได้
+  (Can Dent / Label / Artwork / แดชบอร์ด / ประวัติ / จัดการผู้ใช้), สร้าง role ใหม่,
+  ลบ role ที่ไม่มีคนใช้
+
+> role ที่ seed มาให้ (Admin/Manager/Staff/Viewer) เป็นแค่จุดเริ่ม — แก้สิทธิ์/สร้าง/
+> ลบได้อิสระจากหน้านี้ (เก็บใน DB จริง ไม่ผูกกับโค้ด)
+
+**กันล็อกตัวเอง:** ระบบจะไม่ยอมให้ถอดสิทธิ์ `manage_users` ถ้าจะทำให้ไม่เหลือบัญชี
+ที่ดูแลระบบได้ และปิด/ลดสิทธิ์บัญชีตัวเองที่เป็นแอดมินคนสุดท้ายไม่ได้
 
 ---
 

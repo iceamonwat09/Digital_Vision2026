@@ -38,6 +38,9 @@
                 {% if has_perm('view_history') %}
                 <li><a href="/history" class="nav-link{{ ' active' if p == '/history' else '' }}">ประวัติ</a></li>
                 {% endif %}
+                {% if has_perm('manage_users') %}
+                <li><a href="/admin/users" class="nav-link{{ ' active' if p.startswith('/admin') else '' }}">จัดการผู้ใช้</a></li>
+                {% endif %}
             </ul>
             {% if auth_enabled and current_user %}
             <div class="nav-user">
