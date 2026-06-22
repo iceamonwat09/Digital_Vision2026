@@ -302,7 +302,10 @@
       natH = res.preview_size[1];
       selectedId = null;
       cancelDraw();
-      showTabs(false);
+      // Show the result tabs right after upload so the "ข้อความ + คำแปล" tab
+      // can be used WITHOUT first pressing "ส่งตรวจสอบ" (OCR-only advisory).
+      showTabs(true);
+      switchTab("result");
       resetTextTab();
       previewImg.src = "/api/artwork/" + inspectionId + "/preview.png?t=" + Date.now();
       previewImg.onload = () => { applyZoom(); renderZones(); };
@@ -687,13 +690,22 @@
     btn.disabled = true;
     textMsg.innerHTML = '<span class="aw-spin"></span>กำลังสร้างตารางและแปล…';
     try {
-      textResult = await api("/api/artwork/" + inspectionId + "/translate",
-                             { method: "POST" });
+      // Send the current zones + brand so the server can OCR on the fly when
+      // no full inspection exists yet. When an inspection IS saved the server
+      // ignores these and uses the stored OCR + defects instead.
+      textResult = await api("/api/artwork/" + inspectionId + "/translate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ zones: zones, brand: brandInput.value.trim() }),
+      });
       renderTextTable(textResult, textTableWrap, onlyIssuesCb.checked);
       if (textResult.translated)
         textMsg.textContent = textResult.cached ? "✓ แปลแล้ว (จากแคช)" : "✓ แปลเรียบร้อย";
       else
         textMsg.textContent = "";   // note แสดงในตารางอยู่แล้ว
+      if (textResult.ocr_only)
+        textMsg.textContent +=
+          "  · ยังไม่ได้ส่งตรวจ — ตารางนี้ตรวจการสะกด/แปลเท่านั้น ยังไม่เทียบ panel (กด ‘ส่งตรวจสอบ’ เพื่อตรวจครบทุกชั้น)";
     } catch (e) {
       textMsg.textContent = "ทำงานไม่สำเร็จ: " + e.message;
     } finally {

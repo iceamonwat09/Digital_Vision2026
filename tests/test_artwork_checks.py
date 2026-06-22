@@ -416,3 +416,57 @@ def test_translate_table_no_webhook_is_advisory(tmp_path, monkeypatch):
     res = translate.translate_table(str(tmp_path), rows)
     assert res["translated"] is False
     assert all("en" in r for r in res["rows"])            # still usable
+
+
+# ── OCR-only path (translate tab WITHOUT a full inspection) ────────────
+
+def test_run_ocr_only_caches_and_stays_isolated(tmp_path, monkeypatch):
+    """run_ocr_only must OCR on demand, reuse the cache when zones are
+    unchanged, re-OCR when they change, and NEVER write a report.json
+    (so it can't create/affect a verdict)."""
+    import os
+    from artwork_check import pipeline, report
+
+    rec_id = "20260101-000000-abcdef"
+    monkeypatch.setattr(report.config, "INSPECTIONS_DIR", str(tmp_path))
+    d = report.inspection_dir(rec_id, create=True)
+    with open(os.path.join(d, "source.png"), "wb") as f:
+        f.write(b"not-a-real-image")   # only needs to exist for _find_source
+
+    # Avoid real PDF/image decoding and real OCR network calls.
+    monkeypatch.setattr(pipeline, "ArtworkDocument", lambda *a, **k: object())
+    calls = {"n": 0}
+
+    def fake_read(doc, zones):
+        calls["n"] += 1
+        return [{"zone_id": z["id"], "text": "Hello", "engine": "stub",
+                 "conf": None} for z in zones]
+
+    monkeypatch.setattr(pipeline.ocr, "read_all_zones", fake_read)
+
+    zones = [{"id": "z1", "type": "panel", "group": "",
+              "bbox": [0.1, 0.1, 0.2, 0.2]}]
+    _, ocr1 = pipeline.run_ocr_only(rec_id, zones)
+    assert calls["n"] == 1 and ocr1[0]["text"] == "Hello"
+
+    # Same zones → cache hit, no second OCR.
+    pipeline.run_ocr_only(rec_id, zones)
+    assert calls["n"] == 1
+
+    # Different zone layout → cache invalidated, re-OCR.
+    zones2 = [dict(zones[0], bbox=[0.3, 0.3, 0.2, 0.2])]
+    pipeline.run_ocr_only(rec_id, zones2)
+    assert calls["n"] == 2
+
+    # Isolation: no verdict artifact was ever written.
+    assert report.load_report(rec_id) is None
+    assert not os.path.exists(os.path.join(d, "overlay.png"))
+
+
+def test_run_ocr_only_missing_upload_raises(tmp_path, monkeypatch):
+    from artwork_check import pipeline, report
+    monkeypatch.setattr(report.config, "INSPECTIONS_DIR", str(tmp_path))
+    with pytest.raises(FileNotFoundError):
+        pipeline.run_ocr_only("20260101-000000-abcdef",
+                              [{"id": "z1", "type": "panel", "group": "",
+                                "bbox": [0.1, 0.1, 0.2, 0.2]}])

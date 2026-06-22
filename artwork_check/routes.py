@@ -140,20 +140,52 @@ def api_snap(rec_id):
 @artwork_bp.route("/api/artwork/<rec_id>/translate", methods=["POST"])
 def api_translate(rec_id):
     """Build the per-line text table and (when a translate webhook is
-    configured) attach EN translations. Advisory only — reads the saved
-    report's OCR text, never re-runs OCR and never touches the verdict."""
+    configured) attach EN translations. Advisory only — never touches the
+    PASS/FAIL verdict.
+
+    Two modes, picked automatically:
+      • A full inspection already exists (report.json) → use its saved OCR +
+        defects so the table can also flag cross-panel mismatch lines.
+      • No inspection yet → OCR the zones sent in the request body on the fly
+        (cached) so the translate tab works WITHOUT pressing "ส่งตรวจสอบ".
+        This advisory-only path has no defects, so it reports spelling +
+        translation only (never a mismatch verdict)."""
     try:
         d = report.inspection_dir(rec_id)
     except ValueError:
         return jsonify({"error": "bad id"}), 400
-    rep = report.load_report(rec_id)
-    if rep is None:
-        return jsonify({"error": "ยังไม่มีผลตรวจของรายการนี้"}), 404
 
-    zone_list = rep.get("zones", [])
-    ocr_results = rep.get("ocr", [])
+    body = request.get_json(silent=True) or {}
+    rep = report.load_report(rec_id)
+    ocr_only = rep is None
+
+    if not ocr_only:
+        zone_list = rep.get("zones", [])
+        ocr_results = rep.get("ocr", [])
+        brand = rep.get("brand", "")
+        defects = rep.get("defects", [])
+    else:
+        # No full inspection yet — OCR the supplied zones on the fly.
+        try:
+            zone_list = zones_mod.sanitize_zones(body.get("zones"))
+        except ValueError as e:
+            return jsonify({"error": f"โซนไม่ถูกต้อง: {e}"}), 400
+        if not zone_list:
+            return jsonify({
+                "error": "ยังไม่มีผลตรวจของรายการนี้ และไม่ได้ส่งโซนมาเพื่อ OCR "
+                         "(กรุณาจัดโซนก่อน หรือกด ‘ส่งตรวจสอบ’)"
+            }), 400
+        brand = str(body.get("brand", "")).strip()[:60]
+        try:
+            zone_list, ocr_results = pipeline.run_ocr_only(rec_id, zone_list)
+        except (ValueError, FileNotFoundError) as e:
+            return jsonify({"error": str(e)}), 404
+        except Exception as e:
+            logger.exception("[artwork] ocr-only failed for %s", rec_id)
+            return jsonify({"error": f"OCR ไม่สำเร็จ: {e}"}), 500
+        defects = None   # advisory: no verdict/mismatch without a full inspection
+
     vocab_words: set = set()
-    brand = rep.get("brand", "")
     if brand:
         try:
             vocab_words = set(vocab.load(brand)["words"])
@@ -162,7 +194,7 @@ def api_translate(rec_id):
 
     rows = translate.build_table(zone_list, ocr_results,
                                  vocab_words=vocab_words,
-                                 defects=rep.get("defects", []))
+                                 defects=defects)
     try:
         result = translate.translate_table(d, rows)
     except Exception as e:
@@ -180,6 +212,9 @@ def api_translate(rec_id):
     result["rows"] = rows
 
     result["enabled"] = translate.is_enabled()
+    # Tells the UI this table came from the on-the-fly OCR path (no full
+    # inspection yet) so it can note that cross-panel mismatch isn't checked.
+    result["ocr_only"] = ocr_only
     return jsonify(result)
 
 
