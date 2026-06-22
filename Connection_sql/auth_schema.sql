@@ -2,8 +2,9 @@
    auth_schema.sql  —  Authentication + RBAC tables for VisionIQ
    SQL Server 2014+  •  idempotent (safe to run more than once)
 
-   Run against the VisionIQ database, e.g.:
-     sqlcmd -S 172.32.0.50 -d VisionIQ -U sa -P <pwd> -i Connection_sql/auth_schema.sql
+   Run against the VisionIQ database — IMPORTANT: ใส่ -f 65001 (UTF-8) เสมอ
+   ไม่งั้นข้อความไทยจะเพี้ยนเป็น mojibake ตอน sqlcmd อ่านไฟล์:
+     sqlcmd -f 65001 -S 172.32.0.50 -d VisionIQ -U sa -P <pwd> -i Connection_sql/auth_schema.sql
 
    Then create the first admin with:
      python -m auth.seed_admin --username admin --password '<StrongPass1!>'

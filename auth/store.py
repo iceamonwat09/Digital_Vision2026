@@ -275,13 +275,22 @@ def set_user_active(username: str, active: bool) -> bool:
 # ── Role / permission management (manage_users) ───────────────────────
 
 def list_permissions() -> List[dict]:
-    """All permission keys + their human label (drives the UI checkboxes)."""
+    """All permission keys + their human label (drives the UI checkboxes).
+
+    Labels are taken from the canonical ``auth/config.py`` PERMISSIONS dict
+    (Python source, UTF-8) rather than the DB ``Description`` column. This is
+    immune to the mojibake you get when a UTF-8 ``.sql`` seed is loaded via
+    sqlcmd without ``-f 65001`` — the key (ASCII) always matches; the Thai label
+    comes from code. Falls back to the DB description, then the key."""
+    from . import config as auth_config
+    labels = auth_config.PERMISSIONS
     try:
         with _connect() as conn:
             cur = conn.cursor()
             cur.execute("SELECT PermissionKey, Description FROM AuthPermissions "
                         "ORDER BY PermissionId")
-            return [{"key": r[0], "label": r[1] or r[0]} for r in cur.fetchall()]
+            return [{"key": r[0], "label": labels.get(r[0], r[1] or r[0])}
+                    for r in cur.fetchall()]
     except Exception as e:
         logger.error("list_permissions failed: %s", e)
         return []

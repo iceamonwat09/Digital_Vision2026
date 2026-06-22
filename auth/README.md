@@ -63,10 +63,14 @@ pip install -r requirements.txt      # เพิ่ม bcrypt + PyJWT แล้�
 
 ใช้ค่าการเชื่อมต่อเดียวกับที่ตั้งใน `config.py` (`SQL_SERVER/SQL_DATABASE/...`)
 
-```bash
-sqlcmd -S 172.32.0.50 -d VisionIQ -U sa -P "<password>" \
-       -i Connection_sql/auth_schema.sql
+```powershell
+sqlcmd -f 65001 -S 172.32.0.50 -d VisionIQ -U sa -P "<password>" -i Connection_sql\auth_schema.sql
 ```
+
+> **สำคัญ:** ต้องมี `-f 65001` (codepage UTF-8) เสมอ ไม่งั้น `sqlcmd` จะอ่านไฟล์
+> ผิด encoding ทำให้ข้อความไทยใน DB เพี้ยนเป็น `à¸...` (mojibake)
+> ถ้าเผลอรันไปแล้วเพี้ยน ซ่อมด้วย:
+> `sqlcmd -f 65001 -S ... -i Connection_sql\fix_thai_encoding.sql`
 
 > สคริปต์เป็น **idempotent** — รันซ้ำได้ ไม่สร้างข้อมูลซ้ำ
 > (จะสร้างตารางที่ยังไม่มี + seed roles/permissions ให้ครบ)
