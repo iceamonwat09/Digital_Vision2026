@@ -38,6 +38,20 @@ app = Flask(__name__, template_folder=config.TEMPLATES_DIR, static_folder=config
 def inject_config():
     return {"config_version": config.CONFIG_VERSION}
 
+# Fallback auth template globals. base.html references has_perm()/current_user/
+# auth_enabled — if the auth layer fails to load (e.g. bcrypt/PyJWT not yet
+# installed) its context processor never registers and those names would be
+# Undefined, 500-ing every page. These defaults keep the app working exactly as
+# before (all menus visible, no gating). When auth installs successfully its own
+# context processor is registered LATER and overrides these.
+@app.context_processor
+def _auth_fallback():
+    return {
+        "current_user": None,
+        "auth_enabled": False,
+        "has_perm": lambda *_a, **_k: True,
+    }
+
 # Artwork Proof Check (ตรวจสะกดคำ/ตัวเลขใน artwork ก่อนพิมพ์).
 # Fully isolated blueprint — a failure here only disables that one mode
 # and can never break Can Dent / Label / Label Paper.
