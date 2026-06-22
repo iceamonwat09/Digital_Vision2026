@@ -54,7 +54,9 @@
     margin-bottom: 6px;
 }
 .field input[type="text"],
-.field input[type="password"] {
+.field input[type="email"],
+.field input[type="password"],
+.field select {
     width: 100%;
     box-sizing: border-box;
     padding: 11px 12px;
@@ -65,7 +67,8 @@
     background: var(--gray-50);
     transition: border-color .15s, box-shadow .15s;
 }
-.field input:focus {
+.field input:focus,
+.field select:focus {
     outline: none;
     border-color: var(--blue);
     box-shadow: 0 0 0 3px var(--blue-pale);
@@ -263,31 +266,108 @@
 .status-pill.off    { background: var(--gray-100); color: var(--gray-600); }
 .status-pill.locked { background: #FDECEA; color: var(--danger); }
 
-.admin-new {
-    margin-top: 1rem;
-    border-top: 1px dashed var(--gray-200);
-    padding-top: 1rem;
-}
-.admin-new summary {
-    cursor: pointer;
-    font-weight: 600;
-    color: var(--blue);
-    margin-bottom: .75rem;
-}
-.admin-new-grid {
+.admin-card-head {
     display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
     align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+    padding-bottom: .6rem;
+    border-bottom: 2px solid var(--blue-pale);
+    margin-bottom: .25rem;
 }
-.admin-new-grid input,
-.admin-new-grid select {
-    padding: 9px 11px;
-    border: 1.5px solid var(--gray-200);
-    border-radius: 8px;
-    font-family: var(--font-sans);
-    flex: 1 1 160px;
-    min-width: 140px;
+.admin-card-head h3 { margin: 0; color: var(--navy); }
+.admin-card-head .muted.small { margin: 2px 0 0; }
+
+.btn-add { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.btn-add-icon { font-size: 1rem; font-weight: 700; line-height: 1; }
+
+/* ── Modal (popup) ───────────────────────────────────────────────── */
+body.modal-open { overflow: hidden; }
+
+.modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(13, 43, 107, .45);
+    backdrop-filter: blur(2px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    z-index: 1000;
+    animation: modal-fade-in .15s ease-out;
+}
+@keyframes modal-fade-in { from { opacity: 0; } to { opacity: 1; } }
+
+.modal-dialog {
+    width: 100%;
+    max-width: 460px;
+    max-height: calc(100vh - 40px);
+    overflow-y: auto;
+    background: var(--white);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-lg);
+    animation: modal-pop-in .18s ease-out;
+}
+@keyframes modal-pop-in {
+    from { opacity: 0; transform: translateY(8px) scale(.97); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 18px 22px;
+    border-bottom: 1px solid var(--gray-100);
+}
+.modal-header h3 { margin: 0; font-size: 1.15rem; color: var(--navy); }
+.modal-close {
+    border: none;
+    background: var(--gray-50);
+    color: var(--gray-600);
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    font-size: 1.1rem;
+    line-height: 1;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: background .15s, color .15s;
+}
+.modal-close:hover { background: var(--blue-pale); color: var(--blue); }
+
+.modal-body { padding: 20px 22px; }
+.modal-body .field:last-of-type { margin-bottom: 8px; }
+
+.modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    padding: 16px 22px;
+    border-top: 1px solid var(--gray-100);
+    background: var(--gray-50);
+    border-radius: 0 0 var(--radius) var(--radius);
+}
+.modal-footer .btn { min-width: 96px; }
+
+.field-hint {
+    font-size: .78rem;
+    margin: 6px 0 0;
+    color: var(--gray-600);
+}
+.field-hint.ok { color: var(--success); }
+.field-hint.no { color: var(--danger); }
+
+@media (max-width: 480px) {
+    .modal-overlay { padding: 0; align-items: flex-end; }
+    .modal-dialog {
+        max-width: none;
+        width: 100%;
+        max-height: 92vh;
+        border-radius: var(--radius) var(--radius) 0 0;
+    }
 }
 
 .role-card {

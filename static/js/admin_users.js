@@ -148,25 +148,101 @@
     });
   }
 
+  // ── Modal helpers ────────────────────────────────────────────────────
+  function openModal(modal) {
+    modal.hidden = false;
+    document.body.classList.add("modal-open");
+  }
+  function closeModal(modal) {
+    modal.hidden = true;
+    document.body.classList.remove("modal-open");
+  }
+  function wireModal(modal, openBtn, closeBtns, onReset) {
+    openBtn.addEventListener("click", () => {
+      if (onReset) onReset();
+      openModal(modal);
+    });
+    closeBtns.forEach((b) => b.addEventListener("click", () => closeModal(modal)));
+    modal.addEventListener("click", (e) => { if (e.target === modal) closeModal(modal); });
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && !modal.hidden) closeModal(modal);
+    });
+  }
+
+  function wirePasswordToggles(scope) {
+    scope.querySelectorAll(".pw-toggle").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const input = document.getElementById(btn.dataset.target);
+        const show = input.type === "password";
+        input.type = show ? "text" : "password";
+        btn.textContent = show ? "ซ่อน" : "แสดง";
+      });
+    });
+  }
+
   // ── Create handlers ─────────────────────────────────────────────────
   function wireCreate() {
+    const nuModal = document.getElementById("nu-modal");
+    const nuPw = document.getElementById("nu-password");
+    const nuPwConfirm = document.getElementById("nu-password-confirm");
+    const nuMatchMsg = document.getElementById("nu-pw-match");
+
+    function resetUserForm() {
+      ["nu-username", "nu-email", "nu-password", "nu-password-confirm"].forEach((id) => {
+        document.getElementById(id).value = "";
+      });
+      nuMatchMsg.hidden = true;
+    }
+
+    function passwordsMatch() {
+      if (!nuPwConfirm.value) { nuMatchMsg.hidden = true; return false; }
+      const match = nuPw.value === nuPwConfirm.value;
+      nuMatchMsg.hidden = false;
+      nuMatchMsg.textContent = match ? "✓ รหัสผ่านตรงกัน" : "รหัสผ่านไม่ตรงกัน";
+      nuMatchMsg.className = "field-hint " + (match ? "ok" : "no");
+      return match;
+    }
+    nuPw.addEventListener("input", () => { if (nuPwConfirm.value) passwordsMatch(); });
+    nuPwConfirm.addEventListener("input", passwordsMatch);
+
+    wireModal(nuModal, document.getElementById("nu-open"),
+      [document.getElementById("nu-close"), document.getElementById("nu-cancel")],
+      resetUserForm);
+    wirePasswordToggles(nuModal);
+
     document.getElementById("nu-create").addEventListener("click", async () => {
+      if (nuPw.value !== nuPwConfirm.value) {
+        passwordsMatch();
+        showAlert("รหัสผ่านและการยืนยันรหัสผ่านไม่ตรงกัน", false);
+        return;
+      }
       try {
         await api("/api/auth/users", "POST", {
           username: document.getElementById("nu-username").value.trim(),
           email: document.getElementById("nu-email").value.trim(),
-          password: document.getElementById("nu-password").value,
+          password: nuPw.value,
           role: document.getElementById("nu-role").value,
         });
         showAlert("สร้างบัญชีแล้ว", true);
-        ["nu-username", "nu-email", "nu-password"].forEach((id) => {
-          document.getElementById(id).value = "";
-        });
+        resetUserForm();
+        closeModal(nuModal);
         load();
       } catch (e) { showAlert(e.message, false); }
     });
 
+    const nrModal = document.getElementById("nr-modal");
     const nrPerms = document.getElementById("nr-perms");
+
+    function resetRoleForm() {
+      document.getElementById("nr-name").value = "";
+      document.getElementById("nr-desc").value = "";
+      fillNewRolePerms();
+    }
+
+    wireModal(nrModal, document.getElementById("nr-open"),
+      [document.getElementById("nr-close"), document.getElementById("nr-cancel")],
+      resetRoleForm);
+
     document.getElementById("nr-create").addEventListener("click", async () => {
       try {
         await api("/api/auth/roles", "POST", {
@@ -175,8 +251,8 @@
           permissions: selectedPerms(nrPerms),
         });
         showAlert("สร้าง role แล้ว", true);
-        document.getElementById("nr-name").value = "";
-        document.getElementById("nr-desc").value = "";
+        resetRoleForm();
+        closeModal(nrModal);
         load();
       } catch (e) { showAlert(e.message, false); }
     });
