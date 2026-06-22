@@ -204,16 +204,25 @@ def build_table(zones: List[dict], ocr_results: List[dict],
 
 def translate_lines(lines: List[str],
                     url: Optional[str] = None,
-                    timeout: Optional[float] = None) -> List[str]:
+                    timeout: Optional[float] = None) -> Dict[str, list]:
     """
-    Translate ``lines`` to English in one request. Returns a list aligned
-    with the input (same length). On any failure returns [] so the caller
-    can show source text without translation rather than erroring.
+    Translate ``lines`` to English and run the advisory AI spell-check in
+    ONE request (same webhook, same Gemini call — see
+    n8n_artwork_translate.workflow.json). Returns
+    {"translations": [...], "spell": [...]}, both aligned with the input
+    (same length, padded/truncated defensively). On any failure returns
+    {"translations": [], "spell": []} so the caller can show source text
+    without translation rather than erroring.
+
+    ``spell`` entries are {"flagged": bool, "suggestion": str|None} and
+    are PURELY advisory (AI-generated) — they never feed into the
+    deterministic PASS/FAIL verdict in checks.py.
     """
+    empty = {"translations": [], "spell": []}
     target = (url if url is not None
               else config.N8N_TRANSLATE_WEBHOOK_URL).strip()
     if not target or not lines:
-        return []
+        return empty
     t = float(timeout if timeout is not None
               else config.N8N_TRANSLATE_TIMEOUT_S)
     try:
@@ -222,7 +231,7 @@ def translate_lines(lines: List[str],
         payload = resp.json()
     except (requests.RequestException, ValueError) as e:
         logger.warning("[artwork] translate webhook failed: %s", e)
-        return []
+        return empty
 
     if isinstance(payload, list) and payload:
         payload = payload[0]
@@ -239,14 +248,36 @@ def translate_lines(lines: List[str],
                 payload = inner
                 break
 
-    out = payload.get("translations") if isinstance(payload, dict) else None
+    if not isinstance(payload, dict):
+        return empty
+
+    out = payload.get("translations")
     if not isinstance(out, list):
-        return []
-    # align defensively: pad/truncate to match input length
+        out = []
     out = [str(x) if x is not None else "" for x in out]
     if len(out) < len(lines):
         out += [""] * (len(lines) - len(out))
-    return out[:len(lines)]
+    out = out[:len(lines)]
+
+    spell_raw = payload.get("spell")
+    spell: List[dict] = []
+    if isinstance(spell_raw, list):
+        for item in spell_raw:
+            if isinstance(item, dict):
+                spell.append({
+                    "flagged": bool(item.get("flagged")),
+                    "suggestion": (str(item["suggestion"])
+                                  if item.get("suggestion") is not None
+                                  else None),
+                })
+            else:
+                spell.append({"flagged": False, "suggestion": None})
+    if len(spell) < len(lines):
+        spell += [{"flagged": False, "suggestion": None}] * (
+            len(lines) - len(spell))
+    spell = spell[:len(lines)]
+
+    return {"translations": out, "spell": spell}
 
 
 # ── cache (per inspection, keyed by source-text hash) ─────────────────
@@ -285,8 +316,12 @@ def save_cache(insp_dir: str, rows: List[dict]) -> None:
 
 def translate_table(insp_dir: str, rows: List[dict]) -> dict:
     """
-    Attach an ``en`` field to each row, using cache when the source text
-    is unchanged. Returns {"rows": [...], "translated": bool, "note": ...}.
+    Attach an ``en`` field and an advisory ``ai_spell`` field
+    ({"flagged": bool, "suggestion": str|None}) to each row, using cache
+    when the source text is unchanged. ``ai_spell`` is purely informational
+    — it never affects the deterministic ``status``/verdict already set
+    by ``build_table``. Returns
+    {"rows": [...], "translated": bool, "note": ...}.
     """
     cached = load_cache(insp_dir, rows)
     if cached is not None:
@@ -295,18 +330,23 @@ def translate_table(insp_dir: str, rows: List[dict]) -> dict:
     if not is_enabled():
         for r in rows:
             r["en"] = ""
+            r["ai_spell"] = {"flagged": False, "suggestion": None}
         return {"rows": rows, "translated": False,
                 "note": "ยังไม่ได้ตั้งค่า N8N_TRANSLATE_WEBHOOK_URL — "
                         "แสดงข้อความและคำแนะนำการสะกดได้ แต่ยังไม่มีคำแปล"}
 
-    en = translate_lines([r["src"] for r in rows])
+    result = translate_lines([r["src"] for r in rows])
+    en = result["translations"]
+    spell = result["spell"]
     if not en:
         for r in rows:
             r["en"] = ""
+            r["ai_spell"] = {"flagged": False, "suggestion": None}
         return {"rows": rows, "translated": False,
                 "note": "เรียกบริการแปลไม่สำเร็จ — แสดงเฉพาะข้อความต้นฉบับ"}
 
-    for r, t in zip(rows, en):
+    for r, t, sp in zip(rows, en, spell):
         r["en"] = t
+        r["ai_spell"] = sp
     save_cache(insp_dir, rows)
     return {"rows": rows, "translated": True}

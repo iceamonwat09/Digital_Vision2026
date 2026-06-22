@@ -167,9 +167,9 @@ Webhook ──> Code in JavaScript2 ──> If ──true──> HTTP Request (G
 | Node | หน้าที่ |
 |---|---|
 | **Webhook** | รับ `POST` JSON `{"lines": ["บรรทัด1", "บรรทัด2", ...]}` (path: `artwork-translate`) |
-| **Code in JavaScript2** | ตรวจว่า `lines` เป็น array (≤ 400 บรรทัด) แล้วประกอบ Gemini request สั่งแปลทุกบรรทัดเป็น EN — `temperature 0`, responseSchema บังคับตอบ `{"translations":[...]}` |
-| **If / HTTP Request / Code in JavaScript** | เหมือน workflow OCR (ยิง Gemini, retry 2, แกะ JSON, กัน error) |
-| **Respond to Webhook** | ตอบ `{"translations": ["en1", "en2", ...]}` เรียงตรงกับ input |
+| **Code in JavaScript2** | ตรวจว่า `lines` เป็น array (≤ 400 บรรทัด) แล้วประกอบ Gemini request สั่งแปลทุกบรรทัดเป็น EN **และ** สแกนคำสะกดผิดในต้นฉบับแบบ advisory — `temperature 0`, responseSchema บังคับตอบ `{"translations":[...], "spell":[...]}` |
+| **If / HTTP Request / Code in JavaScript** | เหมือน workflow OCR (ยิง Gemini, retry 2, แกะ JSON ทั้ง `translations`/`spell`, กัน error) |
+| **Respond to Webhook** | ตอบ `{"translations": ["en1", ...], "spell": [{"flagged": false, "suggestion": null}, ...]}` เรียงตรงกับ input |
 
 ## ขั้นตอน
 
@@ -189,19 +189,31 @@ curl -s -X POST "http://172.32.201.106:5678/webhook/artwork-translate" \
   | python3 -m json.tool
 ```
 
-ผลที่ถูกต้อง — จำนวนรายการเท่ากับ input, บรรทัด EN/ตัวเลขล้วนคืนเดิม:
+ผลที่ถูกต้อง — จำนวนรายการเท่ากับ input, บรรทัด EN/ตัวเลขล้วนคืนเดิม,
+และมี `spell` มาด้วย:
 
 ```json
-{"translations": ["Type of fish: Katsuwonus pelamis", "Net Weight: 200 gm", "16785"]}
+{
+  "translations": ["Type of fish: Katsuwonus pelamis", "Net Weight: 200 gm", "16785"],
+  "spell": [
+    {"flagged": false, "suggestion": null},
+    {"flagged": false, "suggestion": null},
+    {"flagged": false, "suggestion": null}
+  ]
+}
 ```
 
 ## หมายเหตุสำคัญของแท็บ "ข้อความ + คำแปล"
 
 - เป็น **ข้อมูลช่วยอ่านอย่างเดียว** ไม่มีผลต่อ PASS/FAIL — สอดคล้องกฎ
   "ระบบห้ามให้คำที่เดาขึ้นมาตัดสินผล"
-- คอลัมน์ **"คำที่ควรใช้"** เมื่อสะกดน่าสงสัย มาจาก engine
-  deterministic (พจนานุกรม + คลังคำแบรนด์ + เสียงข้างมากของ panel
-  กลุ่มเดียวกัน) **ไม่ใช่** ตัวแปล — เชื่อถือได้และตรวจที่มาได้
+- คอลัมน์ **"คำที่ควรใช้"** (ตรวจสะกดแบบ deterministic) เมื่อสะกดน่าสงสัย
+  มาจาก engine deterministic (พจนานุกรม + คลังคำแบรนด์ + เสียงข้างมากของ
+  panel กลุ่มเดียวกัน) **ไม่ใช่** ตัวแปล — เชื่อถือได้และตรวจที่มาได้
+- คอลัมน์ใหม่ **"ตรวจสะกดโดย AI"** มาจากฟิลด์ `spell` ที่ Gemini คืนมา
+  พร้อมกับการแปล (webhook เดียวกัน ไม่ได้สร้าง workflow ใหม่) — เป็นแค่
+  **คำแนะนำ ไม่มีผลต่อ verdict เด็ดขาด** เหมือนคอลัมน์ dictionary
+  เดิมทุกประการ ต่างกันที่แหล่งข้อมูล (โมเดล AI ไม่ใช่ dictionary)
 - ระบบส่ง**ข้อความที่ OCR ได้แล้ว** ไปแปล (ไม่ส่งรูปซ้ำ) ทุกบรรทัดของ
   ทุกโซนใน **1 request** ต่อการกดปุ่มแปล 1 ครั้ง และ**แคชผล**ไว้ — กดซ้ำ
   หรือเปิดรายการเดิมไม่เสียค่า Gemini ใหม่ถ้าข้อความไม่เปลี่ยน

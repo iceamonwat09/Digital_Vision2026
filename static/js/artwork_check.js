@@ -224,7 +224,9 @@
     let html = "";
     if (result && result.note)
       html += '<div class="aw-note">' + esc(result.note) + "</div>";
-    const shown = onlyIssues ? rows.filter((r) => r.status !== "ok") : rows;
+    const shown = onlyIssues
+      ? rows.filter((r) => r.status !== "ok" || (r.ai_spell && r.ai_spell.flagged))
+      : rows;
     if (!shown.length) {
       box.innerHTML = html + '<div class="aw-empty">' +
         (onlyIssues ? "ไม่มีบรรทัดที่น่าสงสัย" : "ไม่มีข้อความให้แสดง") + "</div>";
@@ -232,10 +234,12 @@
     }
     html += '<table class="aw-ttable"><thead><tr>' +
       "<th>โซน</th><th>ข้อความบนฉลาก</th><th>คำแปล EN</th><th>สถานะ</th>" +
+      "<th>🤖 ตรวจสะกดโดย AI</th>" +
       "</tr></thead><tbody>";
     shown.forEach((r) => {
       const issue = r.status !== "ok";
-      html += '<tr class="' + (issue ? "has-issue" : "") + '">';
+      const aiFlagged = !!(r.ai_spell && r.ai_spell.flagged);
+      html += '<tr class="' + (issue ? "has-issue" : (aiFlagged ? "has-ai-issue" : "")) + '">';
       html += '<td class="zone-cell">' + esc(r.zone_id) + "</td>";
       html += '<td class="src-cell">' + highlightFlagged(r.src, r.flagged) + "</td>";
       const en = r.en || "";
@@ -246,7 +250,7 @@
         if (r.status === "mismatch")
           st = '<span class="aw-status-warn">❌ ไม่ตรงกับฉลากจริง</span>';
         else
-          st = '<span class="aw-status-warn">⚠️ สะกดน่าสงสัย</span>';
+          st = '<span class="aw-status-warn">⚠️ dict: สะกดน่าสงสัย</span>';
         const sug = r.suggest || {};
         Object.keys(sug).forEach((w) => {
           if (sug[w] && sug[w].length)
@@ -254,7 +258,18 @@
               sug[w].map((s) => "<code>" + esc(s) + "</code>").join(" ") + "</span>";
         });
       }
-      html += "<td>" + st + "</td></tr>";
+      html += "<td>" + st + "</td>";
+      // Advisory AI spell-check (Gemini, via the translate webhook).
+      // Purely informational — never feeds the status column above.
+      const aiSpell = r.ai_spell || {};
+      let ai = '<span class="aw-status-ok">—</span>';
+      if (aiSpell.flagged) {
+        ai = '<span class="aw-status-warn">🤖 น่าสงสัย</span>';
+        if (aiSpell.suggestion)
+          ai += '<span class="aw-suggest">→ <code>' +
+            esc(aiSpell.suggestion) + "</code></span>";
+      }
+      html += "<td>" + ai + "</td></tr>";
     });
     html += "</tbody></table>";
     box.innerHTML = html;

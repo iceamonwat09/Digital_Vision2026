@@ -43,7 +43,9 @@ EMBEDDED_TEXT_MIN_CHARS = int(os.getenv("ARTWORK_EMBEDDED_MIN_CHARS", "12"))
 # in ANY enabled language or in the brand vocabulary — labels mix
 # languages on one panel, so per-word language detection is not assumed.
 SPELL_LANGUAGES = [
-    s.strip() for s in os.getenv("ARTWORK_SPELL_LANGS", "en,es").split(",")
+    s.strip() for s in os.getenv(
+        "ARTWORK_SPELL_LANGS", "en,es,fr,de,pt,it,ru,ar"
+    ).split(",")
     if s.strip()
 ]
 # Words shorter than this are skipped by the dictionary layer

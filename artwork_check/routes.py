@@ -204,11 +204,14 @@ def api_translate(rec_id):
     # translate_table may return rows from an older cache that predates the
     # mismatch cross-check. Keep the freshly-built status/flags authoritative
     # and only borrow the EN strings (which are what the cache really saves).
-    en_by_src: dict = {}
+    cache_by_src: dict = {}
     for rr in result.get("rows", []):
-        en_by_src.setdefault(rr.get("src", ""), rr.get("en", ""))
+        cache_by_src.setdefault(rr.get("src", ""), rr)
     for r in rows:
-        r["en"] = en_by_src.get(r["src"], r.get("en", ""))
+        cached_row = cache_by_src.get(r["src"], {})
+        r["en"] = cached_row.get("en", r.get("en", ""))
+        r["ai_spell"] = cached_row.get(
+            "ai_spell", {"flagged": False, "suggestion": None})
     result["rows"] = rows
 
     result["enabled"] = translate.is_enabled()
