@@ -22,9 +22,14 @@ def _now() -> datetime:
 
 
 def user_claims(user: dict, perms: list) -> dict:
-    """Identity payload shared by the access token and Flask's request context."""
+    """Identity payload shared by the access token and Flask's request context.
+
+    ``sub`` is stored as a string: PyJWT >= 2.10 enforces RFC 7519 and rejects a
+    non-string ``sub`` on decode (InvalidSubjectError). Readers coerce back with
+    ``int()`` (store.get_user_by_id already does).
+    """
     return {
-        "sub": int(user["user_id"]),
+        "sub": str(user["user_id"]),
         "username": user["username"],
         "role": user.get("role_name", ""),
         "perms": list(perms),
@@ -43,7 +48,7 @@ def make_access(claims: dict) -> str:
 
 def make_refresh(user: dict) -> str:
     payload = {
-        "sub": int(user["user_id"]),
+        "sub": str(user["user_id"]),  # string sub — see user_claims()
         "type": "refresh",
         "iat": _now(),
         "exp": _now() + timedelta(days=ac.REFRESH_TTL_DAYS),
