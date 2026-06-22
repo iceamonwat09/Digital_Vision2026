@@ -8,6 +8,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v={{ config_version }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/auth.css') }}?v={{ config_version }}">
     {% block extra_css %}{% endblock %}
 </head>
 <body>
@@ -22,12 +23,32 @@
             </div>
             {% set p = request.path %}
             <ul class="nav-menu">
+                {% if has_perm('run_live_detection') %}
                 <li><a href="/" class="nav-link{{ ' active' if p == '/' else '' }}">ตรวจจับสด</a></li>
+                {% endif %}
+                {% if has_perm('inspect_label_paper') %}
                 <li><a href="/label_paper" class="nav-link{{ ' active' if p.startswith('/label_paper') else '' }}">ตรวจฉลากกระดาษ</a></li>
+                {% endif %}
+                {% if has_perm('inspect_artwork') %}
                 <li><a href="/artwork_check" class="nav-link{{ ' active' if p.startswith('/artwork_check') else '' }}">ตรวจ Artwork</a></li>
+                {% endif %}
+                {% if has_perm('view_dashboard') %}
                 <li><a href="/dashboard" class="nav-link{{ ' active' if p.startswith('/dashboard') else '' }}">แดชบอร์ด</a></li>
+                {% endif %}
+                {% if has_perm('view_history') %}
                 <li><a href="/history" class="nav-link{{ ' active' if p == '/history' else '' }}">ประวัติ</a></li>
+                {% endif %}
+                {% if has_perm('manage_users') %}
+                <li><a href="/admin/users" class="nav-link{{ ' active' if p.startswith('/admin') else '' }}">จัดการผู้ใช้</a></li>
+                {% endif %}
             </ul>
+            {% if auth_enabled and current_user %}
+            <div class="nav-user">
+                <span class="nav-username">{{ current_user.username }}</span>
+                <span class="nav-role">{{ current_user.role }}</span>
+                <button type="button" class="logout-btn" id="logout-btn">ออกจากระบบ</button>
+            </div>
+            {% endif %}
         </div>
     </nav>
 
@@ -40,6 +61,17 @@
     </footer>
 
     <script src="{{ url_for('static', filename='js/main.js') }}?v={{ config_version }}"></script>
+    <script>
+        // Logout: clear the httpOnly cookies server-side, then go to /login.
+        (function () {
+            var b = document.getElementById('logout-btn');
+            if (!b) return;
+            b.addEventListener('click', function () {
+                fetch('/api/auth/logout', { method: 'POST' })
+                    .finally(function () { window.location.href = '/login'; });
+            });
+        })();
+    </script>
     {% block extra_js %}{% endblock %}
 </body>
 </html>

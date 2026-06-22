@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+{% block title %}จัดการผู้ใช้และสิทธิ์ · Thai Union{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h2>จัดการผู้ใช้และสิทธิ์</h2>
+    <p class="muted">กำหนดว่าแต่ละบัญชีเข้าใช้ฟังก์ชันใดได้ ผ่านการเลือก “บทบาท (role)” —
+        แก้สิทธิ์ของแต่ละ role ได้ในการ์ดด้านล่าง</p>
+</div>
+
+<div id="admin-alert" class="auth-error" role="alert" hidden></div>
+
+<!-- ── Users ─────────────────────────────────────────────── -->
+<section class="control-card admin-card">
+    <div class="admin-card-head">
+        <h3>บัญชีผู้ใช้</h3>
+        <button class="btn btn-primary btn-add" id="nu-open" type="button">
+            <span class="btn-add-icon">+</span> เพิ่มผู้ใช้ใหม่
+        </button>
+    </div>
+
+    <div class="admin-table-wrap">
+        <table class="admin-table" id="users-table">
+            <thead>
+                <tr>
+                    <th>ชื่อผู้ใช้</th><th>อีเมล</th><th>บทบาท (role)</th>
+                    <th>สถานะ</th><th>เข้าใช้ล่าสุด</th><th></th>
+                </tr>
+            </thead>
+            <tbody><!-- filled by JS --></tbody>
+        </table>
+    </div>
+</section>
+
+<!-- ── Roles ─────────────────────────────────────────────── -->
+<section class="control-card admin-card">
+    <div class="admin-card-head">
+        <div>
+            <h3>บทบาทและสิทธิ์การใช้งาน</h3>
+            <p class="muted small">ติ๊กฟังก์ชันที่ role นั้นเข้าใช้ได้ แล้วกด “บันทึก”</p>
+        </div>
+        <button class="btn btn-primary btn-add" id="nr-open" type="button">
+            <span class="btn-add-icon">+</span> สร้างบทบาทใหม่
+        </button>
+    </div>
+
+    <div id="roles-list"><!-- filled by JS --></div>
+</section>
+
+<!-- ── Modal: เพิ่มผู้ใช้ใหม่ ───────────────────────────────── -->
+<div class="modal-overlay" id="nu-modal" hidden>
+    <div class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="nu-modal-title">
+        <div class="modal-header">
+            <h3 id="nu-modal-title">เพิ่มผู้ใช้ใหม่</h3>
+            <button class="modal-close" id="nu-close" type="button" aria-label="ปิด">&times;</button>
+        </div>
+        <div class="modal-body">
+            <div class="field">
+                <label for="nu-username">ชื่อผู้ใช้</label>
+                <input id="nu-username" type="text" placeholder="เช่น somchai.s" autocomplete="off">
+            </div>
+            <div class="field">
+                <label for="nu-email">อีเมล (ไม่บังคับ)</label>
+                <input id="nu-email" type="email" placeholder="name@company.com" autocomplete="off">
+            </div>
+            <div class="field">
+                <label for="nu-role">บทบาท (role)</label>
+                <select id="nu-role"></select>
+            </div>
+            <div class="field">
+                <label for="nu-password">รหัสผ่าน</label>
+                <div class="pw-wrap">
+                    <input id="nu-password" type="password" placeholder="รหัสผ่าน" autocomplete="new-password">
+                    <button type="button" class="pw-toggle" data-target="nu-password">แสดง</button>
+                </div>
+            </div>
+            <div class="field">
+                <label for="nu-password-confirm">ยืนยันรหัสผ่าน</label>
+                <div class="pw-wrap">
+                    <input id="nu-password-confirm" type="password" placeholder="พิมพ์รหัสผ่านอีกครั้ง" autocomplete="new-password">
+                    <button type="button" class="pw-toggle" data-target="nu-password-confirm">แสดง</button>
+                </div>
+                <p class="field-hint" id="nu-pw-match" hidden></p>
+            </div>
+            <p class="muted small">รหัสผ่าน: ≥ 8 ตัว มีพิมพ์ใหญ่/พิมพ์เล็ก/ตัวเลข/อักขระพิเศษ (!@#$%^&amp;*)</p>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-secondary" id="nu-cancel" type="button">ยกเลิก</button>
+            <button class="btn btn-primary" id="nu-create" type="button">สร้างบัญชี</button>
+        </div>
+    </div>
+</div>
+
+<!-- ── Modal: สร้างบทบาทใหม่ ───────────────────────────────── -->
+<div class="modal-overlay" id="nr-modal" hidden>
+    <div class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="nr-modal-title">
+        <div class="modal-header">
+            <h3 id="nr-modal-title">สร้างบทบาทใหม่</h3>
+            <button class="modal-close" id="nr-close" type="button" aria-label="ปิด">&times;</button>
+        </div>
+        <div class="modal-body">
+            <div class="field">
+                <label for="nr-name">ชื่อ role</label>
+                <input id="nr-name" type="text" placeholder="เช่น CanDentOnly" autocomplete="off">
+            </div>
+            <div class="field">
+                <label for="nr-desc">คำอธิบาย (ไม่บังคับ)</label>
+                <input id="nr-desc" type="text" placeholder="คำอธิบายสั้น ๆ" autocomplete="off">
+            </div>
+            <div class="field">
+                <label>สิทธิ์การใช้งาน</label>
+                <div id="nr-perms" class="perm-grid"><!-- permission checkboxes --></div>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-secondary" id="nr-cancel" type="button">ยกเลิก</button>
+            <button class="btn btn-primary" id="nr-create" type="button">สร้าง role</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/admin_users.js') }}?v={{ config_version }}"></script>
+{% endblock %}

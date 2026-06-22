@@ -1,0 +1,421 @@
+/* Login page — reuses the Thai Union theme variables from style.css
+   (:root --navy/--blue/...). Standalone (no navbar) and fully responsive. */
+
+.auth-body {
+    min-height: 100vh;
+    margin: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    background: linear-gradient(135deg, var(--navy) 0%, var(--blue) 100%);
+    font-family: var(--font-sans);
+}
+
+.auth-card {
+    width: 100%;
+    max-width: 420px;
+    background: var(--white);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-lg);
+    padding: 32px 28px 24px;
+    box-sizing: border-box;
+}
+
+.auth-head {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 24px;
+}
+.auth-head .brand-logo {
+    width: 48px;
+    height: 48px;
+    flex: 0 0 48px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 10px;
+    background: linear-gradient(135deg, var(--navy), var(--blue));
+    color: var(--white);
+    font-weight: 700;
+    font-size: 1.2rem;
+    letter-spacing: .5px;
+}
+.auth-title { margin: 0; font-size: 1.4rem; color: var(--navy); }
+.auth-sub   { margin: 2px 0 0; font-size: .85rem; color: var(--gray-600); }
+
+.field { margin-bottom: 16px; }
+.field label {
+    display: block;
+    font-size: .85rem;
+    font-weight: 500;
+    color: var(--gray-800);
+    margin-bottom: 6px;
+}
+.field input[type="text"],
+.field input[type="email"],
+.field input[type="password"],
+.field select {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 11px 12px;
+    font-size: 1rem;
+    font-family: var(--font-sans);
+    border: 1.5px solid var(--gray-200);
+    border-radius: 9px;
+    background: var(--gray-50);
+    transition: border-color .15s, box-shadow .15s;
+}
+.field input:focus,
+.field select:focus {
+    outline: none;
+    border-color: var(--blue);
+    box-shadow: 0 0 0 3px var(--blue-pale);
+    background: var(--white);
+}
+
+.pw-wrap { position: relative; }
+.pw-wrap input { padding-right: 64px; }
+.pw-toggle {
+    position: absolute;
+    right: 6px;
+    top: 50%;
+    transform: translateY(-50%);
+    border: none;
+    background: transparent;
+    color: var(--blue);
+    font-size: .85rem;
+    font-weight: 600;
+    cursor: pointer;
+    padding: 6px 8px;
+    font-family: var(--font-sans);
+}
+.pw-toggle:hover { text-decoration: underline; }
+
+/* strength meter */
+.pw-strength {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 10px;
+}
+.pw-bar {
+    flex: 1;
+    height: 6px;
+    border-radius: 4px;
+    background: var(--gray-200);
+    overflow: hidden;
+}
+.pw-bar span {
+    display: block;
+    height: 100%;
+    width: 0;
+    border-radius: 4px;
+    transition: width .2s, background .2s;
+}
+.pw-bar span.s0, .pw-bar span.s1 { background: var(--danger); }
+.pw-bar span.s2                   { background: var(--warning); }
+.pw-bar span.s3                   { background: #FBC02D; }
+.pw-bar span.s4, .pw-bar span.s5 { background: var(--success); }
+.pw-label { font-size: .8rem; color: var(--gray-600); min-width: 64px; }
+
+.pw-rules {
+    list-style: none;
+    margin: 10px 0 0;
+    padding: 0;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 2px 12px;
+}
+.pw-rules li { font-size: .76rem; color: var(--gray-400); }
+.pw-rules li.ok { color: var(--success); }
+.pw-rules li.no { color: var(--gray-400); }
+
+.field-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 16px;
+}
+.checkbox {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: .88rem;
+    color: var(--gray-800);
+    cursor: pointer;
+    user-select: none;
+}
+.checkbox input { width: 16px; height: 16px; accent-color: var(--blue); }
+
+.auth-error {
+    background: #FDECEA;
+    border: 1px solid #F5C2C0;
+    color: var(--danger);
+    border-radius: 9px;
+    padding: 10px 12px;
+    font-size: .85rem;
+    margin-bottom: 14px;
+}
+
+.btn-primary {
+    width: 100%;
+    padding: 12px;
+    font-size: 1rem;
+    font-weight: 600;
+    font-family: var(--font-sans);
+    color: var(--white);
+    background: linear-gradient(90deg, var(--navy), var(--blue));
+    border: none;
+    border-radius: 9px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    transition: filter .15s, opacity .15s;
+}
+.btn-primary:hover:not(:disabled) { filter: brightness(1.08); }
+.btn-primary:disabled { opacity: .7; cursor: default; }
+
+.btn-spinner {
+    width: 18px;
+    height: 18px;
+    border: 2.5px solid rgba(255, 255, 255, .4);
+    border-top-color: var(--white);
+    border-radius: 50%;
+    animation: auth-spin .7s linear infinite;
+}
+@keyframes auth-spin { to { transform: rotate(360deg); } }
+
+.auth-foot {
+    text-align: center;
+    margin: 18px 0 0;
+    font-family: var(--font-mono);
+    font-size: .72rem;
+    color: var(--gray-400);
+}
+
+/* user badge + logout in the main navbar (added to base.html) */
+.nav-user {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: var(--white);
+}
+.nav-user .nav-username { font-size: .85rem; font-weight: 500; }
+.nav-user .nav-role {
+    font-size: .7rem;
+    background: rgba(255, 255, 255, .18);
+    padding: 2px 8px;
+    border-radius: 10px;
+}
+.nav-user .logout-btn {
+    background: rgba(255, 255, 255, .15);
+    color: var(--white);
+    border: 1px solid rgba(255, 255, 255, .3);
+    border-radius: 8px;
+    padding: 5px 12px;
+    font-size: .82rem;
+    font-family: var(--font-sans);
+    cursor: pointer;
+}
+.nav-user .logout-btn:hover { background: rgba(255, 255, 255, .28); }
+
+@media (max-width: 480px) {
+    .auth-card { padding: 24px 18px; }
+    .pw-rules { grid-template-columns: 1fr; }
+}
+
+/* ── Admin: manage users & roles ─────────────────────────────────── */
+.admin-card { margin-bottom: 1.5rem; }
+.muted { color: var(--gray-600); }
+.small { font-size: .82rem; }
+.btn-sm { padding: 5px 12px; font-size: .82rem; }
+
+.admin-table-wrap { overflow-x: auto; }
+.admin-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: .9rem;
+}
+.admin-table th,
+.admin-table td {
+    text-align: left;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--gray-100);
+    vertical-align: middle;
+}
+.admin-table th {
+    font-size: .78rem;
+    color: var(--gray-600);
+    text-transform: uppercase;
+    letter-spacing: .03em;
+}
+.admin-table .role-select {
+    padding: 6px 8px;
+    border: 1.5px solid var(--gray-200);
+    border-radius: 8px;
+    background: var(--white);
+    font-family: var(--font-sans);
+}
+.row-actions { display: flex; gap: 6px; white-space: nowrap; }
+
+.status-pill.ok     { background: #E8F5E9; color: var(--success); }
+.status-pill.off    { background: var(--gray-100); color: var(--gray-600); }
+.status-pill.locked { background: #FDECEA; color: var(--danger); }
+
+.admin-card-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+    padding-bottom: .6rem;
+    border-bottom: 2px solid var(--blue-pale);
+    margin-bottom: .25rem;
+}
+.admin-card-head h3 { margin: 0; color: var(--navy); }
+.admin-card-head .muted.small { margin: 2px 0 0; }
+
+.btn-add { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.btn-add-icon { font-size: 1rem; font-weight: 700; line-height: 1; }
+
+/* ── Modal (popup) ───────────────────────────────────────────────── */
+body.modal-open { overflow: hidden; }
+
+.modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(13, 43, 107, .45);
+    backdrop-filter: blur(2px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    z-index: 1000;
+    animation: modal-fade-in .15s ease-out;
+}
+/* The plain ``display:flex`` above would override the browser's
+   ``[hidden]{display:none}`` rule, so the modal would show on load.
+   This keeps a hidden overlay hidden until JS clears the attribute. */
+.modal-overlay[hidden] { display: none; }
+@keyframes modal-fade-in { from { opacity: 0; } to { opacity: 1; } }
+
+.modal-dialog {
+    width: 100%;
+    max-width: 460px;
+    max-height: calc(100vh - 40px);
+    overflow-y: auto;
+    background: var(--white);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-lg);
+    animation: modal-pop-in .18s ease-out;
+}
+@keyframes modal-pop-in {
+    from { opacity: 0; transform: translateY(8px) scale(.97); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 18px 22px;
+    border-bottom: 1px solid var(--gray-100);
+}
+.modal-header h3 { margin: 0; font-size: 1.15rem; color: var(--navy); }
+.modal-close {
+    border: none;
+    background: var(--gray-50);
+    color: var(--gray-600);
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    font-size: 1.1rem;
+    line-height: 1;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: background .15s, color .15s;
+}
+.modal-close:hover { background: var(--blue-pale); color: var(--blue); }
+
+.modal-body { padding: 20px 22px; }
+.modal-body .field:last-of-type { margin-bottom: 8px; }
+
+.modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    padding: 16px 22px;
+    border-top: 1px solid var(--gray-100);
+    background: var(--gray-50);
+    border-radius: 0 0 var(--radius) var(--radius);
+}
+.modal-footer .btn { min-width: 96px; }
+
+.field-hint {
+    font-size: .78rem;
+    margin: 6px 0 0;
+    color: var(--gray-600);
+}
+.field-hint.ok { color: var(--success); }
+.field-hint.no { color: var(--danger); }
+
+@media (max-width: 480px) {
+    .modal-overlay { padding: 0; align-items: flex-end; }
+    .modal-dialog {
+        max-width: none;
+        width: 100%;
+        max-height: 92vh;
+        border-radius: var(--radius) var(--radius) 0 0;
+    }
+}
+
+.role-card {
+    border: 1px solid var(--gray-200);
+    border-radius: var(--radius);
+    padding: 16px;
+    margin-bottom: 14px;
+    background: var(--gray-50);
+}
+.role-head {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 10px;
+}
+.role-head strong { font-size: 1.05rem; color: var(--navy); }
+.role-count {
+    font-size: .75rem;
+    background: var(--blue-pale);
+    color: var(--blue);
+    padding: 2px 10px;
+    border-radius: 10px;
+}
+.role-desc {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 8px 10px;
+    border: 1.5px solid var(--gray-200);
+    border-radius: 8px;
+    margin-bottom: 12px;
+    font-family: var(--font-sans);
+}
+.perm-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+    gap: 8px 16px;
+    margin-bottom: 12px;
+}
+.perm-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: .88rem;
+    cursor: pointer;
+}
+.perm-item input { width: 16px; height: 16px; accent-color: var(--blue); }
+.role-actions { display: flex; gap: 8px; }

@@ -38,6 +38,20 @@ app = Flask(__name__, template_folder=config.TEMPLATES_DIR, static_folder=config
 def inject_config():
     return {"config_version": config.CONFIG_VERSION}
 
+# Fallback auth template globals. base.html references has_perm()/current_user/
+# auth_enabled — if the auth layer fails to load (e.g. bcrypt/PyJWT not yet
+# installed) its context processor never registers and those names would be
+# Undefined, 500-ing every page. These defaults keep the app working exactly as
+# before (all menus visible, no gating). When auth installs successfully its own
+# context processor is registered LATER and overrides these.
+@app.context_processor
+def _auth_fallback():
+    return {
+        "current_user": None,
+        "auth_enabled": False,
+        "has_perm": lambda *_a, **_k: True,
+    }
+
 # Artwork Proof Check (ตรวจสะกดคำ/ตัวเลขใน artwork ก่อนพิมพ์).
 # Fully isolated blueprint — a failure here only disables that one mode
 # and can never break Can Dent / Label / Label Paper.
@@ -47,6 +61,16 @@ try:
     logger.info("Artwork Proof Check mode registered (/artwork_check)")
 except Exception as _aw_err:  # noqa: BLE001 — isolation by design
     logger.warning(f"Artwork Proof Check disabled: {_aw_err}")
+
+# Authentication + RBAC (login, JWT cookies, per-route permission guard).
+# Isolated like the artwork blueprint: a failure here leaves the inspection
+# modes running (just without auth). When AUTH_ENABLED is false the guard is a
+# no-op, so the station behaves exactly as before until you switch it on.
+try:
+    from auth import install_auth
+    install_auth(app)
+except Exception as _auth_err:  # noqa: BLE001 — never let auth wiring crash boot
+    logger.error(f"Auth + RBAC disabled (wiring error): {_auth_err}")
 
 # Pre-computed JPEG encode params (avoids re-creating each frame)
 _JPEG_PARAMS = [cv2.IMWRITE_JPEG_QUALITY, 80]
