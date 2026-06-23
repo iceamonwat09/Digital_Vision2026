@@ -399,11 +399,31 @@ def test_translate_lines_alignment(monkeypatch):
                         "http://x/webhook/artwork-translate")
     out = translate.translate_lines(["1", "2", "3"])
     assert out["translations"] == ["a", "b", ""]          # padded to len 3
+    assert out["spell_available"] is True
     assert out["spell"] == [
         {"flagged": True, "suggestion": "A"},
         {"flagged": False, "suggestion": None},
         {"flagged": False, "suggestion": None},
     ]
+
+
+def test_translate_lines_no_spell_field_marks_unavailable(monkeypatch):
+    # N8N workflow not yet updated to return "spell" — must be
+    # distinguishable from "spell ran and found nothing".
+    from artwork_check import translate
+
+    class FakeResp:
+        status_code = 200
+        def raise_for_status(self): pass
+        def json(self): return {"translations": ["a"]}
+
+    monkeypatch.setattr(translate.requests, "post",
+                        lambda *a, **k: FakeResp())
+    monkeypatch.setattr(translate.config, "N8N_TRANSLATE_WEBHOOK_URL",
+                        "http://x/webhook/artwork-translate")
+    out = translate.translate_lines(["1"])
+    assert out["spell_available"] is False
+    assert out["spell"] == [{"flagged": False, "suggestion": None}]
 
 
 def test_translate_lines_network_failure_returns_empty(monkeypatch):
@@ -414,7 +434,8 @@ def test_translate_lines_network_failure_returns_empty(monkeypatch):
     monkeypatch.setattr(translate.requests, "post", boom)
     monkeypatch.setattr(translate.config, "N8N_TRANSLATE_WEBHOOK_URL",
                         "http://x/webhook/artwork-translate")
-    assert translate.translate_lines(["a"]) == {"translations": [], "spell": []}
+    assert translate.translate_lines(["a"]) == {
+        "translations": [], "spell": [], "spell_available": False}
 
 
 def test_translate_cache_round_trip(tmp_path, monkeypatch):
@@ -428,10 +449,12 @@ def test_translate_cache_round_trip(tmp_path, monkeypatch):
                             "translations": ["hello", "16785"],
                             "spell": [{"flagged": False, "suggestion": None},
                                      {"flagged": False, "suggestion": None}],
+                            "spell_available": True,
                         })
     r1 = translate.translate_table(str(tmp_path), [dict(x) for x in rows])
     assert r1["translated"] and r1["rows"][0]["en"] == "hello"
     assert r1["rows"][0]["ai_spell"] == {"flagged": False, "suggestion": None}
+    assert r1["ai_spell_available"] is True
 
     # second call must hit cache, not the (now exploding) translator
     monkeypatch.setattr(translate, "translate_lines",
@@ -439,6 +462,7 @@ def test_translate_cache_round_trip(tmp_path, monkeypatch):
                             AssertionError("cache miss")))
     r2 = translate.translate_table(str(tmp_path), [dict(x) for x in rows])
     assert r2.get("cached") is True and r2["rows"][1]["en"] == "16785"
+    assert r2["ai_spell_available"] is True
 
 
 def test_translate_table_no_webhook_is_advisory(tmp_path, monkeypatch):
@@ -447,6 +471,7 @@ def test_translate_table_no_webhook_is_advisory(tmp_path, monkeypatch):
     rows = [{"src": "x", "status": "ok", "flagged": [], "suggest": {}}]
     res = translate.translate_table(str(tmp_path), rows)
     assert res["translated"] is False
+    assert res["ai_spell_available"] is False
     assert all("en" in r and "ai_spell" in r for r in res["rows"])  # usable
 
 

@@ -261,13 +261,19 @@
       html += "<td>" + st + "</td>";
       // Advisory AI spell-check (Gemini, via the translate webhook).
       // Purely informational — never feeds the status column above.
+      // Three states, NOT two: "checked, clean" must look different from
+      // "AI never ran" (N8N not updated yet) — both used to render "—".
       const aiSpell = r.ai_spell || {};
-      let ai = '<span class="aw-status-ok">—</span>';
-      if (aiSpell.flagged) {
+      let ai;
+      if (!result || !result.ai_spell_available) {
+        ai = '<span class="aw-status-unavail">ยังไม่รองรับ</span>';
+      } else if (aiSpell.flagged) {
         ai = '<span class="aw-status-warn">🤖 น่าสงสัย</span>';
         if (aiSpell.suggestion)
           ai += '<span class="aw-suggest">→ <code>' +
             esc(aiSpell.suggestion) + "</code></span>";
+      } else {
+        ai = '<span class="aw-status-ok">✓ ไม่พบ</span>';
       }
       html += "<td>" + ai + "</td></tr>";
     });
