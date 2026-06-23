@@ -204,16 +204,32 @@ def build_table(zones: List[dict], ocr_results: List[dict],
 
 def translate_lines(lines: List[str],
                     url: Optional[str] = None,
-                    timeout: Optional[float] = None) -> List[str]:
+                    timeout: Optional[float] = None) -> Dict[str, list]:
     """
-    Translate ``lines`` to English in one request. Returns a list aligned
-    with the input (same length). On any failure returns [] so the caller
-    can show source text without translation rather than erroring.
+    Translate ``lines`` to English and run the advisory AI spell-check in
+    ONE request (same webhook, same Gemini call — see
+    n8n_artwork_translate.workflow.json). Returns
+    {"translations": [...], "spell": [...], "spell_available": bool}.
+    ``translations``/``spell`` are aligned with the input (same length,
+    padded/truncated defensively). On any failure returns
+    {"translations": [], "spell": [], "spell_available": False} so the
+    caller can show source text without translation rather than erroring.
+
+    ``spell_available`` tells the caller whether the N8N workflow has
+    actually been updated to return a ``spell`` array at all — distinct
+    from "checked and found nothing", which is what an all-False ``spell``
+    list with ``spell_available: True`` means. Without this flag the UI
+    cannot tell "AI checked, all clean" apart from "AI never ran".
+
+    ``spell`` entries are {"flagged": bool, "suggestion": str|None} and
+    are PURELY advisory (AI-generated) — they never feed into the
+    deterministic PASS/FAIL verdict in checks.py.
     """
+    empty = {"translations": [], "spell": [], "spell_available": False}
     target = (url if url is not None
               else config.N8N_TRANSLATE_WEBHOOK_URL).strip()
     if not target or not lines:
-        return []
+        return empty
     t = float(timeout if timeout is not None
               else config.N8N_TRANSLATE_TIMEOUT_S)
     try:
@@ -222,7 +238,7 @@ def translate_lines(lines: List[str],
         payload = resp.json()
     except (requests.RequestException, ValueError) as e:
         logger.warning("[artwork] translate webhook failed: %s", e)
-        return []
+        return empty
 
     if isinstance(payload, list) and payload:
         payload = payload[0]
@@ -239,14 +255,38 @@ def translate_lines(lines: List[str],
                 payload = inner
                 break
 
-    out = payload.get("translations") if isinstance(payload, dict) else None
+    if not isinstance(payload, dict):
+        return empty
+
+    out = payload.get("translations")
     if not isinstance(out, list):
-        return []
-    # align defensively: pad/truncate to match input length
+        out = []
     out = [str(x) if x is not None else "" for x in out]
     if len(out) < len(lines):
         out += [""] * (len(lines) - len(out))
-    return out[:len(lines)]
+    out = out[:len(lines)]
+
+    spell_raw = payload.get("spell")
+    spell_available = isinstance(spell_raw, list)
+    spell: List[dict] = []
+    if spell_available:
+        for item in spell_raw:
+            if isinstance(item, dict):
+                spell.append({
+                    "flagged": bool(item.get("flagged")),
+                    "suggestion": (str(item["suggestion"])
+                                  if item.get("suggestion") is not None
+                                  else None),
+                })
+            else:
+                spell.append({"flagged": False, "suggestion": None})
+    if len(spell) < len(lines):
+        spell += [{"flagged": False, "suggestion": None}] * (
+            len(lines) - len(spell))
+    spell = spell[:len(lines)]
+
+    return {"translations": out, "spell": spell,
+            "spell_available": spell_available}
 
 
 # ── cache (per inspection, keyed by source-text hash) ─────────────────
@@ -259,7 +299,7 @@ def _hash_rows(rows: List[dict]) -> str:
     return h.hexdigest()
 
 
-def load_cache(insp_dir: str, rows: List[dict]) -> Optional[List[dict]]:
+def load_cache(insp_dir: str, rows: List[dict]) -> Optional[dict]:
     p = os.path.join(insp_dir, _CACHE_NAME)
     if not os.path.exists(p):
         return None
@@ -270,14 +310,17 @@ def load_cache(insp_dir: str, rows: List[dict]) -> Optional[List[dict]]:
         return None
     if data.get("hash") != _hash_rows(rows):
         return None        # source text changed → cache stale
-    return data.get("rows")
+    return {"rows": data.get("rows"),
+            "spell_available": bool(data.get("spell_available"))}
 
 
-def save_cache(insp_dir: str, rows: List[dict]) -> None:
+def save_cache(insp_dir: str, rows: List[dict],
+               spell_available: bool = False) -> None:
     try:
         with open(os.path.join(insp_dir, _CACHE_NAME), "w",
                   encoding="utf-8") as f:
-            json.dump({"hash": _hash_rows(rows), "rows": rows},
+            json.dump({"hash": _hash_rows(rows), "rows": rows,
+                      "spell_available": spell_available},
                       f, ensure_ascii=False, indent=2)
     except OSError as e:
         logger.warning("[artwork] could not cache translation: %s", e)
@@ -285,28 +328,49 @@ def save_cache(insp_dir: str, rows: List[dict]) -> None:
 
 def translate_table(insp_dir: str, rows: List[dict]) -> dict:
     """
-    Attach an ``en`` field to each row, using cache when the source text
-    is unchanged. Returns {"rows": [...], "translated": bool, "note": ...}.
+    Attach an ``en`` field and an advisory ``ai_spell`` field
+    ({"flagged": bool, "suggestion": str|None}) to each row, using cache
+    when the source text is unchanged. ``ai_spell`` is purely informational
+    — it never affects the deterministic ``status``/verdict already set
+    by ``build_table``. Returns
+    {"rows": [...], "translated": bool, "ai_spell_available": bool,
+     "note": ...}. ``ai_spell_available`` tells the UI whether the N8N
+    workflow actually returned a ``spell`` array (vs. the AI check never
+    having run at all — both look like "no issues" otherwise).
     """
     cached = load_cache(insp_dir, rows)
     if cached is not None:
-        return {"rows": cached, "translated": True, "cached": True}
+        return {"rows": cached["rows"], "translated": True, "cached": True,
+                "ai_spell_available": cached["spell_available"]}
 
     if not is_enabled():
         for r in rows:
             r["en"] = ""
-        return {"rows": rows, "translated": False,
+            r["ai_spell"] = {"flagged": False, "suggestion": None}
+        return {"rows": rows, "translated": False, "ai_spell_available": False,
                 "note": "ยังไม่ได้ตั้งค่า N8N_TRANSLATE_WEBHOOK_URL — "
                         "แสดงข้อความและคำแนะนำการสะกดได้ แต่ยังไม่มีคำแปล"}
 
-    en = translate_lines([r["src"] for r in rows])
+    result = translate_lines([r["src"] for r in rows])
+    en = result["translations"]
+    spell = result["spell"]
+    spell_available = result["spell_available"]
     if not en:
         for r in rows:
             r["en"] = ""
-        return {"rows": rows, "translated": False,
+            r["ai_spell"] = {"flagged": False, "suggestion": None}
+        return {"rows": rows, "translated": False, "ai_spell_available": False,
                 "note": "เรียกบริการแปลไม่สำเร็จ — แสดงเฉพาะข้อความต้นฉบับ"}
 
-    for r, t in zip(rows, en):
+    for r, t, sp in zip(rows, en, spell):
         r["en"] = t
-    save_cache(insp_dir, rows)
-    return {"rows": rows, "translated": True}
+        r["ai_spell"] = sp
+    save_cache(insp_dir, rows, spell_available=spell_available)
+    note = (None if spell_available else
+            "N8N ยังไม่คืนข้อมูล spell-check — คอลัมน์ AI ยังไม่ทำงาน "
+            "(ต้องอัปเดต workflow artwork-translate ก่อน)")
+    out = {"rows": rows, "translated": True,
+          "ai_spell_available": spell_available}
+    if note:
+        out["note"] = note
+    return out

@@ -127,7 +127,7 @@ FLASK_DEBUG = False
 | `OCR_BACKEND` | (ว่าง) | `n8n` / `stub` / `vertex` — ว่างไว้ระบบเลือก n8n ให้เมื่อมี URL |
 | `ARTWORK_OCR_DPI` | `450` | ความละเอียดที่ render โซนส่ง OCR |
 | `ARTWORK_PREVIEW_DPI` | `150` | ความละเอียด preview ในเบราว์เซอร์ |
-| `ARTWORK_SPELL_LANGS` | `en,es` | ภาษาที่ชั้น dictionary ตรวจ |
+| `ARTWORK_SPELL_LANGS` | `en,es,fr,de,pt,it,ru,ar` | ภาษาที่ชั้น dictionary ตรวจ (มีผลต่อ verdict) |
 
 ---
 

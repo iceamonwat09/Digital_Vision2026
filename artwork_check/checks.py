@@ -419,7 +419,10 @@ def check_numbers(zones: List[dict], texts: Dict[str, str]) -> List[dict]:
 
 # ── Layer 3: dictionary + brand vocabulary ────────────────────────────
 
-_RE_WORD = re.compile(r"[A-Za-zÀ-ÖØ-öø-ÿ]+(?:['’][A-Za-zÀ-ÖØ-öø-ÿ]+)?")
+_RE_WORD = re.compile(
+    r"[A-Za-zÀ-ÖØ-öø-ÿЀ-ӿ؀-ۿ]+"
+    r"(?:['’][A-Za-zÀ-ÖØ-öø-ÿЀ-ӿ؀-ۿ]+)?"
+)
 
 _spellcheckers: Optional[list] = None
 
@@ -451,8 +454,9 @@ def check_spelling(zones: List[dict], texts: Dict[str, str],
     """
     Flag words found in no enabled dictionary and not in the brand
     vocabulary. NO suggestions are produced — per the project rule the
-    system must not invent words. Non-Latin scripts (Thai/Arabic) are
-    left to the cross-panel layer.
+    system must not invent words. Thai/CJK have no enabled dictionary
+    and are left to the cross-panel layer; Cyrillic and Arabic are
+    covered when "ru"/"ar" are in SPELL_LANGUAGES.
     """
     checkers = _get_spellcheckers()
     if not checkers:

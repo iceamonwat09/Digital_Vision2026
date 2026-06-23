@@ -246,6 +246,24 @@ def test_spell_layer_respects_brand_vocab():
     assert cleared == []
 
 
+@pytest.mark.skipif(not checks.spell_layer_available(),
+                    reason="pyspellchecker not installed")
+def test_spell_layer_checks_cyrillic_and_arabic_words():
+    # "рыба" (Russian, "fish") and "سمك" (Arabic, "fish") are valid
+    # dictionary words and must not be flagged once ru/ar are enabled.
+    z = [_zone("z1", group="")]
+    texts = {"z1": "рыба سمك"}
+    defects = checks.check_spelling(z, texts)
+    assert defects == []
+
+
+def test_re_word_extracts_cyrillic_and_arabic_tokens():
+    text = "EN рыба سمك word"
+    words = checks._RE_WORD.findall(text)
+    assert "рыба" in words
+    assert "سمك" in words
+
+
 # ── Layer 4: readability ──────────────────────────────────────────────
 
 def test_readability_flags():
@@ -369,14 +387,43 @@ def test_translate_lines_alignment(monkeypatch):
     class FakeResp:
         status_code = 200
         def raise_for_status(self): pass
-        def json(self): return {"translations": ["a", "b"]}   # too few
+        def json(self):
+            return {
+                "translations": ["a", "b"],   # too few
+                "spell": [{"flagged": True, "suggestion": "A"}],  # too few
+            }
 
     monkeypatch.setattr(translate.requests, "post",
                         lambda *a, **k: FakeResp())
     monkeypatch.setattr(translate.config, "N8N_TRANSLATE_WEBHOOK_URL",
                         "http://x/webhook/artwork-translate")
     out = translate.translate_lines(["1", "2", "3"])
-    assert out == ["a", "b", ""]                          # padded to len 3
+    assert out["translations"] == ["a", "b", ""]          # padded to len 3
+    assert out["spell_available"] is True
+    assert out["spell"] == [
+        {"flagged": True, "suggestion": "A"},
+        {"flagged": False, "suggestion": None},
+        {"flagged": False, "suggestion": None},
+    ]
+
+
+def test_translate_lines_no_spell_field_marks_unavailable(monkeypatch):
+    # N8N workflow not yet updated to return "spell" — must be
+    # distinguishable from "spell ran and found nothing".
+    from artwork_check import translate
+
+    class FakeResp:
+        status_code = 200
+        def raise_for_status(self): pass
+        def json(self): return {"translations": ["a"]}
+
+    monkeypatch.setattr(translate.requests, "post",
+                        lambda *a, **k: FakeResp())
+    monkeypatch.setattr(translate.config, "N8N_TRANSLATE_WEBHOOK_URL",
+                        "http://x/webhook/artwork-translate")
+    out = translate.translate_lines(["1"])
+    assert out["spell_available"] is False
+    assert out["spell"] == [{"flagged": False, "suggestion": None}]
 
 
 def test_translate_lines_network_failure_returns_empty(monkeypatch):
@@ -387,7 +434,8 @@ def test_translate_lines_network_failure_returns_empty(monkeypatch):
     monkeypatch.setattr(translate.requests, "post", boom)
     monkeypatch.setattr(translate.config, "N8N_TRANSLATE_WEBHOOK_URL",
                         "http://x/webhook/artwork-translate")
-    assert translate.translate_lines(["a"]) == []
+    assert translate.translate_lines(["a"]) == {
+        "translations": [], "spell": [], "spell_available": False}
 
 
 def test_translate_cache_round_trip(tmp_path, monkeypatch):
@@ -397,9 +445,16 @@ def test_translate_cache_round_trip(tmp_path, monkeypatch):
     monkeypatch.setattr(translate.config, "N8N_TRANSLATE_WEBHOOK_URL",
                         "http://x/webhook/artwork-translate")
     monkeypatch.setattr(translate, "translate_lines",
-                        lambda lines, **k: ["hello", "16785"])
+                        lambda lines, **k: {
+                            "translations": ["hello", "16785"],
+                            "spell": [{"flagged": False, "suggestion": None},
+                                     {"flagged": False, "suggestion": None}],
+                            "spell_available": True,
+                        })
     r1 = translate.translate_table(str(tmp_path), [dict(x) for x in rows])
     assert r1["translated"] and r1["rows"][0]["en"] == "hello"
+    assert r1["rows"][0]["ai_spell"] == {"flagged": False, "suggestion": None}
+    assert r1["ai_spell_available"] is True
 
     # second call must hit cache, not the (now exploding) translator
     monkeypatch.setattr(translate, "translate_lines",
@@ -407,6 +462,7 @@ def test_translate_cache_round_trip(tmp_path, monkeypatch):
                             AssertionError("cache miss")))
     r2 = translate.translate_table(str(tmp_path), [dict(x) for x in rows])
     assert r2.get("cached") is True and r2["rows"][1]["en"] == "16785"
+    assert r2["ai_spell_available"] is True
 
 
 def test_translate_table_no_webhook_is_advisory(tmp_path, monkeypatch):
@@ -415,4 +471,59 @@ def test_translate_table_no_webhook_is_advisory(tmp_path, monkeypatch):
     rows = [{"src": "x", "status": "ok", "flagged": [], "suggest": {}}]
     res = translate.translate_table(str(tmp_path), rows)
     assert res["translated"] is False
-    assert all("en" in r for r in res["rows"])            # still usable
+    assert res["ai_spell_available"] is False
+    assert all("en" in r and "ai_spell" in r for r in res["rows"])  # usable
+
+
+# ── OCR-only path (translate tab WITHOUT a full inspection) ────────────
+
+def test_run_ocr_only_caches_and_stays_isolated(tmp_path, monkeypatch):
+    """run_ocr_only must OCR on demand, reuse the cache when zones are
+    unchanged, re-OCR when they change, and NEVER write a report.json
+    (so it can't create/affect a verdict)."""
+    import os
+    from artwork_check import pipeline, report
+
+    rec_id = "20260101-000000-abcdef"
+    monkeypatch.setattr(report.config, "INSPECTIONS_DIR", str(tmp_path))
+    d = report.inspection_dir(rec_id, create=True)
+    with open(os.path.join(d, "source.png"), "wb") as f:
+        f.write(b"not-a-real-image")   # only needs to exist for _find_source
+
+    # Avoid real PDF/image decoding and real OCR network calls.
+    monkeypatch.setattr(pipeline, "ArtworkDocument", lambda *a, **k: object())
+    calls = {"n": 0}
+
+    def fake_read(doc, zones):
+        calls["n"] += 1
+        return [{"zone_id": z["id"], "text": "Hello", "engine": "stub",
+                 "conf": None} for z in zones]
+
+    monkeypatch.setattr(pipeline.ocr, "read_all_zones", fake_read)
+
+    zones = [{"id": "z1", "type": "panel", "group": "",
+              "bbox": [0.1, 0.1, 0.2, 0.2]}]
+    _, ocr1 = pipeline.run_ocr_only(rec_id, zones)
+    assert calls["n"] == 1 and ocr1[0]["text"] == "Hello"
+
+    # Same zones → cache hit, no second OCR.
+    pipeline.run_ocr_only(rec_id, zones)
+    assert calls["n"] == 1
+
+    # Different zone layout → cache invalidated, re-OCR.
+    zones2 = [dict(zones[0], bbox=[0.3, 0.3, 0.2, 0.2])]
+    pipeline.run_ocr_only(rec_id, zones2)
+    assert calls["n"] == 2
+
+    # Isolation: no verdict artifact was ever written.
+    assert report.load_report(rec_id) is None
+    assert not os.path.exists(os.path.join(d, "overlay.png"))
+
+
+def test_run_ocr_only_missing_upload_raises(tmp_path, monkeypatch):
+    from artwork_check import pipeline, report
+    monkeypatch.setattr(report.config, "INSPECTIONS_DIR", str(tmp_path))
+    with pytest.raises(FileNotFoundError):
+        pipeline.run_ocr_only("20260101-000000-abcdef",
+                              [{"id": "z1", "type": "panel", "group": "",
+                                "bbox": [0.1, 0.1, 0.2, 0.2]}])

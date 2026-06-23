@@ -224,7 +224,9 @@
     let html = "";
     if (result && result.note)
       html += '<div class="aw-note">' + esc(result.note) + "</div>";
-    const shown = onlyIssues ? rows.filter((r) => r.status !== "ok") : rows;
+    const shown = onlyIssues
+      ? rows.filter((r) => r.status !== "ok" || (r.ai_spell && r.ai_spell.flagged))
+      : rows;
     if (!shown.length) {
       box.innerHTML = html + '<div class="aw-empty">' +
         (onlyIssues ? "ไม่มีบรรทัดที่น่าสงสัย" : "ไม่มีข้อความให้แสดง") + "</div>";
@@ -232,10 +234,12 @@
     }
     html += '<table class="aw-ttable"><thead><tr>' +
       "<th>โซน</th><th>ข้อความบนฉลาก</th><th>คำแปล EN</th><th>สถานะ</th>" +
+      "<th>🤖 ตรวจสะกดโดย AI</th>" +
       "</tr></thead><tbody>";
     shown.forEach((r) => {
       const issue = r.status !== "ok";
-      html += '<tr class="' + (issue ? "has-issue" : "") + '">';
+      const aiFlagged = !!(r.ai_spell && r.ai_spell.flagged);
+      html += '<tr class="' + (issue ? "has-issue" : (aiFlagged ? "has-ai-issue" : "")) + '">';
       html += '<td class="zone-cell">' + esc(r.zone_id) + "</td>";
       html += '<td class="src-cell">' + highlightFlagged(r.src, r.flagged) + "</td>";
       const en = r.en || "";
@@ -246,7 +250,7 @@
         if (r.status === "mismatch")
           st = '<span class="aw-status-warn">❌ ไม่ตรงกับฉลากจริง</span>';
         else
-          st = '<span class="aw-status-warn">⚠️ สะกดน่าสงสัย</span>';
+          st = '<span class="aw-status-warn">⚠️ dict: สะกดน่าสงสัย</span>';
         const sug = r.suggest || {};
         Object.keys(sug).forEach((w) => {
           if (sug[w] && sug[w].length)
@@ -254,7 +258,24 @@
               sug[w].map((s) => "<code>" + esc(s) + "</code>").join(" ") + "</span>";
         });
       }
-      html += "<td>" + st + "</td></tr>";
+      html += "<td>" + st + "</td>";
+      // Advisory AI spell-check (Gemini, via the translate webhook).
+      // Purely informational — never feeds the status column above.
+      // Three states, NOT two: "checked, clean" must look different from
+      // "AI never ran" (N8N not updated yet) — both used to render "—".
+      const aiSpell = r.ai_spell || {};
+      let ai;
+      if (!result || !result.ai_spell_available) {
+        ai = '<span class="aw-status-unavail">ยังไม่รองรับ</span>';
+      } else if (aiSpell.flagged) {
+        ai = '<span class="aw-status-warn">🤖 น่าสงสัย</span>';
+        if (aiSpell.suggestion)
+          ai += '<span class="aw-suggest">→ <code>' +
+            esc(aiSpell.suggestion) + "</code></span>";
+      } else {
+        ai = '<span class="aw-status-ok">✓ ไม่พบ</span>';
+      }
+      html += "<td>" + ai + "</td></tr>";
     });
     html += "</tbody></table>";
     box.innerHTML = html;
@@ -302,7 +323,10 @@
       natH = res.preview_size[1];
       selectedId = null;
       cancelDraw();
-      showTabs(false);
+      // Show the result tabs right after upload so the "ข้อความ + คำแปล" tab
+      // can be used WITHOUT first pressing "ส่งตรวจสอบ" (OCR-only advisory).
+      showTabs(true);
+      switchTab("result");
       resetTextTab();
       previewImg.src = "/api/artwork/" + inspectionId + "/preview.png?t=" + Date.now();
       previewImg.onload = () => { applyZoom(); renderZones(); };
@@ -687,13 +711,22 @@
     btn.disabled = true;
     textMsg.innerHTML = '<span class="aw-spin"></span>กำลังสร้างตารางและแปล…';
     try {
-      textResult = await api("/api/artwork/" + inspectionId + "/translate",
-                             { method: "POST" });
+      // Send the current zones + brand so the server can OCR on the fly when
+      // no full inspection exists yet. When an inspection IS saved the server
+      // ignores these and uses the stored OCR + defects instead.
+      textResult = await api("/api/artwork/" + inspectionId + "/translate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ zones: zones, brand: brandInput.value.trim() }),
+      });
       renderTextTable(textResult, textTableWrap, onlyIssuesCb.checked);
       if (textResult.translated)
         textMsg.textContent = textResult.cached ? "✓ แปลแล้ว (จากแคช)" : "✓ แปลเรียบร้อย";
       else
         textMsg.textContent = "";   // note แสดงในตารางอยู่แล้ว
+      if (textResult.ocr_only)
+        textMsg.textContent +=
+          "  · ยังไม่ได้ส่งตรวจ — ตารางนี้ตรวจการสะกด/แปลเท่านั้น ยังไม่เทียบ panel (กด ‘ส่งตรวจสอบ’ เพื่อตรวจครบทุกชั้น)";
     } catch (e) {
       textMsg.textContent = "ทำงานไม่สำเร็จ: " + e.message;
     } finally {
