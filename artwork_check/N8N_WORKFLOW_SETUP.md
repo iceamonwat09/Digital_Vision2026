@@ -180,7 +180,53 @@ Webhook ──> Code in JavaScript2 ──> If ──true──> HTTP Request (G
    `http://<host>:5678/webhook/artwork-translate` ตรงกับค่า default
    ของ `N8N_TRANSLATE_WEBHOOK_URL` อยู่แล้ว ถ้า host/port ตรงก็ไม่ต้องตั้ง env
 
-## ทดสอบเร็ว
+## ⚠️ ถ้าคุณมี workflow เก่าอยู่แล้ว (อัปเดตเอง ไม่ได้ import ใหม่)
+
+โหมด "ตรวจสะกดโดย AI" ต้องการให้ **ทั้ง 5 node** ส่งต่อ field `spell`
+ครบทุก node ไม่ใช่แค่ 2 node โค้ด — นี่คือจุดที่พลาดบ่อยที่สุดเวลาแก้
+workflow เก่าด้วยมือ (วาง code ทับเฉพาะ node "Code in JavaScript" /
+"Code in JavaScript2" แล้วลืม node Respond):
+
+| Node | ต้องมี/ทำอะไรเพิ่มเพื่อรองรับ `spell` |
+|---|---|
+| **Code in JavaScript2** (validate+build) | prompt ต้องสั่งให้ Gemini คืนทั้ง `translations` **และ** `spell` พร้อม `responseSchema` ที่มี property `spell` (array of `{flagged: boolean, suggestion: string\|null}`) — และคืน `lines`/`line_count` ออกมาด้วยให้ node ถัดไปใช้ align ความยาว |
+| **Code in JavaScript** (parse) | ต้อง parse ทั้ง `parsed.translations` และ `parsed.spell`, normalize ให้เป็น `{flagged, suggestion}` เสมอ, pad/truncate ให้ยาวเท่า `line_count` |
+| **Respond to Webhook** (200) | **ต้องมี `spell: $json.spell` ใน responseBody ด้วย** — แค่แก้ 2 node โค้ดแล้วลืมจุดนี้ คือสาเหตุอันดับ 1 ที่ทำให้คอลัมน์ AI ในแอปไม่มีข้อมูลเลย ถึงแม้ Gemini จะตอบ `spell` มาให้ตั้งแต่ใน node ก่อนหน้าแล้วก็ตาม |
+| **Respond to Webhook1** (400, error path) | ควรมี `spell: []` ด้วย เพื่อให้ shape ตรงกันทั้งสองทาง |
+
+ตรวจสอบ **ทุก node ทั้ง 5 ตัว** ทีละตัวหลังแก้ ไม่ใช่เชื่อว่าแก้ node
+parse แล้วปลายทางต้องถูกตามไปด้วยอัตโนมัติ — n8n ไม่ propagate field
+ข้าม node ให้เอง ถ้า Respond node ไม่ได้อ้างถึง field นั้นตรงๆ มันจะ
+หายไปจาก response ที่แอปได้รับ
+
+## ข้อผิดพลาดที่พบบ่อยตอนแก้ field แบบ expression (`fx`)
+
+1. **อย่าพิมพ์ `=` นำหน้าซ้ำ** — ใน n8n field ที่เปิดโหมด expression
+   (ไอคอน `fx` ติดสีแล้ว) เนื้อหาในกล่องคือ `{{ ... }}` **เปล่าๆ**
+   เครื่องหมาย `=` ข้างหน้าเป็นแค่ตัวบอก UI ว่า "field นี้เป็น
+   expression" ไม่ใช่ส่วนของนิพจน์ ถ้า paste ค่าที่มี `=` นำหน้าซ้ำเข้าไป
+   ใน field ที่อยู่ใน expression mode อยู่แล้ว ตัว `=` นั้นจะกลายเป็น
+   ส่วนหนึ่งของ string จริง ๆ ที่ evaluate ออกมา ทำให้ผลลัพธ์เพี้ยนเป็น
+   `={"translations":...}` (มี `=` โผล่ปนใน JSON) แล้ว n8n จะฟ้อง
+   **"Invalid JSON in 'Response Body' field"** เพราะ parse JSON ไม่ผ่าน
+   - ค่าที่ถูกต้องในกล่อง `responseBody` (โหมด expression):
+     ```
+     {{ JSON.stringify({ translations: $json.translations, spell: $json.spell, warning: $json.warning }) }}
+     ```
+     **ไม่มี** `=` นำหน้า
+   - ถ้า field ยังเป็นโหมดข้อความปกติ (ไอคอน `fx` ยังไม่ติด) ให้กด `fx`
+     ก่อน แล้วใส่แค่ `{{ ... }}` แบบเดียวกัน — ห้ามพิมพ์ `=` เองทั้งสองกรณี
+2. **preview ใน editor อาจเป็นข้อมูลเก่าที่ยัง cache อยู่** — บางครั้ง n8n
+   โชว์ค่า preview/pinned data จาก execution รอบก่อนตอนแก้ field
+   expression ทำให้เห็น error "Invalid JSON" หลอกๆ ทั้งที่ field ที่
+   พิมพ์ไว้ถูกแล้ว วิธีเช็คให้ชัวร์: **Save workflow แล้วยิง request จริง
+   เข้า webhook** (ไม่ใช่กดแค่ "Execute step" ใน editor) ถ้า response
+   จริงออกมาถูก ก็ไม่ต้องสนใจ warning เก่าใน preview
+3. หลังแก้ทุกครั้ง ให้ทดสอบด้วย request จริงทั้ง 2 เคส (lines ถูกต้อง /
+   lines ผิด เช่นส่ง `{}`) เพื่อเช็คทั้ง `Respond to Webhook` และ
+   `Respond to Webhook1` พร้อมกัน
+
+## ทดสอบเร็ว (bash / curl)
 
 ```bash
 curl -s -X POST "http://172.32.201.106:5678/webhook/artwork-translate" \
@@ -203,6 +249,32 @@ curl -s -X POST "http://172.32.201.106:5678/webhook/artwork-translate" \
 }
 ```
 
+## ทดสอบเร็ว (Windows PowerShell)
+
+บน PowerShell `\` ไม่ใช่ตัวต่อบรรทัด (ใช้ได้แค่ใน bash) และ `curl` มัก
+ถูก alias ไปที่ `Invoke-WebRequest` ซึ่ง escape เครื่องหมายคำพูดต่างจาก
+GNU curl — ใช้วิธีนี้แทนจะชัวร์กว่า:
+
+```powershell
+$body = @{ lines = @("نوع السمك : كاتسوانوس بيلاميس", "Net Weight: 200 gm", "16785") } | ConvertTo-Json
+$res = Invoke-RestMethod -Method Post `
+  -Uri "http://172.32.201.106:5678/webhook/artwork-translate" `
+  -ContentType "application/json; charset=utf-8" `
+  -Body ([System.Text.Encoding]::UTF8.GetBytes($body))
+$res | ConvertTo-Json -Depth 10
+```
+
+หมายเหตุ:
+
+- ถ้าอยากใช้ `curl` จริง (ไม่ใช่ alias) ต้องเรียก `curl.exe` ตรงๆ —
+  แต่การ escape `"` ใน JSON ผ่าน PowerShell มักเพี้ยน (เจอ error
+  `Failed to parse request body ... Expected property name or '}' in
+  JSON`) จึงแนะนำให้ใช้ `Invoke-RestMethod` ด้านบนแทน
+- `Invoke-RestMethod` ค่า default จะ render ผลลัพธ์เป็น table แล้วตัด
+  field ที่เป็น array/object ซ้อนกันออก (`spell` มักหายจากหน้าจอ) ทั้งที่
+  จริงๆ field นั้นมีค่าอยู่ — ต้อง pipe ผ่าน `| ConvertTo-Json -Depth 10`
+  เสมอเพื่อดู structure เต็มๆ ก่อนสรุปว่า "ไม่มีข้อมูล"
+
 ## หมายเหตุสำคัญของแท็บ "ข้อความ + คำแปล"
 
 - เป็น **ข้อมูลช่วยอ่านอย่างเดียว** ไม่มีผลต่อ PASS/FAIL — สอดคล้องกฎ
@@ -214,6 +286,23 @@ curl -s -X POST "http://172.32.201.106:5678/webhook/artwork-translate" \
   พร้อมกับการแปล (webhook เดียวกัน ไม่ได้สร้าง workflow ใหม่) — เป็นแค่
   **คำแนะนำ ไม่มีผลต่อ verdict เด็ดขาด** เหมือนคอลัมน์ dictionary
   เดิมทุกประการ ต่างกันที่แหล่งข้อมูล (โมเดล AI ไม่ใช่ dictionary)
+- คอลัมน์นี้มี **3 สถานะ** แยกกันชัดเจน เพื่อไม่ให้ "AI ตรวจแล้วไม่พบ
+  อะไร" ไปปนกับ "AI ยังไม่ได้รันเลย" (สองอย่างนี้หน้าตาคล้ายกันถ้าไม่มี
+  flag แยก):
+  - **"ยังไม่รองรับ"** (สีเทา) — `ai_spell_available = false` แปลว่า
+    webhook ที่ตอบมาไม่มีฟิลด์ `spell` เลย (เช่น workflow ยังไม่ได้อัปเดต
+    ให้ส่ง `spell` ออกมา หรือ Respond node ลืมอ้างถึง `$json.spell` —
+    ดูหัวข้อ "ถ้าคุณมี workflow เก่าอยู่แล้ว" ด้านบน)
+  - **"✓ ไม่พบ"** (เขียว) — `ai_spell_available = true` และ
+    `flagged = false` แปลว่า AI ตรวจแล้วจริง แค่ไม่เจอจุดที่น่าสงสัยใน
+    บรรทัดนั้น
+  - **"🤖 น่าสงสัย"** (เหลือง/ส้ม) — `flagged = true` พร้อม
+    `suggestion` คำที่ AI เสนอแก้ — เป็นคำแนะนำอย่างเดียว คนตรวจต้อง
+    พิจารณาเอง
+  - ถ้าทุกแถวในตารางโชว์ "ยังไม่รองรับ" ทั้งหมด ให้สงสัยก่อนว่า
+    workflow `artwork-translate` ยังไม่ได้แก้ให้ส่ง `spell` ออกมา —
+    ลองยิง request ทดสอบตรงๆ ตามหัวข้อ "ทดสอบเร็ว" ด้านบน แล้วเช็คว่า
+    response มี key `spell` จริงไหมก่อนสงสัยฝั่งแอป
 - ระบบส่ง**ข้อความที่ OCR ได้แล้ว** ไปแปล (ไม่ส่งรูปซ้ำ) ทุกบรรทัดของ
   ทุกโซนใน **1 request** ต่อการกดปุ่มแปล 1 ครั้ง และ**แคชผล**ไว้ — กดซ้ำ
   หรือเปิดรายการเดิมไม่เสียค่า Gemini ใหม่ถ้าข้อความไม่เปลี่ยน
