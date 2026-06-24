@@ -180,6 +180,26 @@ Webhook ──> Code in JavaScript2 ──> If ──true──> HTTP Request (G
    `http://<host>:5678/webhook/artwork-translate` ตรงกับค่า default
    ของ `N8N_TRANSLATE_WEBHOOK_URL` อยู่แล้ว ถ้า host/port ตรงก็ไม่ต้องตั้ง env
 
+## ⚠️ คำแปล EN ว่างทั้งคอลัมน์ (`—`) ทั้งที่ทดสอบ 2-3 บรรทัดแล้วผ่าน
+
+อาการ: ทดสอบยิงไม่กี่บรรทัดได้คำแปลปกติ แต่พอใช้กับฉลากจริง (บรรทัดเยอะ
+เช่น 100+ บรรทัด) คำแปล EN กลับว่างหมดทุกแถว
+
+สาเหตุ: Gemini แปลไปจนชน **`maxOutputTokens`** แล้วถูกตัดกลางคัน → JSON
+ที่ตอบกลับไม่ครบ → parse ไม่ผ่าน → node คืน `translations` ว่างทั้งหมด
+สังเกตได้จาก response จะมี `"warning": "model did not return a
+translations array"` และ `candidatesTokenCount` เท่ากับค่า
+`maxOutputTokens` พอดีเป๊ะ (ชนเพดาน)
+
+วิธีแก้: เปิด node **Code in JavaScript2** หาบรรทัด
+`maxOutputTokens: 8192,` เปลี่ยนเป็น **`maxOutputTokens: 65536,`**
+(เพดานสูงสุดของ gemini-2.5-flash) แล้ว Save — รองรับฉลากที่บรรทัดเยอะ
+ขึ้นมาก ค่า default ในไฟล์ template ตั้งเป็น 65536 ให้แล้ว
+
+> ฝั่งแอป (`translate.py`) ถูกแก้ไม่ให้แคชผลแปลที่ว่างทั้งหมดแล้ว ดังนั้น
+> เมื่อแก้ N8N เสร็จ แค่กด "แปล / อธิบาย (EN)" ซ้ำก็จะแปลใหม่ให้เอง
+> ไม่ต้องลบไฟล์แคช
+
 ## ⚠️ ถ้าคุณมี workflow เก่าอยู่แล้ว (อัปเดตเอง ไม่ได้ import ใหม่)
 
 โหมด "ตรวจสะกดโดย AI" ต้องการให้ **ทั้ง 5 node** ส่งต่อ field `spell`
