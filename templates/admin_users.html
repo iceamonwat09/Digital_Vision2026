@@ -19,6 +19,11 @@
         </button>
     </div>
 
+    <div class="field user-search">
+        <input id="user-search" type="search" autocomplete="off"
+               placeholder="ค้นหาชื่อผู้ใช้หรืออีเมล…">
+    </div>
+
     <div class="admin-table-wrap">
         <table class="admin-table" id="users-table">
             <thead>
@@ -87,6 +92,64 @@
         <div class="modal-footer">
             <button class="btn btn-secondary" id="nu-cancel" type="button">ยกเลิก</button>
             <button class="btn btn-primary" id="nu-create" type="button">สร้างบัญชี</button>
+        </div>
+    </div>
+</div>
+
+<!-- ── Modal: แก้ไขผู้ใช้ ───────────────────────────────────── -->
+<div class="modal-overlay" id="eu-modal" hidden>
+    <div class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="eu-modal-title">
+        <div class="modal-header">
+            <h3 id="eu-modal-title">แก้ไขผู้ใช้</h3>
+            <button class="modal-close" id="eu-close" type="button" aria-label="ปิด">&times;</button>
+        </div>
+        <div class="modal-body">
+            <div class="field">
+                <label>ชื่อผู้ใช้</label>
+                <input id="eu-username" type="text" disabled>
+                <p class="muted small">ชื่อผู้ใช้เป็นรหัสเข้าสู่ระบบ จึงแก้ไขไม่ได้</p>
+            </div>
+            <div class="field">
+                <label for="eu-email">อีเมล</label>
+                <input id="eu-email" type="email" placeholder="name@company.com" autocomplete="off">
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-secondary" id="eu-cancel" type="button">ยกเลิก</button>
+            <button class="btn btn-primary" id="eu-save" type="button">บันทึก</button>
+        </div>
+    </div>
+</div>
+
+<!-- ── Modal: รีเซ็ตรหัสผ่าน ────────────────────────────────── -->
+<div class="modal-overlay" id="rp-modal" hidden>
+    <div class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="rp-modal-title">
+        <div class="modal-header">
+            <h3 id="rp-modal-title">รีเซ็ตรหัสผ่าน</h3>
+            <button class="modal-close" id="rp-close" type="button" aria-label="ปิด">&times;</button>
+        </div>
+        <div class="modal-body">
+            <p class="muted">ตั้งรหัสผ่านใหม่ให้ <strong id="rp-username"></strong></p>
+            <div class="field">
+                <label for="rp-password">รหัสผ่านใหม่</label>
+                <div class="pw-wrap">
+                    <input id="rp-password" type="password" placeholder="รหัสผ่านใหม่" autocomplete="new-password">
+                    <button type="button" class="pw-toggle" data-target="rp-password">แสดง</button>
+                </div>
+            </div>
+            <div class="field">
+                <label for="rp-password-confirm">ยืนยันรหัสผ่านใหม่</label>
+                <div class="pw-wrap">
+                    <input id="rp-password-confirm" type="password" placeholder="พิมพ์รหัสผ่านอีกครั้ง" autocomplete="new-password">
+                    <button type="button" class="pw-toggle" data-target="rp-password-confirm">แสดง</button>
+                </div>
+                <p class="field-hint" id="rp-pw-match" hidden></p>
+            </div>
+            <p class="muted small">รหัสผ่าน: ≥ 8 ตัว มีพิมพ์ใหญ่/พิมพ์เล็ก/ตัวเลข/อักขระพิเศษ (!@#$%^&amp;*)</p>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-secondary" id="rp-cancel" type="button">ยกเลิก</button>
+            <button class="btn btn-primary" id="rp-save" type="button">ตั้งรหัสผ่าน</button>
         </div>
     </div>
 </div>

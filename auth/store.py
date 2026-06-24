@@ -272,6 +272,73 @@ def set_user_active(username: str, active: bool) -> bool:
         return cur.rowcount > 0
 
 
+def update_user(username: str, email: Optional[str]) -> bool:
+    """Update an account's editable profile fields. Username is immutable
+    (it is the login identity); only the email changes here. Returns True if
+    a row changed."""
+    with _connect() as conn:
+        cur = conn.cursor()
+        cur.execute("UPDATE AuthUsers SET Email = ? WHERE Username = ?",
+                    email, username)
+        conn.commit()
+        return cur.rowcount > 0
+
+
+def set_user_password(username: str, password_hash: str) -> bool:
+    """Set a new password hash for an account (admin reset, or self-service).
+    Also clears any active lockout so the user can sign in immediately.
+    Returns True if a row changed."""
+    with _connect() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "UPDATE AuthUsers SET PasswordHash = ?, FailedAttempts = 0, "
+            "LockedUntil = NULL WHERE Username = ?",
+            password_hash, username,
+        )
+        conn.commit()
+        return cur.rowcount > 0
+
+
+def unlock_user(username: str) -> bool:
+    """Clear a temporary lockout (reset FailedAttempts + LockedUntil) without
+    touching the password. Returns True if a row changed."""
+    with _connect() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "UPDATE AuthUsers SET FailedAttempts = 0, LockedUntil = NULL "
+            "WHERE Username = ?",
+            username,
+        )
+        conn.commit()
+        return cur.rowcount > 0
+
+
+def record_admin_action(actor: Optional[dict], action: str,
+                        target_username: Optional[str],
+                        detail: str = "") -> None:
+    """Append to the admin-action audit trail (best-effort — never blocks the
+    request). ``actor`` is the g.current_user dict (or None when auth is off)."""
+    try:
+        actor_id = None
+        actor_name = None
+        if actor:
+            sub = actor.get("sub")
+            actor_id = int(sub) if sub is not None else None
+            actor_name = actor.get("username")
+        with _connect() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "INSERT INTO AuthAdminAudit "
+                "(ActorUserId, ActorUsername, Action, TargetUsername, Detail) "
+                "VALUES (?,?,?,?,?)",
+                actor_id, (actor_name or "")[:64], (action or "")[:40],
+                (target_username or "")[:64], (detail or "")[:400],
+            )
+            conn.commit()
+    except Exception as e:
+        logger.error("record_admin_action failed: %s", e)
+
+
 # ── Role / permission management (manage_users) ───────────────────────
 
 def list_permissions() -> List[dict]:

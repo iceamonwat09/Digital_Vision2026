@@ -10,6 +10,12 @@ Routes
   GET  /api/auth/policy       — password policy (for live UX validation)
   GET  /api/auth/users        — list users           (needs manage_users)
   POST /api/auth/users        — create a user        (needs manage_users)
+  PATCH /api/auth/users/<u>   — edit a user's email  (needs manage_users)
+  POST /api/auth/users/<u>/role           — change role         (manage_users)
+  POST /api/auth/users/<u>/active         — enable/disable      (manage_users)
+  POST /api/auth/users/<u>/reset-password — admin reset pw      (manage_users)
+  POST /api/auth/users/<u>/unlock         — clear lockout       (manage_users)
+  POST /api/auth/me/password  — change your own password (any signed-in user)
 """
 
 from __future__ import annotations
@@ -202,7 +208,52 @@ def api_users_create():
     except Exception as e:
         logger.error("create_user failed: %s", e)
         return jsonify({"error": f"สร้างผู้ใช้ไม่สำเร็จ (ซ้ำ?): {e}"}), 409
+    store.record_admin_action(getattr(g, "current_user", None), "create_user",
+                              username, f"role={role}")
     return jsonify({"status": "ok", "user_id": uid})
+
+
+@auth_bp.route("/api/auth/users/<username>", methods=["PATCH"])
+def api_user_update(username):
+    """Edit an account's editable profile fields (email only — username is
+    the immutable login identity)."""
+    body = request.get_json(silent=True) or {}
+    email = (body.get("email") or "").strip() or None
+    ok = store.update_user(username, email)
+    if not ok:
+        return jsonify({"error": "ไม่พบผู้ใช้"}), 404
+    store.record_admin_action(getattr(g, "current_user", None), "update_user",
+                              username, f"email={email or '—'}")
+    return jsonify({"status": "ok"})
+
+
+@auth_bp.route("/api/auth/users/<username>/reset-password", methods=["POST"])
+def api_user_reset_password(username):
+    """Admin sets a new password for an account (and clears any lockout)."""
+    if not passwords.hashing_available():
+        return jsonify({"error": "bcrypt ไม่ได้ติดตั้ง"}), 503
+    if store.get_user_by_login(username) is None:
+        return jsonify({"error": "ไม่พบผู้ใช้"}), 404
+    body = request.get_json(silent=True) or {}
+    password = body.get("password") or ""
+    ok, errs = passwords.validate_password(password)
+    if not ok:
+        return jsonify({"error": "รหัสผ่านไม่ผ่านเงื่อนไข", "details": errs}), 400
+    store.set_user_password(username, passwords.hash_password(password))
+    store.record_admin_action(getattr(g, "current_user", None),
+                              "reset_password", username, "")
+    return jsonify({"status": "ok"})
+
+
+@auth_bp.route("/api/auth/users/<username>/unlock", methods=["POST"])
+def api_user_unlock(username):
+    """Clear a temporary lockout immediately (without changing the password)."""
+    ok = store.unlock_user(username)
+    if not ok:
+        return jsonify({"error": "ไม่พบผู้ใช้"}), 404
+    store.record_admin_action(getattr(g, "current_user", None), "unlock_user",
+                              username, "")
+    return jsonify({"status": "ok"})
 
 
 @auth_bp.route("/api/auth/users/<username>/role", methods=["POST"])
@@ -225,6 +276,7 @@ def api_user_set_role(username):
     ok = store.set_user_role(username, role_id)
     if not ok:
         return jsonify({"error": "ไม่พบผู้ใช้"}), 404
+    store.record_admin_action(me, "set_role", username, f"role={role}")
     return jsonify({"status": "ok"})
 
 
@@ -239,6 +291,37 @@ def api_user_set_active(username):
     ok = store.set_user_active(username, active)
     if not ok:
         return jsonify({"error": "ไม่พบผู้ใช้"}), 404
+    store.record_admin_action(me, "set_active", username,
+                              "active=1" if active else "active=0")
+    return jsonify({"status": "ok"})
+
+
+@auth_bp.route("/api/auth/me/password", methods=["POST"])
+def api_me_change_password():
+    """Self-service: a signed-in user changes their own password. Requires the
+    current password. Reachable by any authenticated account (no manage_users)."""
+    if not passwords.hashing_available():
+        return jsonify({"error": "bcrypt ไม่ได้ติดตั้ง"}), 503
+    me = getattr(g, "current_user", None)
+    if not me:
+        return jsonify({"error": "ยังไม่ได้เข้าสู่ระบบ"}), 401
+
+    body = request.get_json(silent=True) or {}
+    current = body.get("current_password") or ""
+    new_pw = body.get("new_password") or ""
+
+    user = store.get_user_by_id(int(me["sub"]))
+    if user is None:
+        return jsonify({"error": "ไม่พบผู้ใช้"}), 404
+    if not passwords.verify_password(current, user["password_hash"]):
+        return jsonify({"error": "รหัสผ่านปัจจุบันไม่ถูกต้อง"}), 400
+
+    ok, errs = passwords.validate_password(new_pw)
+    if not ok:
+        return jsonify({"error": "รหัสผ่านใหม่ไม่ผ่านเงื่อนไข", "details": errs}), 400
+
+    store.set_user_password(user["username"], passwords.hash_password(new_pw))
+    store.record_admin_action(me, "self_change_password", user["username"], "")
     return jsonify({"status": "ok"})
 
 

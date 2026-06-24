@@ -6,6 +6,13 @@
   const alertBox = document.getElementById("admin-alert");
   let PERMISSIONS = [];   // [{key,label}]
   let ROLES = [];         // [{role_id,name,description,user_count,permissions[]}]
+  let ALL_USERS = [];     // last-loaded users (the search box filters this)
+
+  // Does a role grant manage_users? Used to warn before risky changes.
+  function roleHasManageUsers(roleName) {
+    const r = ROLES.find((x) => x.name === roleName);
+    return !!(r && r.permissions.indexOf("manage_users") >= 0);
+  }
 
   function showAlert(msg, ok) {
     alertBox.textContent = msg;
@@ -51,8 +58,12 @@
         sel.appendChild(o);
       });
 
-      const saveBtn = el("button", { class: "btn btn-secondary btn-sm", text: "บันทึก" });
+      const saveBtn = el("button", { class: "btn btn-secondary btn-sm", text: "บันทึกบทบาท" });
       saveBtn.addEventListener("click", async () => {
+        // Warn when removing manage_users from an account (could lock admins out).
+        if (roleHasManageUsers(u.role) && !roleHasManageUsers(sel.value) &&
+            !confirm("บทบาทใหม่ '" + sel.value + "' ไม่มีสิทธิ์จัดการผู้ใช้\n" +
+                     "ยืนยันการเปลี่ยนบทบาทของ " + u.username + " ?")) return;
         try {
           await api("/api/auth/users/" + encodeURIComponent(u.username) + "/role",
                     "POST", { role: sel.value });
@@ -61,17 +72,38 @@
         } catch (e) { showAlert(e.message, false); }
       });
 
+      const editBtn = el("button", { class: "btn btn-secondary btn-sm", text: "แก้ไข" });
+      editBtn.addEventListener("click", () => openEditUser(u));
+
+      const resetBtn = el("button", { class: "btn btn-secondary btn-sm", text: "รีเซ็ตรหัสผ่าน" });
+      resetBtn.addEventListener("click", () => openResetPassword(u));
+
       const toggle = el("button", {
-        class: "btn btn-sm " + (u.is_active ? "btn-secondary" : "btn-danger"),
-        text: u.is_active ? "เปิดใช้งาน" : "ปิดอยู่",
+        class: "btn btn-sm " + (u.is_active ? "btn-danger" : "btn-secondary"),
+        text: u.is_active ? "ปิดบัญชี" : "เปิดบัญชี",
       });
       toggle.addEventListener("click", async () => {
+        if (u.is_active && !confirm("ปิดการใช้งานบัญชี " + u.username + " ?\n" +
+            "ผู้ใช้จะเข้าสู่ระบบไม่ได้จนกว่าจะเปิดใช้งานอีกครั้ง")) return;
         try {
           await api("/api/auth/users/" + encodeURIComponent(u.username) + "/active",
                     "POST", { active: !u.is_active });
           load();
         } catch (e) { showAlert(e.message, false); }
       });
+
+      const actions = [saveBtn, editBtn, resetBtn, toggle];
+      if (u.locked) {
+        const unlockBtn = el("button", { class: "btn btn-secondary btn-sm", text: "ปลดล็อก" });
+        unlockBtn.addEventListener("click", async () => {
+          try {
+            await api("/api/auth/users/" + encodeURIComponent(u.username) + "/unlock", "POST");
+            showAlert("ปลดล็อก " + u.username + " แล้ว", true);
+            load();
+          } catch (e) { showAlert(e.message, false); }
+        });
+        actions.splice(3, 0, unlockBtn);  // before the toggle
+      }
 
       const status = el("span", {
         class: u.locked ? "status-pill locked" : (u.is_active ? "status-pill ok" : "status-pill off"),
@@ -84,9 +116,18 @@
         el("td", null, [sel]),
         el("td", null, [status]),
         el("td", { text: u.last_login_at ? u.last_login_at.replace("T", " ").slice(0, 16) : "—" }),
-        el("td", { class: "row-actions" }, [saveBtn, toggle]),
+        el("td", { class: "row-actions" }, actions),
       ]));
     });
+  }
+
+  // Filter the loaded users by the search box, then re-render.
+  function applyUserFilter() {
+    const q = (document.getElementById("user-search").value || "").trim().toLowerCase();
+    const filtered = !q ? ALL_USERS : ALL_USERS.filter((u) =>
+      (u.username || "").toLowerCase().indexOf(q) >= 0 ||
+      (u.email || "").toLowerCase().indexOf(q) >= 0);
+    renderUsers(filtered);
   }
 
   // ── Roles ───────────────────────────────────────────────────────────
@@ -158,7 +199,7 @@
     document.body.classList.remove("modal-open");
   }
   function wireModal(modal, openBtn, closeBtns, onReset) {
-    openBtn.addEventListener("click", () => {
+    if (openBtn) openBtn.addEventListener("click", () => {
       if (onReset) onReset();
       openModal(modal);
     });
@@ -270,6 +311,72 @@
     box.appendChild(permGrid([], "newrole"));
   }
 
+  // ── Edit user + reset password modals ────────────────────────────────
+  let editTarget = null;    // username currently open in the edit modal
+  let resetTarget = null;   // username currently open in the reset-pw modal
+
+  function openEditUser(u) {
+    editTarget = u.username;
+    document.getElementById("eu-username").value = u.username;
+    document.getElementById("eu-email").value = u.email || "";
+    openModal(document.getElementById("eu-modal"));
+  }
+
+  function openResetPassword(u) {
+    resetTarget = u.username;
+    document.getElementById("rp-username").textContent = u.username;
+    document.getElementById("rp-password").value = "";
+    document.getElementById("rp-password-confirm").value = "";
+    document.getElementById("rp-pw-match").hidden = true;
+    openModal(document.getElementById("rp-modal"));
+  }
+
+  function wireEditAndReset() {
+    const euModal = document.getElementById("eu-modal");
+    wireModal(euModal, null,  // opened per-row, no dedicated open button
+      [document.getElementById("eu-close"), document.getElementById("eu-cancel")]);
+    document.getElementById("eu-save").addEventListener("click", async () => {
+      try {
+        await api("/api/auth/users/" + encodeURIComponent(editTarget), "PATCH",
+                  { email: document.getElementById("eu-email").value.trim() });
+        showAlert("บันทึกข้อมูลของ " + editTarget + " แล้ว", true);
+        closeModal(euModal);
+        load();
+      } catch (e) { showAlert(e.message, false); }
+    });
+
+    const rpModal = document.getElementById("rp-modal");
+    const rpPw = document.getElementById("rp-password");
+    const rpPwConfirm = document.getElementById("rp-password-confirm");
+    const rpMatch = document.getElementById("rp-pw-match");
+    function rpPasswordsMatch() {
+      if (!rpPwConfirm.value) { rpMatch.hidden = true; return false; }
+      const match = rpPw.value === rpPwConfirm.value;
+      rpMatch.hidden = false;
+      rpMatch.textContent = match ? "✓ รหัสผ่านตรงกัน" : "รหัสผ่านไม่ตรงกัน";
+      rpMatch.className = "field-hint " + (match ? "ok" : "no");
+      return match;
+    }
+    rpPw.addEventListener("input", () => { if (rpPwConfirm.value) rpPasswordsMatch(); });
+    rpPwConfirm.addEventListener("input", rpPasswordsMatch);
+    wireModal(rpModal, null,
+      [document.getElementById("rp-close"), document.getElementById("rp-cancel")]);
+    wirePasswordToggles(rpModal);
+    document.getElementById("rp-save").addEventListener("click", async () => {
+      if (rpPw.value !== rpPwConfirm.value) {
+        rpPasswordsMatch();
+        showAlert("รหัสผ่านและการยืนยันรหัสผ่านไม่ตรงกัน", false);
+        return;
+      }
+      try {
+        await api("/api/auth/users/" + encodeURIComponent(resetTarget) + "/reset-password",
+                  "POST", { password: rpPw.value });
+        showAlert("ตั้งรหัสผ่านใหม่ให้ " + resetTarget + " แล้ว", true);
+        closeModal(rpModal);
+      } catch (e) { showAlert(e.message, false); }
+    });
+  }
+
   // ── Load all ────────────────────────────────────────────────────────
   async function load() {
     try {
@@ -277,8 +384,9 @@
       ROLES = rolesData.roles;
       PERMISSIONS = rolesData.permissions;
       const usersData = await api("/api/auth/users");
+      ALL_USERS = usersData.users;
       renderRoles();
-      renderUsers(usersData.users);
+      applyUserFilter();
       fillRoleDropdown();
     } catch (e) {
       showAlert("โหลดข้อมูลไม่สำเร็จ: " + e.message, false);
@@ -288,6 +396,8 @@
   document.addEventListener("DOMContentLoaded", function () {
     fillNewRolePerms();
     wireCreate();
+    wireEditAndReset();
+    document.getElementById("user-search").addEventListener("input", applyUserFilter);
     load();
   });
 })();
