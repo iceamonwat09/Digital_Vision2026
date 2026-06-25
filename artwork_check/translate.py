@@ -339,7 +339,11 @@ def translate_table(insp_dir: str, rows: List[dict]) -> dict:
     having run at all — both look like "no issues" otherwise).
     """
     cached = load_cache(insp_dir, rows)
-    if cached is not None:
+    # A cache saved while every "en" came back blank (N8N glitch) is not a
+    # real translation — ignore it and retranslate instead of repeating "—"
+    # forever just because the source-text hash still matches.
+    if cached is not None and any(
+            (r.get("en") or "").strip() for r in cached["rows"]):
         return {"rows": cached["rows"], "translated": True, "cached": True,
                 "ai_spell_available": cached["spell_available"]}
 
@@ -355,7 +359,10 @@ def translate_table(insp_dir: str, rows: List[dict]) -> dict:
     en = result["translations"]
     spell = result["spell"]
     spell_available = result["spell_available"]
-    if not en:
+    # A same-length list of all-blank strings is still a failure (every
+    # line should get *some* translation, even unchanged loanwords/codes)
+    # — treat it like an empty list so we never cache it as "translated".
+    if not en or not any(t.strip() for t in en):
         for r in rows:
             r["en"] = ""
             r["ai_spell"] = {"flagged": False, "suggestion": None}
