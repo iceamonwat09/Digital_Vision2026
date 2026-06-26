@@ -419,3 +419,117 @@ body.modal-open { overflow: hidden; }
 }
 .perm-item input { width: 16px; height: 16px; accent-color: var(--blue); }
 .role-actions { display: flex; gap: 8px; }
+
+/* ── User-management polish (table density, kebab menu, empty state) ── */
+
+/* The login page declares `.btn-primary { width:100% }`; that rule leaks onto
+   this page (auth.css is global). Neutralise it for header / inline / footer
+   buttons so they size to their content. Login is untouched (it lives under
+   .auth-body, and these selectors don't match there). */
+.admin-card .btn-primary,
+.modal-footer .btn-primary { width: auto; }
+
+/* Search box above the users table */
+.user-search { max-width: 320px; margin: 14px 0 4px; }
+.user-search input {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 9px 12px;
+    font-size: .9rem;
+    font-family: var(--font-sans);
+    border: 1.5px solid var(--gray-200);
+    border-radius: 9px;
+    background: var(--gray-50);
+    transition: border-color .15s, box-shadow .15s, background .15s;
+}
+.user-search input:focus {
+    outline: none;
+    border-color: var(--blue);
+    background: var(--white);
+    box-shadow: 0 0 0 3px var(--blue-pale);
+}
+
+/* Roomier, easier-to-scan rows; zebra + row hover for orientation */
+.admin-table th, .admin-table td { padding: 12px 14px; }
+.admin-table tbody tr { transition: background .12s; }
+.admin-table tbody tr:hover { background: var(--gray-50); }
+.user-name { font-weight: 600; color: var(--gray-800); }
+.cell-muted { color: var(--gray-600); }
+
+/* Status pills sit on a consistent baseline as small caps-y chips */
+.admin-table .status-pill {
+    display: inline-block;
+    padding: 3px 11px;
+    border-radius: 999px;
+    font-size: .78rem;
+    font-weight: 600;
+    border: none;
+    box-shadow: none;
+}
+
+/* Role: select + contextual save button on one tidy line */
+.role-cell { display: flex; align-items: center; gap: 8px; }
+.role-cell .role-select { min-width: 132px; }
+.role-cell .role-save {
+    transition: opacity .15s;
+}
+.role-cell .role-save:disabled {
+    opacity: 0;
+    pointer-events: none;   /* hidden until the role actually changes */
+}
+
+/* Actions column → single "⋮" trigger */
+.row-actions { display: flex; justify-content: flex-end; }
+.kebab-btn {
+    width: 36px;
+    height: 36px;
+    border: 1.5px solid transparent;
+    border-radius: 9px;
+    background: transparent;
+    color: var(--gray-600);
+    font-size: 1.25rem;
+    line-height: 1;
+    cursor: pointer;
+    transition: background .15s, border-color .15s, color .15s;
+}
+.kebab-btn:hover { background: var(--blue-pale); color: var(--blue); }
+.kebab-btn:focus-visible { outline: none; border-color: var(--blue-mid); }
+
+/* Fixed-positioned dropdown (appended to <body>, never clipped) */
+.kebab-menu {
+    position: fixed;
+    min-width: 176px;
+    background: var(--white);
+    border: 1px solid var(--gray-200);
+    border-radius: 10px;
+    box-shadow: var(--shadow-lg);
+    padding: 6px;
+    z-index: 1100;
+    animation: modal-pop-in .14s ease-out;
+}
+.kebab-item {
+    display: block;
+    width: 100%;
+    text-align: right;
+    padding: 9px 12px;
+    border: none;
+    background: transparent;
+    border-radius: 7px;
+    font-family: var(--font-sans);
+    font-size: .88rem;
+    color: var(--gray-800);
+    cursor: pointer;
+    transition: background .12s, color .12s;
+}
+.kebab-item:hover { background: var(--gray-50); color: var(--blue); }
+.kebab-item.danger { color: var(--danger); }
+.kebab-item.danger:hover { background: #FDECEA; color: var(--danger); }
+.kebab-sep { height: 1px; background: var(--gray-100); margin: 5px 6px; }
+
+/* Empty-state row */
+.table-empty {
+    text-align: center !important;
+    color: var(--gray-400);
+    padding: 40px 16px !important;
+    font-size: .92rem;
+}

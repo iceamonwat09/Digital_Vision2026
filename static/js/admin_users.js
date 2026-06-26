@@ -47,18 +47,70 @@
   }
 
   // ── Users ───────────────────────────────────────────────────────────
+  // A single shared "⋮" dropdown lives on <body> (fixed-positioned) so it is
+  // never clipped by the table's overflow. Only one can be open at a time.
+  let openKebab = null;
+  function closeKebab() {
+    if (openKebab) { openKebab.remove(); openKebab = null; }
+  }
+  document.addEventListener("click", closeKebab);
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeKebab(); });
+  window.addEventListener("scroll", closeKebab, true);
+  window.addEventListener("resize", closeKebab);
+
+  function kebabButton(items) {
+    const btn = el("button", { class: "kebab-btn", type: "button", "aria-label": "ตัวเลือกเพิ่มเติม" });
+    btn.innerHTML = "&#8942;";  // vertical ellipsis ⋮
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const wasMine = openKebab && openKebab._owner === btn;
+      closeKebab();
+      if (wasMine) return;
+      const menu = el("div", { class: "kebab-menu", role: "menu" });
+      menu._owner = btn;
+      items.forEach((it) => {
+        if (it.sep) { menu.appendChild(el("div", { class: "kebab-sep" })); return; }
+        const mi = el("button", {
+          class: "kebab-item" + (it.danger ? " danger" : ""), type: "button", text: it.text,
+        });
+        mi.addEventListener("click", (ev) => { ev.stopPropagation(); closeKebab(); it.onClick(); });
+        menu.appendChild(mi);
+      });
+      document.body.appendChild(menu);
+      const r = btn.getBoundingClientRect();
+      let top = r.bottom + 6;
+      if (top + menu.offsetHeight + 10 > window.innerHeight) top = r.top - menu.offsetHeight - 6;
+      menu.style.top = Math.max(8, top) + "px";
+      menu.style.left = Math.max(8, r.right - menu.offsetWidth) + "px";
+      openKebab = menu;
+    });
+    return btn;
+  }
+
   function renderUsers(users) {
     const tb = document.querySelector("#users-table tbody");
     tb.innerHTML = "";
+
+    if (!users.length) {
+      const searching = !!(document.getElementById("user-search").value || "").trim();
+      tb.appendChild(el("tr", null, [el("td", {
+        class: "table-empty", colspan: "6",
+        text: searching ? "ไม่พบผู้ใช้ที่ตรงกับการค้นหา" : "ยังไม่มีบัญชีผู้ใช้",
+      })]));
+      return;
+    }
+
     users.forEach((u) => {
+      // Role: select + a save button that only lights up once the value changes.
       const sel = el("select", { class: "role-select" });
       ROLES.forEach((r) => {
         const o = el("option", { value: r.name, text: r.name });
         if (r.name === u.role) o.selected = true;
         sel.appendChild(o);
       });
-
-      const saveBtn = el("button", { class: "btn btn-secondary btn-sm", text: "บันทึกบทบาท" });
+      const saveBtn = el("button", { class: "btn btn-primary btn-sm role-save", text: "บันทึก" });
+      saveBtn.disabled = true;
+      sel.addEventListener("change", () => { saveBtn.disabled = (sel.value === u.role); });
       saveBtn.addEventListener("click", async () => {
         // Warn when removing manage_users from an account (could lock admins out).
         if (roleHasManageUsers(u.role) && !roleHasManageUsers(sel.value) &&
@@ -71,39 +123,36 @@
           load();
         } catch (e) { showAlert(e.message, false); }
       });
+      const roleCell = el("div", { class: "role-cell" }, [sel, saveBtn]);
 
-      const editBtn = el("button", { class: "btn btn-secondary btn-sm", text: "แก้ไข" });
-      editBtn.addEventListener("click", () => openEditUser(u));
-
-      const resetBtn = el("button", { class: "btn btn-secondary btn-sm", text: "รีเซ็ตรหัสผ่าน" });
-      resetBtn.addEventListener("click", () => openResetPassword(u));
-
-      const toggle = el("button", {
-        class: "btn btn-sm " + (u.is_active ? "btn-danger" : "btn-secondary"),
-        text: u.is_active ? "ปิดบัญชี" : "เปิดบัญชี",
-      });
-      toggle.addEventListener("click", async () => {
-        if (u.is_active && !confirm("ปิดการใช้งานบัญชี " + u.username + " ?\n" +
-            "ผู้ใช้จะเข้าสู่ระบบไม่ได้จนกว่าจะเปิดใช้งานอีกครั้ง")) return;
-        try {
-          await api("/api/auth/users/" + encodeURIComponent(u.username) + "/active",
-                    "POST", { active: !u.is_active });
-          load();
-        } catch (e) { showAlert(e.message, false); }
-      });
-
-      const actions = [saveBtn, editBtn, resetBtn, toggle];
+      // Secondary actions collapse into a tidy "⋮" menu.
+      const items = [
+        { text: "แก้ไขข้อมูล", onClick: () => openEditUser(u) },
+        { text: "รีเซ็ตรหัสผ่าน", onClick: () => openResetPassword(u) },
+      ];
       if (u.locked) {
-        const unlockBtn = el("button", { class: "btn btn-secondary btn-sm", text: "ปลดล็อก" });
-        unlockBtn.addEventListener("click", async () => {
+        items.push({ text: "ปลดล็อกบัญชี", onClick: async () => {
           try {
             await api("/api/auth/users/" + encodeURIComponent(u.username) + "/unlock", "POST");
             showAlert("ปลดล็อก " + u.username + " แล้ว", true);
             load();
           } catch (e) { showAlert(e.message, false); }
-        });
-        actions.splice(3, 0, unlockBtn);  // before the toggle
+        } });
       }
+      items.push({ sep: true });
+      items.push({
+        text: u.is_active ? "ปิดบัญชี" : "เปิดบัญชี",
+        danger: u.is_active,
+        onClick: async () => {
+          if (u.is_active && !confirm("ปิดการใช้งานบัญชี " + u.username + " ?\n" +
+              "ผู้ใช้จะเข้าสู่ระบบไม่ได้จนกว่าจะเปิดใช้งานอีกครั้ง")) return;
+          try {
+            await api("/api/auth/users/" + encodeURIComponent(u.username) + "/active",
+                      "POST", { active: !u.is_active });
+            load();
+          } catch (e) { showAlert(e.message, false); }
+        },
+      });
 
       const status = el("span", {
         class: u.locked ? "status-pill locked" : (u.is_active ? "status-pill ok" : "status-pill off"),
@@ -111,12 +160,12 @@
       });
 
       tb.appendChild(el("tr", null, [
-        el("td", { text: u.username }),
-        el("td", { text: u.email || "—" }),
-        el("td", null, [sel]),
+        el("td", null, [el("span", { class: "user-name", text: u.username })]),
+        el("td", { class: "cell-muted", text: u.email || "—" }),
+        el("td", null, [roleCell]),
         el("td", null, [status]),
-        el("td", { text: u.last_login_at ? u.last_login_at.replace("T", " ").slice(0, 16) : "—" }),
-        el("td", { class: "row-actions" }, actions),
+        el("td", { class: "cell-muted", text: u.last_login_at ? u.last_login_at.replace("T", " ").slice(0, 16) : "—" }),
+        el("td", { class: "row-actions" }, [kebabButton(items)]),
       ]));
     });
   }
