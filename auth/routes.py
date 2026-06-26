@@ -177,8 +177,12 @@ def admin_users_page():
 
 @auth_bp.route("/api/auth/users", methods=["GET"])
 def api_users_list():
-    return jsonify({"users": store.list_users(),
-                    "roles": store.role_names()})
+    try:
+        users = store.list_users()
+    except Exception as e:
+        logger.error("list_users failed: %s", e)
+        return jsonify({"error": f"โหลดรายชื่อผู้ใช้ไม่สำเร็จ: {e}"}), 500
+    return jsonify({"users": users, "roles": store.role_names()})
 
 
 @auth_bp.route("/api/auth/users", methods=["POST"])

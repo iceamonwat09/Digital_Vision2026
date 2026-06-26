@@ -190,32 +190,28 @@ def get_role_id(role_name: str) -> Optional[int]:
 
 
 def list_users() -> List[dict]:
-    try:
-        with _connect() as conn:
-            cur = conn.cursor()
-            cur.execute(
-                "SELECT u.UserId, u.Username, u.Email, r.RoleName, u.IsActive, "
-                "u.LastLoginAt, u.LockedUntil FROM AuthUsers u "
-                "JOIN AuthRoles r ON r.RoleId = u.RoleId ORDER BY u.Username"
-            )
-            cols = [c[0] for c in cur.description]
-            out = []
-            for row in cur.fetchall():
-                d = dict(zip(cols, row))
-                out.append({
-                    "user_id": d["UserId"],
-                    "username": d["Username"],
-                    "email": d.get("Email"),
-                    "role": d.get("RoleName"),
-                    "is_active": bool(d["IsActive"]),
-                    "last_login_at": (d["LastLoginAt"].isoformat()
-                                      if d.get("LastLoginAt") else None),
-                    "locked": is_locked({"locked_until": d.get("LockedUntil")}),
-                })
-            return out
-    except Exception as e:
-        logger.error("list_users failed: %s", e)
-        return []
+    with _connect() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT u.UserId, u.Username, u.Email, r.RoleName, u.IsActive, "
+            "u.LastLoginAt, u.LockedUntil FROM AuthUsers u "
+            "JOIN AuthRoles r ON r.RoleId = u.RoleId ORDER BY u.Username"
+        )
+        cols = [c[0] for c in cur.description]
+        out = []
+        for row in cur.fetchall():
+            d = dict(zip(cols, row))
+            out.append({
+                "user_id": d["UserId"],
+                "username": d["Username"],
+                "email": d.get("Email"),
+                "role": d.get("RoleName"),
+                "is_active": bool(d["IsActive"]),
+                "last_login_at": (d["LastLoginAt"].isoformat()
+                                  if d.get("LastLoginAt") else None),
+                "locked": is_locked({"locked_until": d.get("LockedUntil")}),
+            })
+        return out
 
 
 def create_user(username: str, email: Optional[str], password_hash: str,
