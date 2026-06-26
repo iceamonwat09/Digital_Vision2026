@@ -28,6 +28,18 @@ def db_available() -> bool:
     return _PYODBC_OK
 
 
+def _iso(value) -> Optional[str]:
+    """Normalise a datetime column to an ISO string. The pyodbc driver may
+    hand back a ``datetime`` or an already-formatted ``str`` depending on the
+    column type / driver, so handle both rather than assuming ``.isoformat()``
+    exists."""
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.isoformat()
+    return str(value)
+
+
 def _connect():
     """Open a fresh SQL Server connection (mirrors database.py's auth style)."""
     if not _PYODBC_OK:
@@ -207,8 +219,7 @@ def list_users() -> List[dict]:
                 "email": d.get("Email"),
                 "role": d.get("RoleName"),
                 "is_active": bool(d["IsActive"]),
-                "last_login_at": (d["LastLoginAt"].isoformat()
-                                  if d.get("LastLoginAt") else None),
+                "last_login_at": _iso(d.get("LastLoginAt")),
                 "locked": is_locked({"locked_until": d.get("LockedUntil")}),
             })
         return out
