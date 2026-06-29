@@ -109,7 +109,7 @@
     const q = new URLSearchParams(window.location.search).get("next");
     // only allow same-site relative paths
     if (q && q.startsWith("/") && !q.startsWith("//")) return q;
-    return "/";
+    return "/home";
   }
 
   // ── submit ─────────────────────────────────────────────────────────

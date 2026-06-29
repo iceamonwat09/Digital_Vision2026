@@ -14,13 +14,13 @@
 <body>
     <nav class="navbar">
         <div class="nav-container">
-            <div class="nav-brand">
+            <a class="nav-brand" href="/home">
                 <div class="brand-logo">TU</div>
                 <div class="brand-text">
                     <span class="brand-name">Thai Union</span>
                     <span class="brand-sub">ระบบตรวจสอบบรรจุภัณฑ์ <span class="brand-version">{{ config_version }}</span></span>
                 </div>
-            </div>
+            </a>
             {% set p = request.path %}
             <ul class="nav-menu">
                 {% if has_perm('run_live_detection') %}
@@ -46,6 +46,7 @@
             <div class="nav-user">
                 <span class="nav-username">{{ current_user.username }}</span>
                 <span class="nav-role">{{ current_user.role }}</span>
+                <button type="button" class="logout-btn" id="change-pw-btn">เปลี่ยนรหัสผ่าน</button>
                 <button type="button" class="logout-btn" id="logout-btn">ออกจากระบบ</button>
             </div>
             {% endif %}
@@ -60,15 +61,98 @@
         <p>&copy; 2026 Thai Union Group PCL. &nbsp;|&nbsp; Can Dent Detection (YOLOv8) + Label Paper Inspection (ΔE2000) &nbsp;|&nbsp; {{ config_version }}</p>
     </footer>
 
+    {% if auth_enabled and current_user %}
+    <!-- Self-service change-password modal (any signed-in user) -->
+    <div class="modal-overlay" id="cp-modal" hidden>
+        <div class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="cp-modal-title">
+            <div class="modal-header">
+                <h3 id="cp-modal-title">เปลี่ยนรหัสผ่านของฉัน</h3>
+                <button class="modal-close" id="cp-close" type="button" aria-label="ปิด">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="field">
+                    <label for="cp-current">รหัสผ่านปัจจุบัน</label>
+                    <input id="cp-current" type="password" autocomplete="current-password">
+                </div>
+                <div class="field">
+                    <label for="cp-new">รหัสผ่านใหม่</label>
+                    <input id="cp-new" type="password" autocomplete="new-password">
+                </div>
+                <div class="field">
+                    <label for="cp-confirm">ยืนยันรหัสผ่านใหม่</label>
+                    <input id="cp-confirm" type="password" autocomplete="new-password">
+                    <p class="field-hint" id="cp-msg" hidden></p>
+                </div>
+                <p class="muted small">รหัสผ่าน: ≥ 8 ตัว มีพิมพ์ใหญ่/พิมพ์เล็ก/ตัวเลข/อักขระพิเศษ (!@#$%^&amp;*)</p>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="cp-cancel" type="button">ยกเลิก</button>
+                <button class="btn btn-primary" id="cp-save" type="button">บันทึก</button>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
     <script src="{{ url_for('static', filename='js/main.js') }}?v={{ config_version }}"></script>
     <script>
         // Logout: clear the httpOnly cookies server-side, then go to /login.
         (function () {
             var b = document.getElementById('logout-btn');
-            if (!b) return;
-            b.addEventListener('click', function () {
+            if (b) b.addEventListener('click', function () {
                 fetch('/api/auth/logout', { method: 'POST' })
                     .finally(function () { window.location.href = '/login'; });
+            });
+
+            // Self-service change password.
+            var modal = document.getElementById('cp-modal');
+            var openBtn = document.getElementById('change-pw-btn');
+            if (!modal || !openBtn) return;
+            var cur = document.getElementById('cp-current');
+            var npw = document.getElementById('cp-new');
+            var conf = document.getElementById('cp-confirm');
+            var msg = document.getElementById('cp-msg');
+
+            function setMsg(text, ok) {
+                msg.hidden = false;
+                msg.textContent = text;
+                msg.className = 'field-hint ' + (ok ? 'ok' : 'no');
+            }
+            function open() {
+                cur.value = npw.value = conf.value = '';
+                msg.hidden = true;
+                modal.hidden = false;
+                document.body.classList.add('modal-open');
+            }
+            function close() {
+                modal.hidden = true;
+                document.body.classList.remove('modal-open');
+            }
+            openBtn.addEventListener('click', open);
+            document.getElementById('cp-close').addEventListener('click', close);
+            document.getElementById('cp-cancel').addEventListener('click', close);
+            modal.addEventListener('click', function (e) { if (e.target === modal) close(); });
+            document.addEventListener('keydown', function (e) {
+                if (e.key === 'Escape' && !modal.hidden) close();
+            });
+
+            document.getElementById('cp-save').addEventListener('click', function () {
+                if (npw.value !== conf.value) { setMsg('รหัสผ่านใหม่ไม่ตรงกัน', false); return; }
+                fetch('/api/auth/me/password', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ current_password: cur.value, new_password: npw.value })
+                }).then(function (r) {
+                    return r.json().then(function (d) { return { ok: r.ok, d: d }; });
+                }).then(function (res) {
+                    if (res.ok) {
+                        setMsg('✓ เปลี่ยนรหัสผ่านแล้ว', true);
+                        setTimeout(close, 1200);
+                    } else {
+                        var err = res.d.error || 'เปลี่ยนรหัสผ่านไม่สำเร็จ';
+                        if (res.d.details) err += ': ' + res.d.details.join(', ');
+                        setMsg(err, false);
+                    }
+                }).catch(function () { setMsg('เกิดข้อผิดพลาดในการเชื่อมต่อ', false); });
             });
         })();
     </script>

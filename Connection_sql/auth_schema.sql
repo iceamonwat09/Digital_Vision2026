@@ -82,6 +82,24 @@ BEGIN
         ON dbo.AuthLoginAudit (AttemptedAt DESC);
 END;
 
+/* ── Admin action audit trail ───────────────────────────────── */
+/* Who did what to whom in the user-management screen. Separate from
+   AuthLoginAudit (which tracks login attempts only). */
+IF OBJECT_ID('dbo.AuthAdminAudit', 'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.AuthAdminAudit (
+        AuditId        BIGINT IDENTITY(1,1) PRIMARY KEY,
+        ActorUserId    INT           NULL,      -- who performed the action
+        ActorUsername  NVARCHAR(64)  NULL,
+        Action         NVARCHAR(40)  NOT NULL,  -- create_user / set_role / ...
+        TargetUsername NVARCHAR(64)  NULL,      -- account acted upon
+        Detail         NVARCHAR(400) NULL,      -- free-text context
+        CreatedAt      DATETIME2     NOT NULL DEFAULT SYSUTCDATETIME()
+    );
+    CREATE INDEX IX_AuthAdminAudit_CreatedAt
+        ON dbo.AuthAdminAudit (CreatedAt DESC);
+END;
+
 /* ================================================================
    SEED — roles, permissions, role↔permission map
    (all guarded with NOT EXISTS so re-running changes nothing)

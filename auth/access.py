@@ -86,17 +86,42 @@ def _load_user():
     access = request.cookies.get(ac.COOKIE_ACCESS)
     claims = tokens.decode(access, "access")
     if claims:
-        return claims, None
+        # The access token carries perms/role captured at login. Re-resolve them
+        # from the DB on each request so a role change or permission edit takes
+        # effect immediately — not only after the token's 60-min lifetime.
+        fresh, deny = _resolve_live(claims.get("sub"))
+        if deny:
+            return None, None            # account now missing/disabled/locked
+        return (fresh or claims), None   # fresh perms, or token fallback on DB error
 
     refresh = request.cookies.get(ac.COOKIE_REFRESH)
     rdata = tokens.decode(refresh, "refresh")
     if rdata:
-        user = store.get_user_by_id(rdata["sub"])
-        if user and user["is_active"] and not store.is_locked(user):
-            perms = store.get_permissions(user["role_id"])
-            fresh = tokens.user_claims(user, perms)
+        fresh, _deny = _resolve_live(rdata["sub"])
+        if fresh:
             return fresh, tokens.make_access(fresh)
     return None, None
+
+
+def _resolve_live(user_id):
+    """Build current claims straight from the DB for an authenticated user.
+
+    Returns ``(claims, deny)``:
+      * ``(claims, False)`` — account OK, claims reflect current role/perms.
+      * ``(None, True)``    — account missing/disabled/locked → deny access.
+      * ``(None, False)``   — DB error → caller falls back to token claims.
+    """
+    if user_id is None:
+        return None, True
+    try:
+        user = store.get_user_by_id(user_id)
+        if not user or not user["is_active"] or store.is_locked(user):
+            return None, True
+        perms = store.get_permissions(user["role_id"])
+        return tokens.user_claims(user, perms), False
+    except Exception as e:
+        logger.error("_resolve_live failed: %s", e)
+        return None, False
 
 
 def _deny(path: str, status: int):
