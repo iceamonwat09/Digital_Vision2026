@@ -88,7 +88,7 @@ def _generate_with_cryptography(dns_names, ip_addrs):
         x509.NameAttribute(NameOID.COMMON_NAME, "Thai Union Can Inspector"),
         x509.NameAttribute(NameOID.ORGANIZATION_NAME, "Digital Vision"),
     ])
-    now = datetime.datetime.utcnow()
+    now = datetime.datetime.now(datetime.timezone.utc)
     cert = (
         x509.CertificateBuilder()
         .subject_name(subject)
