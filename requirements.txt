@@ -17,6 +17,10 @@ pyodbc>=4.0.39           # SQL Server connection driver
 bcrypt>=4.1.0            # password hashing (salt อัตโนมัติ — ห้ามเก็บ plain text)
 PyJWT>=2.8.0            # access / refresh token (httpOnly cookie)
 
+# HTTPS self-signed cert generator (generate_cert.py) — จำเป็นสำหรับโหมด STREAM
+# (getUserMedia ต้องใช้ secure context). มี prebuilt wheel บน Windows ใช้ได้ทันที.
+cryptography>=41.0.0
+
 # Utilities
 Pillow==10.1.0
 pygrabber==0.2
