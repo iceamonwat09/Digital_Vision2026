@@ -14,13 +14,13 @@
 <body>
     <nav class="navbar">
         <div class="nav-container">
-            <div class="nav-brand">
+            <a class="nav-brand" href="/home">
                 <div class="brand-logo">TU</div>
                 <div class="brand-text">
                     <span class="brand-name">Thai Union</span>
                     <span class="brand-sub">ระบบตรวจสอบบรรจุภัณฑ์ <span class="brand-version">{{ config_version }}</span></span>
                 </div>
-            </div>
+            </a>
             {% set p = request.path %}
             <ul class="nav-menu">
                 {% if has_perm('run_live_detection') %}

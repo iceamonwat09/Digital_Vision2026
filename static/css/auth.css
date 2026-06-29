@@ -533,3 +533,39 @@ body.modal-open { overflow: hidden; }
     padding: 40px 16px !important;
     font-size: .92rem;
 }
+
+/* ── Landing page (post-login) menu tiles ───────────────────────────── */
+.home-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 18px;
+}
+.home-tile {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 22px 20px;
+    background: var(--white);
+    border: 1px solid var(--gray-200);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-sm);
+    text-decoration: none;
+    color: inherit;
+    transition: transform .14s, box-shadow .14s, border-color .14s;
+}
+.home-tile:hover {
+    transform: translateY(-3px);
+    box-shadow: var(--shadow-lg);
+    border-color: var(--blue-light);
+}
+.home-tile-icon { font-size: 1.9rem; line-height: 1; }
+.home-tile-title {
+    font-weight: 700;
+    font-size: 1.05rem;
+    color: var(--navy);
+}
+.home-tile-desc {
+    font-size: .86rem;
+    color: var(--gray-600);
+    line-height: 1.45;
+}

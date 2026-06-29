@@ -420,6 +420,14 @@ def generate_viewfinder():
 
 # ── Routes ─────────────────────────────────────────────
 
+@app.route('/home')
+def home():
+    """Neutral landing page shown right after login. Requires only a valid
+    session (no specific permission), then offers menu tiles filtered to the
+    user's permissions — so limited accounts are not bounced into a 403."""
+    return render_template('home.html')
+
+
 @app.route('/')
 def index():
     """Home page - Live detection view."""

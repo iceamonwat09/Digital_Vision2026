@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}หน้าแรก · Thai Union{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h2>ยินดีต้อนรับ{% if current_user %}, {{ current_user.username }}{% endif %}</h2>
+    <p class="muted">เลือกฟังก์ชันที่ต้องการใช้งานจากเมนูด้านล่าง —
+        แสดงเฉพาะรายการที่บัญชีของคุณมีสิทธิ์เข้าถึง</p>
+</div>
+
+<div class="home-grid">
+    {% if has_perm('run_live_detection') %}
+    <a class="home-tile" href="/">
+        <span class="home-tile-icon">🎥</span>
+        <span class="home-tile-title">ตรวจจับสด</span>
+        <span class="home-tile-desc">ตรวจจับรอยบุบกระป๋องแบบเรียลไทม์ผ่านกล้อง</span>
+    </a>
+    {% endif %}
+    {% if has_perm('inspect_label_paper') %}
+    <a class="home-tile" href="/label_paper">
+        <span class="home-tile-icon">📄</span>
+        <span class="home-tile-title">ตรวจฉลากกระดาษ</span>
+        <span class="home-tile-desc">เทียบสีฉลากกับต้นฉบับด้วยค่า ΔE2000</span>
+    </a>
+    {% endif %}
+    {% if has_perm('inspect_artwork') %}
+    <a class="home-tile" href="/artwork_check">
+        <span class="home-tile-icon">🖼️</span>
+        <span class="home-tile-title">ตรวจ Artwork</span>
+        <span class="home-tile-desc">ตรวจอาร์ตเวิร์กด้วย OCR และการเทียบ 4 ชั้น</span>
+    </a>
+    {% endif %}
+    {% if has_perm('view_dashboard') %}
+    <a class="home-tile" href="/dashboard">
+        <span class="home-tile-icon">📊</span>
+        <span class="home-tile-title">แดชบอร์ด</span>
+        <span class="home-tile-desc">สรุปภาพรวมผลการตรวจและสถิติ</span>
+    </a>
+    {% endif %}
+    {% if has_perm('view_history') %}
+    <a class="home-tile" href="/history">
+        <span class="home-tile-icon">🕑</span>
+        <span class="home-tile-title">ประวัติการตรวจ</span>
+        <span class="home-tile-desc">ดูบันทึกผลการตรวจย้อนหลัง</span>
+    </a>
+    {% endif %}
+    {% if has_perm('manage_users') %}
+    <a class="home-tile" href="/admin/users">
+        <span class="home-tile-icon">👥</span>
+        <span class="home-tile-title">จัดการผู้ใช้</span>
+        <span class="home-tile-desc">เพิ่ม/แก้ไขบัญชีและกำหนดสิทธิ์การใช้งาน</span>
+    </a>
+    {% endif %}
+</div>
+{% endblock %}

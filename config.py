@@ -7,7 +7,7 @@ import os
 
 # Bump this whenever a config default changes so a running deployment can
 # print it on startup and confirm it is actually executing the new code.
-CONFIG_VERSION = "2026.06.26-user-mgmt-ui"
+CONFIG_VERSION = "2026.06.29-landing-page"
 
 # ====================
 # CAMERA CONFIGURATION
