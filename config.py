@@ -184,7 +184,7 @@ FLASK_DEBUG = False
 # HTTPS หรือ localhost เท่านั้น. เปิด USE_HTTPS=True แล้วชี้ไปที่ไฟล์ cert/key
 # (สร้างได้ด้วย `python generate_cert.py`) เพื่อให้เข้าผ่าน https://<ip>:5000 ได้.
 # ค่า default = ปิด → app.run ทำงานเหมือนเดิมทุกประการ (ไม่กระทบของเดิม).
-USE_HTTPS = False
+USE_HTTPS = True
 SSL_CERT_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "certs", "cert.pem")
 SSL_KEY_FILE  = os.path.join(os.path.dirname(os.path.abspath(__file__)), "certs", "key.pem")
 
