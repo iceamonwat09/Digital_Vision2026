@@ -68,3 +68,6 @@ data/artwork_check/inspections/
 
 # Auth — JWT signing secret is generated per deployment, never commit it
 data/auth/
+
+# TLS certs for HTTPS (self-signed, generated per machine via generate_cert.py)
+certs/

@@ -48,6 +48,7 @@
                 <div class="src-tabs src-tabs-fill">
                     <button id="tabUsb"  class="src-tab src-tab-active" onclick="switchSource('usb')">กล้อง USB</button>
                     <button id="tabRtsp" class="src-tab" onclick="switchSource('rtsp')">กล้อง IP (RTSP)</button>
+                    <button id="tabStream" class="src-tab" onclick="switchSource('stream')">สตรีม</button>
                 </div>
 
                 <!-- USB panel -->
@@ -68,6 +69,17 @@
                                title="RTSP URL">
                         <button class="btn btn-icon" onclick="saveRtsp()" title="บันทึก URL">&#x1F4BE;</button>
                     </div>
+                </div>
+
+                <!-- STREAM panel (กล้องของเครื่องที่เปิดหน้านี้ ผ่านเบราว์เซอร์) -->
+                <div id="panelStream" class="camera-panel" style="display:none">
+                    <div class="camera-select-group">
+                        <select id="streamCameraSelect" class="camera-select" title="เลือกกล้องของเครื่องนี้" disabled>
+                            <option value="" disabled selected>กดรีเฟรชเพื่ออนุญาตกล้อง…</option>
+                        </select>
+                        <button id="refreshStreamCamsBtn" class="btn btn-icon" title="ขออนุญาต/รีเฟรชกล้อง">&#x1F504;</button>
+                    </div>
+                    <p class="control-hint" id="streamHint">ใช้กล้องของเครื่องที่เปิดหน้านี้ (ต้องเข้าผ่าน HTTPS หรือ localhost)</p>
                 </div>
             </section>
 
@@ -125,6 +137,8 @@
             <div class="snap-image-pane">
                 <!-- live viewfinder (raw camera, no detection) -->
                 <img id="snapViewfinder" alt="Viewfinder">
+                <!-- local browser-camera viewfinder (STREAM source only) -->
+                <video id="snapVideoLocal" autoplay playsinline muted style="display:none"></video>
                 <!-- captured result (shown after shutter) -->
                 <img id="snapImage" alt="Snapshot result" style="display:none">
             </div>
@@ -183,7 +197,8 @@
         flex: 1 1 560px; background: #0b1220; display: flex;
         align-items: center; justify-content: center; min-height: 320px;
     }
-    .snap-image-pane img { max-width: 100%; max-height: 70vh; display: block; }
+    .snap-image-pane img,
+    .snap-image-pane video { max-width: 100%; max-height: 70vh; display: block; }
     .snap-info-pane {
         flex: 1 1 260px; padding: 22px; display: flex; flex-direction: column; gap: 18px;
     }
@@ -223,17 +238,29 @@
     const modelSelect    = document.getElementById('modelSelect');
     const refreshModelsBtn = document.getElementById('refreshModelsBtn');
 
+    const streamCameraSelect   = document.getElementById('streamCameraSelect');
+    const refreshStreamCamsBtn = document.getElementById('refreshStreamCamsBtn');
+    const streamHint           = document.getElementById('streamHint');
+
     let statusCheckInterval = null;
-    let currentSource = 'usb';   // 'usb' | 'rtsp'
+    let currentSource = 'usb';   // 'usb' | 'rtsp' | 'stream'
     let currentMode  = null;     // populated from /api/modes
 
     // ── Source tab switching ──────────────────────────
     window.switchSource = function(src) {
         currentSource = src;
-        document.getElementById('panelUsb').style.display  = src === 'usb'  ? '' : 'none';
-        document.getElementById('panelRtsp').style.display = src === 'rtsp' ? '' : 'none';
-        document.getElementById('tabUsb').classList.toggle('src-tab-active',  src === 'usb');
-        document.getElementById('tabRtsp').classList.toggle('src-tab-active', src === 'rtsp');
+        document.getElementById('panelUsb').style.display    = src === 'usb'    ? '' : 'none';
+        document.getElementById('panelRtsp').style.display   = src === 'rtsp'   ? '' : 'none';
+        document.getElementById('panelStream').style.display = src === 'stream' ? '' : 'none';
+        document.getElementById('tabUsb').classList.toggle('src-tab-active',    src === 'usb');
+        document.getElementById('tabRtsp').classList.toggle('src-tab-active',   src === 'rtsp');
+        document.getElementById('tabStream').classList.toggle('src-tab-active', src === 'stream');
+        // Lazily enumerate browser cameras the first time STREAM is selected, so
+        // we never prompt for camera permission unless the user actually wants it.
+        if (src === 'stream' && streamCameraSelect.dataset.scanned !== '1') {
+            streamCameraSelect.dataset.scanned = '1';
+            scanStreamCameras();
+        }
     };
 
     window.saveRtsp = function() {
@@ -248,6 +275,173 @@
     // Restore saved RTSP URL
     const savedRtsp = localStorage.getItem('rtspUrl');
     if (savedRtsp) rtspUrlInput.value = savedRtsp;
+
+    // ── STREAM source (กล้องของเครื่อง Client ผ่าน getUserMedia) ─────────
+    // The browser captures from its own camera and PUSHES JPEG frames to the
+    // server (/api/stream/push), which feeds them to the virtual StreamCamera.
+    // The annotated result comes back via the same /video_feed MJPEG as USB/RTSP.
+    // These constants mirror config.py (STREAM_*).
+    const STREAM_PUSH_FPS      = 10;
+    const STREAM_JPEG_QUALITY  = 0.85;
+    const STREAM_MAX_WIDTH     = 960;
+    const STREAM_SNAP_QUALITY  = 0.95;
+    const STREAM_SNAP_MAX_WIDTH = 1920;
+
+    // Off-screen elements reused for both the live push loop and snapshot grab.
+    const streamVideoEl = document.createElement('video');
+    streamVideoEl.muted = true; streamVideoEl.playsInline = true; streamVideoEl.autoplay = true;
+    const streamCanvas  = document.createElement('canvas');
+
+    let streamLiveStream = null;   // MediaStream feeding the live push loop
+    let streamPushTimer  = null;
+    let streamPushInFlight = false;
+    let snapStreamStream = null;   // MediaStream for the snapshot viewfinder
+
+    function secureContextOk() {
+        return window.isSecureContext
+            || location.hostname === 'localhost'
+            || location.hostname === '127.0.0.1';
+    }
+
+    function hasGetUserMedia() {
+        return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+    }
+
+    // Enumerate the browser's cameras. Requires a one-time permission grant for
+    // the OS to reveal device labels.
+    function scanStreamCameras() {
+        if (!hasGetUserMedia()) {
+            streamCameraSelect.innerHTML = '<option value="" disabled selected>เบราว์เซอร์ไม่รองรับ</option>';
+            return;
+        }
+        if (!secureContextOk()) {
+            streamCameraSelect.innerHTML = '<option value="" disabled selected>ต้องใช้ HTTPS</option>';
+            streamHint.innerHTML = '⚠️ กล้องเครื่องนี้ใช้ได้เฉพาะผ่าน <b>HTTPS</b> หรือ localhost — ดูวิธีตั้งค่าใน generate_cert.py';
+            return;
+        }
+        streamCameraSelect.disabled = true;
+        streamCameraSelect.innerHTML = '<option value="" disabled selected>กำลังขออนุญาต…</option>';
+        refreshStreamCamsBtn.disabled = true;
+        navigator.mediaDevices.getUserMedia({ video: true, audio: false })
+            .then(stream => {
+                stream.getTracks().forEach(t => t.stop());  // release immediately
+                return navigator.mediaDevices.enumerateDevices();
+            })
+            .then(devices => {
+                const cams = devices.filter(d => d.kind === 'videoinput');
+                streamCameraSelect.innerHTML = '';
+                if (!cams.length) {
+                    streamCameraSelect.innerHTML = '<option value="" disabled selected>ไม่พบกล้อง</option>';
+                    return;
+                }
+                cams.forEach((c, i) => {
+                    const opt = document.createElement('option');
+                    opt.value = c.deviceId;
+                    opt.textContent = c.label || ('กล้อง ' + (i + 1));
+                    streamCameraSelect.appendChild(opt);
+                });
+                streamCameraSelect.disabled = false;
+            })
+            .catch(err => {
+                console.error('Stream enumerate error:', err);
+                streamCameraSelect.innerHTML = '<option value="" disabled selected>ไม่ได้รับอนุญาตกล้อง</option>';
+            })
+            .finally(() => { refreshStreamCamsBtn.disabled = false; });
+    }
+    refreshStreamCamsBtn.addEventListener('click', scanStreamCameras);
+
+    // Draw the current video frame onto the shared canvas, downscaled to maxW.
+    // Returns false if the video has no frame yet.
+    function drawVideoToCanvas(video, canvas, maxW) {
+        const vw = video.videoWidth, vh = video.videoHeight;
+        if (!vw || !vh) return false;
+        const scale = vw > maxW ? maxW / vw : 1;
+        canvas.width  = Math.round(vw * scale);
+        canvas.height = Math.round(vh * scale);
+        canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+        return true;
+    }
+
+    function startStreamLive() {
+        const deviceId = streamCameraSelect.value;
+        const constraints = {
+            video: deviceId ? { deviceId: { exact: deviceId } } : true,
+            audio: false
+        };
+        return navigator.mediaDevices.getUserMedia(constraints).then(stream => {
+            streamLiveStream = stream;
+            streamVideoEl.srcObject = stream;
+            return streamVideoEl.play();
+        });
+    }
+
+    function startStreamPush() {
+        stopStreamPush();
+        streamPushTimer = setInterval(() => {
+            if (streamPushInFlight) return;
+            if (!drawVideoToCanvas(streamVideoEl, streamCanvas, STREAM_MAX_WIDTH)) return;
+            streamPushInFlight = true;
+            streamCanvas.toBlob(blob => {
+                if (!blob) { streamPushInFlight = false; return; }
+                fetch('/api/stream/push', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'image/jpeg' },
+                    body: blob
+                }).catch(() => {}).finally(() => { streamPushInFlight = false; });
+            }, 'image/jpeg', STREAM_JPEG_QUALITY);
+        }, Math.round(1000 / STREAM_PUSH_FPS));
+    }
+
+    function stopStreamPush() {
+        if (streamPushTimer) { clearInterval(streamPushTimer); streamPushTimer = null; }
+        streamPushInFlight = false;
+    }
+
+    function stopStreamLive() {
+        stopStreamPush();
+        if (streamLiveStream) {
+            streamLiveStream.getTracks().forEach(t => t.stop());
+            streamLiveStream = null;
+        }
+        streamVideoEl.srcObject = null;
+    }
+
+    // Start live detection in STREAM mode: open the browser camera, tell the
+    // server to use the virtual camera, then begin pushing frames.
+    function startStreamDetection() {
+        if (!hasGetUserMedia() || !secureContextOk()) {
+            alert('โหมดสตรีมต้องเข้าผ่าน HTTPS หรือ localhost จึงจะเข้าถึงกล้องของเครื่องนี้ได้');
+            return;
+        }
+        startBtn.disabled = true;
+        detectionStatus.textContent = 'Starting camera...';
+        startStreamLive()
+            .then(() => fetch('/api/detection/start', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ camera_index: 'stream' })
+            }))
+            .then(r => r.json())
+            .then(data => {
+                if (data.status === 'error') {
+                    alert(data.message);
+                    stopStreamLive();
+                    startBtn.disabled = false;
+                    detectionStatus.textContent = 'Ready';
+                    return;
+                }
+                startStreamPush();
+                updateStatus();
+                if (!statusCheckInterval) statusCheckInterval = setInterval(updateStatus, 1000);
+            })
+            .catch(err => {
+                console.error('Stream start error:', err);
+                alert('เปิดกล้องเครื่องนี้ไม่สำเร็จ: ' + (err && err.message ? err.message : err));
+                stopStreamLive();
+                startBtn.disabled = false;
+                detectionStatus.textContent = 'Ready';
+            });
+    }
 
     // ── Camera scanning (USB only) ────────────────────
     function scanCameras() {
@@ -292,6 +486,12 @@
                 cameraSelect.disabled      = isActive;
                 refreshCamerasBtn.disabled = isActive;
                 rtspUrlInput.disabled      = isActive;
+                streamCameraSelect.disabled   = isActive || streamCameraSelect.options.length === 0
+                                                || streamCameraSelect.options[0].disabled;
+                refreshStreamCamsBtn.disabled = isActive;
+                // Safety net: if the server stopped detection while we still hold
+                // the browser camera open (e.g. error/restart), release it.
+                if (!isActive && streamLiveStream) stopStreamLive();
                 modelSelect.disabled       = isActive || modelSelect.options.length === 0;
                 refreshModelsBtn.disabled  = isActive;
                 Array.from(modeTabs.children).forEach(b => b.disabled = isActive);
@@ -312,6 +512,9 @@
 
     // ── Start ─────────────────────────────────────────
     startBtn.addEventListener('click', () => {
+        // STREAM source has its own async open-camera-then-start path.
+        if (currentSource === 'stream') { startStreamDetection(); return; }
+
         let cameraIndex;
 
         if (currentSource === 'usb') {
@@ -357,6 +560,8 @@
 
     // ── Stop ──────────────────────────────────────────
     stopBtn.addEventListener('click', () => {
+        // Tear down the browser camera too (no-op for USB/RTSP).
+        stopStreamLive();
         fetch('/api/detection/stop', { method: 'POST' })
             .then(r => r.json())
             .then(() => updateStatus())
@@ -477,18 +682,112 @@
         return url || null;
     }
 
+    const snapVideoLocal = document.getElementById('snapVideoLocal');
+
     // Toggle the overlay between "aim" (live viewfinder) and "result" states.
+    // In STREAM mode the viewfinder is the local <video> (browser camera);
+    // otherwise it's the server MJPEG <img> exactly as before.
     function showLiveState() {
         snapImage.style.display = 'none';
-        snapViewfinder.style.display = '';
+        if (currentSource === 'stream') {
+            snapViewfinder.style.display = 'none';
+            snapVideoLocal.style.display = '';
+        } else {
+            snapVideoLocal.style.display = 'none';
+            snapViewfinder.style.display = '';
+        }
         snapResultPanel.style.display = 'none';
         snapLivePanel.style.display = 'flex';
     }
     function showResultState() {
         snapViewfinder.style.display = 'none';
+        snapVideoLocal.style.display = 'none';
         snapImage.style.display = '';
         snapLivePanel.style.display = 'none';
         snapResultPanel.style.display = 'flex';
+    }
+
+    // Map the quality preset to getUserMedia resolution constraints (STREAM mode).
+    function streamSnapConstraints(quality) {
+        const deviceId = streamCameraSelect.value;
+        const sizes = {
+            smooth:   { width: { ideal: 1280 }, height: { ideal: 720 } },
+            balanced: { width: { ideal: 1920 }, height: { ideal: 1080 } },
+            sharp:    { width: { ideal: 2592 }, height: { ideal: 1944 } },
+        };
+        const video = Object.assign({}, sizes[quality] || sizes.smooth);
+        if (deviceId) video.deviceId = { exact: deviceId };
+        return { video: video, audio: false };
+    }
+
+    function stopSnapStream() {
+        if (snapStreamStream) {
+            snapStreamStream.getTracks().forEach(t => t.stop());
+            snapStreamStream = null;
+        }
+        snapVideoLocal.srcObject = null;
+    }
+
+    // Open snapshot in STREAM mode: show the local browser camera as viewfinder.
+    function openSnapshotStream() {
+        if (!hasGetUserMedia() || !secureContextOk()) {
+            alert('โหมดสตรีมต้องเข้าผ่าน HTTPS หรือ localhost จึงจะถ่ายรูปจากกล้องเครื่องนี้ได้');
+            return;
+        }
+        snapBtn.disabled = true;
+        stopSnapStream();
+        navigator.mediaDevices.getUserMedia(streamSnapConstraints(snapQuality.value))
+            .then(stream => {
+                snapStreamStream = stream;
+                snapVideoLocal.srcObject = stream;
+                return snapVideoLocal.play();
+            })
+            .then(() => {
+                showLiveState();
+                snapOverlay.style.display = 'flex';
+            })
+            .catch(err => {
+                console.error('Stream viewfinder error:', err);
+                alert('เปิดกล้องไม่สำเร็จ: ' + (err && err.message ? err.message : err));
+            })
+            .finally(() => { snapBtn.disabled = false; });
+    }
+
+    // Capture one high-res still from the browser camera and send it to the
+    // server for detection (STREAM mode).
+    function pressShutterStream() {
+        snapShutter.disabled = true;
+        snapShutter.textContent = '⏳ กำลังถ่าย…';
+        if (!drawVideoToCanvas(snapVideoLocal, streamCanvas, STREAM_SNAP_MAX_WIDTH)) {
+            alert('ภาพจากกล้องยังไม่พร้อม ลองอีกครั้ง');
+            snapShutter.disabled = false; snapShutter.textContent = '📸 ถ่าย';
+            return;
+        }
+        streamCanvas.toBlob(blob => {
+            if (!blob) {
+                alert('จับภาพไม่สำเร็จ');
+                snapShutter.disabled = false; snapShutter.textContent = '📸 ถ่าย';
+                return;
+            }
+            fetch('/api/stream/snapshot', {
+                method: 'POST', headers: { 'Content-Type': 'image/jpeg' }, body: blob
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.status !== 'ok') { alert(data.message || 'ถ่ายรูปไม่สำเร็จ'); return; }
+                snapImage.src = data.image;
+                snapVerdict.className = 'snap-verdict ' + data.verdict;
+                snapVerdict.textContent = data.verdict === 'ng' ? 'NG' : 'OK';
+                snapDents.textContent = data.dent_count;
+                snapConf.textContent  = data.dent_count > 0 ? data.max_confidence : '—';
+                snapTime.textContent  = data.timestamp;
+                snapRes.textContent   = data.capture_size || '—';
+                snapLine.textContent  = data.line + ' / ' + data.plant;
+                showResultState();
+            })
+            .catch(err => { console.error('Stream snapshot error:', err); alert('ถ่ายรูปไม่สำเร็จ'); })
+            .finally(() => { snapShutter.disabled = false; snapShutter.textContent = '📸 ถ่าย'; });
+        }, 'image/jpeg', STREAM_SNAP_QUALITY);
     }
 
     // Open snapshot mode: start the raw viewfinder so the operator can aim.
@@ -497,6 +796,7 @@
             alert('กรุณากด Stop Detection ก่อน แล้วจึงถ่ายรูปตรวจ');
             return;
         }
+        if (currentSource === 'stream') { openSnapshotStream(); return; }
         const cameraIndex = resolveCameraIndex();
         if (cameraIndex === null) {
             alert('กรุณาเลือกกล้อง/ใส่ RTSP URL ก่อนถ่ายรูป');
@@ -526,23 +826,30 @@
     snapQuality.addEventListener('change', () => {
         localStorage.setItem('snapQuality', snapQuality.value);
         if (snapOverlay.style.display !== 'none' && snapLivePanel.style.display !== 'none') {
-            // Re-open at the new quality (switching to a lower mode is quick).
-            snapViewfinder.removeAttribute('src');
-            fetch('/api/viewfinder/stop', { method: 'POST' })
-                .catch(() => {})
-                .finally(openSnapshot);
+            // Re-open the viewfinder at the new quality.
+            if (currentSource === 'stream') {
+                stopSnapStream();
+                openSnapshot();
+            } else {
+                snapViewfinder.removeAttribute('src');
+                fetch('/api/viewfinder/stop', { method: 'POST' })
+                    .catch(() => {})
+                    .finally(openSnapshot);
+            }
         }
     });
 
     // Close snapshot mode: drop the MJPEG connection + release the camera.
     function closeSnapshot() {
         snapOverlay.style.display = 'none';
+        if (currentSource === 'stream') { stopSnapStream(); return; }
         snapViewfinder.removeAttribute('src');
         fetch('/api/viewfinder/stop', { method: 'POST' }).catch(() => {});
     }
 
     // Shutter: run the model once on the newest viewfinder frame.
     function pressShutter() {
+        if (currentSource === 'stream') { pressShutterStream(); return; }
         snapShutter.disabled = true;
         snapShutter.textContent = '⏳ กำลังถ่าย…';   // viewfinder ค้างชั่วครู่ขณะสลับเป็น 5MP
         fetch('/api/snapshot', {

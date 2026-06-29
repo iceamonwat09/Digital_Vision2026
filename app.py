@@ -16,7 +16,7 @@ from werkzeug.serving import WSGIRequestHandler
 
 import config
 from logger import setup_logger
-from camera import Camera, scan_cameras_fast
+from camera import Camera, StreamCamera, scan_cameras_fast
 from yolo_detector import YOLODetector
 from database import Database
 from modes import registry as mode_registry
@@ -511,21 +511,27 @@ def start_detection():
     else:
         camera_index = camera_index_raw  # RTSP URL string
 
-    # Initialize camera on demand
-    camera = Camera(camera_index=camera_index)
-    if not camera.initialize():
-        available = scan_cameras_fast()
-        hint = ""
-        if available:
-            ids = [c["id"] for c in available]
-            hint = f" Available indices: {ids}. Try one of these."
-        else:
-            hint = " No cameras found — check connection and drivers."
-        return jsonify({
-            "status": "error",
-            "message": f"Cannot open camera {camera_index}.{hint}",
-            "available_cameras": available
-        }), 500
+    # Initialize camera on demand. The STREAM sentinel uses a virtual camera fed
+    # by frames pushed from the browser (/api/stream/push); everything else opens
+    # a real USB/RTSP camera exactly as before.
+    if camera_index == config.STREAM_SOURCE_SENTINEL:
+        camera = StreamCamera(camera_index=camera_index)
+        camera.initialize()  # never fails — just arms the push buffer
+    else:
+        camera = Camera(camera_index=camera_index)
+        if not camera.initialize():
+            available = scan_cameras_fast()
+            hint = ""
+            if available:
+                ids = [c["id"] for c in available]
+                hint = f" Available indices: {ids}. Try one of these."
+            else:
+                hint = " No cameras found — check connection and drivers."
+            return jsonify({
+                "status": "error",
+                "message": f"Cannot open camera {camera_index}.{hint}",
+                "available_cameras": available
+            }), 500
 
     # Reset shared frame/detection state from any previous session
     with raw_lock:
@@ -576,6 +582,24 @@ def stop_detection():
 
     logger.info("Detection stopped")
     return jsonify({"status": "stopped", "message": "Detection stopped successfully"})
+
+
+@app.route('/api/stream/push', methods=['POST'])
+def api_stream_push():
+    """
+    Receive ONE JPEG frame (raw request body) pushed from the browser camera and
+    feed it to the virtual StreamCamera. No-op unless live detection is currently
+    running on a StreamCamera, so it can never interfere with USB/RTSP sessions.
+    """
+    cam = camera  # snapshot the global once
+    if not detection_active or not isinstance(cam, StreamCamera):
+        return jsonify({"status": "ignored", "message": "stream source not active"}), 409
+    data = request.get_data()
+    if not data:
+        return jsonify({"status": "error", "message": "empty frame"}), 400
+    if not cam.push_jpeg(data):
+        return jsonify({"status": "error", "message": "decode failed"}), 400
+    return jsonify({"status": "ok"})
 
 
 @app.route('/api/detection/status', methods=['GET'])
@@ -853,6 +877,60 @@ def api_snapshot():
         return jsonify({"status": "error", "message": f"ถ่ายรูปไม่สำเร็จ: {e}"}), 500
 
 
+@app.route('/api/stream/snapshot', methods=['POST'])
+def api_stream_snapshot():
+    """
+    Run the model on a single high-res JPEG captured by the BROWSER camera (the
+    STREAM source) and return the same JSON shape as /api/snapshot. The image
+    arrives in the raw request body instead of from a server-side viewfinder, so
+    the original /api/snapshot + viewfinder path stays completely untouched.
+    """
+    if detector is None or detector.model is None:
+        return jsonify({"status": "error", "message": "ยังไม่ได้โหลดโมเดล"}), 400
+
+    data = request.get_data()
+    if not data:
+        return jsonify({"status": "error", "message": "ไม่พบภาพที่ส่งมา"}), 400
+
+    try:
+        arr = np.frombuffer(data, dtype=np.uint8)
+        frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+        if frame is None:
+            return jsonify({"status": "error", "message": "ถอดรหัสภาพไม่สำเร็จ"}), 400
+
+        # Same detection path as /api/snapshot: detect on the full frame, then
+        # downscale for a lightweight annotated preview.
+        detections = detector.detect(frame, imgsz=config.SNAPSHOT_IMGSZ)
+
+        dents = [d for d in detections if d["class_name"] not in _NON_DEFECT_CLASSES]
+        verdict = "ng" if dents else "ok"
+        max_conf = max((d["confidence"] for d in dents), default=0.0)
+
+        disp_frame, disp_dets = _scale_for_display(frame, detections, _SNAPSHOT_DISPLAY_MAX_W)
+        annotated = detector.draw_detections(disp_frame, disp_dets)
+
+        ret, buffer = cv2.imencode('.jpg', annotated, _JPEG_PARAMS)
+        if not ret:
+            return jsonify({"status": "error", "message": "เข้ารหัสภาพไม่สำเร็จ"}), 500
+        image_b64 = "data:image/jpeg;base64," + base64.b64encode(buffer.tobytes()).decode("ascii")
+
+        cap_h, cap_w = frame.shape[:2]
+        return jsonify({
+            "status": "ok",
+            "image": image_b64,
+            "verdict": verdict,
+            "dent_count": len(dents),
+            "max_confidence": round(max_conf, 2),
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "line": config.LINE_NUMBER,
+            "plant": config.PLANT_CODE,
+            "capture_size": f"{cap_w}x{cap_h}",
+        })
+    except Exception as e:
+        logger.error(f"Stream snapshot failed: {e}", exc_info=True)
+        return jsonify({"status": "error", "message": f"ถ่ายรูปไม่สำเร็จ: {e}"}), 500
+
+
 @app.route('/api/stats', methods=['GET'])
 def get_stats():
     """Get defect detection statistics from database."""
@@ -1109,13 +1187,30 @@ if __name__ == '__main__':
     print(f"  N8N_OCR_WEBHOOK_URL : {config.N8N_OCR_WEBHOOK_URL}")
     print("=" * 64)
 
+    # HTTPS is opt-in (config.USE_HTTPS). It is required for the browser STREAM
+    # source — getUserMedia only works over a secure context (HTTPS or localhost).
+    # When off (default) the server starts over plain HTTP exactly as before.
+    ssl_context = None
+    scheme = "http"
+    if getattr(config, "USE_HTTPS", False):
+        if os.path.exists(config.SSL_CERT_FILE) and os.path.exists(config.SSL_KEY_FILE):
+            ssl_context = (config.SSL_CERT_FILE, config.SSL_KEY_FILE)
+            scheme = "https"
+        else:
+            logger.warning(
+                "USE_HTTPS=True but cert/key not found "
+                f"({config.SSL_CERT_FILE}, {config.SSL_KEY_FILE}). "
+                "Run `python generate_cert.py` first. Falling back to HTTP."
+            )
+
     try:
-        logger.info(f"Starting Flask server at http://{config.FLASK_HOST}:{config.FLASK_PORT}")
+        logger.info(f"Starting Flask server at {scheme}://{config.FLASK_HOST}:{config.FLASK_PORT}")
         app.run(
             host=config.FLASK_HOST,
             port=config.FLASK_PORT,
             debug=config.FLASK_DEBUG,
-            threaded=True
+            threaded=True,
+            ssl_context=ssl_context
         )
     except KeyboardInterrupt:
         logger.info("Shutting down...")
