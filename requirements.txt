@@ -21,6 +21,11 @@ PyJWT>=2.8.0            # access / refresh token (httpOnly cookie)
 # (getUserMedia ต้องใช้ secure context). มี prebuilt wheel บน Windows ใช้ได้ทันที.
 cryptography>=41.0.0
 
+# Production-ish WSGI server (run_server.py) — แก้อาการ Flask dev server ค้าง/
+# timeout เมื่อมี HTTPS + การสตรีม MJPEG ค้างหลาย connection พร้อมกัน. gevent
+# รองรับ connection ค้างจำนวนมากในโปรเซสเดียว + ทำ TLS ได้เสถียร.
+gevent>=23.9.0
+
 # Utilities
 Pillow==10.1.0
 pygrabber==0.2

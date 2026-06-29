@@ -105,7 +105,9 @@
         <!-- ── จอภาพ + สถิติ (ขวา) ──────────────────────────── -->
         <div class="live-main">
             <div class="video-wrapper-compact video-stage">
-                <img id="videoStream" src="{{ url_for('video_feed') }}" alt="Video Stream">
+                <!-- src is attached only while detection is active (see updateStatus),
+                     so an idle/parked tab holds ZERO long-lived MJPEG connections. -->
+                <img id="videoStream" alt="Video Stream">
             </div>
 
             <div class="stats-row">
@@ -237,6 +239,7 @@
     const modeTabs       = document.getElementById('modeTabs');
     const modelSelect    = document.getElementById('modelSelect');
     const refreshModelsBtn = document.getElementById('refreshModelsBtn');
+    const videoStream    = document.getElementById('videoStream');
 
     const streamCameraSelect   = document.getElementById('streamCameraSelect');
     const refreshStreamCamsBtn = document.getElementById('refreshStreamCamsBtn');
@@ -481,6 +484,15 @@
                 const isActive = data.active;
                 statusDot.className = 'status-dot ' + (isActive ? 'status-active' : 'status-inactive');
                 statusText.textContent = isActive ? 'Active' : 'Inactive';
+
+                // Attach the MJPEG stream only while detection runs, and drop the
+                // connection the moment it stops — so parked tabs never hold an
+                // open /video_feed (the main cause of dev-server connection pileup).
+                if (isActive && !videoStream.getAttribute('src')) {
+                    videoStream.src = '/video_feed?t=' + Date.now();
+                } else if (!isActive && videoStream.getAttribute('src')) {
+                    videoStream.removeAttribute('src');
+                }
                 startBtn.disabled  = isActive;
                 stopBtn.disabled   = !isActive;
                 cameraSelect.disabled      = isActive;
