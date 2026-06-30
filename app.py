@@ -983,10 +983,15 @@ def api_stream_infer():
         return jsonify({"status": "error", "message": "empty frame"}), 400
 
     try:
+        # ── Server-side timing (diagnostics) ───────────────────────────────
+        # Measure each stage so we can see where a frame spends its time —
+        # decode vs inference — without changing any detection behaviour.
+        _t0 = time.perf_counter()
         arr = np.frombuffer(data, dtype=np.uint8)
         frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
         if frame is None:
             return jsonify({"status": "error", "message": "decode failed"}), 400
+        _t_decoded = time.perf_counter()
 
         # Live STREAM favours speed (responsive boxes) over the highest accuracy.
         imgsz = getattr(config, "STREAM_INFER_IMGSZ", None)
@@ -998,6 +1003,7 @@ def api_stream_infer():
             detections = gevent.get_hub().threadpool.apply(_stream_detect, (frame, imgsz))
         else:
             detections = _stream_detect(frame, imgsz)
+        _t_infer = time.perf_counter()
 
         palette, names = {}, {}
         try:
@@ -1028,6 +1034,16 @@ def api_stream_infer():
             "dent_count": len(dents),
             "max_confidence": round(max((d["confidence"] for d in dents), default=0.0), 2),
             "detections": out,
+            # Stage timings (ms) for client-side diagnostics. Pure measurement —
+            # does not affect detection. The client subtracts `total` from the
+            # round-trip to estimate network time.
+            "srv_ms": {
+                "decode": round((_t_decoded - _t0) * 1000, 1),
+                "infer": round((_t_infer - _t_decoded) * 1000, 1),
+                "total": round((time.perf_counter() - _t0) * 1000, 1),
+                "imgsz": imgsz,
+                "bytes": len(data),
+            },
         })
     except Exception as e:
         logger.error(f"Stream infer failed: {e}", exc_info=True)

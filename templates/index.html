@@ -235,8 +235,9 @@
     #streamStats {
         position: absolute; left: 10px; top: 10px; z-index: 2;
         background: rgba(15, 23, 42, .65); color: #e2e8f0;
-        font: 600 12px/1.4 ui-monospace, monospace;
+        font: 600 11px/1.4 ui-monospace, monospace;
         padding: 4px 8px; border-radius: 6px; pointer-events: none;
+        white-space: nowrap; max-width: calc(100% - 20px); overflow: hidden;
     }
 </style>
 {% endblock %}
@@ -475,6 +476,8 @@
         streamCanvas.toBlob(blob => {
             if (!streamLiveActive) return;
             if (!blob) { reschedule(); return; }
+            const tEncoded = performance.now();   // JPEG encode (toBlob) finished
+            const blobKB   = Math.round(blob.size / 1024);
             fetch('/api/stream/infer', {
                 method: 'POST', headers: { 'Content-Type': 'image/jpeg' }, body: blob
             })
@@ -510,15 +513,34 @@
                 detectionStatus.textContent =
                     raw === 'ng' ? 'NG' : (raw === 'ok' ? 'OK' : 'Detecting...');
 
-                // Effective FPS (smoothed) + round-trip latency for this client.
+                // ── Per-stage timing breakdown (diagnostics) ───────────────
+                // Splits one frame's time so we can see the bottleneck:
+                //   enc   = JPEG encode in this browser (toBlob)
+                //   net   = network up+down  (round-trip − server total)
+                //   dec   = server JPEG decode
+                //   infer = server YOLO inference  ← usually the big one on CPU
                 const now = performance.now();
-                const latency = Math.round(now - t0);
+                const totalMs  = Math.round(now - t0);          // capture → boxes drawn
+                const encMs    = Math.round(tEncoded - t0);     // encode only
+                const tripMs   = Math.round(now - tEncoded);    // sent → response (net+server)
+                const srv      = data.srv_ms || {};
+                const srvTotal = (srv.total != null) ? srv.total : null;
+                const netMs    = (srvTotal != null) ? Math.max(0, Math.round(tripMs - srvTotal)) : null;
+
                 if (streamLastDoneTs) {
                     const inst = 1000 / (now - streamLastDoneTs);
                     streamFps = streamFps ? (streamFps * 0.7 + inst * 0.3) : inst;
                 }
                 streamLastDoneTs = now;
-                streamStats.textContent = 'FPS ' + streamFps.toFixed(1) + ' · ' + latency + ' ms';
+
+                // Compact badge: FPS · size · enc/net/decode/infer/total (ms)
+                streamStats.textContent =
+                    'FPS ' + streamFps.toFixed(1) + ' · ' + blobKB + 'KB · ' +
+                    'enc ' + encMs +
+                    ' / net ' + (netMs != null ? netMs : '?') +
+                    ' / dec ' + (srv.decode != null ? srv.decode : '?') +
+                    ' / inf ' + (srv.infer  != null ? srv.infer  : '?') +
+                    ' / tot ' + totalMs + 'ms';
             })
             .catch(() => {})
             .finally(reschedule);
