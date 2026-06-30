@@ -142,8 +142,14 @@ def main():
         opset = getattr(config, "ONNX_OPSET", None) if config else None
         if opset:
             export_kwargs["opset"] = int(opset)
+        # Mirror the app's resilient export: simplify=True (needs onnxslim) then
+        # fall back to simplify=False so the verification matches what the app does.
         try:
-            YOLO(pt_path).export(**export_kwargs)
+            try:
+                YOLO(pt_path).export(simplify=True, **export_kwargs)
+            except Exception as e_simpl:
+                print(f"[WARN] export simplify=True ล้มเหลว ({e_simpl}); ลองใหม่แบบ simplify=False")
+                YOLO(pt_path).export(simplify=False, **export_kwargs)
         except Exception as e:
             print(f"[ERROR] export ONNX ล้มเหลว: {e}")
             print("        ตรวจว่าได้ติดตั้ง: py -3.9 -m pip install onnxruntime==1.19.2 onnxslim onnx")

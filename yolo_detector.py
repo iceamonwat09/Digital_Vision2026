@@ -214,7 +214,15 @@ class YOLODetector:
                 opset = getattr(config, "ONNX_OPSET", None)
                 if opset:
                     export_kwargs["opset"] = int(opset)
-                YOLO(pt_path).export(**export_kwargs)
+                # ultralytics defaults simplify=True (needs onnxslim). Try it for the
+                # leaner graph, but fall back to simplify=False so a missing/flaky
+                # onnxslim never costs us the ONNX export entirely.
+                try:
+                    YOLO(pt_path).export(simplify=True, **export_kwargs)
+                except Exception as e_simpl:
+                    logger.warning(f"ONNX export with simplify failed ({e_simpl}); "
+                                   "retrying without simplify.")
+                    YOLO(pt_path).export(simplify=False, **export_kwargs)
             if os.path.exists(onnx_path):
                 return onnx_path
             logger.warning("ONNX export produced no file; using PyTorch.")

@@ -12,13 +12,18 @@ numpy>=1.26.0
 # ── ONNX Runtime acceleration (เร่ง inference บน CPU โดยคงความแม่น FP32) ──
 # ทางที่ปลอดภัย/แนะนำสำหรับเครื่องสถานี (Windows + Python 3.9): เปิด config.USE_ONNX=True
 # แล้วระบบ export .pt → .onnx ครั้งเดียวและรันผ่าน onnxruntime (~2 เท่าของ PyTorch CPU).
-# ⚠️ Python 3.9 บน Windows: wheel ตัวสุดท้ายที่รองรับคือ onnxruntime==1.19.2
-#    (เวอร์ชัน 1.20+ ตัด Python 3.9 ทิ้ง). ติดตั้งบน interpreter เดียวกับที่รัน:
-#        py -3.9 -m pip install onnxruntime==1.19.2 onnxslim onnx
-# fallback: ถ้าไม่ติดตั้ง/export/load/smoke-test ล้มเหลว → ใช้ PyTorch อัตโนมัติ.
+# ⚠️ Python 3.9 บน Windows (ตรวจสอบกับ PyPI แล้ว):
+#   • onnxruntime==1.19.2 = wheel ตัวสุดท้ายที่มี cp39-win_amd64 (1.20+ ตัด py3.9 ทิ้ง)
+#   • onnx: ตัวล่าสุด (1.22) ต้องการ Python ≥3.10 — แต่ pip จะเลือกตัวสุดท้ายที่มี cp39
+#     ให้เองอัตโนมัติ (~1.16/1.17) เพราะเคารพ Requires-Python จึงไม่ต้อง pin
+#   • onnxslim (pure-python, py3.8+) — ultralytics ตั้ง simplify=True เป็น default จึง
+#     "ควรติดตั้ง"; โค้ดมี fallback retry แบบ simplify=False ถ้า onnxslim มีปัญหา
+# ติดตั้งบน interpreter เดียวกับที่รัน:
+#     py -3.9 -m pip install onnxruntime==1.19.2 onnxslim onnx
+# fallback หลายชั้น: ถ้าไม่ติดตั้ง/export/load/smoke-test ล้มเหลว → ใช้ PyTorch อัตโนมัติ.
 onnx>=1.15.0
 # onnxruntime==1.19.2     # << ติดตั้งแยกตามเวอร์ชัน Python ของเครื่อง (ดูหมายเหตุด้านบน)
-# onnxslim                # ออปชัน — ช่วยลดขนาดกราฟ ONNX ตอน export
+# onnxslim                # << แนะนำให้ติดตั้ง (ultralytics simplify=True เป็น default)
 
 # OpenVINO acceleration (ทางเลือก — ปิดเป็นค่าเริ่มต้น, ดู config.USE_OPENVINO)
 # ⚠️ บนสถานีนี้ (Python 3.9) ใช้ไม่ได้: OpenVINO 2025 + onnxruntime-openvino ต้องการ
