@@ -46,7 +46,12 @@ except ModuleNotFoundError:
         "Tip: a bare `pip install` may target a DIFFERENT Python than `py -3.9`.\n\n"
     )
     sys.exit(1)
-monkey.patch_all(thread=False)
+# thread=False  → camera/inference stay on real OS threads (OpenCV won't stall the hub).
+# queue=False   → leave queue.SimpleQueue native, so the ThreadPoolExecutor that
+#                 ultralytics/OpenVINO use while loading the model doesn't hit
+#                 "LoopExit: would block forever". OpenVINO inference itself runs
+#                 synchronously (LATENCY mode) and never touches the gevent hub.
+monkey.patch_all(thread=False, queue=False)
 
 import os
 
