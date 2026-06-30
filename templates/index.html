@@ -312,6 +312,7 @@
     const STREAM_INFER_FPS     = 10;    // how often this client asks the server to detect
     const STREAM_JPEG_QUALITY  = 0.92;  // higher = cleaner image → tighter boxes / higher conf
     const STREAM_MAX_WIDTH     = 640;   // model uses imgsz 480 → 640 is the sweet spot
+    const STREAM_RESET_FRAMES  = 3;     // consecutive "empty" frames before the can counts as gone
     const STREAM_SNAP_QUALITY  = 0.95;
     const STREAM_SNAP_MAX_WIDTH = 1920;
 
@@ -323,7 +324,11 @@
     let streamLiveStream = null;   // MediaStream of the browser camera (live)
     let streamInferTimer = null;
     let streamLiveActive = false;  // true while this client is running STREAM detection
-    let streamTotalDetected = 0;
+    let streamTotalDetected = 0;   // count of NG cans, ONE per can (edge-triggered)
+    // Per-can state machine so one physical can = one inspection (not per frame).
+    let streamCanPresent = false;      // is a can currently in view?
+    let streamCanCountedNG = false;    // already counted THIS can as NG?
+    let streamEmptyStreak = 0;         // consecutive frames with nothing detected
     let streamFps = 0;             // smoothed effective inference FPS
     let streamLastDoneTs = 0;      // perf timestamp of the previous completed infer
     let snapStreamStream = null;   // MediaStream for the snapshot viewfinder
@@ -416,7 +421,12 @@
         const lw = Math.max(2, Math.round(dispW / 320));   // box thickness scaled to display
         const fs = Math.max(12, Math.round(dispW / 52));   // label font scaled to display
         ctx.textBaseline = 'top';
-        (data.detections || []).forEach(d => {
+        // When NG, hide the "good"/non-defect (green) box — a defective can must
+        // not also show the green "Can Good" frame (matches the USB view).
+        const dets = data.verdict === 'ng'
+            ? (data.detections || []).filter(d => d.is_defect)
+            : (data.detections || []);
+        dets.forEach(d => {
             const [x1, y1, x2, y2] = d.bbox;
             const x = x1 * sx, y = y1 * sy, w = (x2 - x1) * sx, h = (y2 - y1) * sy;
             const rgb = 'rgb(' + d.color[0] + ',' + d.color[1] + ',' + d.color[2] + ')';
@@ -472,10 +482,33 @@
             .then(data => {
                 if (data.status !== 'ok' || !streamLiveActive) return;
                 drawStreamBoxes(data);
+
+                // ── Per-can counting (edge-triggered) ──────────────────
+                // 3 states: 'ng' (dent), 'ok' (can, no dent), 'none' (nothing).
+                // A new inspection begins on none → ok/ng; the same can is never
+                // re-counted; the can is "gone" only after a few empty frames.
+                const hasDent = data.dent_count > 0;
+                const hasAny  = (data.detections || []).length > 0;
+                const raw = hasDent ? 'ng' : (hasAny ? 'ok' : 'none');
+
+                if (raw === 'none') {
+                    if (++streamEmptyStreak >= STREAM_RESET_FRAMES) streamCanPresent = false;
+                } else {
+                    streamEmptyStreak = 0;
+                    if (!streamCanPresent) {           // a new can just appeared
+                        streamCanPresent = true;
+                        streamCanCountedNG = false;
+                    }
+                    if (raw === 'ng' && !streamCanCountedNG) {
+                        streamCanCountedNG = true;      // count this defective can ONCE
+                        streamTotalDetected += 1;
+                        totalDetected.textContent = streamTotalDetected;
+                    }
+                }
+
                 activeDefects.textContent = data.dent_count;
-                streamTotalDetected += data.dent_count;
-                totalDetected.textContent = streamTotalDetected;
-                detectionStatus.textContent = data.verdict === 'ng' ? 'NG' : 'Detecting...';
+                detectionStatus.textContent =
+                    raw === 'ng' ? 'NG' : (raw === 'ok' ? 'OK' : 'Detecting...');
 
                 // Effective FPS (smoothed) + round-trip latency for this client.
                 const now = performance.now();
@@ -516,6 +549,7 @@
             .then(() => {
                 streamLiveActive = true;
                 streamTotalDetected = 0;
+                streamCanPresent = false; streamCanCountedNG = false; streamEmptyStreak = 0;
                 streamFps = 0; streamLastDoneTs = 0;
                 // Show local video + overlay, hide the MJPEG img.
                 videoStream.style.display = 'none';
