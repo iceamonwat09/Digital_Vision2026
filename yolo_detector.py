@@ -122,6 +122,7 @@ class YOLODetector:
         self.model_path = model_path if model_path is not None else config.MODEL_PATH
         self.model: Optional[YOLO] = None
         self.is_openvino = False   # True when inference runs through OpenVINO
+        self.is_onnx = False       # True when inference runs through ONNX Runtime
         self.confidence_threshold = config.CONFIDENCE_THRESHOLD
         self.iou_threshold = config.IOU_THRESHOLD
         self.mode_config = mode_config
@@ -178,6 +179,93 @@ class YOLODetector:
             logger.warning(f"OpenVINO unavailable ({e}); using PyTorch instead.")
         return None
 
+    def _maybe_onnx(self, pt_path: str) -> Optional[str]:
+        """
+        Return a path to an ONNX model file for ``pt_path`` (exporting it once if
+        needed), or ``None`` to signal "fall back to PyTorch".
+
+        Accuracy is preserved: FP32 export with ``dynamic=True`` so the SAME model
+        runs at both the live imgsz (480) and the snapshot imgsz (1280).
+        ``ultralytics`` does its own decode/NMS on the ONNX output exactly as it
+        does for the ``.pt`` model, so results match while CPU inference is faster.
+
+        Any failure (package missing, export error, produced file missing) is
+        swallowed → PyTorch is used, so this can never break the existing modes.
+        Note: this only returns a *path*; the actual load + a smoke test happen in
+        ``load_model``, which falls back to ``.pt`` if either fails.
+        """
+        if not getattr(config, "USE_ONNX", False):
+            return None
+        if not pt_path.endswith(".pt") or not os.path.exists(pt_path):
+            return None
+        onnx_path = pt_path[:-3] + ".onnx"
+        try:
+            # Re-export when the .onnx is missing OR older than the .pt — otherwise
+            # retraining/replacing best.pt would silently keep running the stale
+            # ONNX model (a quiet correctness trap).
+            stale = (os.path.exists(onnx_path)
+                     and os.path.getmtime(pt_path) > os.path.getmtime(onnx_path))
+            if not os.path.exists(onnx_path) or stale:
+                if stale:
+                    logger.info(f"ONNX is older than .pt — re-exporting: {pt_path}")
+                else:
+                    logger.info(f"Exporting ONNX model (one-time, FP32/dynamic): {pt_path}")
+                export_kwargs = dict(format="onnx", dynamic=True, half=False)
+                opset = getattr(config, "ONNX_OPSET", None)
+                if opset:
+                    export_kwargs["opset"] = int(opset)
+                YOLO(pt_path).export(**export_kwargs)
+            if os.path.exists(onnx_path):
+                return onnx_path
+            logger.warning("ONNX export produced no file; using PyTorch.")
+        except Exception as e:
+            logger.warning(f"ONNX unavailable ({e}); using PyTorch instead.")
+        return None
+
+    def _select_backend(self, model_path: str):
+        """
+        Decide which accelerated backend (if any) to load for ``model_path``.
+
+        Priority: ONNX Runtime → OpenVINO → PyTorch (.pt). Each is opt-in via its
+        config flag and falls back to ``None`` on any problem, so with both flags
+        off (the default) this returns the plain ``.pt`` path and behaviour is
+        unchanged. Only one accelerator is ever active at a time.
+
+        Returns ``(load_path, label)`` where ``label`` is "" for plain PyTorch.
+        """
+        onnx_path = self._maybe_onnx(model_path)
+        if onnx_path is not None:
+            self.is_onnx, self.is_openvino = True, False
+            return onnx_path, "ONNX"
+
+        ov_path = self._maybe_openvino(model_path)
+        if ov_path is not None:
+            self.is_onnx, self.is_openvino = False, True
+            return ov_path, "OpenVINO"
+
+        self.is_onnx, self.is_openvino = False, False
+        return model_path, ""
+
+    def _smoke_test(self) -> bool:
+        """
+        Run ONE tiny inference to confirm the loaded backend actually executes
+        without raising (catches an installed-but-incompatible onnxruntime/
+        OpenVINO that loads the model yet crashes on inference). Returns True on
+        success, False on any exception. Does NOT validate accuracy — that is the
+        job of ``verify_onnx.py`` before USE_ONNX is turned on.
+        """
+        try:
+            # Use the real live size so this also confirms the export is dynamic
+            # enough for the size the system actually runs at (a fixed-shape export
+            # would raise here and correctly trigger the PyTorch fallback).
+            imgsz = getattr(config, "YOLO_IMGSZ", 480)
+            dummy = np.zeros((480, 640, 3), dtype=np.uint8)
+            self.model(dummy, imgsz=imgsz, verbose=False)
+            return True
+        except Exception as e:
+            logger.warning(f"Accelerated backend smoke test failed ({e}).")
+            return False
+
     def load_model(self) -> bool:
         """
         Load YOLO model.
@@ -204,17 +292,41 @@ class YOLODetector:
             except Exception:
                 pass
 
-            # Prefer an OpenVINO build (faster on Intel) when enabled; fall back
-            # to the .pt transparently on any problem.
-            ov_path = self._maybe_openvino(model_path)
-            self.is_openvino = ov_path is not None
-            load_path = ov_path or model_path
+            # Best-effort thread cap for the ONNX path (see config.ONNX_INTRA_THREADS).
+            # Must be set before the backend builds its thread pool. Only applied
+            # when the ONNX path is in use, so the PyTorch default is untouched.
+            if getattr(config, "USE_ONNX", False):
+                n_threads = int(getattr(config, "ONNX_INTRA_THREADS", 0) or 0)
+                if n_threads > 0:
+                    os.environ["OMP_NUM_THREADS"] = str(n_threads)
+
+            # Pick an accelerated backend (ONNX → OpenVINO) when enabled, else the
+            # plain .pt. With both flags off (default) load_path == model_path and
+            # behaviour is unchanged.
+            load_path, accel = self._select_backend(model_path)
 
             logger.info(f"Loading YOLO model: {load_path}"
-                        + (" [OpenVINO]" if self.is_openvino else ""))
-            self.model = YOLO(load_path)
+                        + (f" [{accel}]" if accel else ""))
+            try:
+                self.model = YOLO(load_path)
+                # An accelerated backend can load yet fail at inference time on an
+                # incompatible runtime — verify with a smoke test and fall back.
+                if accel and not self._smoke_test():
+                    raise RuntimeError(f"{accel} backend failed smoke test")
+            except Exception as accel_err:
+                if accel and load_path != model_path:
+                    logger.warning(
+                        f"{accel} backend unusable ({accel_err}); "
+                        f"falling back to PyTorch: {model_path}"
+                    )
+                    self.is_onnx = self.is_openvino = False
+                    accel = ""
+                    self.model = YOLO(model_path)   # plain PyTorch — known-good
+                else:
+                    raise   # plain .pt itself failed → real error, surface it
+
             logger.info("YOLO model loaded successfully"
-                        + (" (OpenVINO acceleration)" if self.is_openvino else ""))
+                        + (f" ({accel} acceleration)" if accel else ""))
 
             if hasattr(self.model, 'names'):
                 logger.info(f"Model classes ({len(self.model.names)}): {list(self.model.names.values())}")

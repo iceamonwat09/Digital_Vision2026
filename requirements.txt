@@ -9,10 +9,21 @@ opencv-python==4.8.1.78
 ultralytics==8.1.0
 numpy>=1.26.0
 
-# OpenVINO acceleration (เร่ง inference บน Intel CPU/iGPU โดยคง imgsz/ความแม่น)
-# จำเป็นเฉพาะเมื่อ config.USE_OPENVINO=True — ถ้าไม่ติดตั้ง ระบบ fallback เป็น PyTorch
-openvino>=2023.3.0
+# ── ONNX Runtime acceleration (เร่ง inference บน CPU โดยคงความแม่น FP32) ──
+# ทางที่ปลอดภัย/แนะนำสำหรับเครื่องสถานี (Windows + Python 3.9): เปิด config.USE_ONNX=True
+# แล้วระบบ export .pt → .onnx ครั้งเดียวและรันผ่าน onnxruntime (~2 เท่าของ PyTorch CPU).
+# ⚠️ Python 3.9 บน Windows: wheel ตัวสุดท้ายที่รองรับคือ onnxruntime==1.19.2
+#    (เวอร์ชัน 1.20+ ตัด Python 3.9 ทิ้ง). ติดตั้งบน interpreter เดียวกับที่รัน:
+#        py -3.9 -m pip install onnxruntime==1.19.2 onnxslim onnx
+# fallback: ถ้าไม่ติดตั้ง/export/load/smoke-test ล้มเหลว → ใช้ PyTorch อัตโนมัติ.
 onnx>=1.15.0
+# onnxruntime==1.19.2     # << ติดตั้งแยกตามเวอร์ชัน Python ของเครื่อง (ดูหมายเหตุด้านบน)
+# onnxslim                # ออปชัน — ช่วยลดขนาดกราฟ ONNX ตอน export
+
+# OpenVINO acceleration (ทางเลือก — ปิดเป็นค่าเริ่มต้น, ดู config.USE_OPENVINO)
+# ⚠️ บนสถานีนี้ (Python 3.9) ใช้ไม่ได้: OpenVINO 2025 + onnxruntime-openvino ต้องการ
+# Python ≥3.10. เคยทำให้ตรวจไม่เจอทุกโหมด — ใช้ ONNX Runtime (ด้านบน) แทน.
+openvino>=2023.3.0
 
 # Database
 pyodbc>=4.0.39           # SQL Server connection driver

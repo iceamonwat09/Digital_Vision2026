@@ -7,7 +7,7 @@ import os
 
 # Bump this whenever a config default changes so a running deployment can
 # print it on startup and confirm it is actually executing the new code.
-CONFIG_VERSION = "2026.06.29-landing-page"
+CONFIG_VERSION = "2026.06.30-onnx-accel"
 
 # ====================
 # CAMERA CONFIGURATION
@@ -131,6 +131,30 @@ YOLO_IMGSZ = 480
 # ถ้าจะลองเปิดใหม่ในอนาคต ต้องทดสอบ pin เวอร์ชัน ultralytics/openvino ให้เข้ากันก่อน
 # (และตรวจว่ายังเจอ dent เท่า PyTorch). เปิด = True เพื่อทดลองเท่านั้น.
 USE_OPENVINO = False
+
+# ── ONNX Runtime acceleration (เร่ง inference บน CPU โดยคงความแม่น FP32) ──
+# ทางที่ปลอดภัยกว่า OpenVINO บนสถานีนี้ (Windows + Python 3.9): export โมเดล .pt
+# เป็น .onnx (FP32 / dynamic) ครั้งเดียว แล้วรันผ่าน onnxruntime — ultralytics เป็น
+# คนถอดผล (decode/NMS) เองเหมือน .pt ทุกประการ จึงได้ผลตรวจเท่าเดิมแต่เร็วขึ้น ~2 เท่า.
+#
+# ⚠️ ค่าเริ่มต้น = False (ปิด). ต้องรัน `python verify_onnx.py` เทียบผลตรวจ .pt vs .onnx
+# ให้ผ่าน (PASS) ก่อน ค่อยเปิดเป็น True — กันเหตุ "ตรวจผิดเงียบๆ" แบบที่เคยเจอกับ OpenVINO.
+#
+# ข้อกำหนดเครื่อง (ติดตั้งบน interpreter เดียวกับที่รัน เช่น `py -3.9 -m pip ...`):
+#   onnxruntime==1.19.2   (wheel ตัวสุดท้ายที่รองรับ Python 3.9 บน Windows; 1.20+ ตัดทิ้ง)
+#   onnxslim              (ออปชัน — ใช้ลดขนาดกราฟตอน export ให้เร็วขึ้น)
+# fallback: ถ้า onnxruntime ไม่ได้ติดตั้ง / export / load / smoke-test ล้มเหลว
+# → ระบบกลับไปใช้ PyTorch .pt อัตโนมัติ (ของเดิมพังไม่ได้).
+USE_ONNX = False
+
+# opset ที่ใช้ตอน export ONNX. ปักไว้ที่ 17 เพื่อความเข้ากันได้กับ onnxruntime 1.19.x
+# (รองรับ opset ≤ ~21). None = ปล่อยให้ ultralytics เลือก default ของมันเอง.
+ONNX_OPSET = 17
+
+# จำนวน intra-op thread ของ onnxruntime. 0 = ให้ onnxruntime ตัดสินใจเอง (= จำนวน
+# physical core). บนชิป 15W ที่ throttle ง่าย (i7-1165G7) การตั้ง = 4 (เท่า physical
+# core, ไม่นับ hyper-thread) บางทีนิ่ง/ร้อนน้อยกว่า. มีผลเฉพาะเมื่อ USE_ONNX=True.
+ONNX_INTRA_THREADS = 0
 
 # Snapshot inference image size. Snapshot runs the model ONCE per shutter press
 # (not a live stream), so speed is irrelevant — we trade it for accuracy. With

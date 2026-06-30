@@ -407,6 +407,7 @@ approve** (ถ้าบน artwork สะกดเพี้ยนจะถูก
 ├── config.py                    # ตั้งค่ากลาง (กล้อง, snapshot, SQL, Flask, HTTPS, STREAM, N8N)
 ├── camera.py / yolo_detector.py # โหมดตรวจจับสด + StreamCamera + จัดการ backend กล้อง (MSMF/DSHOW/V4L2)
 ├── diagnose_snapshot.py         # เครื่องมือทดสอบกล้องบนสถานี (ความละเอียด/backend/fourcc)
+├── verify_onnx.py               # เทียบผลตรวจ .pt vs .onnx (ต้อง PASS ก่อนเปิด USE_ONNX)
 ├── database.py                  # SQL Server (pyodbc)
 ├── modes/                       # registry + config ต่อโหมด YOLO
 │   ├── registry.py · can_dent.py · label.py · label_paper.py
@@ -468,6 +469,33 @@ python diagnose_snapshot.py
 ---
 
 ## สรุปการปรับปรุงล่าสุด (Changelog)
+
+### 🚀 ONNX Runtime acceleration (เร่ง inference บน CPU โดยคงความแม่น) (มิ.ย. 2026)
+- **ปัญหา**: วัดด้วยตัวจับเวลาในโหมด STREAM พบว่า inference กิน **542ms = 91%** ของเวลา
+  ต่อเฟรม (FPS ~1.8 บน i7-1165G7) — network/encode/decode รวมกันแค่ ~50ms. คอขวดคือ
+  PyTorch CPU ล้วนๆ → กรอบตามวัตถุช้า
+- **ทางแก้**: export `.pt` → `.onnx` (FP32 / `dynamic=True`) ครั้งเดียว แล้วรันผ่าน
+  **onnxruntime** — เร็วกว่า PyTorch CPU ~2 เท่า (คาด ~540ms → ~250-300ms ≈ 3.5-4 FPS)
+  โดย **ultralytics เป็นคนถอดผล/NMS เองเหมือน `.pt`** → ผลตรวจเท่าเดิม (ไม่ใช่ลด imgsz)
+- **ทำไมปลอดภัยกว่า OpenVINO**: โมเดลยังเป็น ONNX มาตรฐาน + decode โดย ultralytics
+  (ไม่ใช่ decoder แยกของ OpenVINO ที่เคยทำตรวจไม่เจอเงียบๆ)
+- **เปิดทั้งระบบ** (USB/RTSP/Snapshot/STREAM ได้เร็วขึ้นพร้อมกัน) ผ่าน `config.USE_ONNX`
+- 🛡️ **fallback หลายชั้น** — ถ้า `onnxruntime` ไม่ได้ติดตั้ง / export / load / **smoke-test**
+  (รัน 1 เฟรมจริงตอนโหลด) ล้มเหลว → กลับไปใช้ PyTorch `.pt` อัตโนมัติ ของเดิมพังไม่ได้
+- 🛡️ **กัน .onnx ค้างเก่า** — ถ้า `best.pt` ใหม่กว่า `best.onnx` (เทรนใหม่) จะ re-export ให้
+- 🧪 **`verify_onnx.py`** — สคริปต์เทียบผลตรวจ `.pt` vs `.onnx` (จำนวนกล่อง/คลาส/conf/IoU)
+  ที่ imgsz 480+1280 → **ต้อง PASS ก่อนเปิด `USE_ONNX=True`** (กันซ้ำรอย OpenVINO)
+- **ค่าเริ่มต้น `USE_ONNX = False`** — ไม่มีอะไรเปลี่ยนจนกว่าจะเปิดเอง หลังเทียบผลผ่านแล้ว
+
+  วิธีเปิดใช้ (บนเครื่องสถานี Windows + Python 3.9):
+  ```bash
+  py -3.9 -m pip install onnxruntime==1.19.2 onnxslim onnx   # 1.19.2 = wheel สุดท้ายของ py3.9
+  py -3.9 verify_onnx.py --images path\to\sample_cans        # ต้องขึ้น PASS
+  #  → แล้วตั้ง USE_ONNX = True ใน config.py, รีสตาร์ตแอป
+  ```
+  > ⚠️ **iGPU (Iris Xe) / OpenVINO EP ยังทำไม่ได้บน Python 3.9** — ทั้ง `openvino 2025`
+  > และ `onnxruntime-openvino` ต้องการ Python ≥3.10 ถ้าจะใช้ iGPU ต้องอัปเกรด Python
+  > ทั้งเครื่องก่อน (เป็นโปรเจกต์แยก ต้องเทสต์ใหม่ทุกโหมด)
 
 ### 🎯 นับ "1 กระป๋อง = 1 การตรวจ" แบบ edge-triggered (มิ.ย. 2026)
 - ปัญหาเดิม: นับ/บันทึก DB ทุกเฟรมที่เจอ defect — กระป๋องเดิมที่ยังไม่ขยับก็ถูกนับ/บันทึก
