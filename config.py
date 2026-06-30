@@ -175,7 +175,12 @@ LINE_NUMBER = "LINE-01"            # รหัสสายการผลิต
 # DEFECT LOGGING CONFIGURATION
 # ====================
 # Cooldown period in seconds to avoid duplicate logging
-DEFECT_LOGGING_COOLDOWN = 2.0  # Log at most once every 2 seconds per defect type
+DEFECT_LOGGING_COOLDOWN = 2.0  # (legacy) ไม่ใช้แล้ว — เปลี่ยนเป็นนับ/บันทึกแบบ edge-triggered
+
+# จำนวนเฟรม "ว่าง" (ไม่เจออะไรเลย) ติดต่อกัน ที่ถือว่ากระป๋องผ่านพ้นไปแล้ว
+# ใช้ทั้งโหมด live (USB/RTSP) — กันการนับ/บันทึกซ้ำของกระป๋องใบเดิม (1 ใบ = 1 การตรวจ).
+# สูงขึ้น = ทนการกะพริบของการตรวจจับมากขึ้น แต่รับกระป๋องใบถัดไปช้าลง.
+DEFECT_RESET_FRAMES = 3
 
 # Maximum number of defects to log per frame
 MAX_DEFECTS_PER_FRAME = 5

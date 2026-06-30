@@ -244,6 +244,12 @@ def inference_loop():
 
     logger.info("Inference loop started")
     last_seq = -1
+    # Per-can state for edge-triggered counting + DB logging: one physical can =
+    # one inspection (not re-counted/re-logged every frame). Local to this thread,
+    # so it resets automatically each time detection is (re)started.
+    can_present = False
+    can_counted_ng = False
+    empty_streak = 0
 
     while detection_active:
         try:
@@ -268,29 +274,35 @@ def inference_loop():
                 latest_det_frame = frame
                 latest_det_seq = seq
 
-            detection_stats["current_defects"] = len(detections)
-            if detections:
-                detection_stats["total_detected"] += len(detections)
+            # Per-can counting + DB logging (edge-triggered): one physical can =
+            # one inspection. States: NG (defect), OK (can, no defect), or empty
+            # (nothing). A new inspection begins on empty → OK/NG; the same can is
+            # never re-counted/re-logged; the can is "gone" only after a few empty
+            # frames (debounce). "good"/"can" are never defects.
+            defects = [d for d in detections if d["class_name"] not in _NON_DEFECT_CLASSES]
+            detection_stats["current_defects"] = len(defects)
 
-            # Log defects to database (with cooldown). For bestX.pt only a
-            # "dent" is a defect; "can" (good) is never logged.
-            bestx_mode = detector.is_bestx_mode if detector else False
-            current_time = time.time()
-            for det in detections:
-                if bestx_mode and det["class_name"] != "dent":
-                    continue
-                defect_type = det["class_name"]
-                last_log_time = defect_log_cooldown.get(defect_type, 0)
-                if current_time - last_log_time >= config.DEFECT_LOGGING_COOLDOWN:
+            if not detections:
+                empty_streak += 1
+                if empty_streak >= config.DEFECT_RESET_FRAMES:
+                    can_present = False
+            else:
+                empty_streak = 0
+                if not can_present:          # a new can just entered the frame
+                    can_present = True
+                    can_counted_ng = False
+                if defects and not can_counted_ng:
+                    can_counted_ng = True     # count + log this defective can ONCE
+                    detection_stats["total_detected"] += 1
                     if db and db.is_connected:
-                        db.log_defect(
-                            defect_type=defect_type,
-                            confidence=det["confidence"],
-                            frame=frame,
-                            bbox=det["bbox"],
-                            timestamp=datetime.now()
-                        )
-                        defect_log_cooldown[defect_type] = current_time
+                        for det in defects:
+                            db.log_defect(
+                                defect_type=det["class_name"],
+                                confidence=det["confidence"],
+                                frame=frame,
+                                bbox=det["bbox"],
+                                timestamp=datetime.now()
+                            )
 
         except Exception as e:
             logger.error(f"Error in inference loop: {e}")
