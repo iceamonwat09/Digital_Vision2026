@@ -931,6 +931,92 @@ def api_stream_snapshot():
         return jsonify({"status": "error", "message": f"ถ่ายรูปไม่สำเร็จ: {e}"}), 500
 
 
+# ── Per-client live inference for the STREAM source ────────────────────
+# Each browser posts its OWN frames here and gets ITS OWN detections back in the
+# HTTP response — so clients are isolated by construction (no shared camera, no
+# shared /video_feed, no global capture/inference threads). This is the
+# "per-stream isolation + worker-pool + process-latest" pattern, scaled down:
+# the browser throttles + keeps a single request in flight (process-latest), and
+# the CPU-bound model call is offloaded to a real worker thread when running
+# under gevent so it never blocks the cooperative hub (worker-pool). A lock keeps
+# the single shared model instance from being entered concurrently.
+_stream_infer_lock = threading.Lock()
+try:
+    from gevent import monkey as _gmonkey
+    _GEVENT_ACTIVE = _gmonkey.is_module_patched("socket")
+except Exception:
+    _GEVENT_ACTIVE = False
+
+
+def _stream_detect(frame):
+    """Run detection on a frame under a lock (the model is a single instance)."""
+    with _stream_infer_lock:
+        return detector.detect(frame)
+
+
+@app.route('/api/stream/infer', methods=['POST'])
+def api_stream_infer():
+    """
+    Receive ONE JPEG frame (raw body) from a browser camera, detect, and return
+    the detections as JSON for the client to draw over its own <video>. Fully
+    isolated per request — never touches the USB/RTSP global pipeline.
+    """
+    if detector is None or detector.model is None:
+        return jsonify({"status": "error", "message": "ยังไม่ได้โหลดโมเดล"}), 400
+
+    data = request.get_data()
+    if not data:
+        return jsonify({"status": "error", "message": "empty frame"}), 400
+
+    try:
+        arr = np.frombuffer(data, dtype=np.uint8)
+        frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+        if frame is None:
+            return jsonify({"status": "error", "message": "decode failed"}), 400
+
+        # Offload to a worker thread under gevent (keeps the hub responsive for
+        # other clients); call inline under the plain dev server.
+        if _GEVENT_ACTIVE:
+            import gevent
+            detections = gevent.get_hub().threadpool.apply(_stream_detect, (frame,))
+        else:
+            detections = _stream_detect(frame)
+
+        palette, names = {}, {}
+        try:
+            palette = detector._colors() or {}
+            names = detector._class_names() or {}
+        except Exception:
+            pass
+
+        out = []
+        for d in detections:
+            cn = d["class_name"]
+            bgr = palette.get(cn, (0, 0, 220))
+            out.append({
+                "bbox": [int(v) for v in d["bbox"]],
+                "class_name": cn,
+                "confidence": round(float(d["confidence"]), 2),
+                "label": names.get(cn, cn),
+                "color": [int(bgr[2]), int(bgr[1]), int(bgr[0])],  # RGB for canvas
+                "is_defect": cn not in _NON_DEFECT_CLASSES,
+            })
+
+        dents = [d for d in out if d["is_defect"]]
+        h, w = frame.shape[:2]
+        return jsonify({
+            "status": "ok",
+            "w": w, "h": h,
+            "verdict": "ng" if dents else "ok",
+            "dent_count": len(dents),
+            "max_confidence": round(max((d["confidence"] for d in dents), default=0.0), 2),
+            "detections": out,
+        })
+    except Exception as e:
+        logger.error(f"Stream infer failed: {e}", exc_info=True)
+        return jsonify({"status": "error", "message": f"infer failed: {e}"}), 500
+
+
 @app.route('/api/stats', methods=['GET'])
 def get_stats():
     """Get defect detection statistics from database."""

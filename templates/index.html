@@ -105,9 +105,14 @@
         <!-- ── จอภาพ + สถิติ (ขวา) ──────────────────────────── -->
         <div class="live-main">
             <div class="video-wrapper-compact video-stage">
-                <!-- src is attached only while detection is active (see updateStatus),
-                     so an idle/parked tab holds ZERO long-lived MJPEG connections. -->
+                <!-- USB/RTSP: server-annotated MJPEG. src is attached only while
+                     detection is active (see updateStatus), so an idle/parked tab
+                     holds ZERO long-lived MJPEG connections. -->
                 <img id="videoStream" alt="Video Stream">
+                <!-- STREAM: the client's OWN camera shown locally, with detection
+                     boxes drawn on the overlay canvas — per-client, isolated. -->
+                <video id="streamVideo" autoplay playsinline muted style="display:none"></video>
+                <canvas id="streamOverlay" style="display:none"></canvas>
             </div>
 
             <div class="stats-row">
@@ -221,6 +226,10 @@
     .snap-quality { width:100%; }
     .snap-shutter { margin-top: auto; font-size: 18px; padding: 14px 0; }
     .control-hint { margin: 8px 0 0; font-size: 12px; color: #94a3b8; text-align: center; }
+    /* STREAM source: local <video> with a detection-box overlay on top. */
+    .video-stage { position: relative; }
+    #streamVideo { display: block; width: 100%; height: auto; }
+    #streamOverlay { position: absolute; left: 0; top: 0; width: 100%; height: 100%; pointer-events: none; }
 </style>
 {% endblock %}
 
@@ -251,6 +260,8 @@
 
     // ── Source tab switching ──────────────────────────
     window.switchSource = function(src) {
+        // Leaving STREAM while it's running → stop it cleanly first.
+        if (streamLiveActive && src !== 'stream') stopStreamDetection();
         currentSource = src;
         document.getElementById('panelUsb').style.display    = src === 'usb'    ? '' : 'none';
         document.getElementById('panelRtsp').style.display   = src === 'rtsp'   ? '' : 'none';
@@ -280,24 +291,27 @@
     if (savedRtsp) rtspUrlInput.value = savedRtsp;
 
     // ── STREAM source (กล้องของเครื่อง Client ผ่าน getUserMedia) ─────────
-    // The browser captures from its own camera and PUSHES JPEG frames to the
-    // server (/api/stream/push), which feeds them to the virtual StreamCamera.
-    // The annotated result comes back via the same /video_feed MJPEG as USB/RTSP.
-    // These constants mirror config.py (STREAM_*).
-    const STREAM_PUSH_FPS      = 10;
+    // Per-client isolation: the browser shows ITS OWN camera in a local <video>
+    // and posts frames to /api/stream/infer, which returns detections as JSON for
+    // THIS client only. Boxes are drawn on an overlay canvas. No shared camera,
+    // no /video_feed, no global pipeline — so every browser sees only its own
+    // camera. The infer loop throttles + keeps a single request in flight
+    // (process-latest). Constants mirror config.py (STREAM_*).
+    const STREAM_INFER_FPS     = 8;     // how often this client asks the server to detect
     const STREAM_JPEG_QUALITY  = 0.85;
     const STREAM_MAX_WIDTH     = 960;
     const STREAM_SNAP_QUALITY  = 0.95;
     const STREAM_SNAP_MAX_WIDTH = 1920;
 
-    // Off-screen elements reused for both the live push loop and snapshot grab.
-    const streamVideoEl = document.createElement('video');
-    streamVideoEl.muted = true; streamVideoEl.playsInline = true; streamVideoEl.autoplay = true;
-    const streamCanvas  = document.createElement('canvas');
+    const streamVideo   = document.getElementById('streamVideo');    // local live preview
+    const streamOverlay = document.getElementById('streamOverlay');  // detection boxes
+    const streamCanvas  = document.createElement('canvas');          // off-screen frame grab
 
-    let streamLiveStream = null;   // MediaStream feeding the live push loop
-    let streamPushTimer  = null;
-    let streamPushInFlight = false;
+    let streamLiveStream = null;   // MediaStream of the browser camera (live)
+    let streamInferTimer = null;
+    let streamInferInFlight = false;
+    let streamLiveActive = false;  // true while this client is running STREAM detection
+    let streamTotalDetected = 0;
     let snapStreamStream = null;   // MediaStream for the snapshot viewfinder
 
     function secureContextOk() {
@@ -365,52 +379,62 @@
         return true;
     }
 
-    function startStreamLive() {
-        const deviceId = streamCameraSelect.value;
-        const constraints = {
-            video: deviceId ? { deviceId: { exact: deviceId } } : true,
-            audio: false
-        };
-        return navigator.mediaDevices.getUserMedia(constraints).then(stream => {
-            streamLiveStream = stream;
-            streamVideoEl.srcObject = stream;
-            return streamVideoEl.play();
+    // Draw detection boxes (from /api/stream/infer) onto the overlay, scaled from
+    // the inference frame size (data.w/h) to the displayed video size.
+    function drawStreamBoxes(data) {
+        const dispW = streamVideo.clientWidth, dispH = streamVideo.clientHeight;
+        if (!dispW || !dispH) return;
+        streamOverlay.width = dispW;
+        streamOverlay.height = dispH;
+        const ctx = streamOverlay.getContext('2d');
+        ctx.clearRect(0, 0, dispW, dispH);
+        if (!data.w || !data.h) return;
+        const sx = dispW / data.w, sy = dispH / data.h;
+        ctx.lineWidth = 2;
+        ctx.font = '14px sans-serif';
+        ctx.textBaseline = 'top';
+        (data.detections || []).forEach(d => {
+            const [x1, y1, x2, y2] = d.bbox;
+            const x = x1 * sx, y = y1 * sy, w = (x2 - x1) * sx, h = (y2 - y1) * sy;
+            const rgb = 'rgb(' + d.color[0] + ',' + d.color[1] + ',' + d.color[2] + ')';
+            ctx.strokeStyle = rgb;
+            ctx.strokeRect(x, y, w, h);
+            const text = d.label + ' ' + d.confidence;
+            const tw = ctx.measureText(text).width + 8;
+            ctx.fillStyle = rgb;
+            ctx.fillRect(x, Math.max(0, y - 18), tw, 18);
+            ctx.fillStyle = '#fff';
+            ctx.fillText(text, x + 4, Math.max(0, y - 18) + 2);
         });
     }
 
-    function startStreamPush() {
-        stopStreamPush();
-        streamPushTimer = setInterval(() => {
-            if (streamPushInFlight) return;
-            if (!drawVideoToCanvas(streamVideoEl, streamCanvas, STREAM_MAX_WIDTH)) return;
-            streamPushInFlight = true;
-            streamCanvas.toBlob(blob => {
-                if (!blob) { streamPushInFlight = false; return; }
-                fetch('/api/stream/push', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'image/jpeg' },
-                    body: blob
-                }).catch(() => {}).finally(() => { streamPushInFlight = false; });
-            }, 'image/jpeg', STREAM_JPEG_QUALITY);
-        }, Math.round(1000 / STREAM_PUSH_FPS));
+    // One infer tick: grab the newest video frame and ask the server to detect.
+    function streamInferTick() {
+        if (streamInferInFlight) return;
+        if (!drawVideoToCanvas(streamVideo, streamCanvas, STREAM_MAX_WIDTH)) return;
+        streamInferInFlight = true;
+        streamCanvas.toBlob(blob => {
+            if (!blob) { streamInferInFlight = false; return; }
+            fetch('/api/stream/infer', {
+                method: 'POST', headers: { 'Content-Type': 'image/jpeg' }, body: blob
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.status !== 'ok' || !streamLiveActive) return;
+                drawStreamBoxes(data);
+                activeDefects.textContent = data.dent_count;
+                streamTotalDetected += data.dent_count;
+                totalDetected.textContent = streamTotalDetected;
+                detectionStatus.textContent = data.verdict === 'ng' ? 'NG' : 'Detecting...';
+            })
+            .catch(() => {})
+            .finally(() => { streamInferInFlight = false; });
+        }, 'image/jpeg', STREAM_JPEG_QUALITY);
     }
 
-    function stopStreamPush() {
-        if (streamPushTimer) { clearInterval(streamPushTimer); streamPushTimer = null; }
-        streamPushInFlight = false;
-    }
-
-    function stopStreamLive() {
-        stopStreamPush();
-        if (streamLiveStream) {
-            streamLiveStream.getTracks().forEach(t => t.stop());
-            streamLiveStream = null;
-        }
-        streamVideoEl.srcObject = null;
-    }
-
-    // Start live detection in STREAM mode: open the browser camera, tell the
-    // server to use the virtual camera, then begin pushing frames.
+    // Start STREAM detection — fully client-side: open this browser's camera,
+    // show it locally, and loop frames through /api/stream/infer. Does NOT touch
+    // the server's global detection pipeline, so each client is isolated.
     function startStreamDetection() {
         if (!hasGetUserMedia() || !secureContextOk()) {
             alert('โหมดสตรีมต้องเข้าผ่าน HTTPS หรือ localhost จึงจะเข้าถึงกล้องของเครื่องนี้ได้');
@@ -418,32 +442,72 @@
         }
         startBtn.disabled = true;
         detectionStatus.textContent = 'Starting camera...';
-        startStreamLive()
-            .then(() => fetch('/api/detection/start', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ camera_index: 'stream' })
-            }))
-            .then(r => r.json())
-            .then(data => {
-                if (data.status === 'error') {
-                    alert(data.message);
-                    stopStreamLive();
-                    startBtn.disabled = false;
-                    detectionStatus.textContent = 'Ready';
-                    return;
-                }
-                startStreamPush();
-                updateStatus();
-                if (!statusCheckInterval) statusCheckInterval = setInterval(updateStatus, 1000);
+        const deviceId = streamCameraSelect.value;
+        const constraints = {
+            video: deviceId ? { deviceId: { exact: deviceId } } : true,
+            audio: false
+        };
+        navigator.mediaDevices.getUserMedia(constraints)
+            .then(stream => {
+                streamLiveStream = stream;
+                streamVideo.srcObject = stream;
+                return streamVideo.play();
+            })
+            .then(() => {
+                streamLiveActive = true;
+                streamTotalDetected = 0;
+                // Show local video + overlay, hide the MJPEG img.
+                videoStream.style.display = 'none';
+                streamVideo.style.display = '';
+                streamOverlay.style.display = '';
+                statusDot.className = 'status-dot status-active';
+                statusText.textContent = 'Active';
+                stopBtn.disabled = false;
+                streamCameraSelect.disabled = true;
+                refreshStreamCamsBtn.disabled = true;
+                snapBtn.disabled = true;
+                Array.from(modeTabs.children).forEach(b => b.disabled = true);
+                modelSelect.disabled = true;
+                refreshModelsBtn.disabled = true;
+                detectionStatus.textContent = 'Detecting...';
+                streamInferTimer = setInterval(streamInferTick, Math.round(1000 / STREAM_INFER_FPS));
             })
             .catch(err => {
                 console.error('Stream start error:', err);
                 alert('เปิดกล้องเครื่องนี้ไม่สำเร็จ: ' + (err && err.message ? err.message : err));
-                stopStreamLive();
                 startBtn.disabled = false;
                 detectionStatus.textContent = 'Ready';
             });
+    }
+
+    // Stop STREAM detection and release this browser's camera.
+    function stopStreamDetection() {
+        if (streamInferTimer) { clearInterval(streamInferTimer); streamInferTimer = null; }
+        streamInferInFlight = false;
+        if (streamLiveStream) {
+            streamLiveStream.getTracks().forEach(t => t.stop());
+            streamLiveStream = null;
+        }
+        streamVideo.srcObject = null;
+        streamLiveActive = false;
+        // Restore the default (MJPEG) view + controls.
+        streamVideo.style.display = 'none';
+        streamOverlay.style.display = 'none';
+        videoStream.style.display = '';
+        const octx = streamOverlay.getContext('2d');
+        if (octx) octx.clearRect(0, 0, streamOverlay.width, streamOverlay.height);
+        statusDot.className = 'status-dot status-inactive';
+        statusText.textContent = 'Inactive';
+        startBtn.disabled = false;
+        stopBtn.disabled = true;
+        streamCameraSelect.disabled = false;
+        refreshStreamCamsBtn.disabled = false;
+        snapBtn.disabled = false;
+        Array.from(modeTabs.children).forEach(b => b.disabled = false);
+        modelSelect.disabled = modelSelect.options.length === 0;
+        refreshModelsBtn.disabled = false;
+        detectionStatus.textContent = 'Ready';
+        activeDefects.textContent = '0';
     }
 
     // ── Camera scanning (USB only) ────────────────────
@@ -478,10 +542,28 @@
 
     // ── Status polling ────────────────────────────────
     function updateStatus() {
+        // STREAM detection is driven entirely client-side (no server pipeline),
+        // so while it runs we must NOT let the server-status poll override its UI.
+        if (streamLiveActive) return;
         fetch('/api/detection/status')
             .then(r => r.json())
             .then(data => {
                 const isActive = data.active;
+
+                // On the STREAM tab this client is independent of the server's
+                // (USB/RTSP) global pipeline, so a server-side session must NOT
+                // gate the STREAM controls or show its video here. Keep neutral.
+                if (currentSource === 'stream') {
+                    if (videoStream.getAttribute('src')) videoStream.removeAttribute('src');
+                    statusDot.className = 'status-dot status-inactive';
+                    statusText.textContent = 'Inactive';
+                    startBtn.disabled = false;
+                    stopBtn.disabled = true;
+                    snapBtn.disabled = false;   // stream snapshot is allowed when not streaming
+                    snapBtn.title = 'ถ่ายภาพนิ่งมาตรวจ Dent';
+                    return;
+                }
+
                 statusDot.className = 'status-dot ' + (isActive ? 'status-active' : 'status-inactive');
                 statusText.textContent = isActive ? 'Active' : 'Inactive';
 
@@ -501,9 +583,6 @@
                 streamCameraSelect.disabled   = isActive || streamCameraSelect.options.length === 0
                                                 || streamCameraSelect.options[0].disabled;
                 refreshStreamCamsBtn.disabled = isActive;
-                // Safety net: if the server stopped detection while we still hold
-                // the browser camera open (e.g. error/restart), release it.
-                if (!isActive && streamLiveStream) stopStreamLive();
                 modelSelect.disabled       = isActive || modelSelect.options.length === 0;
                 refreshModelsBtn.disabled  = isActive;
                 Array.from(modeTabs.children).forEach(b => b.disabled = isActive);
@@ -572,8 +651,11 @@
 
     // ── Stop ──────────────────────────────────────────
     stopBtn.addEventListener('click', () => {
-        // Tear down the browser camera too (no-op for USB/RTSP).
-        stopStreamLive();
+        // STREAM is client-side only — stop locally, never hit the server pipeline.
+        if (currentSource === 'stream' && streamLiveActive) {
+            stopStreamDetection();
+            return;
+        }
         fetch('/api/detection/stop', { method: 'POST' })
             .then(r => r.json())
             .then(() => updateStatus())
