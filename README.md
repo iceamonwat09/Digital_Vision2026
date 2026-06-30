@@ -452,6 +452,14 @@ python diagnose_snapshot.py
 
 ## สรุปการปรับปรุงล่าสุด (Changelog)
 
+### ⚡ OpenVINO acceleration (มิ.ย. 2026)
+- `USE_OPENVINO = True` — ตอนโหลดโมเดลจะ export `.pt` เป็น OpenVINO (FP32 / dynamic,
+  ครั้งเดียว เก็บใน `weights/.../<name>_openvino_model/`) แล้วใช้รัน inference แทน
+  → เร็วขึ้นบน Intel CPU/iGPU **โดยคง imgsz 480 = ความแม่นเท่าเดิม** (ไม่ใช่ลด imgsz)
+- **Fallback อัตโนมัติ** — ถ้าไม่ได้ติดตั้ง `openvino`/export ล้มเหลว → ใช้ PyTorch เดิม
+  (ไม่กระทบทุกโหมด). ติดตั้ง: `pip install openvino onnx`
+- มีผลกับทุกโหมดที่ใช้โมเดล (live/snapshot) — ผลตรวจเหมือนเดิมเพราะเป็น FP32
+
 ### 🎥 แหล่งสัญญาณภาพ "สตรีม" — กล้องของ Client (มิ.ย. 2026)
 - **โหมด STREAM** ในข้อ "แหล่งสัญญาณภาพ" — ผู้ใช้แต่ละคนเปิดกล้องเครื่องตัวเองผ่านเบราว์เซอร์
 - **Per-client isolation** — `POST /api/stream/infer` แบบ request/response: ทุกคนเห็นแต่กล้องตัวเอง

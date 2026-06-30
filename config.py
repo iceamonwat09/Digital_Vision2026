@@ -124,6 +124,13 @@ YOLO_MAX_DET = 20
 # can-body dents at this camera resolution. Drop to 320 for even more speed.
 YOLO_IMGSZ = 480
 
+# ── OpenVINO acceleration (เร่ง inference บน Intel CPU/iGPU โดยคง imgsz/ความแม่น) ──
+# เมื่อ True: ตอนโหลดโมเดลจะ export ไฟล์ .pt เป็น OpenVINO (FP32, dynamic — ครั้งเดียว)
+# แล้วใช้รัน inference แทน ซึ่งเร็วกว่า PyTorch บน Intel. ถ้า export/โหลดล้มเหลว หรือ
+# ไม่ได้ติดตั้งแพ็กเกจ openvino → ระบบ fallback กลับ PyTorch อัตโนมัติ (ไม่กระทบการทำงาน).
+# มีผลกับทุกโหมดที่ใช้โมเดล (live/snapshot) แต่ผลตรวจเหมือนเดิมเพราะเป็น FP32.
+USE_OPENVINO = True
+
 # Snapshot inference image size. Snapshot runs the model ONCE per shutter press
 # (not a live stream), so speed is irrelevant — we trade it for accuracy. With
 # the high-resolution snapshot capture (SNAPSHOT_CAMERA_* = 5MP) there is real

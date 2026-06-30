@@ -9,6 +9,11 @@ opencv-python==4.8.1.78
 ultralytics==8.1.0
 numpy>=1.26.0
 
+# OpenVINO acceleration (เร่ง inference บน Intel CPU/iGPU โดยคง imgsz/ความแม่น)
+# จำเป็นเฉพาะเมื่อ config.USE_OPENVINO=True — ถ้าไม่ติดตั้ง ระบบ fallback เป็น PyTorch
+openvino>=2023.3.0
+onnx>=1.15.0
+
 # Database
 pyodbc>=4.0.39           # SQL Server connection driver
 # pymongo==4.6.0         # (เดิม — MongoDB, ไม่ใช้แล้ว)
