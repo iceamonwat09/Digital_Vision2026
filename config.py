@@ -192,14 +192,19 @@ SSL_KEY_FILE  = os.path.join(os.path.dirname(os.path.abspath(__file__)), "certs"
 STREAM_FPS = 15  # FPS for the live-detection MJPEG stream (lower = less bandwidth)
 
 # ── Browser STREAM source (กล้องของเครื่อง Client ผ่าน getUserMedia) ──────
-# โหมดที่ 3 ในข้อ "แหล่งสัญญาณภาพ": แทนที่ Server จะเปิดกล้องฮาร์ดแวร์ของตัวเอง
-# เบราว์เซอร์ของผู้ใช้จะ "ดัน" (push) เฟรมจากกล้องเครื่องตัวเองขึ้นมา แล้ว
-# StreamCamera (camera.py) ทำตัวเป็นกล้องเสมือนให้ capture_loop อ่านต่อ — pipeline
-# เดิมไม่ต้องแก้. ค่าด้านล่างคุมอัตรา/คุณภาพที่ฝั่ง browser ส่งขึ้นมา.
-STREAM_SOURCE_SENTINEL = "stream"  # camera_index พิเศษที่บอกว่ามาจากกล้อง browser
-STREAM_PUSH_FPS = 10               # อัตราที่ browser ส่งเฟรม live ขึ้น server (คุมแบนด์วิดท์/ความลื่น)
-STREAM_JPEG_QUALITY = 0.85         # คุณภาพ JPEG ที่ browser encode ก่อนส่ง (0–1) live
-STREAM_MAX_WIDTH = 960             # ย่อความกว้างเฟรม live ก่อนส่ง (px) ลด uplink
+# โหมดที่ 3 ในข้อ "แหล่งสัญญาณภาพ": ใช้กล้องของเครื่อง Client ผ่านเบราว์เซอร์.
+# สถาปัตยกรรม = per-client isolation (request/response): เบราว์เซอร์โชว์กล้อง
+# ตัวเองใน <video> แล้วส่งเฟรมไป /api/stream/infer → server คืนพิกัดกรอบ (JSON)
+# กลับเฉพาะ client นั้น → ทุกคนเห็นแต่กล้องตัวเอง ไม่แชร์ pipeline เดิม.
+#
+# ค่าจริงที่ใช้คุมการสตรีมอยู่ฝั่งเบราว์เซอร์ (ค่าคงที่ STREAM_* ใน
+# templates/index.html). ค่าด้านล่างเก็บไว้เป็น "ค่าอ้างอิง/ค่าเริ่มต้นที่แนะนำ"
+# ให้ตรงกัน — จูนสำหรับ 1 กล้องบนเครื่อง CPU (เช่น i7-1165G7): โมเดล live รันที่
+# imgsz 480 จึงส่งกว้าง 640 พอดี + ~10 fps. อนาคต 2–3 กล้องให้ลด INFER_FPS เป็น 5–6.
+STREAM_SOURCE_SENTINEL = "stream"  # camera_index พิเศษ (ใช้กับ StreamCamera/​push เดิมที่คงไว้)
+STREAM_INFER_FPS = 10              # อัตราที่เบราว์เซอร์เรียก /api/stream/infer (1 กล้อง)
+STREAM_JPEG_QUALITY = 0.85         # คุณภาพ JPEG ที่เบราว์เซอร์ encode ก่อนส่ง (0–1)
+STREAM_MAX_WIDTH = 640             # ความกว้างเฟรม live ก่อนส่ง (px) — โมเดลใช้ 480
 # คุณภาพ/ความกว้างสำหรับภาพ snapshot (ถ่ายครั้งเดียว ดันคุณภาพให้สูงกว่า live).
 STREAM_SNAPSHOT_JPEG_QUALITY = 0.95
 STREAM_SNAPSHOT_MAX_WIDTH = 1920

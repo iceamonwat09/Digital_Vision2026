@@ -113,6 +113,7 @@
                      boxes drawn on the overlay canvas — per-client, isolated. -->
                 <video id="streamVideo" autoplay playsinline muted style="display:none"></video>
                 <canvas id="streamOverlay" style="display:none"></canvas>
+                <div id="streamStats" style="display:none">—</div>
             </div>
 
             <div class="stats-row">
@@ -230,6 +231,12 @@
     .video-stage { position: relative; }
     #streamVideo { display: block; width: 100%; height: auto; }
     #streamOverlay { position: absolute; left: 0; top: 0; width: 100%; height: 100%; pointer-events: none; }
+    #streamStats {
+        position: absolute; left: 10px; top: 10px; z-index: 2;
+        background: rgba(15, 23, 42, .65); color: #e2e8f0;
+        font: 600 12px/1.4 ui-monospace, monospace;
+        padding: 4px 8px; border-radius: 6px; pointer-events: none;
+    }
 </style>
 {% endblock %}
 
@@ -297,14 +304,19 @@
     // no /video_feed, no global pipeline — so every browser sees only its own
     // camera. The infer loop throttles + keeps a single request in flight
     // (process-latest). Constants mirror config.py (STREAM_*).
-    const STREAM_INFER_FPS     = 8;     // how often this client asks the server to detect
+    // Tuned for 1 camera on a CPU-only station (e.g. i7-1165G7): the model runs
+    // at imgsz 480, so 640-wide frames carry full detail with no waste, and ~10
+    // fps matches what the CPU sustains. For 2–3 cameras later, lower INFER_FPS
+    // to ~5–6 (CPU is shared and inference is serialised by a lock).
+    const STREAM_INFER_FPS     = 10;    // how often this client asks the server to detect
     const STREAM_JPEG_QUALITY  = 0.85;
-    const STREAM_MAX_WIDTH     = 960;
+    const STREAM_MAX_WIDTH     = 640;   // model uses imgsz 480 → 640 is the sweet spot
     const STREAM_SNAP_QUALITY  = 0.95;
     const STREAM_SNAP_MAX_WIDTH = 1920;
 
     const streamVideo   = document.getElementById('streamVideo');    // local live preview
     const streamOverlay = document.getElementById('streamOverlay');  // detection boxes
+    const streamStats   = document.getElementById('streamStats');    // FPS / latency badge
     const streamCanvas  = document.createElement('canvas');          // off-screen frame grab
 
     let streamLiveStream = null;   // MediaStream of the browser camera (live)
@@ -312,6 +324,8 @@
     let streamInferInFlight = false;
     let streamLiveActive = false;  // true while this client is running STREAM detection
     let streamTotalDetected = 0;
+    let streamFps = 0;             // smoothed effective inference FPS
+    let streamLastDoneTs = 0;      // perf timestamp of the previous completed infer
     let snapStreamStream = null;   // MediaStream for the snapshot viewfinder
 
     function secureContextOk() {
@@ -413,6 +427,7 @@
         if (streamInferInFlight) return;
         if (!drawVideoToCanvas(streamVideo, streamCanvas, STREAM_MAX_WIDTH)) return;
         streamInferInFlight = true;
+        const t0 = performance.now();
         streamCanvas.toBlob(blob => {
             if (!blob) { streamInferInFlight = false; return; }
             fetch('/api/stream/infer', {
@@ -426,6 +441,16 @@
                 streamTotalDetected += data.dent_count;
                 totalDetected.textContent = streamTotalDetected;
                 detectionStatus.textContent = data.verdict === 'ng' ? 'NG' : 'Detecting...';
+
+                // Effective FPS (smoothed) + round-trip latency for this client.
+                const now = performance.now();
+                const latency = Math.round(now - t0);
+                if (streamLastDoneTs) {
+                    const inst = 1000 / (now - streamLastDoneTs);
+                    streamFps = streamFps ? (streamFps * 0.7 + inst * 0.3) : inst;
+                }
+                streamLastDoneTs = now;
+                streamStats.textContent = 'FPS ' + streamFps.toFixed(1) + ' · ' + latency + ' ms';
             })
             .catch(() => {})
             .finally(() => { streamInferInFlight = false; });
@@ -456,10 +481,13 @@
             .then(() => {
                 streamLiveActive = true;
                 streamTotalDetected = 0;
+                streamFps = 0; streamLastDoneTs = 0;
                 // Show local video + overlay, hide the MJPEG img.
                 videoStream.style.display = 'none';
                 streamVideo.style.display = '';
                 streamOverlay.style.display = '';
+                streamStats.style.display = '';
+                streamStats.textContent = '—';
                 statusDot.className = 'status-dot status-active';
                 statusText.textContent = 'Active';
                 stopBtn.disabled = false;
@@ -493,6 +521,7 @@
         // Restore the default (MJPEG) view + controls.
         streamVideo.style.display = 'none';
         streamOverlay.style.display = 'none';
+        streamStats.style.display = 'none';
         videoStream.style.display = '';
         const octx = streamOverlay.getContext('2d');
         if (octx) octx.clearRect(0, 0, streamOverlay.width, streamOverlay.height);

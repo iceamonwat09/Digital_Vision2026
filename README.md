@@ -109,6 +109,16 @@ SQL_PASSWORD = "********"
 FLASK_HOST = "0.0.0.0"
 FLASK_PORT = 5000
 FLASK_DEBUG = False
+
+# ── HTTPS (จำเป็นสำหรับโหมด STREAM / กล้องของ Client) ─
+USE_HTTPS     = True       # getUserMedia ต้องการ secure context (https/localhost)
+SSL_CERT_FILE = "certs/cert.pem"   # สร้างด้วย: python generate_cert.py <ip>
+SSL_KEY_FILE  = "certs/key.pem"
+
+# ── STREAM source (กล้องของ Client ผ่านเบราว์เซอร์) ──
+STREAM_INFER_FPS  = 10     # อัตราเรียก /api/stream/infer (1 กล้อง; 2–3 กล้องลดเป็น 5–6)
+STREAM_JPEG_QUALITY = 0.85 # คุณภาพ JPEG ที่เบราว์เซอร์ส่งขึ้น
+STREAM_MAX_WIDTH  = 640    # ความกว้างเฟรม live (โมเดลใช้ imgsz 480)
 ```
 
 > **CAMERA_FOURCC**: บน Windows (MSMF) การบังคับ `"MJPG"` อาจทำให้ JPEG ออกมาไม่ครบ →
@@ -133,11 +143,24 @@ FLASK_DEBUG = False
 
 ## การรันแอป
 
+**แบบ dev / เครื่องเดียว (HTTP):**
 ```bash
 python app.py
 ```
-
 เปิดเบราว์เซอร์ไปที่ `http://localhost:5000` (หรือ IP เครื่อง:5000)
+
+**แบบใช้งานจริง / หลายเครื่อง / โหมด STREAM (HTTPS + gevent) — แนะนำ:**
+```bash
+python generate_cert.py 172.32.201.106   # 1) สร้าง self-signed cert (ครั้งเดียว)
+# 2) ตั้ง USE_HTTPS = True ใน config.py
+python run_server.py                      # 3) รันบน gevent (ทน MJPEG/HTTPS หลาย connection)
+```
+เปิด `https://<ip>:5000` (กดผ่านหน้าเตือน self-signed ครั้งแรก)
+
+> **ทำไมต้อง `run_server.py`?** Flask dev server (`app.py`) ค้าง/timeout เมื่อมี
+> HTTPS + การสตรีม MJPEG ค้างหลาย connection พร้อมกัน. `run_server.py` รันบน
+> **gevent** ซึ่งรองรับ connection ค้างจำนวนมากในโปรเซสเดียว + ทำ TLS ได้เสถียร.
+> โหมด STREAM (กล้องของ Client ผ่าน `getUserMedia`) **บังคับ HTTPS** เสมอ.
 
 เมนูบนสุด: **ตรวจจับสด · ตรวจฉลากกระดาษ · ตรวจ Artwork · แดชบอร์ด · ประวัติ**
 
@@ -149,11 +172,34 @@ python app.py
 
 **หน้าใช้งาน** (`/`) จัดเป็นแผงควบคุม 3 ขั้น:
 1. **โหมดตรวจสอบ** — เลือกโมเดล (`can_dent` / `label`) และไฟล์ `.pt`
-2. **แหล่งสัญญาณภาพ** — กล้อง USB หรือ IP (RTSP)
+2. **แหล่งสัญญาณภาพ** — มี 3 แบบ: **กล้อง USB** · **กล้อง IP (RTSP)** · **สตรีม**
 3. **เริ่ม/หยุด** — Start/Stop Detection พร้อมสถิติ Active/Total
 
 **โมเดล** เก็บไฟล์ `.pt` ในโฟลเดอร์ weights ต่อโหมด (ดู `modes/registry.py`)
 สลับโมเดล/โหมดได้จาก UI ไม่ต้องรีสตาร์ต
+
+### แหล่งสัญญาณภาพ "สตรีม" — กล้องของเครื่อง Client (per-client isolation)
+
+ให้ผู้ใช้แต่ละคนเปิด **กล้องของเครื่องตัวเอง** ผ่านเบราว์เซอร์ (`getUserMedia`) แทน
+การใช้กล้องที่เสียบกับ Server โดยออกแบบให้ **แยกขาดต่อคน**:
+
+```
+[กล้อง browser ของแต่ละคน] → <video> ในเครื่องตัวเอง (ลื่น native)
+   → ส่งเฟรม (throttle + single-in-flight) → POST /api/stream/infer
+   → server ตรวจเฟรมนั้น (gevent threadpool + lock) → คืน "พิกัดกรอบ JSON"
+   → วาดกรอบบน <canvas> ทับวิดีโอของตัวเอง  →  เห็นแต่กล้องตัวเอง
+```
+
+- **แยกต่อ client โดยอัตโนมัติ** — เป็น request/response ผลกลับไปหาคนที่ส่งมาเท่านั้น
+  (ไม่แชร์กล้อง/`/video_feed`/global pipeline กับ USB/RTSP)
+- **บังคับ HTTPS** — `getUserMedia` ทำงานเฉพาะ secure context (ดู `generate_cert.py`)
+- **Snapshot** ในโหมดสตรีมก็ใช้กล้อง Client (`POST /api/stream/snapshot`)
+- มีตัวเลข **FPS/latency** มุมจอช่วยดูว่าเน็ต/เครื่องไหวแค่ไหน
+- จูนได้ที่ค่าคงที่ `STREAM_*` ใน `templates/index.html` (สะท้อนใน `config.py`)
+
+> หลักการ: นำ *per-stream isolation + worker-pool + process-latest* ของระบบ
+> machine-vision มืออาชีพมาใช้แบบย่อ — รองรับ 1 กล้องตอนนี้ และขยายเป็น 2–3
+> กล้องได้โดยลด `STREAM_INFER_FPS`.
 
 ---
 
@@ -295,12 +341,18 @@ approve** (ถ้าบน artwork สะกดเพี้ยนจะถูก
 
 ## API Endpoints
 
-### โหมดตรวจจับสด
+### โหมดตรวจจับสด (USB / RTSP)
 - `POST /api/detection/start` · `POST /api/detection/stop` · `GET /api/detection/status`
 - `GET /api/camera/scan` — สแกนกล้อง
 - `GET /api/modes` · `GET /api/models?mode=` · `POST /api/mode/switch`
-- `GET /video_feed` — MJPEG stream
+- `GET /video_feed` — MJPEG stream (ผูก src เฉพาะตอน detection ทำงาน)
 - `GET /api/stats` · `GET /api/defects`
+
+### โหมดสตรีม (กล้องของ Client — per-client isolation)
+- `POST /api/stream/infer` — รับ JPEG 1 เฟรม (raw body) → ตรวจ → คืน
+  `{detections:[{bbox,label,confidence,color,is_defect}], verdict, dent_count, w, h}`
+- `POST /api/stream/snapshot` — ถ่ายภาพนิ่งจากกล้อง Client → ตรวจ คืนผลแบบเดียวกับ `/api/snapshot`
+- *(คงไว้ ไม่ใช้แล้ว: `POST /api/stream/push` + `StreamCamera` จากแนวทาง push เดิม)*
 
 ### ถ่ายรูปตรวจ (Snapshot)
 - `POST /api/viewfinder/start` — เปิดกล้อง + viewfinder (รับ `camera_index`, `quality`)
@@ -332,9 +384,11 @@ approve** (ถ้าบน artwork สะกดเพี้ยนจะถูก
 
 ```
 .
-├── app.py                       # Flask app — entry point, ลงทะเบียนทุกโหมด + snapshot
-├── config.py                    # ตั้งค่ากลาง (กล้อง, snapshot, SQL, Flask, N8N)
-├── camera.py / yolo_detector.py # โหมดตรวจจับสด + จัดการ backend กล้อง (MSMF/DSHOW/V4L2)
+├── app.py                       # Flask app — entry point (dev server), ลงทะเบียนทุกโหมด + snapshot
+├── run_server.py                # entry point แบบ gevent (HTTPS + หลาย connection) — ใช้งานจริง/STREAM
+├── generate_cert.py             # สร้าง self-signed TLS cert (จำเป็นสำหรับ getUserMedia/STREAM)
+├── config.py                    # ตั้งค่ากลาง (กล้อง, snapshot, SQL, Flask, HTTPS, STREAM, N8N)
+├── camera.py / yolo_detector.py # โหมดตรวจจับสด + StreamCamera + จัดการ backend กล้อง (MSMF/DSHOW/V4L2)
 ├── diagnose_snapshot.py         # เครื่องมือทดสอบกล้องบนสถานี (ความละเอียด/backend/fourcc)
 ├── database.py                  # SQL Server (pyodbc)
 ├── modes/                       # registry + config ต่อโหมด YOLO
@@ -396,6 +450,17 @@ python diagnose_snapshot.py
 ---
 
 ## สรุปการปรับปรุงล่าสุด (Changelog)
+
+### 🎥 แหล่งสัญญาณภาพ "สตรีม" — กล้องของ Client (มิ.ย. 2026)
+- **โหมด STREAM** ในข้อ "แหล่งสัญญาณภาพ" — ผู้ใช้แต่ละคนเปิดกล้องเครื่องตัวเองผ่านเบราว์เซอร์
+- **Per-client isolation** — `POST /api/stream/infer` แบบ request/response: ทุกคนเห็นแต่กล้องตัวเอง
+  (รัน detect ใน gevent threadpool + lock; วาดกรอบบน `<canvas>` overlay ทับ local `<video>`)
+- **Snapshot จากกล้อง Client** — `POST /api/stream/snapshot`
+- **HTTPS (opt-in)** — `generate_cert.py` + `USE_HTTPS` (จำเป็นสำหรับ `getUserMedia`)
+- **`run_server.py` (gevent)** — แก้ dev server ค้าง/timeout เมื่อ HTTPS + MJPEG หลาย connection
+- **Lazy `/video_feed`** — ผูก src เฉพาะตอน detection ทำงาน (แท็บที่จอดทิ้งไม่ยึด connection)
+- **ตัววัด FPS/latency** บนจอโหมดสตรีม
+- ✅ กระทบเฉพาะโหมด STREAM — USB/RTSP/Snapshot/Label/Artwork **ไม่แตะ**
 
 ชุดการปรับปรุงโหมด **ถ่ายรูปตรวจ (Snapshot) + กล้อง** (มิ.ย. 2026):
 
