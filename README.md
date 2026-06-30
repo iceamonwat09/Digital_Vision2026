@@ -144,24 +144,39 @@ STREAM_INFER_IMGSZ = 480   # imgsz ตรวจสตรีมสด = เท่
 
 ## การรันแอป
 
-**แบบ dev / เครื่องเดียว (HTTP):**
+**ค่าเริ่มต้น / ใช้งานจริงบนสถานี — แนะนำ:**
 ```bash
 python app.py
 ```
-เปิดเบราว์เซอร์ไปที่ `http://localhost:5000` (หรือ IP เครื่อง:5000)
+เปิดเบราว์เซอร์ไปที่ `http://localhost:5000` (หรือ `http://<ip เครื่อง>:5000`)
+รองรับ HTTPS ด้วยเช่นกัน (ดูด้านล่าง) — แค่ตั้ง `USE_HTTPS = True` แล้วรันคำสั่งเดิม
+`app.py` ใช้ `threaded=True` อยู่แล้ว จึงรับหลาย client พร้อมกันได้ และตั้งแต่โหมด
+STREAM เปลี่ยนมาเป็น request/response สั้นๆ ต่อเฟรม (`POST /api/stream/infer`,
+ไม่ใช่ connection ค้างยาวแบบ MJPEG) ภาระต่อ connection จึงลดลงมากเทียบกับตอนแรกที่ออกแบบ
+`run_server.py` ไว้แก้ปัญหานี้
 
-**แบบใช้งานจริง / หลายเครื่อง / โหมด STREAM (HTTPS + gevent) — แนะนำ:**
+**ทางเลือก (gevent) — สำหรับ deploy หนักจริง/หลายกล้อง/ผู้ใช้พร้อมกันจำนวนมาก:**
 ```bash
 python generate_cert.py 172.32.201.106   # 1) สร้าง self-signed cert (ครั้งเดียว)
 # 2) ตั้ง USE_HTTPS = True ใน config.py
-python run_server.py                      # 3) รันบน gevent (ทน MJPEG/HTTPS หลาย connection)
+python run_server.py                      # 3) รันบน gevent (ทน connection ค้างจำนวนมากในโปรเซสเดียว)
 ```
 เปิด `https://<ip>:5000` (กดผ่านหน้าเตือน self-signed ครั้งแรก)
 
-> **ทำไมต้อง `run_server.py`?** Flask dev server (`app.py`) ค้าง/timeout เมื่อมี
-> HTTPS + การสตรีม MJPEG ค้างหลาย connection พร้อมกัน. `run_server.py` รันบน
-> **gevent** ซึ่งรองรับ connection ค้างจำนวนมากในโปรเซสเดียว + ทำ TLS ได้เสถียร.
-> โหมด STREAM (กล้องของ Client ผ่าน `getUserMedia`) **บังคับ HTTPS** เสมอ.
+> **`app.py` หรือ `run_server.py` ใช้ตัวไหนดี?** เดิมตั้งใจให้ `run_server.py`
+> (gevent) เป็นค่าแนะนำ เพราะตอนนั้น `/video_feed` (MJPEG) เป็น connection ค้างยาว
+> ทุกแท็บที่เปิดไว้ + HTTPS หลาย client ทำให้ dev server ของ Flask ค้าง/timeout จริง.
+> แต่หลังจากย้ายโหมด STREAM ไปใช้ `POST /api/stream/infer` (request/response สั้นๆ
+> ต่อเฟรม แทนการค้าง connection) ภาระแบบเดิมก็ลดลงมาก — สำหรับใช้งานจริงที่ผ่านมา
+> (1 สถานี/กล้องเดียว) **`app.py` รันได้ผลเหมือนกัน** ไม่ต้องพึ่ง `run_server.py` ก็ได้.
+> เก็บ `run_server.py` ไว้เป็นทางเลือกสำหรับ deploy ที่มีหลายกล้อง/ผู้ชม MJPEG
+> (`/video_feed` ของ USB/RTSP) พร้อมกันจำนวนมาก ซึ่งยังเป็น connection ค้างยาวอยู่
+> เหมือนเดิม — ถ้าใช้แล้วรันไม่ขึ้น (เช่น import error) ให้ดูข้อความ error เต็มใน
+> console ก่อน ส่วนใหญ่เกิดจาก `gevent` ถูกติดตั้งคนละ Python interpreter กับตัวที่ใช้
+> รัน (ดู [ตารางอาการ → สาเหตุ → วิธีแก้](#ตารางอาการ--สาเหตุ--วิธีแก้))
+>
+> โหมด STREAM (กล้องของ Client ผ่าน `getUserMedia`) **บังคับ HTTPS** เสมอ ไม่ว่าจะรัน
+> ด้วย `app.py` หรือ `run_server.py`.
 
 เมนูบนสุด: **ตรวจจับสด · ตรวจฉลากกระดาษ · ตรวจ Artwork · แดชบอร์ด · ประวัติ**
 
@@ -187,7 +202,8 @@ python run_server.py                      # 3) รันบน gevent (ทน MJ
 ```
 [กล้อง browser ของแต่ละคน] → <video> ในเครื่องตัวเอง (ลื่น native)
    → ส่งเฟรม (throttle + single-in-flight) → POST /api/stream/infer
-   → server ตรวจเฟรมนั้น (gevent threadpool + lock) → คืน "พิกัดกรอบ JSON"
+   → server ตรวจเฟรมนั้น (lock กันชนกันระหว่าง client; ใช้ gevent threadpool เพิ่ม
+     ถ้ารันด้วย run_server.py) → คืน "พิกัดกรอบ JSON"
    → วาดกรอบบน <canvas> ทับวิดีโอของตัวเอง  →  เห็นแต่กล้องตัวเอง
 ```
 
@@ -385,8 +401,8 @@ approve** (ถ้าบน artwork สะกดเพี้ยนจะถูก
 
 ```
 .
-├── app.py                       # Flask app — entry point (dev server), ลงทะเบียนทุกโหมด + snapshot
-├── run_server.py                # entry point แบบ gevent (HTTPS + หลาย connection) — ใช้งานจริง/STREAM
+├── app.py                       # Flask app — entry point หลัก (ใช้งานจริงบนสถานี), ลงทะเบียนทุกโหมด + snapshot
+├── run_server.py                # entry point แบบ gevent (ทางเลือก) — deploy หนัก/หลายกล้อง/MJPEG หลาย connection
 ├── generate_cert.py             # สร้าง self-signed TLS cert (จำเป็นสำหรับ getUserMedia/STREAM)
 ├── config.py                    # ตั้งค่ากลาง (กล้อง, snapshot, SQL, Flask, HTTPS, STREAM, N8N)
 ├── camera.py / yolo_detector.py # โหมดตรวจจับสด + StreamCamera + จัดการ backend กล้อง (MSMF/DSHOW/V4L2)
@@ -440,6 +456,7 @@ python diagnose_snapshot.py
 | **แอป crash หลุดเอง (ไม่มี traceback)** | `scan` กล้องไล่เปิดทุก backend → ชน DSHOW/obsensor บน OpenCV 4.x | `_probe_index` เปิด backend เดียว + `try/except` — แก้แล้ว |
 | **viewfinder เล็งไม่ลื่น** | กล้องเปิด 5MP@15fps + ย่อภาพใหญ่ทุกเฟรม | เลือก quality **"ลื่นที่สุด 720p"**, encode แชร์ครั้งเดียว, `VIEWFINDER_STREAM_FPS=30` |
 | **กล้องได้แค่ 720p ทั้งที่เป็น 8MP** | MSMF (default Windows) ไม่รองรับ MJPG จึงตัน USB bandwidth | ความละเอียดสูงต้องใช้ DSHOW+MJPG ที่ภาพสะอาด — ถ้ากล้อง/พอร์ตไม่ไหว ใช้ 720p ก็ตรวจ dent ได้ |
+| **`python run_server.py` รันไม่ขึ้น / `ModuleNotFoundError: gevent`** | บน Windows ที่มีหลาย Python (เช่น 3.9 และ 3.14) คำสั่ง `pip install` เปล่าๆ อาจลงให้คนละตัวกับที่ใช้รัน (`py -3.9`) | ติดตั้งด้วย interpreter เดียวกับที่รัน: `py -3.9 -m pip install gevent` ไม่ใช่ `pip install gevent` เฉยๆ — หรือใช้ `python app.py` แทนได้เลย (ดู [การรันแอป](#การรันแอป)) |
 
 ### หลักการที่ยึด
 
@@ -452,21 +469,45 @@ python diagnose_snapshot.py
 
 ## สรุปการปรับปรุงล่าสุด (Changelog)
 
-### ⚡ OpenVINO acceleration (มิ.ย. 2026)
-- `USE_OPENVINO = True` — ตอนโหลดโมเดลจะ export `.pt` เป็น OpenVINO (FP32 / dynamic,
-  ครั้งเดียว เก็บใน `weights/.../<name>_openvino_model/`) แล้วใช้รัน inference แทน
-  → เร็วขึ้นบน Intel CPU/iGPU **โดยคง imgsz 480 = ความแม่นเท่าเดิม** (ไม่ใช่ลด imgsz)
-- **Fallback อัตโนมัติ** — ถ้าไม่ได้ติดตั้ง `openvino`/export ล้มเหลว → ใช้ PyTorch เดิม
-  (ไม่กระทบทุกโหมด). ติดตั้ง: `pip install openvino onnx`
-- มีผลกับทุกโหมดที่ใช้โมเดล (live/snapshot) — ผลตรวจเหมือนเดิมเพราะเป็น FP32
+### 🎯 นับ "1 กระป๋อง = 1 การตรวจ" แบบ edge-triggered (มิ.ย. 2026)
+- ปัญหาเดิม: นับ/บันทึก DB ทุกเฟรมที่เจอ defect — กระป๋องเดิมที่ยังไม่ขยับก็ถูกนับ/บันทึก
+  ซ้ำหลายสิบ-หลายร้อยครั้งระหว่างที่อยู่หน้ากล้อง
+- แก้เป็น state machine 3 สถานะ (`none` / `ok` / `ng`) ต่อกระป๋อง — นับ +1 และบันทึก DB
+  **เฉพาะตอนเปลี่ยนจาก "ไม่มีอะไร" → "เจอของ" เท่านั้น** กระป๋องเดิมที่ยังอยู่หน้ากล้องจะ
+  ไม่ถูกนับซ้ำ ไม่ว่าจะอยู่นานแค่ไหน
+- ถือว่ากระป๋อง "หายไปแล้ว" หลังไม่เจออะไรติดต่อกัน N เฟรม (กันค่าตรวจกระพริบเฟรมเดียว
+  ทำให้นับเกิน) — ปรับได้ที่ `DEFECT_RESET_FRAMES` (config.py, ใช้กับ USB/RTSP) และ
+  `STREAM_RESET_FRAMES` (templates/index.html, ใช้กับ STREAM)
+- ใช้ทั้ง USB/RTSP (`inference_loop()` ใน app.py) และ STREAM (`streamInferLoop()` ฝั่ง JS)
+- `DEFECT_LOGGING_COOLDOWN` (เวลา-based เดิม) เลิกใช้แล้ว เหลือไว้เพื่อ backward-compat
+
+### 🟩 STREAM: ซ่อนกรอบเขียว "Good/Can" เมื่อผล NG (มิ.ย. 2026)
+- USB/RTSP ซ่อนกรอบเขียว (`can`/`good`) อยู่แล้วเมื่อ verdict เป็น NG แต่ STREAM ยังโชว์ค้าง
+  ทำให้ดูเหมือนกรอบไม่ตรงกับอีกโหมด — แก้ที่ `drawStreamBoxes()` ให้กรองเหลือเฉพาะ
+  defect box เมื่อ `verdict === 'ng'` เหมือน USB/RTSP
+
+### ⚡ OpenVINO acceleration (มิ.ย. 2026) — ปิดใช้งานเป็นค่าเริ่มต้น
+- โค้ดรองรับ `USE_OPENVINO = True` (export `.pt` → OpenVINO ครั้งเดียว เก็บใน
+  `weights/.../<name>_openvino_model/` แล้วรัน inference แทน PyTorch) แต่ทดสอบบนสถานีจริง
+  แล้วพบว่า **ตรวจ dent ไม่เจอเลยทุกโหมด** เมื่อใช้คู่ `ultralytics 8.4.41` + `openvino 2025.3.0`
+  (เวอร์ชัน output decoding ไม่ตรงกัน ไม่ขึ้น error ใดๆ ตอน export/load — เงียบแต่ผิด)
+- **ค่าเริ่มต้นจึงล็อกไว้ที่ `USE_OPENVINO = False`** (ใช้ PyTorch ตามปกติ, ยืนยันแม่นยำแล้ว)
+  ไม่แนะนำให้เปิดใช้จนกว่าจะ pin คู่เวอร์ชัน `ultralytics`/`openvino` ที่ทดสอบแล้วว่าตรวจถูก
+  และเทียบผลตรวจกับ PyTorch แบบ side-by-side ก่อน
+- ถ้าจะลองใหม่: ติดตั้ง `pip install openvino onnx` แล้วตั้ง `USE_OPENVINO = True` —
+  มี fallback กลับ PyTorch อัตโนมัติถ้า export ล้มเหลว แต่ไม่ครอบคลุมกรณี "export สำเร็จ
+  แต่ตรวจผิด" แบบที่เจอ จึงต้องตรวจผลเองก่อนใช้งานจริง
 
 ### 🎥 แหล่งสัญญาณภาพ "สตรีม" — กล้องของ Client (มิ.ย. 2026)
 - **โหมด STREAM** ในข้อ "แหล่งสัญญาณภาพ" — ผู้ใช้แต่ละคนเปิดกล้องเครื่องตัวเองผ่านเบราว์เซอร์
 - **Per-client isolation** — `POST /api/stream/infer` แบบ request/response: ทุกคนเห็นแต่กล้องตัวเอง
-  (รัน detect ใน gevent threadpool + lock; วาดกรอบบน `<canvas>` overlay ทับ local `<video>`)
+  (รัน detect ใน lock กันชนกัน; วาดกรอบบน `<canvas>` overlay ทับ local `<video>`)
 - **Snapshot จากกล้อง Client** — `POST /api/stream/snapshot`
-- **HTTPS (opt-in)** — `generate_cert.py` + `USE_HTTPS` (จำเป็นสำหรับ `getUserMedia`)
-- **`run_server.py` (gevent)** — แก้ dev server ค้าง/timeout เมื่อ HTTPS + MJPEG หลาย connection
+- **HTTPS (opt-in)** — `generate_cert.py` + `USE_HTTPS` (จำเป็นสำหรับ `getUserMedia`) — ใช้ได้ทั้ง
+  `python app.py` และ `python run_server.py`
+- **`run_server.py` (gevent, ทางเลือก)** — ตอนออกแบบไว้แก้ dev server ค้าง/timeout เมื่อ HTTPS +
+  MJPEG ค้างหลาย connection; ใช้งานจริง (request/response สั้นๆ ต่อเฟรม) พบว่า `app.py`
+  เพียงพอแล้วสำหรับ 1 สถานี — ดูหัวข้อ [การรันแอป](#การรันแอป)
 - **Lazy `/video_feed`** — ผูก src เฉพาะตอน detection ทำงาน (แท็บที่จอดทิ้งไม่ยึด connection)
 - **ตัววัด FPS/latency** บนจอโหมดสตรีม
 - ✅ กระทบเฉพาะโหมด STREAM — USB/RTSP/Snapshot/Label/Artwork **ไม่แตะ**
