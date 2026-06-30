@@ -203,7 +203,7 @@ STREAM_FPS = 15  # FPS for the live-detection MJPEG stream (lower = less bandwid
 # imgsz 480 จึงส่งกว้าง 640 พอดี + ~10 fps. อนาคต 2–3 กล้องให้ลด INFER_FPS เป็น 5–6.
 STREAM_SOURCE_SENTINEL = "stream"  # camera_index พิเศษ (ใช้กับ StreamCamera/​push เดิมที่คงไว้)
 STREAM_INFER_FPS = 10              # อัตราที่เบราว์เซอร์เรียก /api/stream/infer (1 กล้อง)
-STREAM_JPEG_QUALITY = 0.85         # คุณภาพ JPEG ที่เบราว์เซอร์ encode ก่อนส่ง (0–1)
+STREAM_JPEG_QUALITY = 0.92         # คุณภาพ JPEG ที่เบราว์เซอร์ encode ก่อนส่ง (สูง = กรอบแม่นขึ้น)
 STREAM_MAX_WIDTH = 640             # ความกว้างเฟรม live ก่อนส่ง (px) — โมเดลใช้ 480
 # คุณภาพ/ความกว้างสำหรับภาพ snapshot (ถ่ายครั้งเดียว ดันคุณภาพให้สูงกว่า live).
 STREAM_SNAPSHOT_JPEG_QUALITY = 0.95

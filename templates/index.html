@@ -309,7 +309,7 @@
     // fps matches what the CPU sustains. For 2–3 cameras later, lower INFER_FPS
     // to ~5–6 (CPU is shared and inference is serialised by a lock).
     const STREAM_INFER_FPS     = 10;    // how often this client asks the server to detect
-    const STREAM_JPEG_QUALITY  = 0.85;
+    const STREAM_JPEG_QUALITY  = 0.92;  // higher = cleaner image → tighter boxes / higher conf
     const STREAM_MAX_WIDTH     = 640;   // model uses imgsz 480 → 640 is the sweet spot
     const STREAM_SNAP_QUALITY  = 0.95;
     const STREAM_SNAP_MAX_WIDTH = 1920;
@@ -394,7 +394,8 @@
     }
 
     // Draw detection boxes (from /api/stream/infer) onto the overlay, scaled from
-    // the inference frame size (data.w/h) to the displayed video size.
+    // the inference frame size (data.w/h) to the displayed video size. Styling is
+    // sized to the display so it reads as clearly as the server-rendered USB view.
     function drawStreamBoxes(data) {
         const dispW = streamVideo.clientWidth, dispH = streamVideo.clientHeight;
         if (!dispW || !dispH) return;
@@ -404,22 +405,38 @@
         ctx.clearRect(0, 0, dispW, dispH);
         if (!data.w || !data.h) return;
         const sx = dispW / data.w, sy = dispH / data.h;
-        ctx.lineWidth = 2;
-        ctx.font = '14px sans-serif';
+        const lw = Math.max(2, Math.round(dispW / 320));   // box thickness scaled to display
+        const fs = Math.max(12, Math.round(dispW / 52));   // label font scaled to display
         ctx.textBaseline = 'top';
         (data.detections || []).forEach(d => {
             const [x1, y1, x2, y2] = d.bbox;
             const x = x1 * sx, y = y1 * sy, w = (x2 - x1) * sx, h = (y2 - y1) * sy;
             const rgb = 'rgb(' + d.color[0] + ',' + d.color[1] + ',' + d.color[2] + ')';
+            ctx.lineWidth = lw;
             ctx.strokeStyle = rgb;
             ctx.strokeRect(x, y, w, h);
-            const text = d.label + ' ' + d.confidence;
-            const tw = ctx.measureText(text).width + 8;
+            ctx.font = '700 ' + fs + 'px sans-serif';
+            const text = d.label + ' ' + Number(d.confidence).toFixed(2);
+            const padX = Math.round(fs / 3), lh = fs + Math.round(fs / 2);
+            const tw = ctx.measureText(text).width + padX * 2;
+            const ly = y - lh >= 0 ? y - lh : y;   // flip below the box if no room above
             ctx.fillStyle = rgb;
-            ctx.fillRect(x, Math.max(0, y - 18), tw, 18);
+            ctx.fillRect(x, ly, tw, lh);
             ctx.fillStyle = '#fff';
-            ctx.fillText(text, x + 4, Math.max(0, y - 18) + 2);
+            ctx.fillText(text, x + padX, ly + Math.round(fs / 5));
         });
+        // Big NG / OK verdict banner (mirrors the USB server-rendered view).
+        const isNG = data.verdict === 'ng';
+        const bfs = Math.max(22, Math.round(dispW / 13));
+        ctx.font = '800 ' + bfs + 'px sans-serif';
+        const btext = isNG ? 'NG' : 'OK';
+        const bw = ctx.measureText(btext).width + bfs * 0.6;
+        const bh = bfs + Math.round(bfs / 3);
+        const bx = dispW - bw - 12;
+        ctx.fillStyle = 'rgba(0,0,0,0.55)';
+        ctx.fillRect(bx, 12, bw, bh);
+        ctx.fillStyle = isNG ? 'rgb(220,0,0)' : 'rgb(0,180,70)';
+        ctx.fillText(btext, bx + (bw - ctx.measureText(btext).width) / 2, 12 + Math.round(bh / 6));
     }
 
     // One infer tick: grab the newest video frame and ask the server to detect.
