@@ -32,7 +32,20 @@ hub stays responsive while the camera blocks.
 """
 
 # Monkey-patch BEFORE importing anything that touches socket/ssl (Flask, app, …).
-from gevent import monkey
+try:
+    from gevent import monkey
+except ModuleNotFoundError:
+    import sys
+    exe = sys.executable
+    sys.stderr.write(
+        "\n[run_server] gevent is not installed for THIS Python:\n"
+        f"    {exe}\n"
+        "Install it into the SAME interpreter you run the app with, e.g.:\n"
+        f'    "{exe}" -m pip install gevent\n'
+        "  (or:  py -3.9 -m pip install gevent  if you launch with `py -3.9`)\n"
+        "Tip: a bare `pip install` may target a DIFFERENT Python than `py -3.9`.\n\n"
+    )
+    sys.exit(1)
 monkey.patch_all(thread=False)
 
 import os
