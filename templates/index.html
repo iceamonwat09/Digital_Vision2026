@@ -230,7 +230,8 @@
     /* STREAM source: local <video> with a detection-box overlay on top. */
     .video-stage { position: relative; }
     #streamVideo { display: block; width: 100%; height: auto; }
-    #streamOverlay { position: absolute; left: 0; top: 0; width: 100%; height: 100%; pointer-events: none; }
+    /* size/position are set per-frame in JS to match the <video> exactly */
+    #streamOverlay { position: absolute; left: 0; top: 0; pointer-events: none; }
     #streamStats {
         position: absolute; left: 10px; top: 10px; z-index: 2;
         background: rgba(15, 23, 42, .65); color: #e2e8f0;
@@ -399,6 +400,14 @@
     function drawStreamBoxes(data) {
         const dispW = streamVideo.clientWidth, dispH = streamVideo.clientHeight;
         if (!dispW || !dispH) return;
+        // Pin the overlay EXACTLY over the <video> element's rendered rectangle.
+        // The stage box is flex:1 (can be taller than the video), so sizing the
+        // canvas to the stage stretches/offsets the boxes — we must match the
+        // video itself, in both CSS size AND internal resolution (1:1, no stretch).
+        streamOverlay.style.left = streamVideo.offsetLeft + 'px';
+        streamOverlay.style.top = streamVideo.offsetTop + 'px';
+        streamOverlay.style.width = dispW + 'px';
+        streamOverlay.style.height = dispH + 'px';
         streamOverlay.width = dispW;
         streamOverlay.height = dispH;
         const ctx = streamOverlay.getContext('2d');
