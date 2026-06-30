@@ -124,6 +124,14 @@ YOLO_MAX_DET = 20
 # can-body dents at this camera resolution. Drop to 320 for even more speed.
 YOLO_IMGSZ = 480
 
+# ── OpenVINO acceleration (เร่ง inference บน Intel CPU/iGPU) ──
+# ⚠️ ปิดไว้ (False) เป็นค่าเริ่มต้น: บนสถานี (ultralytics 8.4.41 + openvino 2025.3.0)
+# โมเดล OpenVINO ที่ export ออกมา "ตรวจไม่เจอ dent เลยทุกโหมด" (ถอดรหัส output ไม่ตรง
+# เวอร์ชัน). PyTorch ทำงานถูกต้อง จึงใช้ PyTorch เป็นหลัก.
+# ถ้าจะลองเปิดใหม่ในอนาคต ต้องทดสอบ pin เวอร์ชัน ultralytics/openvino ให้เข้ากันก่อน
+# (และตรวจว่ายังเจอ dent เท่า PyTorch). เปิด = True เพื่อทดลองเท่านั้น.
+USE_OPENVINO = False
+
 # Snapshot inference image size. Snapshot runs the model ONCE per shutter press
 # (not a live stream), so speed is irrelevant — we trade it for accuracy. With
 # the high-resolution snapshot capture (SNAPSHOT_CAMERA_* = 5MP) there is real
@@ -167,7 +175,12 @@ LINE_NUMBER = "LINE-01"            # รหัสสายการผลิต
 # DEFECT LOGGING CONFIGURATION
 # ====================
 # Cooldown period in seconds to avoid duplicate logging
-DEFECT_LOGGING_COOLDOWN = 2.0  # Log at most once every 2 seconds per defect type
+DEFECT_LOGGING_COOLDOWN = 2.0  # (legacy) ไม่ใช้แล้ว — เปลี่ยนเป็นนับ/บันทึกแบบ edge-triggered
+
+# จำนวนเฟรม "ว่าง" (ไม่เจออะไรเลย) ติดต่อกัน ที่ถือว่ากระป๋องผ่านพ้นไปแล้ว
+# ใช้ทั้งโหมด live (USB/RTSP) — กันการนับ/บันทึกซ้ำของกระป๋องใบเดิม (1 ใบ = 1 การตรวจ).
+# สูงขึ้น = ทนการกะพริบของการตรวจจับมากขึ้น แต่รับกระป๋องใบถัดไปช้าลง.
+DEFECT_RESET_FRAMES = 3
 
 # Maximum number of defects to log per frame
 MAX_DEFECTS_PER_FRAME = 5
@@ -179,8 +192,40 @@ FLASK_HOST = "0.0.0.0"
 FLASK_PORT = 5000
 FLASK_DEBUG = False
 
+# ── HTTPS (จำเป็นสำหรับโหมด STREAM / getUserMedia บนเครื่องอื่นใน LAN) ──────
+# เบราว์เซอร์อนุญาตให้เข้าถึงกล้อง (getUserMedia) เฉพาะ "secure context" คือ
+# HTTPS หรือ localhost เท่านั้น. เปิด USE_HTTPS=True แล้วชี้ไปที่ไฟล์ cert/key
+# (สร้างได้ด้วย `python generate_cert.py`) เพื่อให้เข้าผ่าน https://<ip>:5000 ได้.
+# ค่า default = ปิด → app.run ทำงานเหมือนเดิมทุกประการ (ไม่กระทบของเดิม).
+USE_HTTPS = True
+SSL_CERT_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "certs", "cert.pem")
+SSL_KEY_FILE  = os.path.join(os.path.dirname(os.path.abspath(__file__)), "certs", "key.pem")
+
 # Video streaming configuration
 STREAM_FPS = 15  # FPS for the live-detection MJPEG stream (lower = less bandwidth)
+
+# ── Browser STREAM source (กล้องของเครื่อง Client ผ่าน getUserMedia) ──────
+# โหมดที่ 3 ในข้อ "แหล่งสัญญาณภาพ": ใช้กล้องของเครื่อง Client ผ่านเบราว์เซอร์.
+# สถาปัตยกรรม = per-client isolation (request/response): เบราว์เซอร์โชว์กล้อง
+# ตัวเองใน <video> แล้วส่งเฟรมไป /api/stream/infer → server คืนพิกัดกรอบ (JSON)
+# กลับเฉพาะ client นั้น → ทุกคนเห็นแต่กล้องตัวเอง ไม่แชร์ pipeline เดิม.
+#
+# ค่าจริงที่ใช้คุมการสตรีมอยู่ฝั่งเบราว์เซอร์ (ค่าคงที่ STREAM_* ใน
+# templates/index.html). ค่าด้านล่างเก็บไว้เป็น "ค่าอ้างอิง/ค่าเริ่มต้นที่แนะนำ"
+# ให้ตรงกัน — จูนสำหรับ 1 กล้องบนเครื่อง CPU (เช่น i7-1165G7): โมเดล live รันที่
+# imgsz 480 จึงส่งกว้าง 640 พอดี + ~10 fps. อนาคต 2–3 กล้องให้ลด INFER_FPS เป็น 5–6.
+STREAM_SOURCE_SENTINEL = "stream"  # camera_index พิเศษ (ใช้กับ StreamCamera/​push เดิมที่คงไว้)
+STREAM_INFER_FPS = 10              # อัตราที่เบราว์เซอร์เรียก /api/stream/infer (1 กล้อง)
+STREAM_JPEG_QUALITY = 0.92         # คุณภาพ JPEG ที่เบราว์เซอร์ encode ก่อนส่ง (สูง = กรอบแม่นขึ้น)
+STREAM_MAX_WIDTH = 640             # ความกว้างเฟรม live ก่อนส่ง (px) — โมเดลใช้ 480
+# imgsz ที่โมเดลใช้ตรวจ "สตรีมสด". ⚠️ รอยบุบ (dent) เป็นฟีเจอร์เล็ก ต้องการ
+# ความละเอียด ≥480 ถึงจะตรวจเจอ — ต่ำกว่านี้ (เช่น 320) โมเดลจะมองไม่เห็นรอยบุบ
+# แล้วขึ้น Good หมด. จึงล็อกให้เท่า USB live (YOLO_IMGSZ=480). อย่าลดต่ำกว่านี้.
+# ถ้าต้องการเร็วขึ้นโดยคงความแม่น → ใช้ GPU/OpenVINO (ดู README) ไม่ใช่ลด imgsz.
+STREAM_INFER_IMGSZ = YOLO_IMGSZ
+# คุณภาพ/ความกว้างสำหรับภาพ snapshot (ถ่ายครั้งเดียว ดันคุณภาพให้สูงกว่า live).
+STREAM_SNAPSHOT_JPEG_QUALITY = 0.95
+STREAM_SNAPSHOT_MAX_WIDTH = 1920
 
 # Viewfinder (snapshot aiming) stream rate. Higher than STREAM_FPS so aiming
 # feels fluid — the live feed is deliberately 15fps to save bandwidth, but the

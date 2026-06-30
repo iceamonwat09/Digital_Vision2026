@@ -9,6 +9,11 @@ opencv-python==4.8.1.78
 ultralytics==8.1.0
 numpy>=1.26.0
 
+# OpenVINO acceleration (เร่ง inference บน Intel CPU/iGPU โดยคง imgsz/ความแม่น)
+# จำเป็นเฉพาะเมื่อ config.USE_OPENVINO=True — ถ้าไม่ติดตั้ง ระบบ fallback เป็น PyTorch
+openvino>=2023.3.0
+onnx>=1.15.0
+
 # Database
 pyodbc>=4.0.39           # SQL Server connection driver
 # pymongo==4.6.0         # (เดิม — MongoDB, ไม่ใช้แล้ว)
@@ -16,6 +21,15 @@ pyodbc>=4.0.39           # SQL Server connection driver
 # Authentication + RBAC (โหมด Login)
 bcrypt>=4.1.0            # password hashing (salt อัตโนมัติ — ห้ามเก็บ plain text)
 PyJWT>=2.8.0            # access / refresh token (httpOnly cookie)
+
+# HTTPS self-signed cert generator (generate_cert.py) — จำเป็นสำหรับโหมด STREAM
+# (getUserMedia ต้องใช้ secure context). มี prebuilt wheel บน Windows ใช้ได้ทันที.
+cryptography>=41.0.0
+
+# Production-ish WSGI server (run_server.py) — แก้อาการ Flask dev server ค้าง/
+# timeout เมื่อมี HTTPS + การสตรีม MJPEG ค้างหลาย connection พร้อมกัน. gevent
+# รองรับ connection ค้างจำนวนมากในโปรเซสเดียว + ทำ TLS ได้เสถียร.
+gevent>=23.9.0
 
 # Utilities
 Pillow==10.1.0

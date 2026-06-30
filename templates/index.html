@@ -48,6 +48,7 @@
                 <div class="src-tabs src-tabs-fill">
                     <button id="tabUsb"  class="src-tab src-tab-active" onclick="switchSource('usb')">กล้อง USB</button>
                     <button id="tabRtsp" class="src-tab" onclick="switchSource('rtsp')">กล้อง IP (RTSP)</button>
+                    <button id="tabStream" class="src-tab" onclick="switchSource('stream')">สตรีม</button>
                 </div>
 
                 <!-- USB panel -->
@@ -68,6 +69,17 @@
                                title="RTSP URL">
                         <button class="btn btn-icon" onclick="saveRtsp()" title="บันทึก URL">&#x1F4BE;</button>
                     </div>
+                </div>
+
+                <!-- STREAM panel (กล้องของเครื่องที่เปิดหน้านี้ ผ่านเบราว์เซอร์) -->
+                <div id="panelStream" class="camera-panel" style="display:none">
+                    <div class="camera-select-group">
+                        <select id="streamCameraSelect" class="camera-select" title="เลือกกล้องของเครื่องนี้" disabled>
+                            <option value="" disabled selected>กดรีเฟรชเพื่ออนุญาตกล้อง…</option>
+                        </select>
+                        <button id="refreshStreamCamsBtn" class="btn btn-icon" title="ขออนุญาต/รีเฟรชกล้อง">&#x1F504;</button>
+                    </div>
+                    <p class="control-hint" id="streamHint">ใช้กล้องของเครื่องที่เปิดหน้านี้ (ต้องเข้าผ่าน HTTPS หรือ localhost)</p>
                 </div>
             </section>
 
@@ -93,7 +105,15 @@
         <!-- ── จอภาพ + สถิติ (ขวา) ──────────────────────────── -->
         <div class="live-main">
             <div class="video-wrapper-compact video-stage">
-                <img id="videoStream" src="{{ url_for('video_feed') }}" alt="Video Stream">
+                <!-- USB/RTSP: server-annotated MJPEG. src is attached only while
+                     detection is active (see updateStatus), so an idle/parked tab
+                     holds ZERO long-lived MJPEG connections. -->
+                <img id="videoStream" alt="Video Stream">
+                <!-- STREAM: the client's OWN camera shown locally, with detection
+                     boxes drawn on the overlay canvas — per-client, isolated. -->
+                <video id="streamVideo" autoplay playsinline muted style="display:none"></video>
+                <canvas id="streamOverlay" style="display:none"></canvas>
+                <div id="streamStats" style="display:none">—</div>
             </div>
 
             <div class="stats-row">
@@ -125,6 +145,8 @@
             <div class="snap-image-pane">
                 <!-- live viewfinder (raw camera, no detection) -->
                 <img id="snapViewfinder" alt="Viewfinder">
+                <!-- local browser-camera viewfinder (STREAM source only) -->
+                <video id="snapVideoLocal" autoplay playsinline muted style="display:none"></video>
                 <!-- captured result (shown after shutter) -->
                 <img id="snapImage" alt="Snapshot result" style="display:none">
             </div>
@@ -183,7 +205,8 @@
         flex: 1 1 560px; background: #0b1220; display: flex;
         align-items: center; justify-content: center; min-height: 320px;
     }
-    .snap-image-pane img { max-width: 100%; max-height: 70vh; display: block; }
+    .snap-image-pane img,
+    .snap-image-pane video { max-width: 100%; max-height: 70vh; display: block; }
     .snap-info-pane {
         flex: 1 1 260px; padding: 22px; display: flex; flex-direction: column; gap: 18px;
     }
@@ -204,6 +227,18 @@
     .snap-quality { width:100%; }
     .snap-shutter { margin-top: auto; font-size: 18px; padding: 14px 0; }
     .control-hint { margin: 8px 0 0; font-size: 12px; color: #94a3b8; text-align: center; }
+    /* STREAM source: local <video> with a detection-box overlay on top. */
+    .video-stage { position: relative; }
+    #streamVideo { display: block; width: 100%; height: auto; }
+    /* size/position are set per-frame in JS to match the <video> exactly */
+    #streamOverlay { position: absolute; left: 0; top: 0; pointer-events: none; }
+    #streamStats {
+        position: absolute; left: 10px; top: 10px; z-index: 2;
+        background: rgba(15, 23, 42, .65); color: #e2e8f0;
+        font: 600 11px/1.4 ui-monospace, monospace;
+        padding: 4px 8px; border-radius: 6px; pointer-events: none;
+        white-space: nowrap; max-width: calc(100% - 20px); overflow: hidden;
+    }
 </style>
 {% endblock %}
 
@@ -222,18 +257,33 @@
     const modeTabs       = document.getElementById('modeTabs');
     const modelSelect    = document.getElementById('modelSelect');
     const refreshModelsBtn = document.getElementById('refreshModelsBtn');
+    const videoStream    = document.getElementById('videoStream');
+
+    const streamCameraSelect   = document.getElementById('streamCameraSelect');
+    const refreshStreamCamsBtn = document.getElementById('refreshStreamCamsBtn');
+    const streamHint           = document.getElementById('streamHint');
 
     let statusCheckInterval = null;
-    let currentSource = 'usb';   // 'usb' | 'rtsp'
+    let currentSource = 'usb';   // 'usb' | 'rtsp' | 'stream'
     let currentMode  = null;     // populated from /api/modes
 
     // ── Source tab switching ──────────────────────────
     window.switchSource = function(src) {
+        // Leaving STREAM while it's running → stop it cleanly first.
+        if (streamLiveActive && src !== 'stream') stopStreamDetection();
         currentSource = src;
-        document.getElementById('panelUsb').style.display  = src === 'usb'  ? '' : 'none';
-        document.getElementById('panelRtsp').style.display = src === 'rtsp' ? '' : 'none';
-        document.getElementById('tabUsb').classList.toggle('src-tab-active',  src === 'usb');
-        document.getElementById('tabRtsp').classList.toggle('src-tab-active', src === 'rtsp');
+        document.getElementById('panelUsb').style.display    = src === 'usb'    ? '' : 'none';
+        document.getElementById('panelRtsp').style.display   = src === 'rtsp'   ? '' : 'none';
+        document.getElementById('panelStream').style.display = src === 'stream' ? '' : 'none';
+        document.getElementById('tabUsb').classList.toggle('src-tab-active',    src === 'usb');
+        document.getElementById('tabRtsp').classList.toggle('src-tab-active',   src === 'rtsp');
+        document.getElementById('tabStream').classList.toggle('src-tab-active', src === 'stream');
+        // Lazily enumerate browser cameras the first time STREAM is selected, so
+        // we never prompt for camera permission unless the user actually wants it.
+        if (src === 'stream' && streamCameraSelect.dataset.scanned !== '1') {
+            streamCameraSelect.dataset.scanned = '1';
+            scanStreamCameras();
+        }
     };
 
     window.saveRtsp = function() {
@@ -248,6 +298,336 @@
     // Restore saved RTSP URL
     const savedRtsp = localStorage.getItem('rtspUrl');
     if (savedRtsp) rtspUrlInput.value = savedRtsp;
+
+    // ── STREAM source (กล้องของเครื่อง Client ผ่าน getUserMedia) ─────────
+    // Per-client isolation: the browser shows ITS OWN camera in a local <video>
+    // and posts frames to /api/stream/infer, which returns detections as JSON for
+    // THIS client only. Boxes are drawn on an overlay canvas. No shared camera,
+    // no /video_feed, no global pipeline — so every browser sees only its own
+    // camera. The infer loop throttles + keeps a single request in flight
+    // (process-latest). Constants mirror config.py (STREAM_*).
+    // Tuned for 1 camera on a CPU-only station (e.g. i7-1165G7): the model runs
+    // at imgsz 480, so 640-wide frames carry full detail with no waste, and ~10
+    // fps matches what the CPU sustains. For 2–3 cameras later, lower INFER_FPS
+    // to ~5–6 (CPU is shared and inference is serialised by a lock).
+    const STREAM_INFER_FPS     = 10;    // how often this client asks the server to detect
+    const STREAM_JPEG_QUALITY  = 0.92;  // higher = cleaner image → tighter boxes / higher conf
+    const STREAM_MAX_WIDTH     = 640;   // model uses imgsz 480 → 640 is the sweet spot
+    const STREAM_RESET_FRAMES  = 3;     // consecutive "empty" frames before the can counts as gone
+    const STREAM_SNAP_QUALITY  = 0.95;
+    const STREAM_SNAP_MAX_WIDTH = 1920;
+
+    const streamVideo   = document.getElementById('streamVideo');    // local live preview
+    const streamOverlay = document.getElementById('streamOverlay');  // detection boxes
+    const streamStats   = document.getElementById('streamStats');    // FPS / latency badge
+    const streamCanvas  = document.createElement('canvas');          // off-screen frame grab
+
+    let streamLiveStream = null;   // MediaStream of the browser camera (live)
+    let streamInferTimer = null;
+    let streamLiveActive = false;  // true while this client is running STREAM detection
+    let streamTotalDetected = 0;   // count of NG cans, ONE per can (edge-triggered)
+    // Per-can state machine so one physical can = one inspection (not per frame).
+    let streamCanPresent = false;      // is a can currently in view?
+    let streamCanCountedNG = false;    // already counted THIS can as NG?
+    let streamEmptyStreak = 0;         // consecutive frames with nothing detected
+    let streamFps = 0;             // smoothed effective inference FPS
+    let streamLastDoneTs = 0;      // perf timestamp of the previous completed infer
+    let snapStreamStream = null;   // MediaStream for the snapshot viewfinder
+
+    function secureContextOk() {
+        return window.isSecureContext
+            || location.hostname === 'localhost'
+            || location.hostname === '127.0.0.1';
+    }
+
+    function hasGetUserMedia() {
+        return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+    }
+
+    // Enumerate the browser's cameras. Requires a one-time permission grant for
+    // the OS to reveal device labels.
+    function scanStreamCameras() {
+        if (!hasGetUserMedia()) {
+            streamCameraSelect.innerHTML = '<option value="" disabled selected>เบราว์เซอร์ไม่รองรับ</option>';
+            return;
+        }
+        if (!secureContextOk()) {
+            streamCameraSelect.innerHTML = '<option value="" disabled selected>ต้องใช้ HTTPS</option>';
+            streamHint.innerHTML = '⚠️ กล้องเครื่องนี้ใช้ได้เฉพาะผ่าน <b>HTTPS</b> หรือ localhost — ดูวิธีตั้งค่าใน generate_cert.py';
+            return;
+        }
+        streamCameraSelect.disabled = true;
+        streamCameraSelect.innerHTML = '<option value="" disabled selected>กำลังขออนุญาต…</option>';
+        refreshStreamCamsBtn.disabled = true;
+        navigator.mediaDevices.getUserMedia({ video: true, audio: false })
+            .then(stream => {
+                stream.getTracks().forEach(t => t.stop());  // release immediately
+                return navigator.mediaDevices.enumerateDevices();
+            })
+            .then(devices => {
+                const cams = devices.filter(d => d.kind === 'videoinput');
+                streamCameraSelect.innerHTML = '';
+                if (!cams.length) {
+                    streamCameraSelect.innerHTML = '<option value="" disabled selected>ไม่พบกล้อง</option>';
+                    return;
+                }
+                cams.forEach((c, i) => {
+                    const opt = document.createElement('option');
+                    opt.value = c.deviceId;
+                    opt.textContent = c.label || ('กล้อง ' + (i + 1));
+                    streamCameraSelect.appendChild(opt);
+                });
+                streamCameraSelect.disabled = false;
+            })
+            .catch(err => {
+                console.error('Stream enumerate error:', err);
+                streamCameraSelect.innerHTML = '<option value="" disabled selected>ไม่ได้รับอนุญาตกล้อง</option>';
+            })
+            .finally(() => { refreshStreamCamsBtn.disabled = false; });
+    }
+    refreshStreamCamsBtn.addEventListener('click', scanStreamCameras);
+
+    // Draw the current video frame onto the shared canvas, downscaled to maxW.
+    // Returns false if the video has no frame yet.
+    function drawVideoToCanvas(video, canvas, maxW) {
+        const vw = video.videoWidth, vh = video.videoHeight;
+        if (!vw || !vh) return false;
+        const scale = vw > maxW ? maxW / vw : 1;
+        canvas.width  = Math.round(vw * scale);
+        canvas.height = Math.round(vh * scale);
+        canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+        return true;
+    }
+
+    // Draw detection boxes (from /api/stream/infer) onto the overlay, scaled from
+    // the inference frame size (data.w/h) to the displayed video size. Styling is
+    // sized to the display so it reads as clearly as the server-rendered USB view.
+    function drawStreamBoxes(data) {
+        const dispW = streamVideo.clientWidth, dispH = streamVideo.clientHeight;
+        if (!dispW || !dispH) return;
+        // Pin the overlay EXACTLY over the <video> element's rendered rectangle.
+        // The stage box is flex:1 (can be taller than the video), so sizing the
+        // canvas to the stage stretches/offsets the boxes — we must match the
+        // video itself, in both CSS size AND internal resolution (1:1, no stretch).
+        streamOverlay.style.left = streamVideo.offsetLeft + 'px';
+        streamOverlay.style.top = streamVideo.offsetTop + 'px';
+        streamOverlay.style.width = dispW + 'px';
+        streamOverlay.style.height = dispH + 'px';
+        streamOverlay.width = dispW;
+        streamOverlay.height = dispH;
+        const ctx = streamOverlay.getContext('2d');
+        ctx.clearRect(0, 0, dispW, dispH);
+        if (!data.w || !data.h) return;
+        const sx = dispW / data.w, sy = dispH / data.h;
+        const lw = Math.max(2, Math.round(dispW / 320));   // box thickness scaled to display
+        const fs = Math.max(12, Math.round(dispW / 52));   // label font scaled to display
+        ctx.textBaseline = 'top';
+        // When NG, hide the "good"/non-defect (green) box — a defective can must
+        // not also show the green "Can Good" frame (matches the USB view).
+        const dets = data.verdict === 'ng'
+            ? (data.detections || []).filter(d => d.is_defect)
+            : (data.detections || []);
+        dets.forEach(d => {
+            const [x1, y1, x2, y2] = d.bbox;
+            const x = x1 * sx, y = y1 * sy, w = (x2 - x1) * sx, h = (y2 - y1) * sy;
+            const rgb = 'rgb(' + d.color[0] + ',' + d.color[1] + ',' + d.color[2] + ')';
+            ctx.lineWidth = lw;
+            ctx.strokeStyle = rgb;
+            ctx.strokeRect(x, y, w, h);
+            ctx.font = '700 ' + fs + 'px sans-serif';
+            const text = d.label + ' ' + Number(d.confidence).toFixed(2);
+            const padX = Math.round(fs / 3), lh = fs + Math.round(fs / 2);
+            const tw = ctx.measureText(text).width + padX * 2;
+            const ly = y - lh >= 0 ? y - lh : y;   // flip below the box if no room above
+            ctx.fillStyle = rgb;
+            ctx.fillRect(x, ly, tw, lh);
+            ctx.fillStyle = '#fff';
+            ctx.fillText(text, x + padX, ly + Math.round(fs / 5));
+        });
+        // Big NG / OK verdict banner (mirrors the USB server-rendered view).
+        const isNG = data.verdict === 'ng';
+        const bfs = Math.max(22, Math.round(dispW / 13));
+        ctx.font = '800 ' + bfs + 'px sans-serif';
+        const btext = isNG ? 'NG' : 'OK';
+        const bw = ctx.measureText(btext).width + bfs * 0.6;
+        const bh = bfs + Math.round(bfs / 3);
+        const bx = dispW - bw - 12;
+        ctx.fillStyle = 'rgba(0,0,0,0.55)';
+        ctx.fillRect(bx, 12, bw, bh);
+        ctx.fillStyle = isNG ? 'rgb(220,0,0)' : 'rgb(0,180,70)';
+        ctx.fillText(btext, bx + (bw - ctx.measureText(btext).width) / 2, 12 + Math.round(bh / 6));
+    }
+
+    // Continuous infer loop: send a frame, draw the result, then queue the next
+    // one IMMEDIATELY (capped at STREAM_INFER_FPS) — back-to-back, so the boxes
+    // track the image as fast as the model allows with no fixed-interval idle gap.
+    function streamInferLoop() {
+        if (!streamLiveActive) return;
+        if (!drawVideoToCanvas(streamVideo, streamCanvas, STREAM_MAX_WIDTH)) {
+            streamInferTimer = setTimeout(streamInferLoop, 50);  // video not ready yet
+            return;
+        }
+        const t0 = performance.now();
+        const reschedule = () => {
+            if (!streamLiveActive) return;
+            const wait = Math.max(0, (1000 / STREAM_INFER_FPS) - (performance.now() - t0));
+            streamInferTimer = setTimeout(streamInferLoop, wait);
+        };
+        streamCanvas.toBlob(blob => {
+            if (!streamLiveActive) return;
+            if (!blob) { reschedule(); return; }
+            const tEncoded = performance.now();   // JPEG encode (toBlob) finished
+            const blobKB   = Math.round(blob.size / 1024);
+            fetch('/api/stream/infer', {
+                method: 'POST', headers: { 'Content-Type': 'image/jpeg' }, body: blob
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.status !== 'ok' || !streamLiveActive) return;
+                drawStreamBoxes(data);
+
+                // ── Per-can counting (edge-triggered) ──────────────────
+                // 3 states: 'ng' (dent), 'ok' (can, no dent), 'none' (nothing).
+                // A new inspection begins on none → ok/ng; the same can is never
+                // re-counted; the can is "gone" only after a few empty frames.
+                const hasDent = data.dent_count > 0;
+                const hasAny  = (data.detections || []).length > 0;
+                const raw = hasDent ? 'ng' : (hasAny ? 'ok' : 'none');
+
+                if (raw === 'none') {
+                    if (++streamEmptyStreak >= STREAM_RESET_FRAMES) streamCanPresent = false;
+                } else {
+                    streamEmptyStreak = 0;
+                    if (!streamCanPresent) {           // a new can just appeared
+                        streamCanPresent = true;
+                        streamCanCountedNG = false;
+                    }
+                    if (raw === 'ng' && !streamCanCountedNG) {
+                        streamCanCountedNG = true;      // count this defective can ONCE
+                        streamTotalDetected += 1;
+                        totalDetected.textContent = streamTotalDetected;
+                    }
+                }
+
+                activeDefects.textContent = data.dent_count;
+                detectionStatus.textContent =
+                    raw === 'ng' ? 'NG' : (raw === 'ok' ? 'OK' : 'Detecting...');
+
+                // ── Per-stage timing breakdown (diagnostics) ───────────────
+                // Splits one frame's time so we can see the bottleneck:
+                //   enc   = JPEG encode in this browser (toBlob)
+                //   net   = network up+down  (round-trip − server total)
+                //   dec   = server JPEG decode
+                //   infer = server YOLO inference  ← usually the big one on CPU
+                const now = performance.now();
+                const totalMs  = Math.round(now - t0);          // capture → boxes drawn
+                const encMs    = Math.round(tEncoded - t0);     // encode only
+                const tripMs   = Math.round(now - tEncoded);    // sent → response (net+server)
+                const srv      = data.srv_ms || {};
+                const srvTotal = (srv.total != null) ? srv.total : null;
+                const netMs    = (srvTotal != null) ? Math.max(0, Math.round(tripMs - srvTotal)) : null;
+
+                if (streamLastDoneTs) {
+                    const inst = 1000 / (now - streamLastDoneTs);
+                    streamFps = streamFps ? (streamFps * 0.7 + inst * 0.3) : inst;
+                }
+                streamLastDoneTs = now;
+
+                // Compact badge: FPS · size · enc/net/decode/infer/total (ms)
+                streamStats.textContent =
+                    'FPS ' + streamFps.toFixed(1) + ' · ' + blobKB + 'KB · ' +
+                    'enc ' + encMs +
+                    ' / net ' + (netMs != null ? netMs : '?') +
+                    ' / dec ' + (srv.decode != null ? srv.decode : '?') +
+                    ' / inf ' + (srv.infer  != null ? srv.infer  : '?') +
+                    ' / tot ' + totalMs + 'ms';
+            })
+            .catch(() => {})
+            .finally(reschedule);
+        }, 'image/jpeg', STREAM_JPEG_QUALITY);
+    }
+
+    // Start STREAM detection — fully client-side: open this browser's camera,
+    // show it locally, and loop frames through /api/stream/infer. Does NOT touch
+    // the server's global detection pipeline, so each client is isolated.
+    function startStreamDetection() {
+        if (!hasGetUserMedia() || !secureContextOk()) {
+            alert('โหมดสตรีมต้องเข้าผ่าน HTTPS หรือ localhost จึงจะเข้าถึงกล้องของเครื่องนี้ได้');
+            return;
+        }
+        startBtn.disabled = true;
+        detectionStatus.textContent = 'Starting camera...';
+        const deviceId = streamCameraSelect.value;
+        const constraints = {
+            video: deviceId ? { deviceId: { exact: deviceId } } : true,
+            audio: false
+        };
+        navigator.mediaDevices.getUserMedia(constraints)
+            .then(stream => {
+                streamLiveStream = stream;
+                streamVideo.srcObject = stream;
+                return streamVideo.play();
+            })
+            .then(() => {
+                streamLiveActive = true;
+                streamTotalDetected = 0;
+                streamCanPresent = false; streamCanCountedNG = false; streamEmptyStreak = 0;
+                streamFps = 0; streamLastDoneTs = 0;
+                // Show local video + overlay, hide the MJPEG img.
+                videoStream.style.display = 'none';
+                streamVideo.style.display = '';
+                streamOverlay.style.display = '';
+                streamStats.style.display = '';
+                streamStats.textContent = '—';
+                statusDot.className = 'status-dot status-active';
+                statusText.textContent = 'Active';
+                stopBtn.disabled = false;
+                streamCameraSelect.disabled = true;
+                refreshStreamCamsBtn.disabled = true;
+                snapBtn.disabled = true;
+                Array.from(modeTabs.children).forEach(b => b.disabled = true);
+                modelSelect.disabled = true;
+                refreshModelsBtn.disabled = true;
+                detectionStatus.textContent = 'Detecting...';
+                streamInferLoop();
+            })
+            .catch(err => {
+                console.error('Stream start error:', err);
+                alert('เปิดกล้องเครื่องนี้ไม่สำเร็จ: ' + (err && err.message ? err.message : err));
+                startBtn.disabled = false;
+                detectionStatus.textContent = 'Ready';
+            });
+    }
+
+    // Stop STREAM detection and release this browser's camera.
+    function stopStreamDetection() {
+        if (streamInferTimer) { clearTimeout(streamInferTimer); streamInferTimer = null; }
+        if (streamLiveStream) {
+            streamLiveStream.getTracks().forEach(t => t.stop());
+            streamLiveStream = null;
+        }
+        streamVideo.srcObject = null;
+        streamLiveActive = false;
+        // Restore the default (MJPEG) view + controls.
+        streamVideo.style.display = 'none';
+        streamOverlay.style.display = 'none';
+        streamStats.style.display = 'none';
+        videoStream.style.display = '';
+        const octx = streamOverlay.getContext('2d');
+        if (octx) octx.clearRect(0, 0, streamOverlay.width, streamOverlay.height);
+        statusDot.className = 'status-dot status-inactive';
+        statusText.textContent = 'Inactive';
+        startBtn.disabled = false;
+        stopBtn.disabled = true;
+        streamCameraSelect.disabled = false;
+        refreshStreamCamsBtn.disabled = false;
+        snapBtn.disabled = false;
+        Array.from(modeTabs.children).forEach(b => b.disabled = false);
+        modelSelect.disabled = modelSelect.options.length === 0;
+        refreshModelsBtn.disabled = false;
+        detectionStatus.textContent = 'Ready';
+        activeDefects.textContent = '0';
+    }
 
     // ── Camera scanning (USB only) ────────────────────
     function scanCameras() {
@@ -281,17 +661,47 @@
 
     // ── Status polling ────────────────────────────────
     function updateStatus() {
+        // STREAM detection is driven entirely client-side (no server pipeline),
+        // so while it runs we must NOT let the server-status poll override its UI.
+        if (streamLiveActive) return;
         fetch('/api/detection/status')
             .then(r => r.json())
             .then(data => {
                 const isActive = data.active;
+
+                // On the STREAM tab this client is independent of the server's
+                // (USB/RTSP) global pipeline, so a server-side session must NOT
+                // gate the STREAM controls or show its video here. Keep neutral.
+                if (currentSource === 'stream') {
+                    if (videoStream.getAttribute('src')) videoStream.removeAttribute('src');
+                    statusDot.className = 'status-dot status-inactive';
+                    statusText.textContent = 'Inactive';
+                    startBtn.disabled = false;
+                    stopBtn.disabled = true;
+                    snapBtn.disabled = false;   // stream snapshot is allowed when not streaming
+                    snapBtn.title = 'ถ่ายภาพนิ่งมาตรวจ Dent';
+                    return;
+                }
+
                 statusDot.className = 'status-dot ' + (isActive ? 'status-active' : 'status-inactive');
                 statusText.textContent = isActive ? 'Active' : 'Inactive';
+
+                // Attach the MJPEG stream only while detection runs, and drop the
+                // connection the moment it stops — so parked tabs never hold an
+                // open /video_feed (the main cause of dev-server connection pileup).
+                if (isActive && !videoStream.getAttribute('src')) {
+                    videoStream.src = '/video_feed?t=' + Date.now();
+                } else if (!isActive && videoStream.getAttribute('src')) {
+                    videoStream.removeAttribute('src');
+                }
                 startBtn.disabled  = isActive;
                 stopBtn.disabled   = !isActive;
                 cameraSelect.disabled      = isActive;
                 refreshCamerasBtn.disabled = isActive;
                 rtspUrlInput.disabled      = isActive;
+                streamCameraSelect.disabled   = isActive || streamCameraSelect.options.length === 0
+                                                || streamCameraSelect.options[0].disabled;
+                refreshStreamCamsBtn.disabled = isActive;
                 modelSelect.disabled       = isActive || modelSelect.options.length === 0;
                 refreshModelsBtn.disabled  = isActive;
                 Array.from(modeTabs.children).forEach(b => b.disabled = isActive);
@@ -312,6 +722,9 @@
 
     // ── Start ─────────────────────────────────────────
     startBtn.addEventListener('click', () => {
+        // STREAM source has its own async open-camera-then-start path.
+        if (currentSource === 'stream') { startStreamDetection(); return; }
+
         let cameraIndex;
 
         if (currentSource === 'usb') {
@@ -357,6 +770,11 @@
 
     // ── Stop ──────────────────────────────────────────
     stopBtn.addEventListener('click', () => {
+        // STREAM is client-side only — stop locally, never hit the server pipeline.
+        if (currentSource === 'stream' && streamLiveActive) {
+            stopStreamDetection();
+            return;
+        }
         fetch('/api/detection/stop', { method: 'POST' })
             .then(r => r.json())
             .then(() => updateStatus())
@@ -477,18 +895,112 @@
         return url || null;
     }
 
+    const snapVideoLocal = document.getElementById('snapVideoLocal');
+
     // Toggle the overlay between "aim" (live viewfinder) and "result" states.
+    // In STREAM mode the viewfinder is the local <video> (browser camera);
+    // otherwise it's the server MJPEG <img> exactly as before.
     function showLiveState() {
         snapImage.style.display = 'none';
-        snapViewfinder.style.display = '';
+        if (currentSource === 'stream') {
+            snapViewfinder.style.display = 'none';
+            snapVideoLocal.style.display = '';
+        } else {
+            snapVideoLocal.style.display = 'none';
+            snapViewfinder.style.display = '';
+        }
         snapResultPanel.style.display = 'none';
         snapLivePanel.style.display = 'flex';
     }
     function showResultState() {
         snapViewfinder.style.display = 'none';
+        snapVideoLocal.style.display = 'none';
         snapImage.style.display = '';
         snapLivePanel.style.display = 'none';
         snapResultPanel.style.display = 'flex';
+    }
+
+    // Map the quality preset to getUserMedia resolution constraints (STREAM mode).
+    function streamSnapConstraints(quality) {
+        const deviceId = streamCameraSelect.value;
+        const sizes = {
+            smooth:   { width: { ideal: 1280 }, height: { ideal: 720 } },
+            balanced: { width: { ideal: 1920 }, height: { ideal: 1080 } },
+            sharp:    { width: { ideal: 2592 }, height: { ideal: 1944 } },
+        };
+        const video = Object.assign({}, sizes[quality] || sizes.smooth);
+        if (deviceId) video.deviceId = { exact: deviceId };
+        return { video: video, audio: false };
+    }
+
+    function stopSnapStream() {
+        if (snapStreamStream) {
+            snapStreamStream.getTracks().forEach(t => t.stop());
+            snapStreamStream = null;
+        }
+        snapVideoLocal.srcObject = null;
+    }
+
+    // Open snapshot in STREAM mode: show the local browser camera as viewfinder.
+    function openSnapshotStream() {
+        if (!hasGetUserMedia() || !secureContextOk()) {
+            alert('โหมดสตรีมต้องเข้าผ่าน HTTPS หรือ localhost จึงจะถ่ายรูปจากกล้องเครื่องนี้ได้');
+            return;
+        }
+        snapBtn.disabled = true;
+        stopSnapStream();
+        navigator.mediaDevices.getUserMedia(streamSnapConstraints(snapQuality.value))
+            .then(stream => {
+                snapStreamStream = stream;
+                snapVideoLocal.srcObject = stream;
+                return snapVideoLocal.play();
+            })
+            .then(() => {
+                showLiveState();
+                snapOverlay.style.display = 'flex';
+            })
+            .catch(err => {
+                console.error('Stream viewfinder error:', err);
+                alert('เปิดกล้องไม่สำเร็จ: ' + (err && err.message ? err.message : err));
+            })
+            .finally(() => { snapBtn.disabled = false; });
+    }
+
+    // Capture one high-res still from the browser camera and send it to the
+    // server for detection (STREAM mode).
+    function pressShutterStream() {
+        snapShutter.disabled = true;
+        snapShutter.textContent = '⏳ กำลังถ่าย…';
+        if (!drawVideoToCanvas(snapVideoLocal, streamCanvas, STREAM_SNAP_MAX_WIDTH)) {
+            alert('ภาพจากกล้องยังไม่พร้อม ลองอีกครั้ง');
+            snapShutter.disabled = false; snapShutter.textContent = '📸 ถ่าย';
+            return;
+        }
+        streamCanvas.toBlob(blob => {
+            if (!blob) {
+                alert('จับภาพไม่สำเร็จ');
+                snapShutter.disabled = false; snapShutter.textContent = '📸 ถ่าย';
+                return;
+            }
+            fetch('/api/stream/snapshot', {
+                method: 'POST', headers: { 'Content-Type': 'image/jpeg' }, body: blob
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.status !== 'ok') { alert(data.message || 'ถ่ายรูปไม่สำเร็จ'); return; }
+                snapImage.src = data.image;
+                snapVerdict.className = 'snap-verdict ' + data.verdict;
+                snapVerdict.textContent = data.verdict === 'ng' ? 'NG' : 'OK';
+                snapDents.textContent = data.dent_count;
+                snapConf.textContent  = data.dent_count > 0 ? data.max_confidence : '—';
+                snapTime.textContent  = data.timestamp;
+                snapRes.textContent   = data.capture_size || '—';
+                snapLine.textContent  = data.line + ' / ' + data.plant;
+                showResultState();
+            })
+            .catch(err => { console.error('Stream snapshot error:', err); alert('ถ่ายรูปไม่สำเร็จ'); })
+            .finally(() => { snapShutter.disabled = false; snapShutter.textContent = '📸 ถ่าย'; });
+        }, 'image/jpeg', STREAM_SNAP_QUALITY);
     }
 
     // Open snapshot mode: start the raw viewfinder so the operator can aim.
@@ -497,6 +1009,7 @@
             alert('กรุณากด Stop Detection ก่อน แล้วจึงถ่ายรูปตรวจ');
             return;
         }
+        if (currentSource === 'stream') { openSnapshotStream(); return; }
         const cameraIndex = resolveCameraIndex();
         if (cameraIndex === null) {
             alert('กรุณาเลือกกล้อง/ใส่ RTSP URL ก่อนถ่ายรูป');
@@ -526,23 +1039,30 @@
     snapQuality.addEventListener('change', () => {
         localStorage.setItem('snapQuality', snapQuality.value);
         if (snapOverlay.style.display !== 'none' && snapLivePanel.style.display !== 'none') {
-            // Re-open at the new quality (switching to a lower mode is quick).
-            snapViewfinder.removeAttribute('src');
-            fetch('/api/viewfinder/stop', { method: 'POST' })
-                .catch(() => {})
-                .finally(openSnapshot);
+            // Re-open the viewfinder at the new quality.
+            if (currentSource === 'stream') {
+                stopSnapStream();
+                openSnapshot();
+            } else {
+                snapViewfinder.removeAttribute('src');
+                fetch('/api/viewfinder/stop', { method: 'POST' })
+                    .catch(() => {})
+                    .finally(openSnapshot);
+            }
         }
     });
 
     // Close snapshot mode: drop the MJPEG connection + release the camera.
     function closeSnapshot() {
         snapOverlay.style.display = 'none';
+        if (currentSource === 'stream') { stopSnapStream(); return; }
         snapViewfinder.removeAttribute('src');
         fetch('/api/viewfinder/stop', { method: 'POST' }).catch(() => {});
     }
 
     // Shutter: run the model once on the newest viewfinder frame.
     function pressShutter() {
+        if (currentSource === 'stream') { pressShutterStream(); return; }
         snapShutter.disabled = true;
         snapShutter.textContent = '⏳ กำลังถ่าย…';   // viewfinder ค้างชั่วครู่ขณะสลับเป็น 5MP
         fetch('/api/snapshot', {

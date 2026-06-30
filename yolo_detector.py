@@ -121,6 +121,7 @@ class YOLODetector:
         """
         self.model_path = model_path if model_path is not None else config.MODEL_PATH
         self.model: Optional[YOLO] = None
+        self.is_openvino = False   # True when inference runs through OpenVINO
         self.confidence_threshold = config.CONFIDENCE_THRESHOLD
         self.iou_threshold = config.IOU_THRESHOLD
         self.mode_config = mode_config
@@ -151,6 +152,32 @@ class YOLODetector:
                 return colors
         return _COLORS
         
+    def _maybe_openvino(self, pt_path: str) -> Optional[str]:
+        """
+        Return a path to an OpenVINO model directory for ``pt_path`` (exporting it
+        once if needed), or ``None`` to signal "fall back to PyTorch".
+
+        Accuracy is preserved: we export FP32 with ``dynamic=True`` so the SAME
+        model runs at both the live imgsz (480) and the snapshot imgsz (1280).
+        Any failure (package missing, export error) is swallowed → PyTorch is used,
+        so this can never break the existing modes.
+        """
+        if not getattr(config, "USE_OPENVINO", False):
+            return None
+        if not pt_path.endswith(".pt") or not os.path.exists(pt_path):
+            return None
+        ov_dir = pt_path[:-3] + "_openvino_model"
+        try:
+            if not os.path.isdir(ov_dir):
+                logger.info(f"Exporting OpenVINO model (one-time, FP32/dynamic): {pt_path}")
+                YOLO(pt_path).export(format="openvino", dynamic=True, half=False)
+            if os.path.isdir(ov_dir):
+                return ov_dir
+            logger.warning("OpenVINO export produced no model dir; using PyTorch.")
+        except Exception as e:
+            logger.warning(f"OpenVINO unavailable ({e}); using PyTorch instead.")
+        return None
+
     def load_model(self) -> bool:
         """
         Load YOLO model.
@@ -177,9 +204,17 @@ class YOLODetector:
             except Exception:
                 pass
 
-            logger.info(f"Loading YOLO model: {model_path}")
-            self.model = YOLO(model_path)
-            logger.info("YOLO model loaded successfully")
+            # Prefer an OpenVINO build (faster on Intel) when enabled; fall back
+            # to the .pt transparently on any problem.
+            ov_path = self._maybe_openvino(model_path)
+            self.is_openvino = ov_path is not None
+            load_path = ov_path or model_path
+
+            logger.info(f"Loading YOLO model: {load_path}"
+                        + (" [OpenVINO]" if self.is_openvino else ""))
+            self.model = YOLO(load_path)
+            logger.info("YOLO model loaded successfully"
+                        + (" (OpenVINO acceleration)" if self.is_openvino else ""))
 
             if hasattr(self.model, 'names'):
                 logger.info(f"Model classes ({len(self.model.names)}): {list(self.model.names.values())}")

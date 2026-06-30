@@ -5,6 +5,8 @@ Provides camera detection, initialization, and frame capture functionality.
 
 import cv2
 import os
+import threading
+import numpy as np
 from typing import Optional, Tuple, List, Dict, Union
 import config
 from logger import setup_logger
@@ -242,4 +244,85 @@ class Camera:
 
     def __del__(self):
         """Destructor to ensure camera is released."""
+        self.release()
+
+
+class StreamCamera:
+    """
+    Virtual camera fed by frames PUSHED from a remote browser (the STREAM source).
+
+    Exposes the exact same interface as ``Camera`` (initialize / read_frame /
+    release) so the existing capture/inference pipeline can consume it without
+    any change — the only difference is that frames arrive via ``push_jpeg()``
+    (called by the /api/stream/push route) instead of being pulled from local
+    hardware. This keeps the USB/RTSP path and all the streaming threads
+    completely untouched.
+
+    ``read_frame()`` returns a freshly pushed frame exactly once; if no new frame
+    has arrived since the last read it returns ``(False, None)`` so ``capture_loop``
+    idles (the same contract a real camera honours when it has no new frame) and
+    inference is not re-run on a duplicate.
+    """
+
+    def __init__(self, camera_index="stream", width: int = None, height: int = None,
+                 fps: int = None):
+        # camera_index kept only for interface symmetry / logging.
+        self.camera_index = camera_index
+        self.width  = width  if width  is not None else config.CAMERA_WIDTH
+        self.height = height if height is not None else config.CAMERA_HEIGHT
+        self.fps    = fps    if fps    is not None else config.CAMERA_FPS
+        self.is_initialized = False
+        self._lock = threading.Lock()
+        self._frame = None          # newest decoded BGR frame from the browser
+        self._seq = 0               # increments on every pushed frame
+        self._last_read_seq = -1    # last seq handed out by read_frame()
+
+    def initialize(self) -> bool:
+        """No hardware to open — just arm the buffer and wait for pushes."""
+        with self._lock:
+            self._frame = None
+            self._seq = 0
+            self._last_read_seq = -1
+        self.is_initialized = True
+        logger.info("StreamCamera ready — waiting for frames pushed from the browser.")
+        return True
+
+    def push_jpeg(self, jpeg_bytes: bytes) -> bool:
+        """
+        Decode a JPEG pushed by the browser and store it as the newest frame.
+        Returns True on success. Safe to call from the request thread.
+        """
+        if not self.is_initialized:
+            return False
+        try:
+            arr = np.frombuffer(jpeg_bytes, dtype=np.uint8)
+            frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+        except Exception as e:
+            logger.warning(f"StreamCamera: failed to decode pushed frame: {e}")
+            return False
+        if frame is None:
+            return False
+        with self._lock:
+            self._frame = frame
+            self._seq += 1
+        return True
+
+    def read_frame(self) -> Optional[Tuple[bool, any]]:
+        """Hand out the newest pushed frame once; (False, None) if nothing new."""
+        if not self.is_initialized:
+            return None
+        with self._lock:
+            if self._frame is None or self._seq == self._last_read_seq:
+                return (False, None)
+            self._last_read_seq = self._seq
+            return (True, self._frame)
+
+    def release(self):
+        """Drop the buffered frame and mark uninitialised."""
+        with self._lock:
+            self._frame = None
+        self.is_initialized = False
+        logger.info("StreamCamera released")
+
+    def __del__(self):
         self.release()
