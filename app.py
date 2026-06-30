@@ -948,10 +948,12 @@ except Exception:
     _GEVENT_ACTIVE = False
 
 
-def _stream_detect(frame):
-    """Run detection on a frame under a lock (the model is a single instance)."""
+def _stream_detect(frame, imgsz=None):
+    """Run detection on a frame under a lock (the model is a single instance).
+    Live STREAM uses a smaller imgsz for speed; the precise verdict comes from
+    the high-res snapshot path instead."""
     with _stream_infer_lock:
-        return detector.detect(frame)
+        return detector.detect(frame, imgsz=imgsz)
 
 
 @app.route('/api/stream/infer', methods=['POST'])
@@ -974,13 +976,16 @@ def api_stream_infer():
         if frame is None:
             return jsonify({"status": "error", "message": "decode failed"}), 400
 
+        # Live STREAM favours speed (responsive boxes) over the highest accuracy.
+        imgsz = getattr(config, "STREAM_INFER_IMGSZ", None)
+
         # Offload to a worker thread under gevent (keeps the hub responsive for
         # other clients); call inline under the plain dev server.
         if _GEVENT_ACTIVE:
             import gevent
-            detections = gevent.get_hub().threadpool.apply(_stream_detect, (frame,))
+            detections = gevent.get_hub().threadpool.apply(_stream_detect, (frame, imgsz))
         else:
-            detections = _stream_detect(frame)
+            detections = _stream_detect(frame, imgsz)
 
         palette, names = {}, {}
         try:

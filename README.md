@@ -116,9 +116,10 @@ SSL_CERT_FILE = "certs/cert.pem"   # สร้างด้วย: python generat
 SSL_KEY_FILE  = "certs/key.pem"
 
 # ── STREAM source (กล้องของ Client ผ่านเบราว์เซอร์) ──
-STREAM_INFER_FPS  = 10     # อัตราเรียก /api/stream/infer (1 กล้อง; 2–3 กล้องลดเป็น 5–6)
-STREAM_JPEG_QUALITY = 0.85 # คุณภาพ JPEG ที่เบราว์เซอร์ส่งขึ้น
-STREAM_MAX_WIDTH  = 640    # ความกว้างเฟรม live (โมเดลใช้ imgsz 480)
+STREAM_INFER_FPS   = 10    # เพดานอัตราเรียก /api/stream/infer (จริงจำกัดด้วยความเร็ว CPU)
+STREAM_JPEG_QUALITY = 0.92 # คุณภาพ JPEG ที่เบราว์เซอร์ส่งขึ้น (สูง = กรอบแม่นขึ้น)
+STREAM_MAX_WIDTH   = 640   # ความกว้างเฟรม live ก่อนส่ง
+STREAM_INFER_IMGSZ = 320   # imgsz ตรวจสตรีมสด — ต่ำ = เร็ว/กรอบตามทัน (snapshot ใช้ 1280)
 ```
 
 > **CAMERA_FOURCC**: บน Windows (MSMF) การบังคับ `"MJPG"` อาจทำให้ JPEG ออกมาไม่ครบ →

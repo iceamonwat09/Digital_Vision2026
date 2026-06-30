@@ -205,6 +205,10 @@ STREAM_SOURCE_SENTINEL = "stream"  # camera_index พิเศษ (ใช้ก�
 STREAM_INFER_FPS = 10              # อัตราที่เบราว์เซอร์เรียก /api/stream/infer (1 กล้อง)
 STREAM_JPEG_QUALITY = 0.92         # คุณภาพ JPEG ที่เบราว์เซอร์ encode ก่อนส่ง (สูง = กรอบแม่นขึ้น)
 STREAM_MAX_WIDTH = 640             # ความกว้างเฟรม live ก่อนส่ง (px) — โมเดลใช้ 480
+# imgsz ที่โมเดลใช้ตรวจ "สตรีมสด" — ต่ำกว่า USB (480) เพื่อให้ inference เร็วขึ้น
+# กรอบตามภาพทันขึ้น (สดเน้นเร็ว). ความแม่นจริงให้ใช้ snapshot (imgsz 1280).
+# จูน: 256 = เร็วสุด/หยาบ | 320 = สมดุล | 384–480 = แม่นขึ้นแต่ช้าลง.
+STREAM_INFER_IMGSZ = 320
 # คุณภาพ/ความกว้างสำหรับภาพ snapshot (ถ่ายครั้งเดียว ดันคุณภาพให้สูงกว่า live).
 STREAM_SNAPSHOT_JPEG_QUALITY = 0.95
 STREAM_SNAPSHOT_MAX_WIDTH = 1920

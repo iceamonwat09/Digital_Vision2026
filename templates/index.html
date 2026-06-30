@@ -322,7 +322,6 @@
 
     let streamLiveStream = null;   // MediaStream of the browser camera (live)
     let streamInferTimer = null;
-    let streamInferInFlight = false;
     let streamLiveActive = false;  // true while this client is running STREAM detection
     let streamTotalDetected = 0;
     let streamFps = 0;             // smoothed effective inference FPS
@@ -448,14 +447,24 @@
         ctx.fillText(btext, bx + (bw - ctx.measureText(btext).width) / 2, 12 + Math.round(bh / 6));
     }
 
-    // One infer tick: grab the newest video frame and ask the server to detect.
-    function streamInferTick() {
-        if (streamInferInFlight) return;
-        if (!drawVideoToCanvas(streamVideo, streamCanvas, STREAM_MAX_WIDTH)) return;
-        streamInferInFlight = true;
+    // Continuous infer loop: send a frame, draw the result, then queue the next
+    // one IMMEDIATELY (capped at STREAM_INFER_FPS) — back-to-back, so the boxes
+    // track the image as fast as the model allows with no fixed-interval idle gap.
+    function streamInferLoop() {
+        if (!streamLiveActive) return;
+        if (!drawVideoToCanvas(streamVideo, streamCanvas, STREAM_MAX_WIDTH)) {
+            streamInferTimer = setTimeout(streamInferLoop, 50);  // video not ready yet
+            return;
+        }
         const t0 = performance.now();
+        const reschedule = () => {
+            if (!streamLiveActive) return;
+            const wait = Math.max(0, (1000 / STREAM_INFER_FPS) - (performance.now() - t0));
+            streamInferTimer = setTimeout(streamInferLoop, wait);
+        };
         streamCanvas.toBlob(blob => {
-            if (!blob) { streamInferInFlight = false; return; }
+            if (!streamLiveActive) return;
+            if (!blob) { reschedule(); return; }
             fetch('/api/stream/infer', {
                 method: 'POST', headers: { 'Content-Type': 'image/jpeg' }, body: blob
             })
@@ -479,7 +488,7 @@
                 streamStats.textContent = 'FPS ' + streamFps.toFixed(1) + ' · ' + latency + ' ms';
             })
             .catch(() => {})
-            .finally(() => { streamInferInFlight = false; });
+            .finally(reschedule);
         }, 'image/jpeg', STREAM_JPEG_QUALITY);
     }
 
@@ -524,7 +533,7 @@
                 modelSelect.disabled = true;
                 refreshModelsBtn.disabled = true;
                 detectionStatus.textContent = 'Detecting...';
-                streamInferTimer = setInterval(streamInferTick, Math.round(1000 / STREAM_INFER_FPS));
+                streamInferLoop();
             })
             .catch(err => {
                 console.error('Stream start error:', err);
@@ -536,8 +545,7 @@
 
     // Stop STREAM detection and release this browser's camera.
     function stopStreamDetection() {
-        if (streamInferTimer) { clearInterval(streamInferTimer); streamInferTimer = null; }
-        streamInferInFlight = false;
+        if (streamInferTimer) { clearTimeout(streamInferTimer); streamInferTimer = null; }
         if (streamLiveStream) {
             streamLiveStream.getTracks().forEach(t => t.stop());
             streamLiveStream = null;
