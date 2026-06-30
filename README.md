@@ -119,7 +119,7 @@ SSL_KEY_FILE  = "certs/key.pem"
 STREAM_INFER_FPS   = 10    # เพดานอัตราเรียก /api/stream/infer (จริงจำกัดด้วยความเร็ว CPU)
 STREAM_JPEG_QUALITY = 0.92 # คุณภาพ JPEG ที่เบราว์เซอร์ส่งขึ้น (สูง = กรอบแม่นขึ้น)
 STREAM_MAX_WIDTH   = 640   # ความกว้างเฟรม live ก่อนส่ง
-STREAM_INFER_IMGSZ = 320   # imgsz ตรวจสตรีมสด — ต่ำ = เร็ว/กรอบตามทัน (snapshot ใช้ 1280)
+STREAM_INFER_IMGSZ = 480   # imgsz ตรวจสตรีมสด = เท่า USB. ⚠️ ต่ำกว่า 480 จะตรวจ dent ไม่เจอ
 ```
 
 > **CAMERA_FOURCC**: บน Windows (MSMF) การบังคับ `"MJPG"` อาจทำให้ JPEG ออกมาไม่ครบ →
