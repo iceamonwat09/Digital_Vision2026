@@ -93,7 +93,8 @@ class Camera:
     """
 
     def __init__(self, camera_index: Union[int, str] = None,
-                 width: int = None, height: int = None, fps: int = None):
+                 width: int = None, height: int = None, fps: int = None,
+                 auto_exposure=None, exposure=None):
         raw = camera_index if camera_index is not None else config.CAMERA_INDEX
         # Normalise numeric strings ("0", "1") → int
         if isinstance(raw, str) and raw.isdigit():
@@ -104,8 +105,40 @@ class Camera:
         self.width  = width  if width  is not None else config.CAMERA_WIDTH
         self.height = height if height is not None else config.CAMERA_HEIGHT
         self.fps    = fps    if fps    is not None else config.CAMERA_FPS
+        # Optional exposure control (opt-in). Passed only by the live-detection
+        # camera; None on both means "leave the camera/driver defaults alone"
+        # (so snapshot/viewfinder are never touched).
+        self.auto_exposure = auto_exposure
+        self.exposure = exposure
         self.cap: Optional[cv2.VideoCapture] = None
         self.is_initialized = False
+
+    def _apply_exposure(self, cap) -> None:
+        """
+        Apply manual/auto exposure if requested (opt-in). Best-effort: many USB
+        cameras / Windows backends silently ignore or reject these — so every set
+        is guarded and a failure just falls back to the camera's own default
+        (never raises, never blocks initialization).
+        """
+        ae, ev = self.auto_exposure, self.exposure
+        if ae is None and ev is None:
+            return                       # nothing requested → leave defaults
+        try:
+            if ae is not None:
+                # Windows DSHOW/MSMF convention (varies by driver!):
+                #   0.75 ≈ auto, 0.25 ≈ manual. Must switch to manual before a
+                #   manual exposure value will "stick".
+                cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.75 if ae else 0.25)
+            if ev is not None:
+                cap.set(cv2.CAP_PROP_EXPOSURE, float(ev))
+            actual = cap.get(cv2.CAP_PROP_EXPOSURE)
+            logger.info(
+                f"Exposure applied (auto_exposure={ae}, requested={ev}, "
+                f"camera reports={actual}). If motion blur is unchanged, the "
+                "camera may have ignored it — try another value or add lighting."
+            )
+        except Exception as e:
+            logger.warning(f"Exposure set failed ({e}); using camera defaults.")
 
     def initialize(self) -> bool:
         if self.is_initialized:
@@ -148,6 +181,8 @@ class Camera:
             cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
             cap.set(cv2.CAP_PROP_FPS,          self.fps)
             cap.set(cv2.CAP_PROP_BUFFERSIZE,   1)
+            # Opt-in exposure control (live camera only; no-op unless configured).
+            self._apply_exposure(cap)
 
             for _ in range(5):
                 cap.read()

@@ -7,7 +7,7 @@ import os
 
 # Bump this whenever a config default changes so a running deployment can
 # print it on startup and confirm it is actually executing the new code.
-CONFIG_VERSION = "2026.07.01-frame-capture"
+CONFIG_VERSION = "2026.07.01-capture-tuning"
 
 # ====================
 # CAMERA CONFIGURATION
@@ -26,6 +26,23 @@ CAMERA_INDEX = 0  # ผลจาก test_camera.py: กล้องอยู่�
 CAMERA_WIDTH  = 640
 CAMERA_HEIGHT = 480
 CAMERA_FPS = 30
+
+# ── Exposure control (แก้ motion blur ของกระป๋องบนสายพาน) — เฉพาะกล้อง LIVE ─────
+# ใช้ลด "เบลอจากการเคลื่อนไหว": ปิด auto-exposure แล้วล็อก exposure ให้สั้น เพื่อให้
+# ทุกเฟรมคมสม่ำเสมอ (ต้องเพิ่มไฟส่องชดเชยเพราะภาพจะมืดลง).
+#
+# ⚠️ opt-in: ค่าเริ่มต้น None = "ไม่แตะ" → กล้องใช้ค่า default เดิมทุกประการ (พฤติกรรม
+#    เดิม 100%). มีผลเฉพาะกล้อง live (USB) เท่านั้น — snapshot/viewfinder ไม่กระทบ.
+# ⚠️ กล้อง USB + backend Windows แต่ละรุ่นตอบสนองค่าพวกนี้ไม่เหมือนกัน (บางรุ่นไม่รับ);
+#    โค้ดมี try/except — ถ้าตั้งไม่ได้ก็ใช้ค่ากล้องเดิม ไม่พัง.
+#
+#   CAMERA_AUTO_EXPOSURE : True = auto (ให้กล้องปรับเอง), False = manual (ล็อกเอง),
+#                          None = ไม่แตะ. ต้องตั้ง False ก่อน CAMERA_EXPOSURE จึงจะมีผล.
+#   CAMERA_EXPOSURE      : ค่าเวลารับแสง (สเกล log2 บนกล้องส่วนใหญ่: ยิ่งติดลบมาก =
+#                          ยิ่งสั้น = คมขึ้นแต่มืดลง เช่น -6 ≈ 1/64s, -7 ≈ 1/128s,
+#                          -8 ≈ 1/256s). None = ไม่ตั้ง. ลองไล่ -6 → -7 → -8 + เพิ่มไฟ.
+CAMERA_AUTO_EXPOSURE = None
+CAMERA_EXPOSURE = None
 
 # FourCC ของกล้อง. ตั้งเป็น None = ใช้ฟอร์แมต default ของกล้อง (มักเป็น YUY2
 # uncompressed) ซึ่ง MSMF บน Windows ถอดรหัสได้ "สะอาด" ไม่มีเฟรมแตก.

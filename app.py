@@ -120,6 +120,16 @@ latest_best_jpeg = None           # annotated JPEG of the sharpest NG frame
 latest_best_ts = 0.0              # time.time() when it was published
 best_lock = threading.Lock()
 
+# Candidate pool: capture_loop scores EVERY raw frame (camera rate ~30 FPS, not
+# just the ~2.7 FPS that reach inference), so Frame Capture picks the sharpest of
+# many more candidates. Only active while Frame Capture is on AND a defect is
+# currently on screen (pool_collecting) — so empty-conveyor frames never pollute
+# the pool. inference_loop resets it per can and reads it when the can leaves.
+pool_lock = threading.Lock()
+pool_best_frame = None
+pool_best_score = -1.0
+pool_collecting = False
+
 
 def _dent_sharpness(frame, bbox):
     """
@@ -136,6 +146,20 @@ def _dent_sharpness(frame, bbox):
             return 0.0
         crop = frame[y1:y2, x1:x2]
         gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+        return float(cv2.Laplacian(gray, cv2.CV_64F).var())
+    except Exception:
+        return 0.0
+
+
+def _frame_sharpness(frame):
+    """Whole-frame focus/blur score (variance of Laplacian on a downscaled gray
+    copy — cheap enough to run on every captured frame). Higher = sharper. Used
+    to score camera-rate candidates for Frame Capture. 0.0 on any problem."""
+    try:
+        h, w = frame.shape[:2]
+        if w > 320:
+            frame = cv2.resize(frame, (320, max(1, int(h * 320.0 / w))))
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         return float(cv2.Laplacian(gray, cv2.CV_64F).var())
     except Exception:
         return 0.0
@@ -261,6 +285,7 @@ def capture_loop():
     waits on the model — this is what keeps the displayed feed smooth.
     """
     global latest_raw_frame, raw_frame_seq
+    global pool_best_frame, pool_best_score
 
     logger.info("Capture loop started")
     while detection_active:
@@ -276,6 +301,17 @@ def capture_loop():
             with raw_lock:
                 latest_raw_frame = frame
                 raw_frame_seq += 1
+
+            # Frame Capture candidate pool: score this raw frame and keep the
+            # sharpest. Only while the mode is on AND a defect is currently on
+            # screen (pool_collecting, set by inference_loop) — so empty-conveyor
+            # frames never win. Cheap (downscaled Laplacian); off = zero cost.
+            if frame_capture_enabled and pool_collecting:
+                s = _frame_sharpness(frame)
+                with pool_lock:
+                    if s > pool_best_score:
+                        pool_best_score = s
+                        pool_best_frame = frame
         except Exception as e:
             logger.error(f"Error in capture loop: {e}")
             time.sleep(0.05)
@@ -291,6 +327,7 @@ def inference_loop():
     """
     global latest_detections, latest_det_frame, latest_det_seq
     global detection_stats, defect_log_cooldown
+    global pool_best_frame, pool_best_score, pool_collecting
 
     logger.info("Inference loop started")
     last_seq = -1
@@ -338,20 +375,36 @@ def inference_loop():
             detection_stats["current_defects"] = len(defects)
 
             if not detections:
+                pool_collecting = False   # stop pooling empty-conveyor frames
                 empty_streak += 1
                 if empty_streak >= config.DEFECT_RESET_FRAMES:
                     if can_present:
-                        # Falling edge — the can has left. Publish its sharpest NG
+                        # Falling edge — the can has left. Publish the sharpest
                         # frame for Frame Capture (display only; no DB/count effect).
-                        _publish_best_capture(best_frame, best_dets)
+                        # Prefer the camera-rate raw pool (many more candidates);
+                        # fall back to the sharpest inferred frame. Boxes come from
+                        # the best inferred detections (exact on the inferred frame,
+                        # approximate on a pool frame).
+                        sharp = None
+                        if frame_capture_enabled:
+                            with pool_lock:
+                                sharp = pool_best_frame
+                        _publish_best_capture(
+                            sharp if sharp is not None else best_frame, best_dets)
                     can_present = False
                     best_score, best_frame, best_dets = -1.0, None, None
+                    with pool_lock:          # clear pool for the next can
+                        pool_best_frame, pool_best_score = None, -1.0
             else:
                 empty_streak = 0
                 if not can_present:          # a new can just entered the frame
                     can_present = True
                     can_counted_ng = False
                     best_score, best_frame, best_dets = -1.0, None, None
+                    with pool_lock:          # fresh pool for this can
+                        pool_best_frame, pool_best_score = None, -1.0
+                # Pool only while a real defect is on screen (not OK/empty frames).
+                pool_collecting = bool(defects)
                 if defects:
                     # Track the sharpest NG frame of this can (Frame Capture).
                     top = max(defects, key=lambda d: d["confidence"])
@@ -612,6 +665,7 @@ def start_detection():
     global latest_raw_frame, raw_frame_seq, latest_detections
     global latest_det_frame, latest_det_seq
     global latest_best_jpeg, latest_best_ts
+    global pool_best_frame, pool_best_score, pool_collecting
 
     if detection_active:
         return jsonify({"status": "already_running", "message": "Detection already active"}), 200
@@ -645,7 +699,14 @@ def start_detection():
         camera = StreamCamera(camera_index=camera_index)
         camera.initialize()  # never fails — just arms the push buffer
     else:
-        camera = Camera(camera_index=camera_index)
+        # Live camera: pass opt-in exposure config (None = leave camera default,
+        # so this changes nothing unless the operator sets it). Snapshot/viewfinder
+        # create their own Camera without these → unaffected.
+        camera = Camera(
+            camera_index=camera_index,
+            auto_exposure=getattr(config, "CAMERA_AUTO_EXPOSURE", None),
+            exposure=getattr(config, "CAMERA_EXPOSURE", None),
+        )
         if not camera.initialize():
             available = scan_cameras_fast()
             hint = ""
@@ -671,6 +732,10 @@ def start_detection():
     with best_lock:                    # clear any stale Frame Capture from before
         latest_best_jpeg = None
         latest_best_ts = 0.0
+    with pool_lock:                    # clear any stale candidate pool
+        pool_best_frame = None
+        pool_best_score = -1.0
+    pool_collecting = False
 
     detection_active = True
     capture_thread = threading.Thread(target=capture_loop, daemon=True)
