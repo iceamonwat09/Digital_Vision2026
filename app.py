@@ -313,11 +313,20 @@ def inference_loop():
 
 def generate_frames():
     """
-    MJPEG generator. Draws each detection on the exact frame the model ran it
-    on (published together by inference_loop), so the box stays locked to the
-    can instead of trailing behind a newer frame. The displayed feed therefore
-    refreshes at the inference rate; re-encodes JPEG only when a new inference
-    frame has arrived, so a stalled or idle feed costs nothing.
+    MJPEG generator for USB/RTSP. Two display modes (config.LIVE_SMOOTH_VIDEO):
+
+    • SMOOTH (default): base = the newest RAW frame (camera rate) with the latest
+      detections overlaid. The feed stays fluid regardless of how slow inference
+      is (important for heavy models like a segmentation bestX.pt). Trade-off: a
+      box is drawn on a frame newer than the one it was computed on, so it trails
+      slightly while the can is moving — same behaviour as the STREAM overlay.
+
+    • LOCKED: base = the exact frame the model ran on (published together with its
+      detections), so the box is pinned to the can. The feed then refreshes only
+      at the inference rate — smooth boxes but a stuttery picture on heavy models.
+
+    Either way JPEG is re-encoded only when something changed, so an idle feed
+    costs nothing.
     """
     # Placeholder frame (created once)
     placeholder = np.zeros((480, 640, 3), dtype=np.uint8)
@@ -326,24 +335,35 @@ def generate_frames():
     _, placeholder_buf = cv2.imencode('.jpg', placeholder, _JPEG_PARAMS)
     placeholder_bytes = placeholder_buf.tobytes()
 
-    last_encoded_seq = -1
+    smooth = getattr(config, "LIVE_SMOOTH_VIDEO", True)
+    last_key = None
     frame_bytes = placeholder_bytes
 
     while True:
-        with det_lock:
-            frame = latest_det_frame
-            detections = latest_detections
-            seq = latest_det_seq
+        if smooth:
+            # Newest raw frame (fluid) + latest detections drawn on top.
+            with raw_lock:
+                base = latest_raw_frame
+                rseq = raw_frame_seq
+            with det_lock:
+                detections = latest_detections
+                dseq = latest_det_seq
+            # Re-encode when either the picture (raw) or the boxes (det) change.
+            key = (rseq, dseq)
+        else:
+            # Original: only the exact inferred frame, boxes pinned to it.
+            with det_lock:
+                base = latest_det_frame
+                detections = latest_detections
+                key = latest_det_seq
 
-        # Only redo work when a fresh inference frame (frame + its detections)
-        # is available.
-        if frame is not None and seq != last_encoded_seq:
-            last_encoded_seq = seq
+        if base is not None and key != last_key:
+            last_key = key
 
             if detector is not None and detector.model is not None:
-                annotated = detector.draw_detections(frame, detections)
+                annotated = detector.draw_detections(base, detections)
             else:
-                annotated = frame.copy()
+                annotated = base.copy()
                 cv2.putText(annotated, "Camera Preview (No Model)",
                             (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8,
                             (0, 165, 255), 2)

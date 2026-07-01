@@ -228,6 +228,15 @@ SSL_KEY_FILE  = os.path.join(os.path.dirname(os.path.abspath(__file__)), "certs"
 # Video streaming configuration
 STREAM_FPS = 15  # FPS for the live-detection MJPEG stream (lower = less bandwidth)
 
+# ── โหมดแสดงผลวิดีโอสด USB/RTSP (คุมความลื่นของภาพ vs การล็อกกรอบ) ──────────
+# True  = "ลื่น" (แนะนำ): สตรีมเฟรมดิบล่าสุดที่อัตรากล้อง (≈STREAM_FPS) แล้ววาดกรอบ
+#         ผลตรวจล่าสุดทับ → ภาพลื่นไม่ขึ้นกับความเร็ว inference. ข้อแลก: ตอนวัตถุ
+#         ขยับเร็ว กรอบจะตามช้าเล็กน้อย (วาดบนเฟรมที่ใหม่กว่าเฟรมที่ infer — เหมือน
+#         โหมดสตรีม). เหมาะกับโมเดลหนัก (เช่น bestX segmentation) ที่ infer ช้า.
+# False = "ล็อกกรอบ" (พฤติกรรมเดิม): แสดงเฉพาะเฟรมที่ infer เสร็จ → กรอบล็อกเป๊ะกับ
+#         เฟรมนั้น แต่ภาพอัปเดตตามอัตรา inference (กระตุกถ้าโมเดลหนัก).
+LIVE_SMOOTH_VIDEO = True
+
 # ── Browser STREAM source (กล้องของเครื่อง Client ผ่าน getUserMedia) ──────
 # โหมดที่ 3 ในข้อ "แหล่งสัญญาณภาพ": ใช้กล้องของเครื่อง Client ผ่านเบราว์เซอร์.
 # สถาปัตยกรรม = per-client isolation (request/response): เบราว์เซอร์โชว์กล้อง
