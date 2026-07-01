@@ -93,7 +93,9 @@ CAMERA_HEIGHT = 480
 CAMERA_FPS    = 30
 CAMERA_FOURCC = None       # None = YUY2 (สะอาด, แนะนำ) | "MJPG" = บีบอัด (เสี่ยงภาพแตกบาง MSMF)
 CAMERA_AUTO_EXPOSURE = None # None=ไม่แตะ | False=manual (ล็อกเอง) | True=auto — เฉพาะกล้อง live
-CAMERA_EXPOSURE      = None # ค่ารับแสง (เช่น -6/-7/-8: ยิ่งต่ำ=สั้น=คมขึ้นแต่มืด) ต้อง manual ก่อน
+CAMERA_EXPOSURE      = None # ค่ารับแสง (เช่น -6/-7/-8) — ⚠️ กล้องสถานีไม่รับ EXPOSURE ผ่าน OpenCV
+CAMERA_BRIGHTNESS    = None # None=ไม่แตะ | 0-255 = ตั้งความสว่าง (knob ที่กล้องนี้คุมได้จริง)
+                            # ปรับสดขณะรันได้จากสไลเดอร์ในแผงกล้อง USB (diagnose_exposure.py ยืนยัน)
 
 # ── AI acceleration (ONNX Runtime — เร่ง CPU คงความแม่น FP32) ─
 USE_ONNX   = True          # export .pt→.onnx ครั้งเดียว รันผ่าน onnxruntime (~2x). fallback→PyTorch

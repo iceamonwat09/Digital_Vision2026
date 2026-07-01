@@ -64,6 +64,17 @@
                         <input type="checkbox" id="frameCaptureToggle" onchange="toggleFrameCapture()">
                         🖼️ Frame Capture — แช่ภาพเฟรมที่คมที่สุดเมื่อเจอ NG (ทดสอบ)
                     </label>
+                    <div style="margin-top:10px;font-size:13px;color:#475569">
+                        <div style="display:flex;justify-content:space-between;align-items:center">
+                            <span>☀️ ความสว่าง (Brightness)</span>
+                            <span id="brightnessVal" style="font-family:monospace;color:#64748b">128</span>
+                        </div>
+                        <input type="range" id="brightnessSlider" min="0" max="255" value="128"
+                               style="width:100%;margin-top:4px" oninput="onBrightnessInput()">
+                        <div id="brightnessHint" style="font-size:11px;color:#94a3b8;margin-top:2px">
+                            กด Start ก่อน แล้วเลื่อนเพื่อปรับสด (กล้อง USB)
+                        </div>
+                    </div>
                 </div>
 
                 <!-- RTSP panel -->
@@ -300,6 +311,33 @@
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ enabled: on })
         }).catch(() => {});
+    };
+
+    // Brightness slider — adjust the live USB camera on the fly (BRIGHTNESS is the
+    // control verified to work on this station). Throttled so dragging doesn't
+    // flood the server; only meaningful while detection is running (USB source).
+    let _brightnessTimer = null, _brightnessPending = null;
+    function _sendBrightness(v) {
+        fetch('/api/camera/brightness', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ value: v })
+        }).then(r => r.json()).then(d => {
+            const hint = document.getElementById('brightnessHint');
+            if (d.status === 'ok') hint.textContent = 'ปรับแล้ว (กล้องรายงาน ' + d.reports + ')';
+            else hint.textContent = d.message || 'ปรับไม่ได้';
+        }).catch(() => {});
+    }
+    window.onBrightnessInput = function() {
+        const v = parseInt(document.getElementById('brightnessSlider').value, 10);
+        document.getElementById('brightnessVal').textContent = v;
+        // throttle: send at most ~every 120ms while dragging, plus a final send
+        _brightnessPending = v;
+        if (_brightnessTimer) return;
+        _brightnessTimer = setTimeout(() => {
+            _brightnessTimer = null;
+            if (_brightnessPending !== null) { _sendBrightness(_brightnessPending); _brightnessPending = null; }
+        }, 120);
     };
 
     window.saveRtsp = function() {

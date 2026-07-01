@@ -94,7 +94,7 @@ class Camera:
 
     def __init__(self, camera_index: Union[int, str] = None,
                  width: int = None, height: int = None, fps: int = None,
-                 auto_exposure=None, exposure=None):
+                 auto_exposure=None, exposure=None, brightness=None):
         raw = camera_index if camera_index is not None else config.CAMERA_INDEX
         # Normalise numeric strings ("0", "1") → int
         if isinstance(raw, str) and raw.isdigit():
@@ -110,18 +110,24 @@ class Camera:
         # (so snapshot/viewfinder are never touched).
         self.auto_exposure = auto_exposure
         self.exposure = exposure
+        # BRIGHTNESS (UVC 0-255) — the one control verified to work on the station
+        # camera (diagnose_exposure.py). Opt-in; None = leave the camera default.
+        self.brightness = brightness
         self.cap: Optional[cv2.VideoCapture] = None
         self.is_initialized = False
+        # Serialize cap access: capture_loop reads while a live brightness tweak
+        # may cap.set() from the Flask thread (VideoCapture isn't thread-safe).
+        self._cap_lock = threading.Lock()
 
     def _apply_exposure(self, cap) -> None:
         """
-        Apply manual/auto exposure if requested (opt-in). Best-effort: many USB
-        cameras / Windows backends silently ignore or reject these — so every set
-        is guarded and a failure just falls back to the camera's own default
-        (never raises, never blocks initialization).
+        Apply manual/auto exposure + brightness if requested (opt-in). Best-effort:
+        many USB cameras / Windows backends silently ignore or reject these — so
+        every set is guarded and a failure just falls back to the camera's own
+        default (never raises, never blocks initialization).
         """
-        ae, ev = self.auto_exposure, self.exposure
-        if ae is None and ev is None:
+        ae, ev, br = self.auto_exposure, self.exposure, self.brightness
+        if ae is None and ev is None and br is None:
             return                       # nothing requested → leave defaults
         try:
             if ae is not None:
@@ -131,14 +137,33 @@ class Camera:
                 cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.75 if ae else 0.25)
             if ev is not None:
                 cap.set(cv2.CAP_PROP_EXPOSURE, float(ev))
-            actual = cap.get(cv2.CAP_PROP_EXPOSURE)
+            if br is not None:
+                cap.set(cv2.CAP_PROP_BRIGHTNESS, float(br))
             logger.info(
-                f"Exposure applied (auto_exposure={ae}, requested={ev}, "
-                f"camera reports={actual}). If motion blur is unchanged, the "
-                "camera may have ignored it — try another value or add lighting."
+                f"Camera controls applied (auto_exposure={ae}, exposure={ev}, "
+                f"brightness={br}; reports exposure={cap.get(cv2.CAP_PROP_EXPOSURE)}, "
+                f"brightness={cap.get(cv2.CAP_PROP_BRIGHTNESS)})."
             )
         except Exception as e:
-            logger.warning(f"Exposure set failed ({e}); using camera defaults.")
+            logger.warning(f"Camera control set failed ({e}); using defaults.")
+
+    def set_brightness(self, value):
+        """
+        Adjust BRIGHTNESS on the running camera (live, no reopen). Returns the
+        value the camera reports back, or None if there's no open USB capture.
+        Best-effort + guarded so a bad value can never crash the stream.
+        """
+        cap = self.cap
+        if cap is None:
+            return None
+        try:
+            with self._cap_lock:
+                cap.set(cv2.CAP_PROP_BRIGHTNESS, float(value))
+                self.brightness = value
+                return cap.get(cv2.CAP_PROP_BRIGHTNESS)
+        except Exception as e:
+            logger.warning(f"set_brightness failed ({e}).")
+            return None
 
     def initialize(self) -> bool:
         if self.is_initialized:
@@ -263,7 +288,8 @@ class Camera:
         if not self.is_initialized or self.cap is None:
             return None
 
-        ret, frame = self.cap.read()
+        with self._cap_lock:
+            ret, frame = self.cap.read()
         if not ret or frame is None:
             return (False, None)
 

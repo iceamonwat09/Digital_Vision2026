@@ -7,7 +7,7 @@ import os
 
 # Bump this whenever a config default changes so a running deployment can
 # print it on startup and confirm it is actually executing the new code.
-CONFIG_VERSION = "2026.07.01-capture-smooth"
+CONFIG_VERSION = "2026.07.01-brightness"
 
 # ====================
 # CAMERA CONFIGURATION
@@ -43,6 +43,13 @@ CAMERA_FPS = 30
 #                          -8 ≈ 1/256s). None = ไม่ตั้ง. ลองไล่ -6 → -7 → -8 + เพิ่มไฟ.
 CAMERA_AUTO_EXPOSURE = None
 CAMERA_EXPOSURE = None
+
+# ── ความสว่าง (BRIGHTNESS 0-255) — knob ที่ยืนยันแล้วว่าคุมได้บนกล้องสถานี ──────
+# (จาก diagnose_exposure.py: EXPOSURE/GAIN/GAMMA กล้องนี้ไม่รับ แต่ BRIGHTNESS รับ).
+# None = ไม่แตะ (ใช้ค่า default กล้อง) | 0-255 = ตั้งความสว่างตอนเปิดกล้อง live.
+# ปรับสดขณะรันได้ผ่านสไลเดอร์ในแผงกล้อง USB (POST /api/camera/brightness) — เฉพาะ
+# กล้อง live เท่านั้น (snapshot/RTSP ไม่กระทบ).
+CAMERA_BRIGHTNESS = None
 
 # FourCC ของกล้อง. ตั้งเป็น None = ใช้ฟอร์แมต default ของกล้อง (มักเป็น YUY2
 # uncompressed) ซึ่ง MSMF บน Windows ถอดรหัสได้ "สะอาด" ไม่มีเฟรมแตก.

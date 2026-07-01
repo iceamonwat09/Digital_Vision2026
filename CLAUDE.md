@@ -58,9 +58,12 @@
 
 - Live: 640x480 @ 30fps, `CAMERA_FOURCC=None` (YUY2 — "MJPG" ทำภาพแตกบน MSMF). กล้องตัน 720p ผ่าน MSMF.
 - **imgsz: live=480, snapshot=1280. ⚠️ ห้ามต่ำกว่า 480** — dent เป็นฟีเจอร์เล็ก ลดเป็น 320 = ตรวจไม่เจอเลย.
-- **Exposure** (`CAMERA_AUTO_EXPOSURE`/`CAMERA_EXPOSURE`, opt-in default None): แก้ motion blur
-  บนสายพาน. เฉพาะกล้อง **live** (ส่งผ่าน ctor ที่ site สร้างกล้อง live เท่านั้น; snapshot/RTSP ไม่แตะ).
-  best-effort + try/except (กล้อง USB หลายรุ่นไม่รับค่าผ่าน OpenCV — ดู log `camera reports=`).
+- **Exposure/Brightness** (`CAMERA_AUTO_EXPOSURE`/`CAMERA_EXPOSURE`/`CAMERA_BRIGHTNESS`, opt-in default
+  None): เฉพาะกล้อง **live** (ส่งผ่าน ctor ที่ site สร้างกล้อง live; snapshot/RTSP ไม่แตะ). best-effort.
+  - **⚠️ กล้องสถานีนี้: EXPOSURE/GAIN/GAMMA ตั้งไม่ได้ผ่าน OpenCV แต่ `BRIGHTNESS` (0-255) ได้** —
+    พิสูจน์ด้วย `diagnose_exposure.py` (เทสต์ว่าภาพสว่างเปลี่ยนจริงต่อ knob/backend).
+  - ปรับสดขณะรัน: สไลเดอร์ในแผง USB → `POST /api/camera/brightness` → `Camera.set_brightness()`
+    (มี `_cap_lock` กัน race กับ `capture_loop`). StreamCamera ไม่มี method นี้ (endpoint คืน error).
 - `Camera` class ใช้ร่วมทั้ง live+snapshot (แยกด้วย ctor params). RTSP → `_initialize_rtsp` (ไม่ทำ exposure).
 
 ---
