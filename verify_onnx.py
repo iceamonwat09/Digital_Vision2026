@@ -159,9 +159,15 @@ def main():
         return 1
 
     # 2) โหลดทั้งสอง backend
+    #    ONNX ต้องระบุ task ให้ตรงกับ .pt (segment/detect/...) ไม่งั้น ultralytics
+    #    เดาเป็น 'detect' แล้วถอด output ของโมเดล segment ผิด → กรอบขยะ. อ่าน task
+    #    จาก .pt (แหล่งความจริง) แล้วส่งเข้า YOLO(onnx, task=...) — ตรงกับที่แอปทำ.
     try:
         model_pt = YOLO(pt_path)
-        model_on = YOLO(onnx_path)
+        task = getattr(model_pt, "task", None)
+        if task:
+            print(f"[INFO] task ของโมเดล = '{task}' → โหลด ONNX ด้วย task เดียวกัน")
+        model_on = YOLO(onnx_path, task=task) if task else YOLO(onnx_path)
     except Exception as e:
         print(f"[ERROR] โหลดโมเดลล้มเหลว: {e}")
         print("        ถ้าเป็น onnxruntime: py -3.9 -m pip install onnxruntime==1.19.2")

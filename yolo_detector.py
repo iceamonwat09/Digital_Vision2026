@@ -254,6 +254,40 @@ class YOLODetector:
         self.is_onnx, self.is_openvino = False, False
         return model_path, ""
 
+    def _accel_task(self, pt_path: str, onnx_path: str) -> Optional[str]:
+        """
+        Return the ultralytics task ('detect'/'segment'/'pose'/...) that an
+        accelerated backend must be loaded with.
+
+        WHY: exporting to ONNX/OpenVINO drops the task tag, so ``YOLO(model.onnx)``
+        assumes ``task='detect'``. For a *-seg model (e.g. a segmentation bestX.pt)
+        that mis-decodes the output tensor → garbage boxes / no boxes. The source
+        of truth is the ``.pt``. We read its task once and cache it in a tiny
+        ``<onnx>.task`` sidecar so later startups don't reload the .pt.
+        """
+        side = onnx_path + ".task"
+        try:
+            if (os.path.exists(side) and os.path.exists(onnx_path)
+                    and os.path.getmtime(side) >= os.path.getmtime(onnx_path)):
+                with open(side, "r", encoding="utf-8") as f:
+                    t = f.read().strip()
+                if t:
+                    return t
+        except Exception:
+            pass
+        # Authoritative: read the task straight from the .pt, then cache it.
+        try:
+            t = YOLO(pt_path).task
+            try:
+                with open(side, "w", encoding="utf-8") as f:
+                    f.write(str(t or ""))
+            except Exception:
+                pass
+            return t or None
+        except Exception as e:
+            logger.warning(f"Could not determine task from {pt_path}: {e}")
+            return None
+
     def _smoke_test(self) -> bool:
         """
         Run ONE tiny inference to confirm the loaded backend actually executes
@@ -313,10 +347,15 @@ class YOLODetector:
             # behaviour is unchanged.
             load_path, accel = self._select_backend(model_path)
 
+            # Exported ONNX/OpenVINO loses the task tag → YOLO() assumes 'detect'.
+            # For a segmentation model that mis-decodes the output. Pass the real
+            # task read from the .pt so the backend decodes exactly like the .pt.
+            task = self._accel_task(model_path, load_path) if accel else None
+
             logger.info(f"Loading YOLO model: {load_path}"
-                        + (f" [{accel}]" if accel else ""))
+                        + (f" [{accel}{(', task=' + task) if task else ''}]" if accel else ""))
             try:
-                self.model = YOLO(load_path)
+                self.model = YOLO(load_path, task=task) if task else YOLO(load_path)
                 # An accelerated backend can load yet fail at inference time on an
                 # incompatible runtime — verify with a smoke test and fall back.
                 if accel and not self._smoke_test():

@@ -483,6 +483,9 @@ python diagnose_snapshot.py
 - 🛡️ **fallback หลายชั้น** — ถ้า `onnxruntime` ไม่ได้ติดตั้ง / export / load / **smoke-test**
   (รัน 1 เฟรมจริงตอนโหลด) ล้มเหลว → กลับไปใช้ PyTorch `.pt` อัตโนมัติ ของเดิมพังไม่ได้
 - 🛡️ **กัน .onnx ค้างเก่า** — ถ้า `best.pt` ใหม่กว่า `best.onnx` (เทรนใหม่) จะ re-export ให้
+- 🎭 **รองรับโมเดล segmentation** (เช่น `bestX.pt` = YOLOv8-seg) — ONNX ที่ export จะไม่มี
+  แท็ก task, `YOLO()` เลยเดาเป็น `detect` → ถอด output ผิด (กรอบขยะ/ไม่มีกรอบ). แก้โดย
+  อ่าน task จริงจาก `.pt` แล้วส่ง `YOLO(onnx, task=...)` (cache ใน `<onnx>.task` sidecar)
 - 🧪 **`verify_onnx.py`** — สคริปต์เทียบผลตรวจ `.pt` vs `.onnx` (จำนวนกล่อง/คลาส/conf/IoU)
   ที่ imgsz 480+1280 → **ต้อง PASS ก่อนเปิด `USE_ONNX=True`** (กันซ้ำรอย OpenVINO)
 - **ค่าเริ่มต้น `USE_ONNX = False`** — ไม่มีอะไรเปลี่ยนจนกว่าจะเปิดเอง หลังเทียบผลผ่านแล้ว
