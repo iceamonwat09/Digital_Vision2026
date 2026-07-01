@@ -70,7 +70,9 @@
 - **Live USB/RTSP** = 2 thread: `capture_loop` (อ่านกล้อง → `latest_raw_frame`) +
   `inference_loop` (infer, นับ, log DB). `generate_frames` = MJPEG generator.
   - `LIVE_SMOOTH_VIDEO`: `False`=วาดกรอบบนเฟรมที่ infer จริง (กรอบเป๊ะ, ภาพตามอัตรา infer) /
-    `True`=วาดกรอบล่าสุดบนเฟรมดิบล่าสุด (ภาพลื่น, กรอบตามช้าตอนขยับ).
+    `True`=วาดกรอบล่าสุดบนเฟรมดิบล่าสุด (ภาพลื่น, กรอบตามช้าตอนขยับ). **เปิด Frame Capture =
+    บังคับ smooth อัตโนมัติ** (`smooth = frame_capture_enabled or LIVE_SMOOTH_VIDEO` ประเมินสด
+    ทุก loop) — ความแม่นกรอบไปอยู่ที่เฟรมที่แช่ (re-infer แล้ว) ส่วนภาพสดแค่ monitor.
 - **STREAM** = client-side ล้วน: เบราว์เซอร์เปิดกล้องตัวเอง (`getUserMedia`, ต้อง HTTPS) →
   POST เฟรมไป `/api/stream/infer` → คืน JSON กรอบ → วาดบน canvas. **per-client isolation**
   (ไม่แชร์กล้อง/pipeline). JS อยู่ใน `templates/index.html` (ค่าคงที่ `STREAM_*`).

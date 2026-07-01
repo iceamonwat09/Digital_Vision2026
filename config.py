@@ -7,7 +7,7 @@ import os
 
 # Bump this whenever a config default changes so a running deployment can
 # print it on startup and confirm it is actually executing the new code.
-CONFIG_VERSION = "2026.07.01-capture-complete"
+CONFIG_VERSION = "2026.07.01-capture-smooth"
 
 # ====================
 # CAMERA CONFIGURATION
@@ -246,12 +246,15 @@ SSL_KEY_FILE  = os.path.join(os.path.dirname(os.path.abspath(__file__)), "certs"
 STREAM_FPS = 15  # FPS for the live-detection MJPEG stream (lower = less bandwidth)
 
 # ── โหมดแสดงผลวิดีโอสด USB/RTSP (คุมความลื่นของภาพ vs การล็อกกรอบ) ──────────
-# True  = "ลื่น" (แนะนำ): สตรีมเฟรมดิบล่าสุดที่อัตรากล้อง (≈STREAM_FPS) แล้ววาดกรอบ
-#         ผลตรวจล่าสุดทับ → ภาพลื่นไม่ขึ้นกับความเร็ว inference. ข้อแลก: ตอนวัตถุ
-#         ขยับเร็ว กรอบจะตามช้าเล็กน้อย (วาดบนเฟรมที่ใหม่กว่าเฟรมที่ infer — เหมือน
-#         โหมดสตรีม). เหมาะกับโมเดลหนัก (เช่น bestX segmentation) ที่ infer ช้า.
-# False = "ล็อกกรอบ" (พฤติกรรมเดิม): แสดงเฉพาะเฟรมที่ infer เสร็จ → กรอบล็อกเป๊ะกับ
-#         เฟรมนั้น แต่ภาพอัปเดตตามอัตรา inference (กระตุกถ้าโมเดลหนัก).
+# True  = "ลื่น": สตรีมเฟรมดิบล่าสุดที่อัตรากล้อง (≈STREAM_FPS) แล้ววาดกรอบผลตรวจ
+#         ล่าสุดทับ → ภาพลื่นไม่ขึ้นกับความเร็ว inference. ข้อแลก: ตอนวัตถุขยับเร็ว
+#         กรอบจะตามช้าเล็กน้อย (วาดบนเฟรมที่ใหม่กว่าเฟรมที่ infer).
+# False = "ล็อกกรอบ" (default): แสดงเฉพาะเฟรมที่ infer เสร็จ → กรอบล็อกเป๊ะกับเฟรม
+#         นั้น แต่ภาพอัปเดตตามอัตรา inference (กระตุกถ้าโมเดลหนัก).
+#
+# 📌 หมายเหตุ: เมื่อ **เปิด Frame Capture** ระบบจะบังคับใช้โหมดลื่นให้อัตโนมัติ (ไม่ว่า
+# ค่านี้จะเป็นอะไร) — เพราะความแม่นของกรอบไปอยู่ที่ "เฟรมที่แช่" (re-infer แล้ว กรอบตรง)
+# ส่วนภาพสดแค่ monitor. ปิด Frame Capture → กลับมาใช้ค่านี้ (default = ล็อกกรอบเป๊ะ).
 LIVE_SMOOTH_VIDEO = False
 
 # ── โหมด "Frame Capture" (ทดสอบ best-frame) — ใช้กับแหล่งภาพ USB/RTSP ──────────
@@ -259,7 +262,7 @@ LIVE_SMOOTH_VIDEO = False
 # แสดง "เฟรมที่คมที่สุด" ของใบนั้น (เลือกด้วยความคมของรอยบุบ × ความมั่นใจ) ค้างไว้
 # FRAME_CAPTURE_HOLD_SEC วินาที แล้วกลับไปแสดงสด. เป็นแค่การแสดงผล — ไม่กระทบการนับ/
 # การบันทึก DB (ยังทำแบบเดิม). ค่าเริ่มต้นการแสดงผลคุมด้วย toggle ฝั่ง UI (ปิดไว้).
-FRAME_CAPTURE_HOLD_SEC = 5
+FRAME_CAPTURE_HOLD_SEC = 3
 
 # Frame Capture: กระป๋องต้องอยู่ห่างขอบภาพอย่างน้อยเท่านี้ (สัดส่วนของกว้าง/สูง)
 # ถึงจะนับว่า "ครบใบ" — ใช้กล่องคลาส can/good (กระป๋องทั้งใบ) เทียบกับขอบภาพ.

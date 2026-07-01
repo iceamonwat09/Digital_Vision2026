@@ -100,7 +100,7 @@ USE_ONNX   = True          # export .pt→.onnx ครั้งเดียว �
 ONNX_OPSET = 17            # ⚠️ Python 3.9: ต้อง `pip install onnxruntime==1.19.2` (1.20+ ตัด py39)
 
 # ── การแสดงผลวิดีโอสด USB/RTSP ───────────────────────
-LIVE_SMOOTH_VIDEO = False  # False=ล็อกกรอบเป๊ะ (ภาพตามอัตรา infer) | True=ลื่น (กรอบตามช้าตอนขยับ)
+LIVE_SMOOTH_VIDEO = False  # False=ล็อกกรอบเป๊ะ | True=ลื่น. 📌 เปิด Frame Capture = บังคับลื่นอัตโนมัติ
 
 # ── ถ่ายรูปตรวจ (snapshot) ───────────────────────────
 SNAPSHOT_IMGSZ           = 1280   # imgsz ตอน detect (สูงกว่า live เพราะรันครั้งเดียว)
@@ -131,7 +131,7 @@ STREAM_MAX_WIDTH   = 640   # ความกว้างเฟรม live ก่
 STREAM_INFER_IMGSZ = 480   # imgsz ตรวจสตรีมสด = เท่า USB. ⚠️ ต่ำกว่า 480 จะตรวจ dent ไม่เจอ
 
 # ── Frame Capture (แช่ภาพเฟรมคมที่สุดเมื่อเจอ NG — USB/RTSP) ─
-FRAME_CAPTURE_HOLD_SEC    = 5      # แช่ภาพกี่วินาที
+FRAME_CAPTURE_HOLD_SEC    = 3      # แช่ภาพกี่วินาที (สายพานถี่ให้ลดลง)
 FRAME_CAPTURE_EDGE_MARGIN = 0.02   # กระป๋องต้องห่างขอบภาพเท่านี้จึงนับ "ครบใบ" (0=แค่ไม่หลุดขอบ)
 ```
 

@@ -509,12 +509,17 @@ def generate_frames():
     _, placeholder_buf = cv2.imencode('.jpg', placeholder, _JPEG_PARAMS)
     placeholder_bytes = placeholder_buf.tobytes()
 
-    smooth = getattr(config, "LIVE_SMOOTH_VIDEO", True)
     hold = getattr(config, "FRAME_CAPTURE_HOLD_SEC", 5)
     last_key = None
     frame_bytes = placeholder_bytes
 
     while True:
+        # Live display mode, evaluated per iteration so it tracks the toggle:
+        # Frame Capture ON forces SMOOTH live (accuracy comes from the frozen
+        # best-frame instead), otherwise follow config.LIVE_SMOOTH_VIDEO (default
+        # False = frame-locked, boxes pinned exactly to the inferred frame).
+        smooth = frame_capture_enabled or getattr(config, "LIVE_SMOOTH_VIDEO", False)
+
         # Frame Capture: when on and a fresh best-NG capture exists, freeze the
         # feed on it for `hold` seconds, then fall back to the normal live view.
         if frame_capture_enabled:
