@@ -93,7 +93,8 @@ class Camera:
     """
 
     def __init__(self, camera_index: Union[int, str] = None,
-                 width: int = None, height: int = None, fps: int = None):
+                 width: int = None, height: int = None, fps: int = None,
+                 auto_exposure=None, exposure=None, brightness=None, contrast=None):
         raw = camera_index if camera_index is not None else config.CAMERA_INDEX
         # Normalise numeric strings ("0", "1") → int
         if isinstance(raw, str) and raw.isdigit():
@@ -104,8 +105,81 @@ class Camera:
         self.width  = width  if width  is not None else config.CAMERA_WIDTH
         self.height = height if height is not None else config.CAMERA_HEIGHT
         self.fps    = fps    if fps    is not None else config.CAMERA_FPS
+        # Optional exposure control (opt-in). Passed only by the live-detection
+        # camera; None on both means "leave the camera/driver defaults alone"
+        # (so snapshot/viewfinder are never touched).
+        self.auto_exposure = auto_exposure
+        self.exposure = exposure
+        # Live image controls (UVC 0-255), opt-in; None = leave the camera default.
+        # BRIGHTNESS is verified to work on the station camera; CONTRAST is an
+        # experimental knob (may help or hurt detection — must be tested).
+        self.brightness = brightness
+        self.contrast = contrast
         self.cap: Optional[cv2.VideoCapture] = None
         self.is_initialized = False
+        # Serialize cap access: capture_loop reads while a live brightness tweak
+        # may cap.set() from the Flask thread (VideoCapture isn't thread-safe).
+        self._cap_lock = threading.Lock()
+
+    def _apply_exposure(self, cap) -> None:
+        """
+        Apply manual/auto exposure + brightness if requested (opt-in). Best-effort:
+        many USB cameras / Windows backends silently ignore or reject these — so
+        every set is guarded and a failure just falls back to the camera's own
+        default (never raises, never blocks initialization).
+        """
+        ae, ev, br, ct = self.auto_exposure, self.exposure, self.brightness, self.contrast
+        if ae is None and ev is None and br is None and ct is None:
+            return                       # nothing requested → leave defaults
+        try:
+            if ae is not None:
+                # Windows DSHOW/MSMF convention (varies by driver!):
+                #   0.75 ≈ auto, 0.25 ≈ manual. Must switch to manual before a
+                #   manual exposure value will "stick".
+                cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.75 if ae else 0.25)
+            if ev is not None:
+                cap.set(cv2.CAP_PROP_EXPOSURE, float(ev))
+            if br is not None:
+                cap.set(cv2.CAP_PROP_BRIGHTNESS, float(br))
+            if ct is not None:
+                cap.set(cv2.CAP_PROP_CONTRAST, float(ct))
+            logger.info(
+                f"Camera controls applied (auto_exposure={ae}, exposure={ev}, "
+                f"brightness={br}, contrast={ct}; reports "
+                f"brightness={cap.get(cv2.CAP_PROP_BRIGHTNESS)}, "
+                f"contrast={cap.get(cv2.CAP_PROP_CONTRAST)})."
+            )
+        except Exception as e:
+            logger.warning(f"Camera control set failed ({e}); using defaults.")
+
+    # ชื่อ control → OpenCV prop (ที่ปรับสดได้ผ่านสไลเดอร์ UI)
+    _CONTROL_PROPS = {
+        "brightness": cv2.CAP_PROP_BRIGHTNESS,
+        "contrast":   cv2.CAP_PROP_CONTRAST,
+    }
+
+    def set_control(self, name, value):
+        """
+        Adjust an image control (brightness/contrast) on the running camera live
+        (no reopen). Returns the value the camera reports back, or None if the
+        control is unknown / there's no open capture. Guarded + serialized with
+        capture_loop via _cap_lock so a bad value can never crash the stream.
+        """
+        prop = self._CONTROL_PROPS.get(name)
+        cap = self.cap
+        if prop is None or cap is None:
+            return None
+        try:
+            with self._cap_lock:
+                cap.set(prop, float(value))
+                if name == "brightness":
+                    self.brightness = value
+                elif name == "contrast":
+                    self.contrast = value
+                return cap.get(prop)
+        except Exception as e:
+            logger.warning(f"set_control({name}) failed ({e}).")
+            return None
 
     def initialize(self) -> bool:
         if self.is_initialized:
@@ -148,6 +222,8 @@ class Camera:
             cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
             cap.set(cv2.CAP_PROP_FPS,          self.fps)
             cap.set(cv2.CAP_PROP_BUFFERSIZE,   1)
+            # Opt-in exposure control (live camera only; no-op unless configured).
+            self._apply_exposure(cap)
 
             for _ in range(5):
                 cap.read()
@@ -228,7 +304,8 @@ class Camera:
         if not self.is_initialized or self.cap is None:
             return None
 
-        ret, frame = self.cap.read()
+        with self._cap_lock:
+            ret, frame = self.cap.read()
         if not ret or frame is None:
             return (False, None)
 

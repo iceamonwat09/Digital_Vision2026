@@ -110,6 +110,103 @@ latest_det_frame = None           # the exact frame those detections came from
 latest_det_seq = -1               # seq of latest_det_frame (drives re-encode)
 det_lock = threading.Lock()
 
+# ── Frame Capture mode (best-frame test) ────────────────────────────────────
+# inference_loop keeps the sharpest NG frame of each passing can and, when the
+# can leaves, publishes it here as a ready-to-serve JPEG. generate_frames freezes
+# the feed on it for config.FRAME_CAPTURE_HOLD_SEC when the mode is on. Display
+# only — never affects counting or DB logging.
+frame_capture_enabled = False     # toggled by the UI (POST /api/frame_capture)
+latest_best_jpeg = None           # annotated JPEG of the sharpest NG frame
+latest_best_ts = 0.0              # time.time() when it was published
+best_lock = threading.Lock()
+
+# Candidate pool: capture_loop scores EVERY raw frame (camera rate ~30 FPS, not
+# just the ~2.7 FPS that reach inference), so Frame Capture picks the sharpest of
+# many more candidates. Only active while Frame Capture is on AND a defect is
+# currently on screen (pool_collecting) — so empty-conveyor frames never pollute
+# the pool. inference_loop resets it per can and reads it when the can leaves.
+pool_lock = threading.Lock()
+pool_best_frame = None
+pool_best_score = -1.0
+pool_collecting = False
+
+
+def _dent_sharpness(frame, bbox):
+    """
+    Focus/blur score of the dent region — variance of the Laplacian on the bbox
+    crop (higher = sharper). Used to pick the clearest frame of a passing can.
+    Returns 0.0 on any problem so it never breaks the inference loop.
+    """
+    try:
+        h, w = frame.shape[:2]
+        x1, y1, x2, y2 = [int(v) for v in bbox]
+        x1, y1 = max(0, x1), max(0, y1)
+        x2, y2 = min(w, x2), min(h, y2)
+        if x2 - x1 < 4 or y2 - y1 < 4:
+            return 0.0
+        crop = frame[y1:y2, x1:x2]
+        gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+        return float(cv2.Laplacian(gray, cv2.CV_64F).var())
+    except Exception:
+        return 0.0
+
+
+def _frame_sharpness(frame):
+    """Whole-frame focus/blur score (variance of Laplacian on a downscaled gray
+    copy — cheap enough to run on every captured frame). Higher = sharper. Used
+    to score camera-rate candidates for Frame Capture. 0.0 on any problem."""
+    try:
+        h, w = frame.shape[:2]
+        if w > 320:
+            frame = cv2.resize(frame, (320, max(1, int(h * 320.0 / w))))
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        return float(cv2.Laplacian(gray, cv2.CV_64F).var())
+    except Exception:
+        return 0.0
+
+
+def _can_complete(detections, frame_shape, margin=0.02):
+    """
+    True if the whole workpiece is fully inside the frame (not clipped at an
+    edge). Judged from the non-defect 'can'/'good' box — the whole-can class,
+    which is present in the raw detections even when it's hidden on an NG display.
+    Returns False when there is no such box to judge from (treated as "not
+    confirmed complete"). Frame Capture only — never affects detection/counting.
+    """
+    try:
+        h, w = frame_shape[:2]
+        mx, my = w * margin, h * margin
+        body = [d for d in detections if d["class_name"] in _NON_DEFECT_CLASSES]
+        if not body:
+            return False
+        for d in body:
+            x1, y1, x2, y2 = d["bbox"]
+            if x1 <= mx or y1 <= my or x2 >= (w - mx) or y2 >= (h - my):
+                return False          # touches an edge → the can is clipped
+        return True
+    except Exception:
+        return False
+
+
+def _publish_best_capture(frame, detections):
+    """Annotate the sharpest NG frame of a can and publish it for Frame Capture
+    display. No-op if there's nothing to show. Never raises into the loop."""
+    global latest_best_jpeg, latest_best_ts
+    if frame is None:
+        return
+    try:
+        if detector is not None and detector.model is not None:
+            annotated = detector.draw_detections(frame, detections or [])
+        else:
+            annotated = frame
+        ok, buf = cv2.imencode('.jpg', annotated, _JPEG_PARAMS)
+        if ok:
+            with best_lock:
+                latest_best_jpeg = buf.tobytes()
+                latest_best_ts = time.time()
+    except Exception as e:
+        logger.debug(f"Frame Capture publish failed: {e}")
+
 detection_stats = {
     "total_detected": 0,
     "current_defects": 0,
@@ -211,6 +308,7 @@ def capture_loop():
     waits on the model — this is what keeps the displayed feed smooth.
     """
     global latest_raw_frame, raw_frame_seq
+    global pool_best_frame, pool_best_score
 
     logger.info("Capture loop started")
     while detection_active:
@@ -226,6 +324,17 @@ def capture_loop():
             with raw_lock:
                 latest_raw_frame = frame
                 raw_frame_seq += 1
+
+            # Frame Capture candidate pool: score this raw frame and keep the
+            # sharpest. Only while the mode is on AND a defect is currently on
+            # screen (pool_collecting, set by inference_loop) — so empty-conveyor
+            # frames never win. Cheap (downscaled Laplacian); off = zero cost.
+            if frame_capture_enabled and pool_collecting:
+                s = _frame_sharpness(frame)
+                with pool_lock:
+                    if s > pool_best_score:
+                        pool_best_score = s
+                        pool_best_frame = frame
         except Exception as e:
             logger.error(f"Error in capture loop: {e}")
             time.sleep(0.05)
@@ -241,6 +350,7 @@ def inference_loop():
     """
     global latest_detections, latest_det_frame, latest_det_seq
     global detection_stats, defect_log_cooldown
+    global pool_best_frame, pool_best_score, pool_collecting
 
     logger.info("Inference loop started")
     last_seq = -1
@@ -250,6 +360,11 @@ def inference_loop():
     can_present = False
     can_counted_ng = False
     empty_streak = 0
+    # Best-frame (Frame Capture): sharpest NG frame seen during the current can's
+    # pass. Flushed to the global best-capture when the can leaves.
+    best_score = -1.0
+    best_frame = None
+    best_dets = None
 
     while detection_active:
         try:
@@ -283,26 +398,85 @@ def inference_loop():
             detection_stats["current_defects"] = len(defects)
 
             if not detections:
+                pool_collecting = False   # stop pooling empty-conveyor frames
                 empty_streak += 1
                 if empty_streak >= config.DEFECT_RESET_FRAMES:
+                    if can_present:
+                        # Falling edge — the can has left. Publish the sharpest
+                        # frame for Frame Capture (display only; no DB/count effect).
+                        # Prefer the camera-rate raw pool (sharper), but RE-RUN
+                        # detection on that exact frame so the boxes align to it —
+                        # the pool frame never went through inference, and drawing
+                        # boxes from a different frame put them off the can. If the
+                        # re-check no longer shows a defect, fall back to the
+                        # sharpest inferred frame (which definitely shows the dent).
+                        sharp = None
+                        if frame_capture_enabled:
+                            with pool_lock:
+                                sharp = pool_best_frame
+                        if sharp is not None and detector is not None and detector.model is not None:
+                            try:
+                                sharp_dets = detector.detect(sharp)
+                            except Exception:
+                                sharp_dets = []
+                            has_defect = any(d["class_name"] not in _NON_DEFECT_CLASSES
+                                             for d in sharp_dets)
+                            complete = _can_complete(
+                                sharp_dets, sharp.shape,
+                                getattr(config, "FRAME_CAPTURE_EDGE_MARGIN", 0.02))
+                            # Publish the sharp frame only if it still shows the dent
+                            # AND the whole can is in view; otherwise fall back to the
+                            # best inferred frame (already completeness-weighted).
+                            if has_defect and complete:
+                                _publish_best_capture(sharp, sharp_dets)
+                            else:
+                                _publish_best_capture(best_frame, best_dets)
+                        else:
+                            _publish_best_capture(best_frame, best_dets)
                     can_present = False
+                    best_score, best_frame, best_dets = -1.0, None, None
+                    with pool_lock:          # clear pool for the next can
+                        pool_best_frame, pool_best_score = None, -1.0
             else:
                 empty_streak = 0
                 if not can_present:          # a new can just entered the frame
                     can_present = True
                     can_counted_ng = False
-                if defects and not can_counted_ng:
-                    can_counted_ng = True     # count + log this defective can ONCE
-                    detection_stats["total_detected"] += 1
-                    if db and db.is_connected:
-                        for det in defects:
-                            db.log_defect(
-                                defect_type=det["class_name"],
-                                confidence=det["confidence"],
-                                frame=frame,
-                                bbox=det["bbox"],
-                                timestamp=datetime.now()
-                            )
+                    best_score, best_frame, best_dets = -1.0, None, None
+                    with pool_lock:          # fresh pool for this can
+                        pool_best_frame, pool_best_score = None, -1.0
+                if defects:
+                    # Frame Capture: prefer frames where the WHOLE can is in view
+                    # (not a half-can entering/leaving). Judged from the 'can'/'good'
+                    # box we already have. Pool only complete NG frames; and in the
+                    # inferred-best score a clipped can is heavily penalised so a
+                    # complete frame wins whenever one exists — but a partial one can
+                    # still be the fallback if the can never fits fully in view.
+                    complete = _can_complete(
+                        detections, frame.shape,
+                        getattr(config, "FRAME_CAPTURE_EDGE_MARGIN", 0.02))
+                    pool_collecting = complete
+                    top = max(defects, key=lambda d: d["confidence"])
+                    score = (_dent_sharpness(frame, top["bbox"]) * top["confidence"]
+                             * (1.0 if complete else 0.25))
+                    if score > best_score:
+                        best_score = score
+                        best_frame = frame
+                        best_dets = detections
+                    if not can_counted_ng:
+                        can_counted_ng = True     # count + log this defective can ONCE
+                        detection_stats["total_detected"] += 1
+                        if db and db.is_connected:
+                            for det in defects:
+                                db.log_defect(
+                                    defect_type=det["class_name"],
+                                    confidence=det["confidence"],
+                                    frame=frame,
+                                    bbox=det["bbox"],
+                                    timestamp=datetime.now()
+                                )
+                else:
+                    pool_collecting = False   # OK frame (can, no defect) → don't pool
 
         except Exception as e:
             logger.error(f"Error in inference loop: {e}")
@@ -313,11 +487,20 @@ def inference_loop():
 
 def generate_frames():
     """
-    MJPEG generator. Draws each detection on the exact frame the model ran it
-    on (published together by inference_loop), so the box stays locked to the
-    can instead of trailing behind a newer frame. The displayed feed therefore
-    refreshes at the inference rate; re-encodes JPEG only when a new inference
-    frame has arrived, so a stalled or idle feed costs nothing.
+    MJPEG generator for USB/RTSP. Two display modes (config.LIVE_SMOOTH_VIDEO):
+
+    • SMOOTH (default): base = the newest RAW frame (camera rate) with the latest
+      detections overlaid. The feed stays fluid regardless of how slow inference
+      is (important for heavy models like a segmentation bestX.pt). Trade-off: a
+      box is drawn on a frame newer than the one it was computed on, so it trails
+      slightly while the can is moving — same behaviour as the STREAM overlay.
+
+    • LOCKED: base = the exact frame the model ran on (published together with its
+      detections), so the box is pinned to the can. The feed then refreshes only
+      at the inference rate — smooth boxes but a stuttery picture on heavy models.
+
+    Either way JPEG is re-encoded only when something changed, so an idle feed
+    costs nothing.
     """
     # Placeholder frame (created once)
     placeholder = np.zeros((480, 640, 3), dtype=np.uint8)
@@ -326,24 +509,53 @@ def generate_frames():
     _, placeholder_buf = cv2.imencode('.jpg', placeholder, _JPEG_PARAMS)
     placeholder_bytes = placeholder_buf.tobytes()
 
-    last_encoded_seq = -1
+    hold = getattr(config, "FRAME_CAPTURE_HOLD_SEC", 5)
+    last_key = None
     frame_bytes = placeholder_bytes
 
     while True:
-        with det_lock:
-            frame = latest_det_frame
-            detections = latest_detections
-            seq = latest_det_seq
+        # Live display mode, evaluated per iteration so it tracks the toggle:
+        # Frame Capture ON forces SMOOTH live (accuracy comes from the frozen
+        # best-frame instead), otherwise follow config.LIVE_SMOOTH_VIDEO (default
+        # False = frame-locked, boxes pinned exactly to the inferred frame).
+        smooth = frame_capture_enabled or getattr(config, "LIVE_SMOOTH_VIDEO", False)
 
-        # Only redo work when a fresh inference frame (frame + its detections)
-        # is available.
-        if frame is not None and seq != last_encoded_seq:
-            last_encoded_seq = seq
+        # Frame Capture: when on and a fresh best-NG capture exists, freeze the
+        # feed on it for `hold` seconds, then fall back to the normal live view.
+        if frame_capture_enabled:
+            with best_lock:
+                bjpeg = latest_best_jpeg
+                bts = latest_best_ts
+            if bjpeg is not None and (time.time() - bts) < hold:
+                yield (b'--frame\r\n'
+                       b'Content-Type: image/jpeg\r\n\r\n' + bjpeg + b'\r\n')
+                time.sleep(1.0 / config.STREAM_FPS)
+                continue
+
+        if smooth:
+            # Newest raw frame (fluid) + latest detections drawn on top.
+            with raw_lock:
+                base = latest_raw_frame
+                rseq = raw_frame_seq
+            with det_lock:
+                detections = latest_detections
+                dseq = latest_det_seq
+            # Re-encode when either the picture (raw) or the boxes (det) change.
+            key = (rseq, dseq)
+        else:
+            # Original: only the exact inferred frame, boxes pinned to it.
+            with det_lock:
+                base = latest_det_frame
+                detections = latest_detections
+                key = latest_det_seq
+
+        if base is not None and key != last_key:
+            last_key = key
 
             if detector is not None and detector.model is not None:
-                annotated = detector.draw_detections(frame, detections)
+                annotated = detector.draw_detections(base, detections)
             else:
-                annotated = frame.copy()
+                annotated = base.copy()
                 cv2.putText(annotated, "Camera Preview (No Model)",
                             (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8,
                             (0, 165, 255), 2)
@@ -467,6 +679,41 @@ def video_feed():
     )
 
 
+@app.route('/api/camera/control', methods=['POST'])
+def api_camera_control():
+    """Adjust a live camera image control (brightness/contrast, 0-255) on the fly.
+    USB live camera only — soft error if no live camera is running. Never touches
+    snapshot/RTSP/STREAM."""
+    data = request.get_json(silent=True) or {}
+    control = data.get("control")
+    if control not in ("brightness", "contrast"):
+        return jsonify({"status": "error", "message": "control ต้องเป็น brightness/contrast"}), 400
+    try:
+        value = int(data.get("value"))
+    except (TypeError, ValueError):
+        return jsonify({"status": "error", "message": "value ต้องเป็นตัวเลข 0-255"}), 400
+    value = max(0, min(255, value))
+    if camera is not None and hasattr(camera, "set_control"):
+        actual = camera.set_control(control, value)
+        if actual is None:
+            return jsonify({"status": "error",
+                            "message": "ปรับไม่ได้ (ยังไม่ได้เริ่มกล้อง หรือกล้องไม่รับค่า)"}), 409
+        return jsonify({"status": "ok", "control": control, "value": value, "reports": actual})
+    return jsonify({"status": "error", "message": "ยังไม่ได้เริ่มกล้อง (กด Start ก่อน)"}), 409
+
+
+@app.route('/api/frame_capture', methods=['POST'])
+def api_frame_capture():
+    """Toggle Frame Capture display mode (USB/RTSP). Display-only — the best-frame
+    tracking always runs in inference_loop; this just controls whether the feed
+    freezes on the sharpest NG frame."""
+    global frame_capture_enabled
+    data = request.get_json(silent=True) or {}
+    frame_capture_enabled = bool(data.get("enabled", False))
+    logger.info(f"Frame Capture mode {'ON' if frame_capture_enabled else 'OFF'}")
+    return jsonify({"status": "ok", "enabled": frame_capture_enabled})
+
+
 @app.route('/viewfinder_feed')
 def viewfinder_feed():
     """Raw viewfinder stream (MJPEG, no detection) for snapshot aiming."""
@@ -497,6 +744,8 @@ def start_detection():
     global detection_active, capture_thread, inference_thread, camera
     global latest_raw_frame, raw_frame_seq, latest_detections
     global latest_det_frame, latest_det_seq
+    global latest_best_jpeg, latest_best_ts
+    global pool_best_frame, pool_best_score, pool_collecting
 
     if detection_active:
         return jsonify({"status": "already_running", "message": "Detection already active"}), 200
@@ -530,7 +779,16 @@ def start_detection():
         camera = StreamCamera(camera_index=camera_index)
         camera.initialize()  # never fails — just arms the push buffer
     else:
-        camera = Camera(camera_index=camera_index)
+        # Live camera: pass opt-in exposure config (None = leave camera default,
+        # so this changes nothing unless the operator sets it). Snapshot/viewfinder
+        # create their own Camera without these → unaffected.
+        camera = Camera(
+            camera_index=camera_index,
+            auto_exposure=getattr(config, "CAMERA_AUTO_EXPOSURE", None),
+            exposure=getattr(config, "CAMERA_EXPOSURE", None),
+            brightness=getattr(config, "CAMERA_BRIGHTNESS", None),
+            contrast=getattr(config, "CAMERA_CONTRAST", None),
+        )
         if not camera.initialize():
             available = scan_cameras_fast()
             hint = ""
@@ -553,6 +811,13 @@ def start_detection():
         latest_detections = []
         latest_det_frame = None
         latest_det_seq = -1
+    with best_lock:                    # clear any stale Frame Capture from before
+        latest_best_jpeg = None
+        latest_best_ts = 0.0
+    with pool_lock:                    # clear any stale candidate pool
+        pool_best_frame = None
+        pool_best_score = -1.0
+    pool_collecting = False
 
     detection_active = True
     capture_thread = threading.Thread(target=capture_loop, daemon=True)

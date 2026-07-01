@@ -92,6 +92,18 @@ CAMERA_WIDTH  = 640        # ความละเอียดสตรีมส
 CAMERA_HEIGHT = 480
 CAMERA_FPS    = 30
 CAMERA_FOURCC = None       # None = YUY2 (สะอาด, แนะนำ) | "MJPG" = บีบอัด (เสี่ยงภาพแตกบาง MSMF)
+CAMERA_AUTO_EXPOSURE = None # None=ไม่แตะ | False=manual (ล็อกเอง) | True=auto — เฉพาะกล้อง live
+CAMERA_EXPOSURE      = None # ค่ารับแสง (เช่น -6/-7/-8) — ⚠️ กล้องสถานีไม่รับ EXPOSURE ผ่าน OpenCV
+CAMERA_BRIGHTNESS    = None # None=ไม่แตะ | 0-255 = ตั้งความสว่าง (knob ที่กล้องนี้คุมได้จริง)
+CAMERA_CONTRAST      = None # None=ไม่แตะ | 0-255 = คอนทราสต์ (⚠️ ทดลอง ไม่การันตีตรวจดีขึ้น)
+                            # ทั้งคู่ปรับสดขณะรันได้จากสไลเดอร์ในแผงกล้อง USB (POST /api/camera/control)
+
+# ── AI acceleration (ONNX Runtime — เร่ง CPU คงความแม่น FP32) ─
+USE_ONNX   = True          # export .pt→.onnx ครั้งเดียว รันผ่าน onnxruntime (~2x). fallback→PyTorch
+ONNX_OPSET = 17            # ⚠️ Python 3.9: ต้อง `pip install onnxruntime==1.19.2` (1.20+ ตัด py39)
+
+# ── การแสดงผลวิดีโอสด USB/RTSP ───────────────────────
+LIVE_SMOOTH_VIDEO = False  # False=ล็อกกรอบเป๊ะ | True=ลื่น. 📌 เปิด Frame Capture = บังคับลื่นอัตโนมัติ
 
 # ── ถ่ายรูปตรวจ (snapshot) ───────────────────────────
 SNAPSHOT_IMGSZ           = 1280   # imgsz ตอน detect (สูงกว่า live เพราะรันครั้งเดียว)
@@ -120,6 +132,10 @@ STREAM_INFER_FPS   = 10    # เพดานอัตราเรียก /api/
 STREAM_JPEG_QUALITY = 0.92 # คุณภาพ JPEG ที่เบราว์เซอร์ส่งขึ้น (สูง = กรอบแม่นขึ้น)
 STREAM_MAX_WIDTH   = 640   # ความกว้างเฟรม live ก่อนส่ง
 STREAM_INFER_IMGSZ = 480   # imgsz ตรวจสตรีมสด = เท่า USB. ⚠️ ต่ำกว่า 480 จะตรวจ dent ไม่เจอ
+
+# ── Frame Capture (แช่ภาพเฟรมคมที่สุดเมื่อเจอ NG — USB/RTSP) ─
+FRAME_CAPTURE_HOLD_SEC    = 3      # แช่ภาพกี่วินาที (สายพานถี่ให้ลดลง)
+FRAME_CAPTURE_EDGE_MARGIN = 0.02   # กระป๋องต้องห่างขอบภาพเท่านี้จึงนับ "ครบใบ" (0=แค่ไม่หลุดขอบ)
 ```
 
 > **CAMERA_FOURCC**: บน Windows (MSMF) การบังคับ `"MJPG"` อาจทำให้ JPEG ออกมาไม่ครบ →
@@ -217,6 +233,27 @@ python run_server.py                      # 3) รันบน gevent (ทน co
 > หลักการ: นำ *per-stream isolation + worker-pool + process-latest* ของระบบ
 > machine-vision มืออาชีพมาใช้แบบย่อ — รองรับ 1 กล้องตอนนี้ และขยายเป็น 2–3
 > กล้องได้โดยลด `STREAM_INFER_FPS`.
+
+### Frame Capture — แช่ภาพเฟรมที่ "คมที่สุด + ครบใบ" ต่อกระป๋อง NG (USB/RTSP)
+
+checkbox ในแผงกล้อง USB — สำหรับสายพานที่กระป๋องวิ่งผ่าน: เมื่อกระป๋อง NG ผ่านพ้นไป
+ระบบจะ **แช่แสดง "เฟรมที่ดีที่สุด" ของใบนั้นค้างไว้ `FRAME_CAPTURE_HOLD_SEC` วินาที**
+แล้วกลับไปแสดงสด. เป็นการ **แสดงผลอย่างเดียว — ไม่กระทบการนับ/บันทึก DB**.
+
+หลักการเลือก "เฟรมที่ดีที่สุด" (แก้ motion blur บนสายพาน):
+1. **Candidate pooling** — `capture_loop` ให้คะแนนความคม (variance of Laplacian)
+   ทุกเฟรมที่กล้องถ่าย (~อัตรากล้อง ~30fps) ไม่ใช่แค่เฟรมที่ผ่าน inference (~2–3fps)
+   → เลือกจากผู้สมัครมากขึ้น ~10 เท่า
+2. **ครบใบ (completeness)** — เก็บ/ให้แต้มเฉพาะเฟรมที่ **กล่องคลาส `can` (กระป๋องทั้งใบ)
+   อยู่ในภาพครบ ไม่ชนขอบ** (ระยะห่าง `FRAME_CAPTURE_EDGE_MARGIN`) → ไม่ได้ภาพครึ่งใบ
+   ตอนกระป๋องเข้า/ออกเฟรม
+3. **กรอบตรงเป๊ะ** — พอเลือกเฟรมได้ **รัน detection ซ้ำบนเฟรมนั้น 1 ครั้ง** เพื่อให้กรอบ
+   ตรงกับเฟรมที่แสดงพอดี (เฟรม pool ไม่เคยผ่าน inference มาก่อน)
+4. **Fallback หลายชั้น** — ถ้า pool ว่าง/กระป๋องใหญ่กว่าเฟรมจนครบใบไม่ได้ → เลือกเฟรม
+   inferred ที่ดีที่สุดเท่าที่มี (ไม่ค้าง). best.pt (ไม่มีคลาส `can`) → ข้ามเช็คครบใบ.
+
+> จูน motion blur ที่ต้นตอได้ด้วย `CAMERA_AUTO_EXPOSURE=False` + `CAMERA_EXPOSURE=-7`
+> (ล็อก exposure สั้น) **พร้อมเพิ่มไฟส่อง** — ทำให้ทุกเฟรมคมตั้งแต่ต้น (ดูหัวข้อ config).
 
 ---
 
@@ -407,6 +444,8 @@ approve** (ถ้าบน artwork สะกดเพี้ยนจะถูก
 ├── config.py                    # ตั้งค่ากลาง (กล้อง, snapshot, SQL, Flask, HTTPS, STREAM, N8N)
 ├── camera.py / yolo_detector.py # โหมดตรวจจับสด + StreamCamera + จัดการ backend กล้อง (MSMF/DSHOW/V4L2)
 ├── diagnose_snapshot.py         # เครื่องมือทดสอบกล้องบนสถานี (ความละเอียด/backend/fourcc)
+├── verify_onnx.py               # เทียบผลตรวจ .pt vs .onnx (ต้อง PASS ก่อนเปิด USE_ONNX)
+├── CLAUDE.md                     # บริบทสำคัญสำหรับ AI ที่ทำงานต่อ (อ่านก่อนแก้โค้ด)
 ├── database.py                  # SQL Server (pyodbc)
 ├── modes/                       # registry + config ต่อโหมด YOLO
 │   ├── registry.py · can_dent.py · label.py · label_paper.py
@@ -468,6 +507,48 @@ python diagnose_snapshot.py
 ---
 
 ## สรุปการปรับปรุงล่าสุด (Changelog)
+
+### 🖼️ Frame Capture + วิดีโอสด + exposure (ก.ค. 2026)
+- **Frame Capture** (checkbox แผง USB) — แช่ภาพเฟรมคมที่สุด+ครบใบของกระป๋อง NG ค้าง 5 วิ
+  (candidate pooling ที่อัตรากล้อง + เช็คครบใบจากกล่อง `can` + re-infer ให้กรอบตรง + fallback).
+  แสดงผลอย่างเดียว ไม่กระทบการนับ/DB — ดูหัวข้อ [Frame Capture](#frame-capture--แช่ภาพเฟรมที่-คมที่สุด--ครบใบ-ต่อกระป๋อง-ng-usbrtsp)
+- **`LIVE_SMOOTH_VIDEO`** — สลับการแสดงผลสด USB/RTSP: `False`=กรอบล็อกเป๊ะ (ภาพตามอัตรา
+  infer, เหมาะงานที่กรอบต้องตรง) / `True`=ภาพลื่น (กรอบตามช้าตอนขยับ)
+- **Exposure control** (`CAMERA_AUTO_EXPOSURE`/`CAMERA_EXPOSURE`) — opt-in ล็อก exposure สั้น
+  แก้ motion blur เฉพาะกล้อง live (snapshot/RTSP ไม่กระทบ); best-effort + fallback ถ้ากล้องไม่รับ
+- **แก้ bestX (segmentation) ใช้ ONNX ได้** — ONNX ทิ้ง task tag → ต้องอ่าน task จาก `.pt`
+  แล้วส่ง `YOLO(onnx, task='segment')` ไม่งั้นถอด output ผิด (ไม่มีกรอบ). cache ใน `<onnx>.task`
+- **นับ 1 กระป๋อง = 1 การตรวจ** (edge-triggered) — ทั้ง USB/RTSP + STREAM
+
+### 🚀 ONNX Runtime acceleration (เร่ง inference บน CPU โดยคงความแม่น) (มิ.ย. 2026)
+- **ปัญหา**: วัดด้วยตัวจับเวลาในโหมด STREAM พบว่า inference กิน **542ms = 91%** ของเวลา
+  ต่อเฟรม (FPS ~1.8 บน i7-1165G7) — network/encode/decode รวมกันแค่ ~50ms. คอขวดคือ
+  PyTorch CPU ล้วนๆ → กรอบตามวัตถุช้า
+- **ทางแก้**: export `.pt` → `.onnx` (FP32 / `dynamic=True`) ครั้งเดียว แล้วรันผ่าน
+  **onnxruntime** — เร็วกว่า PyTorch CPU ~2 เท่า (คาด ~540ms → ~250-300ms ≈ 3.5-4 FPS)
+  โดย **ultralytics เป็นคนถอดผล/NMS เองเหมือน `.pt`** → ผลตรวจเท่าเดิม (ไม่ใช่ลด imgsz)
+- **ทำไมปลอดภัยกว่า OpenVINO**: โมเดลยังเป็น ONNX มาตรฐาน + decode โดย ultralytics
+  (ไม่ใช่ decoder แยกของ OpenVINO ที่เคยทำตรวจไม่เจอเงียบๆ)
+- **เปิดทั้งระบบ** (USB/RTSP/Snapshot/STREAM ได้เร็วขึ้นพร้อมกัน) ผ่าน `config.USE_ONNX`
+- 🛡️ **fallback หลายชั้น** — ถ้า `onnxruntime` ไม่ได้ติดตั้ง / export / load / **smoke-test**
+  (รัน 1 เฟรมจริงตอนโหลด) ล้มเหลว → กลับไปใช้ PyTorch `.pt` อัตโนมัติ ของเดิมพังไม่ได้
+- 🛡️ **กัน .onnx ค้างเก่า** — ถ้า `best.pt` ใหม่กว่า `best.onnx` (เทรนใหม่) จะ re-export ให้
+- 🎭 **รองรับโมเดล segmentation** (เช่น `bestX.pt` = YOLOv8-seg) — ONNX ที่ export จะไม่มี
+  แท็ก task, `YOLO()` เลยเดาเป็น `detect` → ถอด output ผิด (กรอบขยะ/ไม่มีกรอบ). แก้โดย
+  อ่าน task จริงจาก `.pt` แล้วส่ง `YOLO(onnx, task=...)` (cache ใน `<onnx>.task` sidecar)
+- 🧪 **`verify_onnx.py`** — สคริปต์เทียบผลตรวจ `.pt` vs `.onnx` (จำนวนกล่อง/คลาส/conf/IoU)
+  ที่ imgsz 480+1280 → **ต้อง PASS ก่อนเปิด `USE_ONNX=True`** (กันซ้ำรอย OpenVINO)
+- **ค่าเริ่มต้น `USE_ONNX = False`** — ไม่มีอะไรเปลี่ยนจนกว่าจะเปิดเอง หลังเทียบผลผ่านแล้ว
+
+  วิธีเปิดใช้ (บนเครื่องสถานี Windows + Python 3.9):
+  ```bash
+  py -3.9 -m pip install onnxruntime==1.19.2 onnxslim onnx   # 1.19.2 = wheel สุดท้ายของ py3.9
+  py -3.9 verify_onnx.py --images path\to\sample_cans        # ต้องขึ้น PASS
+  #  → แล้วตั้ง USE_ONNX = True ใน config.py, รีสตาร์ตแอป
+  ```
+  > ⚠️ **iGPU (Iris Xe) / OpenVINO EP ยังทำไม่ได้บน Python 3.9** — ทั้ง `openvino 2025`
+  > และ `onnxruntime-openvino` ต้องการ Python ≥3.10 ถ้าจะใช้ iGPU ต้องอัปเกรด Python
+  > ทั้งเครื่องก่อน (เป็นโปรเจกต์แยก ต้องเทสต์ใหม่ทุกโหมด)
 
 ### 🎯 นับ "1 กระป๋อง = 1 การตรวจ" แบบ edge-triggered (มิ.ย. 2026)
 - ปัญหาเดิม: นับ/บันทึก DB ทุกเฟรมที่เจอ defect — กระป๋องเดิมที่ยังไม่ขยับก็ถูกนับ/บันทึก

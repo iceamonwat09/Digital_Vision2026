@@ -7,7 +7,7 @@ import os
 
 # Bump this whenever a config default changes so a running deployment can
 # print it on startup and confirm it is actually executing the new code.
-CONFIG_VERSION = "2026.06.29-landing-page"
+CONFIG_VERSION = "2026.07.01-cam-controls"
 
 # ====================
 # CAMERA CONFIGURATION
@@ -26,6 +26,36 @@ CAMERA_INDEX = 0  # ผลจาก test_camera.py: กล้องอยู่�
 CAMERA_WIDTH  = 640
 CAMERA_HEIGHT = 480
 CAMERA_FPS = 30
+
+# ── Exposure control (แก้ motion blur ของกระป๋องบนสายพาน) — เฉพาะกล้อง LIVE ─────
+# ใช้ลด "เบลอจากการเคลื่อนไหว": ปิด auto-exposure แล้วล็อก exposure ให้สั้น เพื่อให้
+# ทุกเฟรมคมสม่ำเสมอ (ต้องเพิ่มไฟส่องชดเชยเพราะภาพจะมืดลง).
+#
+# ⚠️ opt-in: ค่าเริ่มต้น None = "ไม่แตะ" → กล้องใช้ค่า default เดิมทุกประการ (พฤติกรรม
+#    เดิม 100%). มีผลเฉพาะกล้อง live (USB) เท่านั้น — snapshot/viewfinder ไม่กระทบ.
+# ⚠️ กล้อง USB + backend Windows แต่ละรุ่นตอบสนองค่าพวกนี้ไม่เหมือนกัน (บางรุ่นไม่รับ);
+#    โค้ดมี try/except — ถ้าตั้งไม่ได้ก็ใช้ค่ากล้องเดิม ไม่พัง.
+#
+#   CAMERA_AUTO_EXPOSURE : True = auto (ให้กล้องปรับเอง), False = manual (ล็อกเอง),
+#                          None = ไม่แตะ. ต้องตั้ง False ก่อน CAMERA_EXPOSURE จึงจะมีผล.
+#   CAMERA_EXPOSURE      : ค่าเวลารับแสง (สเกล log2 บนกล้องส่วนใหญ่: ยิ่งติดลบมาก =
+#                          ยิ่งสั้น = คมขึ้นแต่มืดลง เช่น -6 ≈ 1/64s, -7 ≈ 1/128s,
+#                          -8 ≈ 1/256s). None = ไม่ตั้ง. ลองไล่ -6 → -7 → -8 + เพิ่มไฟ.
+CAMERA_AUTO_EXPOSURE = None
+CAMERA_EXPOSURE = None
+
+# ── ความสว่าง (BRIGHTNESS 0-255) — knob ที่ยืนยันแล้วว่าคุมได้บนกล้องสถานี ──────
+# (จาก diagnose_exposure.py: EXPOSURE/GAIN/GAMMA กล้องนี้ไม่รับ แต่ BRIGHTNESS รับ).
+# None = ไม่แตะ (ใช้ค่า default กล้อง) | 0-255 = ตั้งความสว่างตอนเปิดกล้อง live.
+# ปรับสดขณะรันได้ผ่านสไลเดอร์ในแผงกล้อง USB (POST /api/camera/brightness) — เฉพาะ
+# กล้อง live เท่านั้น (snapshot/RTSP ไม่กระทบ).
+CAMERA_BRIGHTNESS = None
+
+# ── Contrast (0-255) — knob "ทดลอง" ──
+# ⚠️ ไม่การันตีว่าตรวจดีขึ้น: contrast พอดีอาจทำเงารอยบุบเด่นขึ้น แต่สูงไปทำรายละเอียด
+# หาย/ต่างจากภาพตอนเทรน → ตรวจแย่ลง. ต้อง "ลองเทียบผลตรวจจริง" ก่อนใช้. และกล้องอาจ
+# ไม่รับ CONTRAST ผ่าน OpenCV (ยังไม่ได้ยืนยันเหมือน BRIGHTNESS). None = ไม่แตะ.
+CAMERA_CONTRAST = None
 
 # FourCC ของกล้อง. ตั้งเป็น None = ใช้ฟอร์แมต default ของกล้อง (มักเป็น YUY2
 # uncompressed) ซึ่ง MSMF บน Windows ถอดรหัสได้ "สะอาด" ไม่มีเฟรมแตก.
@@ -132,6 +162,30 @@ YOLO_IMGSZ = 480
 # (และตรวจว่ายังเจอ dent เท่า PyTorch). เปิด = True เพื่อทดลองเท่านั้น.
 USE_OPENVINO = False
 
+# ── ONNX Runtime acceleration (เร่ง inference บน CPU โดยคงความแม่น FP32) ──
+# ทางที่ปลอดภัยกว่า OpenVINO บนสถานีนี้ (Windows + Python 3.9): export โมเดล .pt
+# เป็น .onnx (FP32 / dynamic) ครั้งเดียว แล้วรันผ่าน onnxruntime — ultralytics เป็น
+# คนถอดผล (decode/NMS) เองเหมือน .pt ทุกประการ จึงได้ผลตรวจเท่าเดิมแต่เร็วขึ้น ~2 เท่า.
+#
+# ⚠️ ค่าเริ่มต้น = False (ปิด). ต้องรัน `python verify_onnx.py` เทียบผลตรวจ .pt vs .onnx
+# ให้ผ่าน (PASS) ก่อน ค่อยเปิดเป็น True — กันเหตุ "ตรวจผิดเงียบๆ" แบบที่เคยเจอกับ OpenVINO.
+#
+# ข้อกำหนดเครื่อง (ติดตั้งบน interpreter เดียวกับที่รัน เช่น `py -3.9 -m pip ...`):
+#   onnxruntime==1.19.2   (wheel ตัวสุดท้ายที่รองรับ Python 3.9 บน Windows; 1.20+ ตัดทิ้ง)
+#   onnxslim              (ออปชัน — ใช้ลดขนาดกราฟตอน export ให้เร็วขึ้น)
+# fallback: ถ้า onnxruntime ไม่ได้ติดตั้ง / export / load / smoke-test ล้มเหลว
+# → ระบบกลับไปใช้ PyTorch .pt อัตโนมัติ (ของเดิมพังไม่ได้).
+USE_ONNX = True
+
+# opset ที่ใช้ตอน export ONNX. ปักไว้ที่ 17 เพื่อความเข้ากันได้กับ onnxruntime 1.19.x
+# (รองรับ opset ≤ ~21). None = ปล่อยให้ ultralytics เลือก default ของมันเอง.
+ONNX_OPSET = 17
+
+# จำนวน intra-op thread ของ onnxruntime. 0 = ให้ onnxruntime ตัดสินใจเอง (= จำนวน
+# physical core). บนชิป 15W ที่ throttle ง่าย (i7-1165G7) การตั้ง = 4 (เท่า physical
+# core, ไม่นับ hyper-thread) บางทีนิ่ง/ร้อนน้อยกว่า. มีผลเฉพาะเมื่อ USE_ONNX=True.
+ONNX_INTRA_THREADS = 0
+
 # Snapshot inference image size. Snapshot runs the model ONCE per shutter press
 # (not a live stream), so speed is irrelevant — we trade it for accuracy. With
 # the high-resolution snapshot capture (SNAPSHOT_CAMERA_* = 5MP) there is real
@@ -203,6 +257,30 @@ SSL_KEY_FILE  = os.path.join(os.path.dirname(os.path.abspath(__file__)), "certs"
 
 # Video streaming configuration
 STREAM_FPS = 15  # FPS for the live-detection MJPEG stream (lower = less bandwidth)
+
+# ── โหมดแสดงผลวิดีโอสด USB/RTSP (คุมความลื่นของภาพ vs การล็อกกรอบ) ──────────
+# True  = "ลื่น": สตรีมเฟรมดิบล่าสุดที่อัตรากล้อง (≈STREAM_FPS) แล้ววาดกรอบผลตรวจ
+#         ล่าสุดทับ → ภาพลื่นไม่ขึ้นกับความเร็ว inference. ข้อแลก: ตอนวัตถุขยับเร็ว
+#         กรอบจะตามช้าเล็กน้อย (วาดบนเฟรมที่ใหม่กว่าเฟรมที่ infer).
+# False = "ล็อกกรอบ" (default): แสดงเฉพาะเฟรมที่ infer เสร็จ → กรอบล็อกเป๊ะกับเฟรม
+#         นั้น แต่ภาพอัปเดตตามอัตรา inference (กระตุกถ้าโมเดลหนัก).
+#
+# 📌 หมายเหตุ: เมื่อ **เปิด Frame Capture** ระบบจะบังคับใช้โหมดลื่นให้อัตโนมัติ (ไม่ว่า
+# ค่านี้จะเป็นอะไร) — เพราะความแม่นของกรอบไปอยู่ที่ "เฟรมที่แช่" (re-infer แล้ว กรอบตรง)
+# ส่วนภาพสดแค่ monitor. ปิด Frame Capture → กลับมาใช้ค่านี้ (default = ล็อกกรอบเป๊ะ).
+LIVE_SMOOTH_VIDEO = False
+
+# ── โหมด "Frame Capture" (ทดสอบ best-frame) — ใช้กับแหล่งภาพ USB/RTSP ──────────
+# เมื่อเปิด (ผ่าน checkbox ในแผง USB): พอกระป๋อง NG ใบหนึ่งผ่านพ้นไป ระบบจะ "แช่"
+# แสดง "เฟรมที่คมที่สุด" ของใบนั้น (เลือกด้วยความคมของรอยบุบ × ความมั่นใจ) ค้างไว้
+# FRAME_CAPTURE_HOLD_SEC วินาที แล้วกลับไปแสดงสด. เป็นแค่การแสดงผล — ไม่กระทบการนับ/
+# การบันทึก DB (ยังทำแบบเดิม). ค่าเริ่มต้นการแสดงผลคุมด้วย toggle ฝั่ง UI (ปิดไว้).
+FRAME_CAPTURE_HOLD_SEC = 3
+
+# Frame Capture: กระป๋องต้องอยู่ห่างขอบภาพอย่างน้อยเท่านี้ (สัดส่วนของกว้าง/สูง)
+# ถึงจะนับว่า "ครบใบ" — ใช้กล่องคลาส can/good (กระป๋องทั้งใบ) เทียบกับขอบภาพ.
+# สูงขึ้น = เข้มขึ้น (ต้องเห็นครบชัดเจน), 0 = แค่ไม่หลุดขอบ. มีผลเฉพาะ Frame Capture.
+FRAME_CAPTURE_EDGE_MARGIN = 0.02
 
 # ── Browser STREAM source (กล้องของเครื่อง Client ผ่าน getUserMedia) ──────
 # โหมดที่ 3 ในข้อ "แหล่งสัญญาณภาพ": ใช้กล้องของเครื่อง Client ผ่านเบราว์เซอร์.
