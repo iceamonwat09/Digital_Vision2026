@@ -59,6 +59,11 @@
                         </select>
                         <button id="refreshCamerasBtn" class="btn btn-icon" title="Refresh">&#x1F504;</button>
                     </div>
+                    <label id="frameCaptureLabel"
+                           style="display:flex;align-items:center;gap:6px;margin-top:8px;font-size:13px;cursor:pointer;color:#475569">
+                        <input type="checkbox" id="frameCaptureToggle" onchange="toggleFrameCapture()">
+                        🖼️ Frame Capture — แช่ภาพเฟรมที่คมที่สุดเมื่อเจอ NG (ทดสอบ)
+                    </label>
                 </div>
 
                 <!-- RTSP panel -->
@@ -284,6 +289,17 @@
             streamCameraSelect.dataset.scanned = '1';
             scanStreamCameras();
         }
+    };
+
+    // Frame Capture (best-frame test) — server freezes the feed on the sharpest
+    // NG frame for a few seconds. Display only; USB/RTSP source, no other effect.
+    window.toggleFrameCapture = function() {
+        const on = document.getElementById('frameCaptureToggle').checked;
+        fetch('/api/frame_capture', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled: on })
+        }).catch(() => {});
     };
 
     window.saveRtsp = function() {

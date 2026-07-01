@@ -7,7 +7,7 @@ import os
 
 # Bump this whenever a config default changes so a running deployment can
 # print it on startup and confirm it is actually executing the new code.
-CONFIG_VERSION = "2026.06.30-onnx-on"
+CONFIG_VERSION = "2026.07.01-frame-capture"
 
 # ====================
 # CAMERA CONFIGURATION
@@ -235,7 +235,14 @@ STREAM_FPS = 15  # FPS for the live-detection MJPEG stream (lower = less bandwid
 #         โหมดสตรีม). เหมาะกับโมเดลหนัก (เช่น bestX segmentation) ที่ infer ช้า.
 # False = "ล็อกกรอบ" (พฤติกรรมเดิม): แสดงเฉพาะเฟรมที่ infer เสร็จ → กรอบล็อกเป๊ะกับ
 #         เฟรมนั้น แต่ภาพอัปเดตตามอัตรา inference (กระตุกถ้าโมเดลหนัก).
-LIVE_SMOOTH_VIDEO = True
+LIVE_SMOOTH_VIDEO = False
+
+# ── โหมด "Frame Capture" (ทดสอบ best-frame) — ใช้กับแหล่งภาพ USB/RTSP ──────────
+# เมื่อเปิด (ผ่าน checkbox ในแผง USB): พอกระป๋อง NG ใบหนึ่งผ่านพ้นไป ระบบจะ "แช่"
+# แสดง "เฟรมที่คมที่สุด" ของใบนั้น (เลือกด้วยความคมของรอยบุบ × ความมั่นใจ) ค้างไว้
+# FRAME_CAPTURE_HOLD_SEC วินาที แล้วกลับไปแสดงสด. เป็นแค่การแสดงผล — ไม่กระทบการนับ/
+# การบันทึก DB (ยังทำแบบเดิม). ค่าเริ่มต้นการแสดงผลคุมด้วย toggle ฝั่ง UI (ปิดไว้).
+FRAME_CAPTURE_HOLD_SEC = 5
 
 # ── Browser STREAM source (กล้องของเครื่อง Client ผ่าน getUserMedia) ──────
 # โหมดที่ 3 ในข้อ "แหล่งสัญญาณภาพ": ใช้กล้องของเครื่อง Client ผ่านเบราว์เซอร์.
