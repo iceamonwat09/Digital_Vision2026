@@ -7,7 +7,7 @@ import os
 
 # Bump this whenever a config default changes so a running deployment can
 # print it on startup and confirm it is actually executing the new code.
-CONFIG_VERSION = "2026.07.01-brightness"
+CONFIG_VERSION = "2026.07.01-cam-controls"
 
 # ====================
 # CAMERA CONFIGURATION
@@ -50,6 +50,12 @@ CAMERA_EXPOSURE = None
 # ปรับสดขณะรันได้ผ่านสไลเดอร์ในแผงกล้อง USB (POST /api/camera/brightness) — เฉพาะ
 # กล้อง live เท่านั้น (snapshot/RTSP ไม่กระทบ).
 CAMERA_BRIGHTNESS = None
+
+# ── Contrast (0-255) — knob "ทดลอง" ──
+# ⚠️ ไม่การันตีว่าตรวจดีขึ้น: contrast พอดีอาจทำเงารอยบุบเด่นขึ้น แต่สูงไปทำรายละเอียด
+# หาย/ต่างจากภาพตอนเทรน → ตรวจแย่ลง. ต้อง "ลองเทียบผลตรวจจริง" ก่อนใช้. และกล้องอาจ
+# ไม่รับ CONTRAST ผ่าน OpenCV (ยังไม่ได้ยืนยันเหมือน BRIGHTNESS). None = ไม่แตะ.
+CAMERA_CONTRAST = None
 
 # FourCC ของกล้อง. ตั้งเป็น None = ใช้ฟอร์แมต default ของกล้อง (มักเป็น YUY2
 # uncompressed) ซึ่ง MSMF บน Windows ถอดรหัสได้ "สะอาด" ไม่มีเฟรมแตก.

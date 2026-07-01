@@ -679,23 +679,26 @@ def video_feed():
     )
 
 
-@app.route('/api/camera/brightness', methods=['POST'])
-def api_camera_brightness():
-    """Adjust live camera BRIGHTNESS (0-255) on the fly. USB live camera only —
-    no-op with a soft error if no live camera is running. Never touches
+@app.route('/api/camera/control', methods=['POST'])
+def api_camera_control():
+    """Adjust a live camera image control (brightness/contrast, 0-255) on the fly.
+    USB live camera only — soft error if no live camera is running. Never touches
     snapshot/RTSP/STREAM."""
     data = request.get_json(silent=True) or {}
+    control = data.get("control")
+    if control not in ("brightness", "contrast"):
+        return jsonify({"status": "error", "message": "control ต้องเป็น brightness/contrast"}), 400
     try:
         value = int(data.get("value"))
     except (TypeError, ValueError):
         return jsonify({"status": "error", "message": "value ต้องเป็นตัวเลข 0-255"}), 400
     value = max(0, min(255, value))
-    if camera is not None and hasattr(camera, "set_brightness"):
-        actual = camera.set_brightness(value)
+    if camera is not None and hasattr(camera, "set_control"):
+        actual = camera.set_control(control, value)
         if actual is None:
             return jsonify({"status": "error",
                             "message": "ปรับไม่ได้ (ยังไม่ได้เริ่มกล้อง หรือกล้องไม่รับค่า)"}), 409
-        return jsonify({"status": "ok", "value": value, "reports": actual})
+        return jsonify({"status": "ok", "control": control, "value": value, "reports": actual})
     return jsonify({"status": "error", "message": "ยังไม่ได้เริ่มกล้อง (กด Start ก่อน)"}), 409
 
 
@@ -784,6 +787,7 @@ def start_detection():
             auto_exposure=getattr(config, "CAMERA_AUTO_EXPOSURE", None),
             exposure=getattr(config, "CAMERA_EXPOSURE", None),
             brightness=getattr(config, "CAMERA_BRIGHTNESS", None),
+            contrast=getattr(config, "CAMERA_CONTRAST", None),
         )
         if not camera.initialize():
             available = scan_cameras_fast()

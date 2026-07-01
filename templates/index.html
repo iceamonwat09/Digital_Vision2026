@@ -74,6 +74,16 @@
                         <div id="brightnessHint" style="font-size:11px;color:#94a3b8;margin-top:2px">
                             กด Start ก่อน แล้วเลื่อนเพื่อปรับสด (กล้อง USB)
                         </div>
+
+                        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px">
+                            <span>◐ คอนทราสต์ (Contrast · ทดลอง)</span>
+                            <span id="contrastVal" style="font-family:monospace;color:#64748b">32</span>
+                        </div>
+                        <input type="range" id="contrastSlider" min="0" max="255" value="32"
+                               style="width:100%;margin-top:4px" oninput="onContrastInput()">
+                        <div id="contrastHint" style="font-size:11px;color:#94a3b8;margin-top:2px">
+                            ⚠️ ไม่การันตีตรวจดีขึ้น — ปรับแล้วดูผลตรวจจริงเทียบกัน
+                        </div>
                     </div>
                 </div>
 
@@ -313,31 +323,41 @@
         }).catch(() => {});
     };
 
-    // Brightness slider — adjust the live USB camera on the fly (BRIGHTNESS is the
-    // control verified to work on this station). Throttled so dragging doesn't
-    // flood the server; only meaningful while detection is running (USB source).
-    let _brightnessTimer = null, _brightnessPending = null;
-    function _sendBrightness(v) {
-        fetch('/api/camera/brightness', {
+    // Camera image controls (brightness/contrast) — adjust the live USB camera on
+    // the fly. Throttled so dragging doesn't flood the server; only meaningful
+    // while detection is running (USB source).
+    const _ctrlTimers = {}, _ctrlPending = {};
+    function _sendControl(control, v, hintId) {
+        fetch('/api/camera/control', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ value: v })
+            body: JSON.stringify({ control: control, value: v })
         }).then(r => r.json()).then(d => {
-            const hint = document.getElementById('brightnessHint');
-            if (d.status === 'ok') hint.textContent = 'ปรับแล้ว (กล้องรายงาน ' + d.reports + ')';
-            else hint.textContent = d.message || 'ปรับไม่ได้';
+            const hint = document.getElementById(hintId);
+            if (!hint) return;
+            hint.textContent = d.status === 'ok'
+                ? 'ปรับแล้ว (กล้องรายงาน ' + d.reports + ')'
+                : (d.message || 'ปรับไม่ได้');
         }).catch(() => {});
     }
-    window.onBrightnessInput = function() {
-        const v = parseInt(document.getElementById('brightnessSlider').value, 10);
-        document.getElementById('brightnessVal').textContent = v;
-        // throttle: send at most ~every 120ms while dragging, plus a final send
-        _brightnessPending = v;
-        if (_brightnessTimer) return;
-        _brightnessTimer = setTimeout(() => {
-            _brightnessTimer = null;
-            if (_brightnessPending !== null) { _sendBrightness(_brightnessPending); _brightnessPending = null; }
+    function _onControlInput(control, sliderId, valId, hintId) {
+        const v = parseInt(document.getElementById(sliderId).value, 10);
+        document.getElementById(valId).textContent = v;
+        _ctrlPending[control] = v;                       // throttle ~120ms + final
+        if (_ctrlTimers[control]) return;
+        _ctrlTimers[control] = setTimeout(() => {
+            _ctrlTimers[control] = null;
+            if (_ctrlPending[control] != null) {
+                _sendControl(control, _ctrlPending[control], hintId);
+                _ctrlPending[control] = null;
+            }
         }, 120);
+    }
+    window.onBrightnessInput = function() {
+        _onControlInput('brightness', 'brightnessSlider', 'brightnessVal', 'brightnessHint');
+    };
+    window.onContrastInput = function() {
+        _onControlInput('contrast', 'contrastSlider', 'contrastVal', 'contrastHint');
     };
 
     window.saveRtsp = function() {

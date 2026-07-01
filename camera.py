@@ -94,7 +94,7 @@ class Camera:
 
     def __init__(self, camera_index: Union[int, str] = None,
                  width: int = None, height: int = None, fps: int = None,
-                 auto_exposure=None, exposure=None, brightness=None):
+                 auto_exposure=None, exposure=None, brightness=None, contrast=None):
         raw = camera_index if camera_index is not None else config.CAMERA_INDEX
         # Normalise numeric strings ("0", "1") → int
         if isinstance(raw, str) and raw.isdigit():
@@ -110,9 +110,11 @@ class Camera:
         # (so snapshot/viewfinder are never touched).
         self.auto_exposure = auto_exposure
         self.exposure = exposure
-        # BRIGHTNESS (UVC 0-255) — the one control verified to work on the station
-        # camera (diagnose_exposure.py). Opt-in; None = leave the camera default.
+        # Live image controls (UVC 0-255), opt-in; None = leave the camera default.
+        # BRIGHTNESS is verified to work on the station camera; CONTRAST is an
+        # experimental knob (may help or hurt detection — must be tested).
         self.brightness = brightness
+        self.contrast = contrast
         self.cap: Optional[cv2.VideoCapture] = None
         self.is_initialized = False
         # Serialize cap access: capture_loop reads while a live brightness tweak
@@ -126,8 +128,8 @@ class Camera:
         every set is guarded and a failure just falls back to the camera's own
         default (never raises, never blocks initialization).
         """
-        ae, ev, br = self.auto_exposure, self.exposure, self.brightness
-        if ae is None and ev is None and br is None:
+        ae, ev, br, ct = self.auto_exposure, self.exposure, self.brightness, self.contrast
+        if ae is None and ev is None and br is None and ct is None:
             return                       # nothing requested → leave defaults
         try:
             if ae is not None:
@@ -139,30 +141,44 @@ class Camera:
                 cap.set(cv2.CAP_PROP_EXPOSURE, float(ev))
             if br is not None:
                 cap.set(cv2.CAP_PROP_BRIGHTNESS, float(br))
+            if ct is not None:
+                cap.set(cv2.CAP_PROP_CONTRAST, float(ct))
             logger.info(
                 f"Camera controls applied (auto_exposure={ae}, exposure={ev}, "
-                f"brightness={br}; reports exposure={cap.get(cv2.CAP_PROP_EXPOSURE)}, "
-                f"brightness={cap.get(cv2.CAP_PROP_BRIGHTNESS)})."
+                f"brightness={br}, contrast={ct}; reports "
+                f"brightness={cap.get(cv2.CAP_PROP_BRIGHTNESS)}, "
+                f"contrast={cap.get(cv2.CAP_PROP_CONTRAST)})."
             )
         except Exception as e:
             logger.warning(f"Camera control set failed ({e}); using defaults.")
 
-    def set_brightness(self, value):
+    # ชื่อ control → OpenCV prop (ที่ปรับสดได้ผ่านสไลเดอร์ UI)
+    _CONTROL_PROPS = {
+        "brightness": cv2.CAP_PROP_BRIGHTNESS,
+        "contrast":   cv2.CAP_PROP_CONTRAST,
+    }
+
+    def set_control(self, name, value):
         """
-        Adjust BRIGHTNESS on the running camera (live, no reopen). Returns the
-        value the camera reports back, or None if there's no open USB capture.
-        Best-effort + guarded so a bad value can never crash the stream.
+        Adjust an image control (brightness/contrast) on the running camera live
+        (no reopen). Returns the value the camera reports back, or None if the
+        control is unknown / there's no open capture. Guarded + serialized with
+        capture_loop via _cap_lock so a bad value can never crash the stream.
         """
+        prop = self._CONTROL_PROPS.get(name)
         cap = self.cap
-        if cap is None:
+        if prop is None or cap is None:
             return None
         try:
             with self._cap_lock:
-                cap.set(cv2.CAP_PROP_BRIGHTNESS, float(value))
-                self.brightness = value
-                return cap.get(cv2.CAP_PROP_BRIGHTNESS)
+                cap.set(prop, float(value))
+                if name == "brightness":
+                    self.brightness = value
+                elif name == "contrast":
+                    self.contrast = value
+                return cap.get(prop)
         except Exception as e:
-            logger.warning(f"set_brightness failed ({e}).")
+            logger.warning(f"set_control({name}) failed ({e}).")
             return None
 
     def initialize(self) -> bool:

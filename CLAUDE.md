@@ -62,8 +62,10 @@
   None): เฉพาะกล้อง **live** (ส่งผ่าน ctor ที่ site สร้างกล้อง live; snapshot/RTSP ไม่แตะ). best-effort.
   - **⚠️ กล้องสถานีนี้: EXPOSURE/GAIN/GAMMA ตั้งไม่ได้ผ่าน OpenCV แต่ `BRIGHTNESS` (0-255) ได้** —
     พิสูจน์ด้วย `diagnose_exposure.py` (เทสต์ว่าภาพสว่างเปลี่ยนจริงต่อ knob/backend).
-  - ปรับสดขณะรัน: สไลเดอร์ในแผง USB → `POST /api/camera/brightness` → `Camera.set_brightness()`
-    (มี `_cap_lock` กัน race กับ `capture_loop`). StreamCamera ไม่มี method นี้ (endpoint คืน error).
+  - ปรับสดขณะรัน: สไลเดอร์ในแผง USB → `POST /api/camera/control` {control, value} →
+    `Camera.set_control(name, value)` (brightness/contrast; มี `_cap_lock` กัน race กับ
+    `capture_loop`). StreamCamera ไม่มี method นี้ (endpoint คืน error). CONTRAST = knob ทดลอง
+    (อาจช่วยหรือแย่ลง — domain shift; ยังไม่ยืนยันว่ากล้องรับ) ต้องเทียบผลตรวจจริงก่อนใช้.
 - `Camera` class ใช้ร่วมทั้ง live+snapshot (แยกด้วย ctor params). RTSP → `_initialize_rtsp` (ไม่ทำ exposure).
 
 ---
