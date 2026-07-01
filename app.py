@@ -381,16 +381,28 @@ def inference_loop():
                     if can_present:
                         # Falling edge — the can has left. Publish the sharpest
                         # frame for Frame Capture (display only; no DB/count effect).
-                        # Prefer the camera-rate raw pool (many more candidates);
-                        # fall back to the sharpest inferred frame. Boxes come from
-                        # the best inferred detections (exact on the inferred frame,
-                        # approximate on a pool frame).
+                        # Prefer the camera-rate raw pool (sharper), but RE-RUN
+                        # detection on that exact frame so the boxes align to it —
+                        # the pool frame never went through inference, and drawing
+                        # boxes from a different frame put them off the can. If the
+                        # re-check no longer shows a defect, fall back to the
+                        # sharpest inferred frame (which definitely shows the dent).
                         sharp = None
                         if frame_capture_enabled:
                             with pool_lock:
                                 sharp = pool_best_frame
-                        _publish_best_capture(
-                            sharp if sharp is not None else best_frame, best_dets)
+                        if sharp is not None and detector is not None and detector.model is not None:
+                            try:
+                                sharp_dets = detector.detect(sharp)
+                            except Exception:
+                                sharp_dets = []
+                            if any(d["class_name"] not in _NON_DEFECT_CLASSES
+                                   for d in sharp_dets):
+                                _publish_best_capture(sharp, sharp_dets)
+                            else:
+                                _publish_best_capture(best_frame, best_dets)
+                        else:
+                            _publish_best_capture(best_frame, best_dets)
                     can_present = False
                     best_score, best_frame, best_dets = -1.0, None, None
                     with pool_lock:          # clear pool for the next can
