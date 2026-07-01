@@ -7,7 +7,7 @@ import os
 
 # Bump this whenever a config default changes so a running deployment can
 # print it on startup and confirm it is actually executing the new code.
-CONFIG_VERSION = "2026.07.01-capture-tuning"
+CONFIG_VERSION = "2026.07.01-capture-complete"
 
 # ====================
 # CAMERA CONFIGURATION
@@ -260,6 +260,11 @@ LIVE_SMOOTH_VIDEO = False
 # FRAME_CAPTURE_HOLD_SEC วินาที แล้วกลับไปแสดงสด. เป็นแค่การแสดงผล — ไม่กระทบการนับ/
 # การบันทึก DB (ยังทำแบบเดิม). ค่าเริ่มต้นการแสดงผลคุมด้วย toggle ฝั่ง UI (ปิดไว้).
 FRAME_CAPTURE_HOLD_SEC = 5
+
+# Frame Capture: กระป๋องต้องอยู่ห่างขอบภาพอย่างน้อยเท่านี้ (สัดส่วนของกว้าง/สูง)
+# ถึงจะนับว่า "ครบใบ" — ใช้กล่องคลาส can/good (กระป๋องทั้งใบ) เทียบกับขอบภาพ.
+# สูงขึ้น = เข้มขึ้น (ต้องเห็นครบชัดเจน), 0 = แค่ไม่หลุดขอบ. มีผลเฉพาะ Frame Capture.
+FRAME_CAPTURE_EDGE_MARGIN = 0.02
 
 # ── Browser STREAM source (กล้องของเครื่อง Client ผ่าน getUserMedia) ──────
 # โหมดที่ 3 ในข้อ "แหล่งสัญญาณภาพ": ใช้กล้องของเครื่อง Client ผ่านเบราว์เซอร์.

@@ -165,6 +165,29 @@ def _frame_sharpness(frame):
         return 0.0
 
 
+def _can_complete(detections, frame_shape, margin=0.02):
+    """
+    True if the whole workpiece is fully inside the frame (not clipped at an
+    edge). Judged from the non-defect 'can'/'good' box — the whole-can class,
+    which is present in the raw detections even when it's hidden on an NG display.
+    Returns False when there is no such box to judge from (treated as "not
+    confirmed complete"). Frame Capture only — never affects detection/counting.
+    """
+    try:
+        h, w = frame_shape[:2]
+        mx, my = w * margin, h * margin
+        body = [d for d in detections if d["class_name"] in _NON_DEFECT_CLASSES]
+        if not body:
+            return False
+        for d in body:
+            x1, y1, x2, y2 = d["bbox"]
+            if x1 <= mx or y1 <= my or x2 >= (w - mx) or y2 >= (h - my):
+                return False          # touches an edge → the can is clipped
+        return True
+    except Exception:
+        return False
+
+
 def _publish_best_capture(frame, detections):
     """Annotate the sharpest NG frame of a can and publish it for Frame Capture
     display. No-op if there's nothing to show. Never raises into the loop."""
@@ -396,8 +419,15 @@ def inference_loop():
                                 sharp_dets = detector.detect(sharp)
                             except Exception:
                                 sharp_dets = []
-                            if any(d["class_name"] not in _NON_DEFECT_CLASSES
-                                   for d in sharp_dets):
+                            has_defect = any(d["class_name"] not in _NON_DEFECT_CLASSES
+                                             for d in sharp_dets)
+                            complete = _can_complete(
+                                sharp_dets, sharp.shape,
+                                getattr(config, "FRAME_CAPTURE_EDGE_MARGIN", 0.02))
+                            # Publish the sharp frame only if it still shows the dent
+                            # AND the whole can is in view; otherwise fall back to the
+                            # best inferred frame (already completeness-weighted).
+                            if has_defect and complete:
                                 _publish_best_capture(sharp, sharp_dets)
                             else:
                                 _publish_best_capture(best_frame, best_dets)
@@ -415,12 +445,20 @@ def inference_loop():
                     best_score, best_frame, best_dets = -1.0, None, None
                     with pool_lock:          # fresh pool for this can
                         pool_best_frame, pool_best_score = None, -1.0
-                # Pool only while a real defect is on screen (not OK/empty frames).
-                pool_collecting = bool(defects)
                 if defects:
-                    # Track the sharpest NG frame of this can (Frame Capture).
+                    # Frame Capture: prefer frames where the WHOLE can is in view
+                    # (not a half-can entering/leaving). Judged from the 'can'/'good'
+                    # box we already have. Pool only complete NG frames; and in the
+                    # inferred-best score a clipped can is heavily penalised so a
+                    # complete frame wins whenever one exists — but a partial one can
+                    # still be the fallback if the can never fits fully in view.
+                    complete = _can_complete(
+                        detections, frame.shape,
+                        getattr(config, "FRAME_CAPTURE_EDGE_MARGIN", 0.02))
+                    pool_collecting = complete
                     top = max(defects, key=lambda d: d["confidence"])
-                    score = _dent_sharpness(frame, top["bbox"]) * top["confidence"]
+                    score = (_dent_sharpness(frame, top["bbox"]) * top["confidence"]
+                             * (1.0 if complete else 0.25))
                     if score > best_score:
                         best_score = score
                         best_frame = frame
@@ -437,6 +475,8 @@ def inference_loop():
                                     bbox=det["bbox"],
                                     timestamp=datetime.now()
                                 )
+                else:
+                    pool_collecting = False   # OK frame (can, no defect) → don't pool
 
         except Exception as e:
             logger.error(f"Error in inference loop: {e}")
