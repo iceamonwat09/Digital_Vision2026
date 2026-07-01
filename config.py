@@ -7,7 +7,7 @@ import os
 
 # Bump this whenever a config default changes so a running deployment can
 # print it on startup and confirm it is actually executing the new code.
-CONFIG_VERSION = "2026.06.30-onnx-accel"
+CONFIG_VERSION = "2026.06.30-onnx-on"
 
 # ====================
 # CAMERA CONFIGURATION
@@ -145,7 +145,7 @@ USE_OPENVINO = False
 #   onnxslim              (ออปชัน — ใช้ลดขนาดกราฟตอน export ให้เร็วขึ้น)
 # fallback: ถ้า onnxruntime ไม่ได้ติดตั้ง / export / load / smoke-test ล้มเหลว
 # → ระบบกลับไปใช้ PyTorch .pt อัตโนมัติ (ของเดิมพังไม่ได้).
-USE_ONNX = False
+USE_ONNX = True
 
 # opset ที่ใช้ตอน export ONNX. ปักไว้ที่ 17 เพื่อความเข้ากันได้กับ onnxruntime 1.19.x
 # (รองรับ opset ≤ ~21). None = ปล่อยให้ ultralytics เลือก default ของมันเอง.
