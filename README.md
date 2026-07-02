@@ -508,9 +508,15 @@ python diagnose_snapshot.py
 
 ## สรุปการปรับปรุงล่าสุด (Changelog)
 
-### 🎮 OpenVINO iGPU (Iris Xe) — opt-in, รอ verify บนสถานี (ก.ค. 2026)
-- **เป้าหมาย**: เร่ง `bestX.pt` (YOLOv8m-seg) จากเพดาน ONNX CPU ~280ms/เฟรม (~2.7 FPS)
-  ด้วย iGPU — coverage ปัจจุบันขอบล่าง ~2.7 ครั้ง/ใบ ต่ำกว่าเป้า 4-5 ครั้ง/ใบ
+### 🎮 OpenVINO iGPU (Iris Xe) — ✅ VERIFIED & ENABLED บนสถานี (2 ก.ค. 2026)
+- **ผลจริงบนสถานี**: `bestX.pt` (YOLOv8m-seg, production) live 480 →
+  **~45-50ms/เฟรม (~20-22 FPS) เร็วขึ้น ~6 เท่า** จากเพดาน ONNX CPU ~280ms (~2.7 FPS);
+  snapshot 1280 → 420ms (เดิม ~1739ms); `best.pt` (detect) → ~14ms (~70 FPS)
+- **Coverage (โจทย์ตั้งต้น) จบ**: กระป๋องอยู่ในเฟรม 1-2 วิ × ~21 FPS = 20-40+ ครั้ง/ใบ (เป้า 4-5)
+- **verify_openvino.py PASS** ทั้ง intel:cpu+intel:gpu × imgsz 480+1280 (GPU: IoU
+  0.98-0.99, Δconf ≤0.0053 — FP16 drift มีจริงแต่เล็กกว่าเกณฑ์ ~10 เท่า; CPU ตรงเป๊ะ)
+- **สถานะ config ปัจจุบัน**: `OPENVINO_DEVICE = "intel:gpu"` + `CONFIG_VERSION =
+  "2026.07.02-ov-igpu-ON"` — rollback ได้ทันทีด้วยการตั้งกลับเป็น `None` + รีสตาร์ต
 - **flag ใหม่ `config.OPENVINO_DEVICE`** (default `None` = ปิดสนิท ทุกโหมดทำงานเท่าเดิม):
   ตั้ง `"intel:gpu"` เพื่อรัน inference ผ่าน OpenVINO บน iGPU — แยกจาก `USE_OPENVINO` เดิม
 - **เวอร์ชันที่ถูกต้องสำหรับ Python 3.9**: `py -3.9 -m pip install "openvino==2024.6.0"`
