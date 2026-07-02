@@ -46,11 +46,30 @@
 - **fallback หลายชั้นใน `load_model()`**: pkg หาย/export/load/smoke-test ล้มเหลว → กลับ PyTorch อัตโนมัติ.
   stale guard: `.pt` ใหม่กว่า `.onnx` → re-export.
 
-## 🚫 OpenVINO — ปิดไว้ อย่าเปิด (`USE_OPENVINO=False`)
+## 🚫 OpenVINO — ค่าเริ่มต้นปิด (`USE_OPENVINO=False`) — เคยพังเงียบ
 
-บน py3.9 ใช้ไม่ได้: OpenVINO 2025 + onnxruntime-openvino ต้องการ **Python ≥3.10**. เคยทำ
-ตรวจไม่เจอทุกโหมดแบบเงียบๆ. iGPU (Iris Xe) ก็ติดล็อกนี้ — ถ้าจะไป iGPU ต้องอัปเกรด Python
-ทั้งเครื่องก่อน (เป็นโปรเจกต์แยก เทสต์ใหม่ทุกโหมด).
+เคยเปิด `openvino==2025.3.0` บน **py3.9 (off-spec: 2025 ต้องการ Python ≥3.10)** → export/โหลด
+สำเร็จ **แต่ตรวจไม่เจอทุกโหมดแบบเงียบๆ** (ไม่ error). นี่คือ failure mode ที่อันตรายที่สุด:
+**ห้ามเชื่อว่าใช้ได้แค่เพราะโค้ดรันไม่ error — ต้องผ่าน `verify_onnx.py` เท่านั้น**.
+
+## 🎮 iGPU (Iris Xe) acceleration — โปรเจกต์ในอนาคต (ยังไม่ทำ)
+
+เป้าหมาย: เร่ง bestX (seg) จากเพดาน CPU (~280ms/~2.7 FPS) ด้วย iGPU. **ทำเมื่อ coverage
+ไม่พอเท่านั้น** (สายพาน: เวลาในเฟรม × FPS ≥ 4-5 ครั้ง/ใบ = พอแล้ว อาจไม่ต้องทำ).
+
+**ลำดับความเสี่ยง (เริ่มจากน้อย):**
+1. **เทรน bestX ใหม่เป็น detection** (แทน seg) — เบากว่า ~9 เท่า เร็วขึ้นบน CPU เดิม
+   ไม่ต้องยุ่ง Python/OpenVINO เลย (แลกกับต้อง label/เทรนใหม่). พิจารณาก่อน iGPU.
+2. **Route A — iGPU บน py3.9 เดิม:** `OpenVINO 2023.x` **รองรับ Python 3.9** (ต่างจาก 2025).
+   → ลองทางนี้ก่อน ไม่ต้องอัป Python. เสี่ยงที่ ultralytics 8.4.41 (ใหม่) × OpenVINO 2023
+   (เก่า) อาจถอด output ผิด → **verify ความแม่นก่อนเสมอ**.
+3. **Route B — Python 3.11 ใน venv แยก:** ไม่ใช่ "อัปทั้งเครื่อง" — ลง 3.11 เพิ่มข้าง 3.9,
+   `py -3.9 app.py` เดิมยังเป็น fallback สมบูรณ์. ลง deps ใน venv ใหม่ + เทสต์ทุกโหมดก่อนแตะ GPU.
+
+**บังคับทุก Route:** (ก) verify เทียบ PyTorch ผ่าน (IoU ≥0.97, Δconf ≤0.05, จำนวนกล่องตรง,
+เคส "GPU เจอ 0 แต่ PyTorch เจอหลายกล่อง" = FAIL) (ข) fallback อัตโนมัติกลับ CPU-ONNX→PyTorch
+(ค) opt-in flag default ปิด. **⚠️ RAM single-channel = คอขวด iGPU** → คาดจริง ~120-180ms
+(ไม่ใช่ 80ms) ถ้าเอาเต็มควรอัป RAM dual-channel ก่อน.
 
 ---
 
