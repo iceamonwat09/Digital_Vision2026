@@ -52,19 +52,45 @@
 สำเร็จ **แต่ตรวจไม่เจอทุกโหมดแบบเงียบๆ** (ไม่ error). นี่คือ failure mode ที่อันตรายที่สุด:
 **ห้ามเชื่อว่าใช้ได้แค่เพราะโค้ดรันไม่ error — ต้องผ่าน `verify_onnx.py` เท่านั้น**.
 
-## 🎮 iGPU (Iris Xe) acceleration — โปรเจกต์ในอนาคต (ยังไม่ทำ)
+## 🎮 iGPU (Iris Xe) acceleration — Route A ทำโค้ดแล้ว (ก.ค. 2026) รอ verify บนสถานี
 
-เป้าหมาย: เร่ง bestX (seg) จากเพดาน CPU (~280ms/~2.7 FPS) ด้วย iGPU. **ทำเมื่อ coverage
-ไม่พอเท่านั้น** (สายพาน: เวลาในเฟรม × FPS ≥ 4-5 ครั้ง/ใบ = พอแล้ว อาจไม่ต้องทำ).
+เป้าหมาย: เร่ง bestX (seg) จากเพดาน CPU (~280ms/~2.7 FPS) ด้วย iGPU. เหตุผลที่ทำ:
+กระป๋องอยู่ในเฟรม 1-2 วิ → coverage ขอบล่าง ~2.7 ครั้ง/ใบ < เป้า 4-5 ครั้ง/ใบ.
 
-**ลำดับความเสี่ยง (เริ่มจากน้อย):**
-1. **เทรน bestX ใหม่เป็น detection** (แทน seg) — เบากว่า ~9 เท่า เร็วขึ้นบน CPU เดิม
-   ไม่ต้องยุ่ง Python/OpenVINO เลย (แลกกับต้อง label/เทรนใหม่). พิจารณาก่อน iGPU.
-2. **Route A — iGPU บน py3.9 เดิม:** `OpenVINO 2023.x` **รองรับ Python 3.9** (ต่างจาก 2025).
-   → ลองทางนี้ก่อน ไม่ต้องอัป Python. เสี่ยงที่ ultralytics 8.4.41 (ใหม่) × OpenVINO 2023
-   (เก่า) อาจถอด output ผิด → **verify ความแม่นก่อนเสมอ**.
-3. **Route B — Python 3.11 ใน venv แยก:** ไม่ใช่ "อัปทั้งเครื่อง" — ลง 3.11 เพิ่มข้าง 3.9,
-   `py -3.9 app.py` เดิมยังเป็น fallback สมบูรณ์. ลง deps ใน venv ใหม่ + เทสต์ทุกโหมดก่อนแตะ GPU.
+**ข้อเท็จจริงเวอร์ชัน (re-verify จาก PyPI + ซอร์ส ultralytics v8.4.41, ก.ค. 2026):**
+- **`openvino==2024.6.0` = ตัวที่ถูกต้องสำหรับ py3.9** — รุ่นสุดท้ายที่มี wheel
+  `cp39-win_amd64` **และ**อยู่ในช่วง `openvino>=2024.0.0` ที่ exporter ของ
+  ultralytics 8.4.41 ต้องการอย่างเป็นทางการ (ไม่ต้องใช้ 2023.x ที่เสี่ยง mismatch).
+- ultralytics 8.4.41 รองรับ `device="intel:gpu"` ตอน predict ในตัว (`select_device`
+  ส่งผ่าน string `intel:*` ตรงๆ, OpenVINOBackend parse เป็น device_name="GPU").
+- `onnxruntime-openvino` ตัดทิ้ง: รุ่นใหม่ต้อง py≥3.10, รุ่นเก่าชน onnxruntime 1.19.2.
+- **⚠️ GPU plugin ของ OpenVINO default รันภายในเป็น FP16** แม้ IR เป็น FP32 →
+  ความแม่นตัดสินด้วย `verify_openvino.py` เท่านั้น. ถ้า FAIL เพราะ drift → แผนสำรอง
+  คือบังคับ `INFERENCE_PRECISION_HINT=f32` (ช้าลง, ต้องแก้เพิ่ม — ยังไม่ทำ).
+
+**สิ่งที่ทำแล้ว (โค้ด — ยังไม่เปิดใช้จนกว่า verify PASS):**
+- `config.OPENVINO_DEVICE = None` (opt-in; ตั้ง `"intel:gpu"` เพื่อเปิด) — แยกจาก
+  `USE_OPENVINO` เดิม. default None = ทุกโหมดทำงานเท่าเดิม 100%.
+- `_select_backend()` เปลี่ยนเป็นคืน **candidate list**: OpenVINO@device (ถ้าตั้ง
+  flag) → ONNX CPU → OpenVINO (legacy) → PyTorch; `load_model()` ไล่ลองทีละตัว
+  (load + smoke test) → **fallback GPU→ONNX→PyTorch อัตโนมัติ**. flag ปิด = ลำดับเดิมเป๊ะ.
+- `_maybe_openvino()`: เช็ค device มีจริงผ่าน `ov.Core().available_devices` ก่อน
+  (กัน OpenVINO เงียบๆ fallback ไป AUTO/CPU เอง = ตัวเลขความเร็วหลอก) + stale guard
+  (`.pt` ใหม่กว่า IR → re-export) + โหลดด้วย task จาก `_accel_task()` เหมือน ONNX.
+- **`verify_openvino.py`** = ตาข่ายนิรภัย (เกณฑ์ import จาก `verify_onnx.py` ชุดเดียวกัน):
+  เทียบ PyTorch vs OpenVINO ทั้ง `intel:cpu`+`intel:gpu` ที่ 480+1280 + วัดความเร็ว
+  PyTorch/ONNX/OpenVINO ในรันเดียว:
+  `py -3.9 verify_openvino.py --weights weights\can_dent\bestX.pt --images <โฟลเดอร์>`
+
+**ขั้นตอนเปิดใช้บนสถานี (ตามลำดับ ห้ามข้าม):** (1) `py -3.9 -m pip install "openvino==2024.6.0"`
+(2) เช็ค `ov.Core().available_devices` มี GPU (3) รัน verify_openvino.py ต้อง PASS ทุก
+device×imgsz (4) ตัวเลขความเร็วต้องคุ้ม (เร็วกว่า ONNX CPU ≥30%; RAM single-channel
+เป็นคอขวด — คาดจริง ~120-180ms ไม่ใช่ 80ms) (5) ตั้ง `OPENVINO_DEVICE="intel:gpu"` + รีสตาร์ต.
+
+**Route B (fallback ถ้า A ไม่ผ่าน — ผู้ใช้ยอมรับแล้ว):** Python 3.11 ใน venv แยก
+(ไม่ใช่ "อัปทั้งเครื่อง" — ลง 3.11 เพิ่มข้าง 3.9, `py -3.9 app.py` เดิมยังเป็น fallback
+สมบูรณ์). ลง deps ใน venv ใหม่ + เทสต์ทุกโหมดก่อนแตะ GPU.
+(ทางเลือก "เทรน bestX ใหม่เป็น detection" — ผู้ใช้ยังไม่สนใจ ณ ก.ค. 2026.)
 
 **บังคับทุก Route:** (ก) verify เทียบ PyTorch ผ่าน (IoU ≥0.97, Δconf ≤0.05, จำนวนกล่องตรง,
 เคส "GPU เจอ 0 แต่ PyTorch เจอหลายกล่อง" = FAIL) (ข) fallback อัตโนมัติกลับ CPU-ONNX→PyTorch

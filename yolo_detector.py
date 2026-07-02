@@ -123,6 +123,10 @@ class YOLODetector:
         self.model: Optional[YOLO] = None
         self.is_openvino = False   # True when inference runs through OpenVINO
         self.is_onnx = False       # True when inference runs through ONNX Runtime
+        # Inference device string passed to every predict call (e.g. "intel:gpu").
+        # None (default) = no device argument at all → backend default, exactly
+        # the pre-existing behaviour for PyTorch/ONNX/OpenVINO-CPU.
+        self.infer_device: Optional[str] = None
         self.confidence_threshold = config.CONFIDENCE_THRESHOLD
         self.iou_threshold = config.IOU_THRESHOLD
         self.mode_config = mode_config
@@ -153,30 +157,69 @@ class YOLODetector:
                 return colors
         return _COLORS
         
+    @staticmethod
+    def _openvino_device_available(device: str) -> bool:
+        """
+        True when the OpenVINO device in ``device`` (e.g. "intel:gpu" → "GPU")
+        actually exists on this machine. Guards against OpenVINO's own silent
+        fallback (asking for GPU on a machine without one quietly runs AUTO/CPU
+        — accuracy-safe but slower than our ONNX path and very misleading when
+        reading speed numbers), so we skip OpenVINO entirely instead.
+        """
+        try:
+            import openvino as ov
+            want = device.split(":", 1)[1].upper() if ":" in device else device.upper()
+            avail = list(ov.Core().available_devices)
+            ok = any(d == want or d.startswith(want + ".") for d in avail)
+            if not ok:
+                logger.warning(
+                    f"OpenVINO device '{want}' not available (found: {avail}); "
+                    "skipping OpenVINO backend.")
+            return ok
+        except Exception as e:
+            logger.warning(f"OpenVINO device probe failed ({e}); skipping OpenVINO backend.")
+            return False
+
     def _maybe_openvino(self, pt_path: str) -> Optional[str]:
         """
         Return a path to an OpenVINO model directory for ``pt_path`` (exporting it
-        once if needed), or ``None`` to signal "fall back to PyTorch".
+        once if needed), or ``None`` to signal "fall back to the next backend".
+
+        Enabled by either flag (both default off → returns None, behaviour
+        unchanged): the legacy ``USE_OPENVINO`` (CPU) or the new
+        ``OPENVINO_DEVICE`` (e.g. "intel:gpu" for the Iris Xe iGPU).
 
         Accuracy is preserved: we export FP32 with ``dynamic=True`` so the SAME
         model runs at both the live imgsz (480) and the snapshot imgsz (1280).
-        Any failure (package missing, export error) is swallowed → PyTorch is used,
-        so this can never break the existing modes.
+        Any failure (package missing, export error) is swallowed → the next
+        backend is used, so this can never break the existing modes.
         """
-        if not getattr(config, "USE_OPENVINO", False):
+        device = getattr(config, "OPENVINO_DEVICE", None)
+        if not (getattr(config, "USE_OPENVINO", False) or device):
             return None
         if not pt_path.endswith(".pt") or not os.path.exists(pt_path):
             return None
+        if device and not self._openvino_device_available(device):
+            return None
         ov_dir = pt_path[:-3] + "_openvino_model"
+        # The exported IR lives at <dir>/<stem>.xml — use its mtime for the
+        # stale check (same quiet-correctness trap as ONNX: a retrained .pt
+        # must never keep running behind a stale export).
+        ov_xml = os.path.join(ov_dir, os.path.basename(pt_path)[:-3] + ".xml")
         try:
-            if not os.path.isdir(ov_dir):
-                logger.info(f"Exporting OpenVINO model (one-time, FP32/dynamic): {pt_path}")
+            stale = (os.path.exists(ov_xml)
+                     and os.path.getmtime(pt_path) > os.path.getmtime(ov_xml))
+            if not os.path.isdir(ov_dir) or not os.path.exists(ov_xml) or stale:
+                if stale:
+                    logger.info(f"OpenVINO export is older than .pt — re-exporting: {pt_path}")
+                else:
+                    logger.info(f"Exporting OpenVINO model (one-time, FP32/dynamic): {pt_path}")
                 YOLO(pt_path).export(format="openvino", dynamic=True, half=False)
-            if os.path.isdir(ov_dir):
+            if os.path.isdir(ov_dir) and os.path.exists(ov_xml):
                 return ov_dir
-            logger.warning("OpenVINO export produced no model dir; using PyTorch.")
+            logger.warning("OpenVINO export produced no model dir; using next backend.")
         except Exception as e:
-            logger.warning(f"OpenVINO unavailable ({e}); using PyTorch instead.")
+            logger.warning(f"OpenVINO unavailable ({e}); using next backend instead.")
         return None
 
     def _maybe_onnx(self, pt_path: str) -> Optional[str]:
@@ -232,27 +275,39 @@ class YOLODetector:
 
     def _select_backend(self, model_path: str):
         """
-        Decide which accelerated backend (if any) to load for ``model_path``.
+        Build the ordered backend-candidate list for ``model_path``.
 
-        Priority: ONNX Runtime → OpenVINO → PyTorch (.pt). Each is opt-in via its
-        config flag and falls back to ``None`` on any problem, so with both flags
-        off (the default) this returns the plain ``.pt`` path and behaviour is
-        unchanged. Only one accelerator is ever active at a time.
+        Returns a list of ``(load_path, label, device)`` tuples; ``load_model``
+        tries them in order and the first one whose load + smoke test succeeds
+        wins. ``label`` is "" and ``device`` is None for plain PyTorch, which is
+        always the last entry — the final fallback can never disappear.
 
-        Returns ``(load_path, label)`` where ``label`` is "" for plain PyTorch.
+        Priority:
+          OpenVINO on ``config.OPENVINO_DEVICE`` (e.g. iGPU — only when set)
+          → ONNX Runtime (``USE_ONNX``)
+          → OpenVINO default device (legacy ``USE_OPENVINO``)
+          → PyTorch (.pt)
+
+        Every accelerator is opt-in via its config flag and yields no candidate
+        on any problem, so with all flags at defaults this returns the same
+        ONNX → OpenVINO → .pt priority as before — behaviour unchanged.
         """
+        candidates = []
+        device = getattr(config, "OPENVINO_DEVICE", None)
+        ov_path = self._maybe_openvino(model_path)
+
+        if device and ov_path is not None:
+            candidates.append((ov_path, "OpenVINO", device))
+
         onnx_path = self._maybe_onnx(model_path)
         if onnx_path is not None:
-            self.is_onnx, self.is_openvino = True, False
-            return onnx_path, "ONNX"
+            candidates.append((onnx_path, "ONNX", None))
 
-        ov_path = self._maybe_openvino(model_path)
-        if ov_path is not None:
-            self.is_onnx, self.is_openvino = False, True
-            return ov_path, "OpenVINO"
+        if not device and ov_path is not None:
+            candidates.append((ov_path, "OpenVINO", None))
 
-        self.is_onnx, self.is_openvino = False, False
-        return model_path, ""
+        candidates.append((model_path, "", None))
+        return candidates
 
     def _accel_task(self, pt_path: str, onnx_path: str) -> Optional[str]:
         """
@@ -302,7 +357,8 @@ class YOLODetector:
             # would raise here and correctly trigger the PyTorch fallback).
             imgsz = getattr(config, "YOLO_IMGSZ", 480)
             dummy = np.zeros((480, 640, 3), dtype=np.uint8)
-            self.model(dummy, imgsz=imgsz, verbose=False)
+            extra = {"device": self.infer_device} if self.infer_device else {}
+            self.model(dummy, imgsz=imgsz, verbose=False, **extra)
             return True
         except Exception as e:
             logger.warning(f"Accelerated backend smoke test failed ({e}).")
@@ -342,38 +398,44 @@ class YOLODetector:
                 if n_threads > 0:
                     os.environ["OMP_NUM_THREADS"] = str(n_threads)
 
-            # Pick an accelerated backend (ONNX → OpenVINO) when enabled, else the
-            # plain .pt. With both flags off (default) load_path == model_path and
-            # behaviour is unchanged.
-            load_path, accel = self._select_backend(model_path)
+            # Ordered backend candidates (e.g. OpenVINO-iGPU → ONNX → .pt). With
+            # all accel flags off (default) this is [ONNX?/OpenVINO?, .pt] exactly
+            # as before — the first candidate that loads AND passes the smoke
+            # test wins, and plain .pt is always last so PyTorch stays the final
+            # fallback.
+            accel, device = "", None
+            for load_path, accel, device in self._select_backend(model_path):
+                self.is_onnx = accel == "ONNX"
+                self.is_openvino = accel == "OpenVINO"
+                self.infer_device = device
 
-            # Exported ONNX/OpenVINO loses the task tag → YOLO() assumes 'detect'.
-            # For a segmentation model that mis-decodes the output. Pass the real
-            # task read from the .pt so the backend decodes exactly like the .pt.
-            task = self._accel_task(model_path, load_path) if accel else None
+                # Exported ONNX/OpenVINO loses the task tag → YOLO() assumes
+                # 'detect'. For a segmentation model that mis-decodes the output.
+                # Pass the real task read from the .pt so the backend decodes
+                # exactly like the .pt.
+                task = self._accel_task(model_path, load_path) if accel else None
 
-            logger.info(f"Loading YOLO model: {load_path}"
-                        + (f" [{accel}{(', task=' + task) if task else ''}]" if accel else ""))
-            try:
-                self.model = YOLO(load_path, task=task) if task else YOLO(load_path)
-                # An accelerated backend can load yet fail at inference time on an
-                # incompatible runtime — verify with a smoke test and fall back.
-                if accel and not self._smoke_test():
-                    raise RuntimeError(f"{accel} backend failed smoke test")
-            except Exception as accel_err:
-                if accel and load_path != model_path:
-                    logger.warning(
-                        f"{accel} backend unusable ({accel_err}); "
-                        f"falling back to PyTorch: {model_path}"
-                    )
-                    self.is_onnx = self.is_openvino = False
-                    accel = ""
-                    self.model = YOLO(model_path)   # plain PyTorch — known-good
-                else:
+                label = f"{accel}@{device}" if device else accel
+                logger.info(f"Loading YOLO model: {load_path}"
+                            + (f" [{label}{(', task=' + task) if task else ''}]" if accel else ""))
+                try:
+                    self.model = YOLO(load_path, task=task) if task else YOLO(load_path)
+                    # An accelerated backend can load yet fail at inference time
+                    # on an incompatible runtime — verify with a smoke test.
+                    if accel and not self._smoke_test():
+                        raise RuntimeError(f"{label} backend failed smoke test")
+                    break
+                except Exception as accel_err:
+                    if accel:
+                        logger.warning(f"{label} backend unusable ({accel_err}); "
+                                       "trying next backend.")
+                        self.model = None
+                        continue
                     raise   # plain .pt itself failed → real error, surface it
 
+            accel_label = f"{accel}@{device}" if device else accel
             logger.info("YOLO model loaded successfully"
-                        + (f" ({accel} acceleration)" if accel else ""))
+                        + (f" ({accel_label} acceleration)" if accel else ""))
 
             if hasattr(self.model, 'names'):
                 logger.info(f"Model classes ({len(self.model.names)}): {list(self.model.names.values())}")
@@ -452,6 +514,10 @@ class YOLODetector:
             debug_on = logger.isEnabledFor(logging.DEBUG)
             model_conf = 0.01 if debug_on else self.confidence_threshold
 
+            # Only the OpenVINO-device path (opt-in) ever passes a device kwarg;
+            # every other backend gets the exact same call as before.
+            extra = {"device": self.infer_device} if self.infer_device else {}
+
             t0 = time.perf_counter()
             results = self.model(
                 frame,
@@ -459,7 +525,8 @@ class YOLODetector:
                 iou=self.iou_threshold,
                 imgsz=imgsz if imgsz is not None else config.YOLO_IMGSZ,
                 max_det=config.YOLO_MAX_DET,
-                verbose=False
+                verbose=False,
+                **extra
             )
             infer_ms = (time.perf_counter() - t0) * 1000.0
 

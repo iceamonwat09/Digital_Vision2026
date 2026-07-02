@@ -7,7 +7,7 @@ import os
 
 # Bump this whenever a config default changes so a running deployment can
 # print it on startup and confirm it is actually executing the new code.
-CONFIG_VERSION = "2026.07.01-cam-controls"
+CONFIG_VERSION = "2026.07.02-ov-igpu-optin"
 
 # ====================
 # CAMERA CONFIGURATION
@@ -161,6 +161,24 @@ YOLO_IMGSZ = 480
 # ถ้าจะลองเปิดใหม่ในอนาคต ต้องทดสอบ pin เวอร์ชัน ultralytics/openvino ให้เข้ากันก่อน
 # (และตรวจว่ายังเจอ dent เท่า PyTorch). เปิด = True เพื่อทดลองเท่านั้น.
 USE_OPENVINO = False
+
+# ── OpenVINO device — iGPU Iris Xe (opt-in, แยกจาก USE_OPENVINO เดิม) ──
+# None (ค่าเริ่มต้น) = ปิดสนิท → ระบบใช้ ONNX CPU / PyTorch ตามเดิมทุกประการ.
+# ตั้งเป็น "intel:gpu" เพื่อรัน inference ผ่าน OpenVINO บน iGPU (Iris Xe).
+#
+# ⚠️ เงื่อนไขก่อนเปิดใช้ (ครบทุกข้อ — ห้ามข้าม):
+#   1. ติดตั้งบน interpreter จริงเท่านั้น:
+#        py -3.9 -m pip install "openvino==2024.6.0"
+#      (2024.6.0 = รุ่นสุดท้ายที่มี wheel cp39-win_amd64 และอยู่ในช่วง
+#       openvino>=2024.0.0 ที่ ultralytics 8.4.41 รองรับอย่างเป็นทางการ.
+#       ห้ามใช้ openvino 2025+ บน Python 3.9 — off-spec, เคยตรวจไม่เจอเงียบๆ)
+#   2. ต้องรัน verify ให้ PASS ก่อน (ทั้ง intel:cpu และ intel:gpu, imgsz 480+1280):
+#        py -3.9 verify_openvino.py --weights weights\can_dent\bestX.pt --images <โฟลเดอร์ภาพจริง>
+#      GPU plugin ของ OpenVINO default รันภายในเป็น FP16 แม้ IR จะเป็น FP32 —
+#      verify script คือตัวตัดสินว่าความแม่นยังเท่า PyTorch หรือไม่ ห้ามเชื่อสายตา.
+# fallback อัตโนมัติ: device ไม่มีจริง / export / load / smoke-test ล้มเหลว
+# → ONNX CPU → PyTorch (ของเดิมพังไม่ได้).
+OPENVINO_DEVICE = None
 
 # ── ONNX Runtime acceleration (เร่ง inference บน CPU โดยคงความแม่น FP32) ──
 # ทางที่ปลอดภัยกว่า OpenVINO บนสถานีนี้ (Windows + Python 3.9): export โมเดล .pt
