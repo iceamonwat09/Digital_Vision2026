@@ -7,7 +7,7 @@ import os
 
 # Bump this whenever a config default changes so a running deployment can
 # print it on startup and confirm it is actually executing the new code.
-CONFIG_VERSION = "2026.07.02-ov-igpu-optin"
+CONFIG_VERSION = "2026.07.02-ov-igpu-ON"
 
 # ====================
 # CAMERA CONFIGURATION
@@ -178,7 +178,10 @@ USE_OPENVINO = False
 #      verify script คือตัวตัดสินว่าความแม่นยังเท่า PyTorch หรือไม่ ห้ามเชื่อสายตา.
 # fallback อัตโนมัติ: device ไม่มีจริง / export / load / smoke-test ล้มเหลว
 # → ONNX CPU → PyTorch (ของเดิมพังไม่ได้).
-OPENVINO_DEVICE = None
+# เปิดใช้ iGPU แล้ว (ก.ค. 2026): verify_openvino.py PASS ทุก device×imgsz
+# (GPU: IoU 0.98-0.99, Δconf ≤0.0053) + เร็วขึ้น ~2.2 เท่า (137ms vs 309ms @480).
+# ปิด = เปลี่ยนกลับเป็น None แล้วรีสตาร์ต (กลับ ONNX CPU เดิมทันที).
+OPENVINO_DEVICE = "intel:gpu"
 
 # ── ONNX Runtime acceleration (เร่ง inference บน CPU โดยคงความแม่น FP32) ──
 # ทางที่ปลอดภัยกว่า OpenVINO บนสถานีนี้ (Windows + Python 3.9): export โมเดล .pt
