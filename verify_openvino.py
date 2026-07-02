@@ -58,11 +58,13 @@ def _time_call(model, img, imgsz, args, device=None):
     return r, (time.perf_counter() - t0) * 1000.0
 
 
-def _run_set(model, images, imgsz, args, device=None):
+def _run_set(model, images, imgsz, args, device=None, min_timed=5):
     """
     รันทั้งชุดภาพ คืน (dets_per_image, avg_ms).
     ภาพแรกใช้เป็น warmup (compile/alloc ครั้งแรก โดยเฉพาะ GPU) — ผลตรวจของมัน
-    ถูกใช้เทียบตามปกติ แต่เวลาไม่ถูกนับรวมใน avg_ms.
+    ถูกใช้เทียบตามปกติ แต่เวลาไม่ถูกนับรวมใน avg_ms. ถ้าตัวอย่างเวลาน้อยกว่า
+    ``min_timed`` (เช่นมีภาพรูปเดียว) จะวนรันภาพเดิมซ้ำจนได้เวลาครบ — ผลตรวจ
+    ที่ใช้เทียบความแม่นมาจากรอบแรกของแต่ละภาพเท่านั้น ไม่ถูกกระทบ.
     """
     dets, times = [], []
     for i, img in enumerate(images):
@@ -70,6 +72,11 @@ def _run_set(model, images, imgsz, args, device=None):
         dets.append(_extract(r))
         if i > 0:
             times.append(ms)
+    k = 0
+    while len(times) < min_timed:
+        _, ms = _time_call(model, images[k % len(images)], imgsz, args, device)
+        times.append(ms)
+        k += 1
     avg = float(np.mean(times)) if times else float("nan")
     return dets, avg
 
@@ -272,8 +279,9 @@ def main():
     for imgsz, label, ms in speed_rows:
         fps = 1000.0 / ms if ms and ms == ms and ms > 0 else 0.0
         print(f"    imgsz={imgsz:<5} {label:<24} {ms:7.1f} ms  (~{fps:.1f} FPS)")
-    if len(images) < 4:
-        print("    [WARN] ภาพน้อยกว่า 4 รูป → ตัวเลขเวลาเชื่อถือได้ต่ำ (ใช้ ≥10 รูปจะนิ่งกว่า)")
+    if len(images) < 10:
+        print(f"    [WARN] ภาพมีแค่ {len(images)} รูป → ทั้งความแม่นและเวลาเชื่อถือได้ต่ำ")
+        print("           เกณฑ์ของ repo นี้: ใช้ภาพจริง ≥10-20 รูป ผสมกระป๋องดี/บุบ ก่อนเปิดใช้จริง")
 
     print("\n" + "=" * 72)
     if structural_only:
