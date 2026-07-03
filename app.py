@@ -1123,7 +1123,9 @@ def api_snapshot():
         # size. Detection runs on the full-resolution frame; we then downscale
         # to a display size and scale the boxes with it, so the preview has
         # readable box thickness/text and a lightweight payload.
+        t0 = time.perf_counter()
         detections = detector.detect(frame, imgsz=config.SNAPSHOT_IMGSZ)
+        infer_ms = round((time.perf_counter() - t0) * 1000.0, 1)
 
         dents = [d for d in detections if d["class_name"] not in _NON_DEFECT_CLASSES]
         verdict = "ng" if dents else "ok"
@@ -1148,6 +1150,8 @@ def api_snapshot():
             "line": config.LINE_NUMBER,
             "plant": config.PLANT_CODE,
             "capture_size": f"{cap_w}x{cap_h}",
+            "infer_ms": infer_ms,
+            "infer_imgsz": config.SNAPSHOT_IMGSZ,
         })
     except Exception as e:
         logger.error(f"Snapshot failed: {e}", exc_info=True)
@@ -1177,7 +1181,9 @@ def api_stream_snapshot():
 
         # Same detection path as /api/snapshot: detect on the full frame, then
         # downscale for a lightweight annotated preview.
+        t0 = time.perf_counter()
         detections = detector.detect(frame, imgsz=config.SNAPSHOT_IMGSZ)
+        infer_ms = round((time.perf_counter() - t0) * 1000.0, 1)
 
         dents = [d for d in detections if d["class_name"] not in _NON_DEFECT_CLASSES]
         verdict = "ng" if dents else "ok"
@@ -1202,6 +1208,8 @@ def api_stream_snapshot():
             "line": config.LINE_NUMBER,
             "plant": config.PLANT_CODE,
             "capture_size": f"{cap_w}x{cap_h}",
+            "infer_ms": infer_ms,
+            "infer_imgsz": config.SNAPSHOT_IMGSZ,
         })
     except Exception as e:
         logger.error(f"Stream snapshot failed: {e}", exc_info=True)

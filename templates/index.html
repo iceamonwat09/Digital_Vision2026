@@ -64,24 +64,27 @@
                         <input type="checkbox" id="frameCaptureToggle" onchange="toggleFrameCapture()">
                         🖼️ Frame Capture — แช่ภาพเฟรมที่คมที่สุดเมื่อเจอ NG (ทดสอบ)
                     </label>
-                    <div style="margin-top:10px;font-size:13px;color:#475569">
-                        <div style="display:flex;justify-content:space-between;align-items:center">
-                            <span>☀️ ความสว่าง (Brightness)</span>
-                            <span id="brightnessVal" style="font-family:monospace;color:#64748b">128</span>
+                    <!-- Camera image controls — UI uses 0-100% (converted to the
+                         camera's raw 0-255 scale in JS before sending) -->
+                    <div class="cam-ctrl">
+                        <div class="cam-ctrl-head">
+                            <span class="cam-ctrl-label">☀️ ความสว่าง (Brightness)</span>
+                            <span id="brightnessVal" class="cam-ctrl-val">50%</span>
                         </div>
-                        <input type="range" id="brightnessSlider" min="0" max="255" value="128"
-                               style="width:100%;margin-top:4px" oninput="onBrightnessInput()">
-                        <div id="brightnessHint" style="font-size:11px;color:#94a3b8;margin-top:2px">
+                        <input type="range" id="brightnessSlider" min="0" max="100" step="1" value="50"
+                               oninput="onBrightnessInput()">
+                        <div id="brightnessHint" class="cam-ctrl-hint">
                             กด Start ก่อน แล้วเลื่อนเพื่อปรับสด (กล้อง USB)
                         </div>
-
-                        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px">
-                            <span>◐ คอนทราสต์ (Contrast · ทดลอง)</span>
-                            <span id="contrastVal" style="font-family:monospace;color:#64748b">32</span>
+                    </div>
+                    <div class="cam-ctrl">
+                        <div class="cam-ctrl-head">
+                            <span class="cam-ctrl-label">◐ คอนทราสต์ (Contrast · ทดลอง)</span>
+                            <span id="contrastVal" class="cam-ctrl-val">13%</span>
                         </div>
-                        <input type="range" id="contrastSlider" min="0" max="255" value="32"
-                               style="width:100%;margin-top:4px" oninput="onContrastInput()">
-                        <div id="contrastHint" style="font-size:11px;color:#94a3b8;margin-top:2px">
+                        <input type="range" id="contrastSlider" min="0" max="100" step="1" value="13"
+                               oninput="onContrastInput()">
+                        <div id="contrastHint" class="cam-ctrl-hint">
                             ⚠️ ไม่การันตีตรวจดีขึ้น — ปรับแล้วดูผลตรวจจริงเทียบกัน
                         </div>
                     </div>
@@ -194,6 +197,7 @@
                     <dl class="snap-meta">
                         <dt>จำนวน Dent</dt><dd id="snapDents">0</dd>
                         <dt>Confidence สูงสุด</dt><dd id="snapConf">—</dd>
+                        <dt>⚡ ความเร็วตรวจ (inference)</dt><dd id="snapInferMs">—</dd>
                         <dt>เวลา</dt><dd id="snapTime">—</dd>
                         <dt>ความละเอียดภาพ</dt><dd id="snapRes">—</dd>
                         <dt>Line / Plant</dt><dd id="snapLine">—</dd>
@@ -246,6 +250,40 @@
     .snap-meta { margin: 0; }
     .snap-meta dt { color: #64748b; font-size: 13px; margin-top: 12px; }
     .snap-meta dd { margin: 2px 0 0; font-size: 18px; font-weight: 600; color: #0f172a; }
+
+    /* Camera image-control cards (brightness/contrast, USB panel) */
+    .cam-ctrl {
+        border: 1px solid #e2e8f0;
+        border-radius: 10px;
+        background: #f8fafc;
+        padding: 10px 12px;
+        margin-top: 10px;
+    }
+    .cam-ctrl-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 6px;
+    }
+    .cam-ctrl-label { font-size: 13px; font-weight: 600; color: #475569; }
+    .cam-ctrl-val {
+        font-family: monospace;
+        font-size: 12px;
+        color: #334155;
+        background: #e2e8f0;
+        border-radius: 6px;
+        padding: 1px 8px;
+        min-width: 42px;
+        text-align: center;
+    }
+    .cam-ctrl input[type="range"] {
+        display: block;
+        width: 100%;
+        margin: 0;
+        accent-color: #2563eb;
+    }
+    .cam-ctrl-hint { font-size: 11px; color: #94a3b8; margin-top: 6px; }
     .snap-info-pane .btn { margin-top: auto; }
     #snapLivePanel, #snapResultPanel { display: flex; flex-direction: column; flex: 1; }
     .snap-aim-hint { color: #475569; font-size: 15px; line-height: 1.6; text-align: center; margin: 6px 0 0; }
@@ -341,8 +379,11 @@
         }).catch(() => {});
     }
     function _onControlInput(control, sliderId, valId, hintId) {
-        const v = parseInt(document.getElementById(sliderId).value, 10);
-        document.getElementById(valId).textContent = v;
+        // UI is 0-100% (friendlier scale); the camera driver wants raw 0-255.
+        // Convert here so the server API / camera.py stay unchanged.
+        const pct = parseInt(document.getElementById(sliderId).value, 10);
+        document.getElementById(valId).textContent = pct + '%';
+        const v = Math.round(pct * 255 / 100);
         _ctrlPending[control] = v;                       // throttle ~120ms + final
         if (_ctrlTimers[control]) return;
         _ctrlTimers[control] = setTimeout(() => {
@@ -959,6 +1000,14 @@
     const snapTime        = document.getElementById('snapTime');
     const snapRes         = document.getElementById('snapRes');
     const snapLine        = document.getElementById('snapLine');
+    const snapInferMs     = document.getElementById('snapInferMs');
+
+    // Shared formatter: "398 ms (imgsz 1280)" or em dash when the server didn't send it.
+    function setSnapInferMs(data) {
+        snapInferMs.textContent = (data.infer_ms != null)
+            ? data.infer_ms + ' ms' + (data.infer_imgsz ? ' (imgsz ' + data.infer_imgsz + ')' : '')
+            : '—';
+    }
 
     function resolveCameraIndex() {
         if (currentSource === 'usb') {
@@ -1067,6 +1116,7 @@
                 snapVerdict.textContent = data.verdict === 'ng' ? 'NG' : 'OK';
                 snapDents.textContent = data.dent_count;
                 snapConf.textContent  = data.dent_count > 0 ? data.max_confidence : '—';
+                setSnapInferMs(data);
                 snapTime.textContent  = data.timestamp;
                 snapRes.textContent   = data.capture_size || '—';
                 snapLine.textContent  = data.line + ' / ' + data.plant;
@@ -1150,6 +1200,7 @@
             snapVerdict.textContent = data.verdict === 'ng' ? 'NG' : 'OK';
             snapDents.textContent = data.dent_count;
             snapConf.textContent  = data.dent_count > 0 ? data.max_confidence : '—';
+            setSnapInferMs(data);
             snapTime.textContent  = data.timestamp;
             snapRes.textContent   = data.capture_size || '—';
             snapLine.textContent  = data.line + ' / ' + data.plant;
