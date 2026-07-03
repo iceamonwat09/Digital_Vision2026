@@ -681,9 +681,11 @@ def video_feed():
 
 @app.route('/api/camera/control', methods=['POST'])
 def api_camera_control():
-    """Adjust a live camera image control (brightness/contrast, 0-255) on the fly.
-    USB live camera only — soft error if no live camera is running. Never touches
-    snapshot/RTSP/STREAM."""
+    """Adjust a camera image control (brightness/contrast, 0-255) on the fly.
+    Applies to the live USB detection camera when it is running, otherwise to
+    the snapshot viewfinder camera when it is open — so the operator can tune
+    lighting while aiming a test shot. Never touches RTSP-config/STREAM paths
+    (StreamCamera has no set_control, so it is skipped by the hasattr check)."""
     data = request.get_json(silent=True) or {}
     control = data.get("control")
     if control not in ("brightness", "contrast"):
@@ -693,13 +695,16 @@ def api_camera_control():
     except (TypeError, ValueError):
         return jsonify({"status": "error", "message": "value ต้องเป็นตัวเลข 0-255"}), 400
     value = max(0, min(255, value))
-    if camera is not None and hasattr(camera, "set_control"):
-        actual = camera.set_control(control, value)
-        if actual is None:
-            return jsonify({"status": "error",
-                            "message": "ปรับไม่ได้ (ยังไม่ได้เริ่มกล้อง หรือกล้องไม่รับค่า)"}), 409
-        return jsonify({"status": "ok", "control": control, "value": value, "reports": actual})
-    return jsonify({"status": "error", "message": "ยังไม่ได้เริ่มกล้อง (กด Start ก่อน)"}), 409
+    # Prefer the live detection camera; fall back to the snapshot viewfinder.
+    candidates = [camera, viewfinder_camera if viewfinder_active else None]
+    for cam in candidates:
+        if cam is not None and hasattr(cam, "set_control"):
+            actual = cam.set_control(control, value)
+            if actual is not None:
+                return jsonify({"status": "ok", "control": control,
+                                "value": value, "reports": actual})
+    return jsonify({"status": "error",
+                    "message": "ยังไม่ได้เริ่มกล้อง (กด Start หรือเปิดหน้าถ่ายรูปก่อน)"}), 409
 
 
 @app.route('/api/frame_capture', methods=['POST'])
@@ -1095,6 +1100,18 @@ def api_viewfinder_stop():
     return jsonify({"status": "stopped"})
 
 
+def _snapshot_imgsz(raw) -> int:
+    """Resolve the snapshot inference imgsz from an optional client override.
+    Clamped to [480, SNAPSHOT_IMGSZ]: 480 is the repo's hard floor (dents are
+    small features — below 480 the model simply stops seeing them), and there
+    is no accuracy reason to go above the default. Bad/missing input → default."""
+    try:
+        v = int(raw)
+    except (TypeError, ValueError):
+        return config.SNAPSHOT_IMGSZ
+    return max(480, min(int(config.SNAPSHOT_IMGSZ), v))
+
+
 @app.route('/api/snapshot', methods=['POST'])
 def api_snapshot():
     """Run the model on the newest viewfinder frame; return annotated JPEG + verdict."""
@@ -1119,12 +1136,14 @@ def api_snapshot():
                            "ปฏิเสธการตัดสินเพื่อกันผลตรวจจากภาพเก่า ลองใหม่อีกครั้ง"
             }), 500
 
-        # Snapshot runs once per shutter press, so use the high-accuracy image
-        # size. Detection runs on the full-resolution frame; we then downscale
-        # to a display size and scale the boxes with it, so the preview has
-        # readable box thickness/text and a lightweight payload.
+        # Snapshot runs once per shutter press, so default to the high-accuracy
+        # image size; the client may request a smaller imgsz (min 480) to test
+        # the speed/accuracy trade-off on the same shot. Detection runs on the
+        # full-resolution frame; we then downscale to a display size and scale
+        # the boxes with it, so the preview has readable box thickness/text.
+        imgsz = _snapshot_imgsz((request.get_json(silent=True) or {}).get("imgsz"))
         t0 = time.perf_counter()
-        detections = detector.detect(frame, imgsz=config.SNAPSHOT_IMGSZ)
+        detections = detector.detect(frame, imgsz=imgsz)
         infer_ms = round((time.perf_counter() - t0) * 1000.0, 1)
 
         dents = [d for d in detections if d["class_name"] not in _NON_DEFECT_CLASSES]
@@ -1151,7 +1170,7 @@ def api_snapshot():
             "plant": config.PLANT_CODE,
             "capture_size": f"{cap_w}x{cap_h}",
             "infer_ms": infer_ms,
-            "infer_imgsz": config.SNAPSHOT_IMGSZ,
+            "infer_imgsz": imgsz,
         })
     except Exception as e:
         logger.error(f"Snapshot failed: {e}", exc_info=True)
@@ -1180,9 +1199,11 @@ def api_stream_snapshot():
             return jsonify({"status": "error", "message": "ถอดรหัสภาพไม่สำเร็จ"}), 400
 
         # Same detection path as /api/snapshot: detect on the full frame, then
-        # downscale for a lightweight annotated preview.
+        # downscale for a lightweight annotated preview. imgsz override arrives
+        # as a query param because the request body carries the JPEG itself.
+        imgsz = _snapshot_imgsz(request.args.get("imgsz"))
         t0 = time.perf_counter()
-        detections = detector.detect(frame, imgsz=config.SNAPSHOT_IMGSZ)
+        detections = detector.detect(frame, imgsz=imgsz)
         infer_ms = round((time.perf_counter() - t0) * 1000.0, 1)
 
         dents = [d for d in detections if d["class_name"] not in _NON_DEFECT_CLASSES]
@@ -1209,7 +1230,7 @@ def api_stream_snapshot():
             "plant": config.PLANT_CODE,
             "capture_size": f"{cap_w}x{cap_h}",
             "infer_ms": infer_ms,
-            "infer_imgsz": config.SNAPSHOT_IMGSZ,
+            "infer_imgsz": imgsz,
         })
     except Exception as e:
         logger.error(f"Stream snapshot failed: {e}", exc_info=True)
