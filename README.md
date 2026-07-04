@@ -508,6 +508,36 @@ python diagnose_snapshot.py
 
 ## สรุปการปรับปรุงล่าสุด (Changelog)
 
+### 🎮 OpenVINO iGPU (Iris Xe) — ✅ VERIFIED & ENABLED บนสถานี (2 ก.ค. 2026)
+- **ผลจริงบนสถานี**: `bestX.pt` (YOLOv8m-seg, production) live 480 →
+  **~45-50ms/เฟรม (~20-22 FPS) เร็วขึ้น ~6 เท่า** จากเพดาน ONNX CPU ~280ms (~2.7 FPS);
+  snapshot 1280 → 420ms (เดิม ~1739ms); `best.pt` (detect) → ~14ms (~70 FPS)
+- **Coverage (โจทย์ตั้งต้น) จบ**: กระป๋องอยู่ในเฟรม 1-2 วิ × ~21 FPS = 20-40+ ครั้ง/ใบ (เป้า 4-5)
+- **verify_openvino.py PASS** ทั้ง intel:cpu+intel:gpu × imgsz 480+1280 (GPU: IoU
+  0.98-0.99, Δconf ≤0.0053 — FP16 drift มีจริงแต่เล็กกว่าเกณฑ์ ~10 เท่า; CPU ตรงเป๊ะ)
+- **สถานะ config ปัจจุบัน**: `OPENVINO_DEVICE = "intel:gpu"` + `CONFIG_VERSION =
+  "2026.07.02-ov-igpu-ON"` — rollback ได้ทันทีด้วยการตั้งกลับเป็น `None` + รีสตาร์ต
+- **flag ใหม่ `config.OPENVINO_DEVICE`** (default `None` = ปิดสนิท ทุกโหมดทำงานเท่าเดิม):
+  ตั้ง `"intel:gpu"` เพื่อรัน inference ผ่าน OpenVINO บน iGPU — แยกจาก `USE_OPENVINO` เดิม
+- **เวอร์ชันที่ถูกต้องสำหรับ Python 3.9**: `py -3.9 -m pip install "openvino==2024.6.0"`
+  (รุ่นสุดท้ายที่มี wheel cp39-win **และ**อยู่ในช่วง `openvino>=2024.0.0` ที่ ultralytics
+  8.4.41 รองรับ — **ห้ามใช้ 2025+ บน py3.9**, off-spec และเคยตรวจไม่เจอเงียบๆ)
+- 🛡️ **fallback อัตโนมัติหลายชั้น** — `load_model()` ไล่ลอง backend ตามลำดับ
+  OpenVINO@GPU → ONNX CPU → PyTorch (load + smoke test ต่อตัว); device ไม่มีจริง /
+  export / โหลด / smoke-test ล้ม → ตัวถัดไปทำงานแทน ของเดิมพังไม่ได้
+- 🛡️ กัน OpenVINO เงียบๆ สลับไป AUTO/CPU เอง — เช็ค `ov.Core().available_devices`
+  ก่อนใช้ + stale guard (`.pt` ใหม่กว่า IR → re-export) + โหลดด้วย task จาก `.pt`
+  (กับดัก segmentation เดียวกับ ONNX)
+- 🧪 **`verify_openvino.py`** — ตาข่ายนิรภัย (เกณฑ์ชุดเดียวกับ `verify_onnx.py`):
+  เทียบผลตรวจ PyTorch vs OpenVINO ทั้ง `intel:cpu`+`intel:gpu` ที่ imgsz 480+1280
+  พร้อมวัดความเร็ว PyTorch/ONNX/OpenVINO ในรันเดียว — **ต้อง PASS ก่อนตั้ง
+  `OPENVINO_DEVICE`** (⚠️ GPU plugin default รัน FP16 ภายในแม้ IR เป็น FP32 —
+  ความแม่นจึงต้องพิสูจน์ด้วยสคริปต์นี้เท่านั้น ห้ามเชื่อว่ารันได้=ใช้ได้)
+  ```bash
+  py -3.9 -m pip install "openvino==2024.6.0"
+  py -3.9 verify_openvino.py --weights weights\can_dent\bestX.pt --images path\to\sample_cans
+  ```
+
 ### 🖼️ Frame Capture + วิดีโอสด + exposure (ก.ค. 2026)
 - **Frame Capture** (checkbox แผง USB) — แช่ภาพเฟรมคมที่สุด+ครบใบของกระป๋อง NG ค้าง 5 วิ
   (candidate pooling ที่อัตรากล้อง + เช็คครบใบจากกล่อง `can` + re-infer ให้กรอบตรง + fallback).
@@ -546,9 +576,9 @@ python diagnose_snapshot.py
   py -3.9 verify_onnx.py --images path\to\sample_cans        # ต้องขึ้น PASS
   #  → แล้วตั้ง USE_ONNX = True ใน config.py, รีสตาร์ตแอป
   ```
-  > ⚠️ **iGPU (Iris Xe) / OpenVINO EP ยังทำไม่ได้บน Python 3.9** — ทั้ง `openvino 2025`
-  > และ `onnxruntime-openvino` ต้องการ Python ≥3.10 ถ้าจะใช้ iGPU ต้องอัปเกรด Python
-  > ทั้งเครื่องก่อน (เป็นโปรเจกต์แยก ต้องเทสต์ใหม่ทุกโหมด)
+  > ℹ️ **iGPU (Iris Xe) บน Python 3.9 ทำได้แล้วผ่าน `openvino==2024.6.0`** (รุ่นสุดท้าย
+  > ที่มี wheel py3.9) — ดูหัวข้อ Changelog "OpenVINO iGPU" ด้านบน. ที่ใช้ไม่ได้บน py3.9
+  > คือ `openvino 2025+` และ `onnxruntime-openvino` (ต้องการ Python ≥3.10)
 
 ### 🎯 นับ "1 กระป๋อง = 1 การตรวจ" แบบ edge-triggered (มิ.ย. 2026)
 - ปัญหาเดิม: นับ/บันทึก DB ทุกเฟรมที่เจอ defect — กระป๋องเดิมที่ยังไม่ขยับก็ถูกนับ/บันทึก

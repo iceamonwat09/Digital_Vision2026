@@ -30,7 +30,7 @@
 
 ---
 
-## ⚡ ONNX acceleration (เปิดใช้อยู่ — `USE_ONNX=True`)
+## ⚡ ONNX acceleration (`USE_ONNX=True` — ปัจจุบันเป็นชั้น fallback ใต้ iGPU)
 
 - Export `.pt`→`.onnx` (FP32, `dynamic=True`, opset 17) ครั้งเดียว แล้วรันผ่าน onnxruntime (~2x เร็วขึ้น).
   ultralytics ถอดผล/NMS เอง → **ผลตรวจเท่า PyTorch เป๊ะ** (verify แล้ว IoU 1.0, Δconf 0.0).
@@ -52,19 +52,64 @@
 สำเร็จ **แต่ตรวจไม่เจอทุกโหมดแบบเงียบๆ** (ไม่ error). นี่คือ failure mode ที่อันตรายที่สุด:
 **ห้ามเชื่อว่าใช้ได้แค่เพราะโค้ดรันไม่ error — ต้องผ่าน `verify_onnx.py` เท่านั้น**.
 
-## 🎮 iGPU (Iris Xe) acceleration — โปรเจกต์ในอนาคต (ยังไม่ทำ)
+## 🎮 iGPU (Iris Xe) acceleration — ✅ VERIFIED & ENABLED บนสถานี (2 ก.ค. 2026)
 
-เป้าหมาย: เร่ง bestX (seg) จากเพดาน CPU (~280ms/~2.7 FPS) ด้วย iGPU. **ทำเมื่อ coverage
-ไม่พอเท่านั้น** (สายพาน: เวลาในเฟรม × FPS ≥ 4-5 ครั้ง/ใบ = พอแล้ว อาจไม่ต้องทำ).
+**สถานะ: เปิดใช้จริงใน production แล้ว** — `OPENVINO_DEVICE = "intel:gpu"`,
+`CONFIG_VERSION = "2026.07.02-ov-igpu-ON"`, `openvino==2024.6.0` ติดตั้งบนสถานี
+(pip ถอน 2025.3.0 ตัว off-spec ออกให้ตอนติดตั้ง).
 
-**ลำดับความเสี่ยง (เริ่มจากน้อย):**
-1. **เทรน bestX ใหม่เป็น detection** (แทน seg) — เบากว่า ~9 เท่า เร็วขึ้นบน CPU เดิม
-   ไม่ต้องยุ่ง Python/OpenVINO เลย (แลกกับต้อง label/เทรนใหม่). พิจารณาก่อน iGPU.
-2. **Route A — iGPU บน py3.9 เดิม:** `OpenVINO 2023.x` **รองรับ Python 3.9** (ต่างจาก 2025).
-   → ลองทางนี้ก่อน ไม่ต้องอัป Python. เสี่ยงที่ ultralytics 8.4.41 (ใหม่) × OpenVINO 2023
-   (เก่า) อาจถอด output ผิด → **verify ความแม่นก่อนเสมอ**.
-3. **Route B — Python 3.11 ใน venv แยก:** ไม่ใช่ "อัปทั้งเครื่อง" — ลง 3.11 เพิ่มข้าง 3.9,
-   `py -3.9 app.py` เดิมยังเป็น fallback สมบูรณ์. ลง deps ใน venv ใหม่ + เทสต์ทุกโหมดก่อนแตะ GPU.
+**ตัวเลขจริงบนสถานี (จาก log `YOLO inference avg` + verify_openvino.py):**
+- **bestX (seg, production) live 480: ~45-50ms/เฟรม (~20-22 FPS) ≈ เร็วขึ้น ~6 เท่า**
+  จากเพดาน ONNX CPU เดิม ~280ms (~2.7 FPS). เร็วกว่าตอน verify (137ms) เพราะเฟรม
+  live 640x480 ไม่มี cost ย่อภาพใหญ่. snapshot 1280: 420ms (เดิม ONNX ~1739ms).
+- best.pt (detect) บน GPU: ~14ms (~70 FPS).
+- **Coverage (โจทย์ตั้งต้น): จบ** — 1-2 วิในเฟรม × ~21 FPS = 20-40+ ครั้ง/ใบ (เป้า 4-5).
+- verify_openvino.py (bestX): **PASS ทั้ง intel:cpu+intel:gpu × 480+1280** —
+  GPU มี FP16 drift จริงแต่เล็กมาก (IoU 0.9809-0.9913, Δconf ≤0.0053, กล่อง/คลาสตรงหมด;
+  CPU ตรงเป๊ะ IoU 1.0/Δconf 0.0).
+
+**⚠️ งานค้าง (บันทึกไว้ตามจริง — ควรปิดเมื่อสะดวก):**
+1. ชุดภาพ verify ตอนเปิดใช้มีแค่ 1 รูป (ต่ำกว่ามาตรฐาน ≥10-20 รูปของ repo) — ปิด loop:
+   `py -3.9 dump_defect_images.py --limit 30` (ดึงภาพ NG จริงจาก DB → sample_cans)
+   แล้วรัน verify_openvino.py กับ bestX อีกรอบ.
+2. `best.pt` (โหมด detect) วิ่งบน GPU ด้วยแต่ยังไม่เคยผ่าน verify_openvino.py แยกของตัวเอง
+   — รัน `py -3.9 verify_openvino.py --weights weights\can_dent\best.pt --images <โฟลเดอร์>`.
+
+**Rollback:** ตั้ง `OPENVINO_DEVICE = None` + รีสตาร์ต = กลับ ONNX CPU เดิม 100% ทันที.
+ถ้า GPU พังเองระหว่างรัน load_model() fallback → ONNX → PyTorch อัตโนมัติ (ดู log).
+
+**ข้อเท็จจริงเวอร์ชัน (re-verify จาก PyPI + ซอร์ส ultralytics v8.4.41, ก.ค. 2026):**
+- **`openvino==2024.6.0` = ตัวที่ถูกต้องสำหรับ py3.9** — รุ่นสุดท้ายที่มี wheel
+  `cp39-win_amd64` **และ**อยู่ในช่วง `openvino>=2024.0.0` ที่ exporter ของ
+  ultralytics 8.4.41 ต้องการอย่างเป็นทางการ (ไม่ต้องใช้ 2023.x ที่เสี่ยง mismatch).
+- ultralytics 8.4.41 รองรับ `device="intel:gpu"` ตอน predict ในตัว (`select_device`
+  ส่งผ่าน string `intel:*` ตรงๆ, OpenVINOBackend parse เป็น device_name="GPU").
+- `onnxruntime-openvino` ตัดทิ้ง: รุ่นใหม่ต้อง py≥3.10, รุ่นเก่าชน onnxruntime 1.19.2.
+- **⚠️ GPU plugin ของ OpenVINO default รันภายในเป็น FP16** แม้ IR เป็น FP32 →
+  ความแม่นตัดสินด้วย `verify_openvino.py` เท่านั้น. ถ้า FAIL เพราะ drift → แผนสำรอง
+  คือบังคับ `INFERENCE_PRECISION_HINT=f32` (ช้าลง, ต้องแก้เพิ่ม — ยังไม่ทำ).
+
+**โครงสร้างโค้ด (เปิดใช้แล้ว):**
+- `config.OPENVINO_DEVICE = None` (opt-in; ตั้ง `"intel:gpu"` เพื่อเปิด) — แยกจาก
+  `USE_OPENVINO` เดิม. default None = ทุกโหมดทำงานเท่าเดิม 100%.
+- `_select_backend()` เปลี่ยนเป็นคืน **candidate list**: OpenVINO@device (ถ้าตั้ง
+  flag) → ONNX CPU → OpenVINO (legacy) → PyTorch; `load_model()` ไล่ลองทีละตัว
+  (load + smoke test) → **fallback GPU→ONNX→PyTorch อัตโนมัติ**. flag ปิด = ลำดับเดิมเป๊ะ.
+- `_maybe_openvino()`: เช็ค device มีจริงผ่าน `ov.Core().available_devices` ก่อน
+  (กัน OpenVINO เงียบๆ fallback ไป AUTO/CPU เอง = ตัวเลขความเร็วหลอก) + stale guard
+  (`.pt` ใหม่กว่า IR → re-export) + โหลดด้วย task จาก `_accel_task()` เหมือน ONNX.
+- **`verify_openvino.py`** = ตาข่ายนิรภัย (เกณฑ์ import จาก `verify_onnx.py` ชุดเดียวกัน):
+  เทียบ PyTorch vs OpenVINO ทั้ง `intel:cpu`+`intel:gpu` ที่ 480+1280 + วัดความเร็ว
+  PyTorch/ONNX/OpenVINO ในรันเดียว:
+  `py -3.9 verify_openvino.py --weights weights\can_dent\bestX.pt --images <โฟลเดอร์>`
+
+**ถ้าต้องเปิดใช้ใหม่บนเครื่องอื่น (ตามลำดับ ห้ามข้าม):** (1) `py -3.9 -m pip install
+"openvino==2024.6.0"` (2) เช็ค `ov.Core().available_devices` มี GPU (3) รัน
+verify_openvino.py ต้อง PASS ทุก device×imgsz (4) เช็คตัวเลขความเร็วคุ้ม
+(5) ตั้ง `OPENVINO_DEVICE="intel:gpu"` + รีสตาร์ต + เช็ค footer/log.
+
+**Route B (ไม่ต้องใช้แล้ว — Route A ผ่าน):** Python 3.11 ใน venv แยก เก็บไว้เป็น
+ความรู้เผื่ออนาคต (เช่นถ้าจำเป็นต้องอัป openvino/onnxruntime เกินรุ่นสุดท้ายของ py3.9).
 
 **บังคับทุก Route:** (ก) verify เทียบ PyTorch ผ่าน (IoU ≥0.97, Δconf ≤0.05, จำนวนกล่องตรง,
 เคส "GPU เจอ 0 แต่ PyTorch เจอหลายกล่อง" = FAIL) (ข) fallback อัตโนมัติกลับ CPU-ONNX→PyTorch
@@ -131,7 +176,8 @@
 ## 🧰 สภาพแวดล้อม & repo
 
 - HW สถานี: **i7-1165G7** (4C/8T, 15W, AVX-512), 16GB DDR4 (single-channel), Iris Xe, Win10 Pro, Python 3.9.13.
-- inference bestX (seg) บน ONNX CPU ≈ **280ms/เฟรม (~2.7-3 FPS)** = เพดานของ CPU นี้ (ไม่มี iGPU).
+- inference bestX (seg): **iGPU (OpenVINO) ≈ 45-50ms/เฟรม (~20-22 FPS)** = ตัวจริงปัจจุบัน;
+  ONNX CPU ≈ 280ms (~2.7-3 FPS) = ชั้น fallback; PyTorch ≈ 315ms = fallback สุดท้าย.
 - Repo: `iceamonwat09/digital_vision2026`. Dev branch: `claude/dent-detection-camera-access-ub11gy`.
 - SQL Server: 172.32.0.50/VisionIQ. Defect log ผ่าน `sp_log_defect` (เก็บภาพ base64).
 - Tests: `pytest tests/` (artwork/label/barcode — ไม่ครอบคลุม camera/live loop).
