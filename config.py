@@ -7,7 +7,7 @@ import os
 
 # Bump this whenever a config default changes so a running deployment can
 # print it on startup and confirm it is actually executing the new code.
-CONFIG_VERSION = "2026.07.02-ov-igpu-ON"
+CONFIG_VERSION = "2026.07.04-aw-zoom-fix"
 
 # ====================
 # CAMERA CONFIGURATION

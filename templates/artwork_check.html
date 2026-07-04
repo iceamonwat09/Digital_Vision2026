@@ -8,8 +8,11 @@
   .aw-head h2{ margin:0; }
   .aw-sub    { color:#666; font-size:14px; }
 
-  .aw-grid   { display:grid; grid-template-columns: 7fr 5fr; gap:20px; }
-  @media (max-width: 1000px) { .aw-grid { grid-template-columns: 1fr; } }
+  /* minmax(0,…) + min-width:0 กันรูป preview ที่ซูม (max-width:none) ดันคอลัมน์ซ้าย
+     ให้กว้างเกิน track จนไปเบียดกรอบ ② — การซูมจะ scroll อยู่ใน .aw-stage-box เท่านั้น */
+  .aw-grid   { display:grid; grid-template-columns: minmax(0,7fr) minmax(0,5fr); gap:20px; }
+  .aw-grid > .aw-panel { min-width:0; }
+  @media (max-width: 1000px) { .aw-grid { grid-template-columns: minmax(0,1fr); } }
 
   .aw-panel  { background:#fff; border:1px solid #e3e7ec; border-radius:8px; padding:16px 18px; }
   .aw-panel h3 { margin:0 0 12px 0; font-size:16px; color:#0d47a1; }
