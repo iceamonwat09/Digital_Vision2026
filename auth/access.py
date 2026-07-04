@@ -124,21 +124,29 @@ def _resolve_live(user_id):
         return None, False
 
 
-def _deny(path: str, status: int):
+def _deny(path: str, status: int, perm: str = ""):
     if path.startswith("/api/") or path in ("/video_feed", "/viewfinder_feed"):
         msg = ("กรุณาเข้าสู่ระบบ" if status == 401
                else "บัญชีนี้ไม่มีสิทธิ์เข้าถึงฟังก์ชันนี้")
         return jsonify({"error": msg, "status": status}), status
     if status == 401:
         return redirect(url_for("auth_check.login_page", next=path))
-    # 403 — logged in but lacks permission.
+    # 403 — logged in but lacks permission. Link to /home (the neutral landing
+    # every signed-in account can open) — NOT "/", which itself needs
+    # run_live_detection and would bounce limited accounts straight back here.
+    label = ac.PERMISSIONS.get(perm, perm)
+    perm_line = (
+        f"<p style='color:#777;font-size:13px'>สิทธิ์ที่ต้องมี: "
+        f"<b>{label}</b> <code>({perm})</code></p>" if perm else ""
+    )
     return (
         "<meta charset='utf-8'><div style='font-family:sans-serif;"
         "max-width:520px;margin:80px auto;text-align:center'>"
         "<h2>ไม่มีสิทธิ์เข้าถึง (403)</h2>"
         "<p>บัญชีของคุณไม่มีสิทธิ์ใช้งานหน้านี้ "
         "กรุณาติดต่อผู้ดูแลระบบ</p>"
-        "<p><a href='/'>กลับหน้าหลัก</a></p></div>", 403,
+        + perm_line +
+        "<p><a href='/home'>กลับหน้าเมนูหลัก</a></p></div>", 403,
     )
 
 
@@ -167,7 +175,7 @@ def install(app: Flask) -> None:
 
         perm = _required_permission(request.path)
         if perm and perm not in (claims.get("perms") or []):
-            return _deny(request.path, 403)
+            return _deny(request.path, 403, perm)
         return None
 
     @app.after_request

@@ -7,7 +7,7 @@ import os
 
 # Bump this whenever a config default changes so a running deployment can
 # print it on startup and confirm it is actually executing the new code.
-CONFIG_VERSION = "2026.07.04-port-8443"
+CONFIG_VERSION = "2026.07.04-403-home"
 
 # ====================
 # CAMERA CONFIGURATION
