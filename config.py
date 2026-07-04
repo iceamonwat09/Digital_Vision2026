@@ -7,7 +7,7 @@ import os
 
 # Bump this whenever a config default changes so a running deployment can
 # print it on startup and confirm it is actually executing the new code.
-CONFIG_VERSION = "2026.07.04-403-home"
+CONFIG_VERSION = "2026.07.04-port-5000-back"
 
 # ====================
 # CAMERA CONFIGURATION
@@ -264,11 +264,12 @@ MAX_DEFECTS_PER_FRAME = 5
 # APPLICATION CONFIGURATION
 # ====================
 FLASK_HOST = "0.0.0.0"
-# 8443 หลบช่วง port ที่ Windows/Hyper-V สุ่มจองตอน Docker Desktop (WSL2) เปิด —
-# port 5000 เดิมเคยโดนจองแล้ว bind ไม่ได้ (WinError 10013) เป็นบางครั้งตามลำดับ
-# การเปิดโปรแกรม. override ได้โดยไม่ต้องแก้โค้ด: ตั้ง env var FLASK_PORT.
-# เช็คช่วงที่ถูกจอง: netsh interface ipv4 show excludedportrange protocol=tcp
-FLASK_PORT = int(os.getenv("FLASK_PORT", "8443"))
+# override ได้โดยไม่ต้องแก้โค้ด: ตั้ง env var FLASK_PORT ก่อนรัน.
+# ถ้าวันไหน bind ไม่ได้ (WinError 10013) = port ถูก Windows/Hyper-V จองตอน
+# Docker Desktop เปิด — เช็คช่วงที่ถูกจองด้วย:
+#   netsh interface ipv4 show excludedportrange protocol=tcp
+# แล้วตั้ง FLASK_PORT เป็นเลขนอกช่วง (เช่น set FLASK_PORT=8443) ชั่วคราวได้.
+FLASK_PORT = int(os.getenv("FLASK_PORT", "5000"))
 FLASK_DEBUG = False
 
 # ── HTTPS (จำเป็นสำหรับโหมด STREAM / getUserMedia บนเครื่องอื่นใน LAN) ──────

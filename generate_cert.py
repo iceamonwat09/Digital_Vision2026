@@ -3,7 +3,7 @@ Generate a self-signed TLS certificate for running the app over HTTPS.
 
 HTTPS is required for the browser STREAM source: ``getUserMedia`` (accessing the
 client's webcam) only works in a "secure context" — HTTPS or localhost. On a LAN
-you reach the station by IP (e.g. https://172.32.201.106:8443), which is NOT a
+you reach the station by IP (e.g. https://172.32.201.106:5000), which is NOT a
 secure context over plain HTTP, so the browser blocks the camera. A self-signed
 cert fixes that (the browser warns once; click "Advanced -> Proceed").
 
@@ -13,7 +13,7 @@ Usage:
     python generate_cert.py 172.32.201.106 myhost
 
 Then set ``USE_HTTPS = True`` in config.py and start the app as usual. Browse to
-https://<server-ip>:8443  (accept the one-time security warning).
+https://<server-ip>:5000  (accept the one-time security warning).
 
 The generated cert/key are written to ./certs/ and are NOT committed (see
 .gitignore) — regenerate them on each machine.
@@ -177,7 +177,7 @@ def main(extra_hosts):
     print("Next steps:")
     print("  1) Set  USE_HTTPS = True  in config.py")
     print("  2) Start the app:  python app.py")
-    print("  3) Browse to  https://<server-ip>:8443  and accept the one-time warning")
+    print("  3) Browse to  https://<server-ip>:5000  and accept the one-time warning")
 
 
 if __name__ == "__main__":
