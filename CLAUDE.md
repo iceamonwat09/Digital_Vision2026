@@ -170,6 +170,21 @@ verify_openvino.py ต้อง PASS ทุก device×imgsz (4) เช็คต
 
 - **Dual Python**: `pip install` เปล่าอาจลงคนละ interpreter กับ `py -3.9` → ใช้ `py -3.9 -m pip install ...` เสมอ.
 - **CONFIG_VERSION footer** = ตัวยืนยันว่ารันโค้ดใหม่จริง. bump ทุกครั้งที่แก้ config ที่ต้องให้ผู้ใช้ verify.
+- **`pyspellchecker` = ชั้นตรวจ dictionary/คำขาด (deterministic, เชื่อถือได้)** — จับคำที่ไม่ใช่คำจริง เช่น
+  `Sunflow`/`EXPIR`/`Thailan` (คำถูกตัด/สะกดผิด) ในคอลัมน์ "สถานะ". ⚠️ **ถ้า import `spellchecker`
+  ไม่ได้ ชั้นนี้ถูกข้ามเงียบๆ** (`_get_spellcheckers()` คืน `[]`) → คำผิดขึ้น ✓ เหมือนไม่มีปัญหา = จุดบอด QC.
+  อยู่ใน `requirements.txt` แล้ว. บนสถานีติดตั้งที่ user-site (`%APPDATA%\Python\Python39\site-packages`)
+  — **`git pull`/`checkout` ไม่ลบ** (คนละที่กับโฟลเดอร์ repo). เช็ค: `py -3.9 -c "from spellchecker import SpellChecker"`.
+  หมายเหตุ: คำขาดที่ "ยังเป็นคำจริง" (เช่น `Sunflower Oil`→`Sunflower`) ไม่มี checker ตัวไหนจับได้ →
+  ต้องพึ่งการลากโซนให้ครบ + เทียบ panel. ส่วนคอลัมน์ AI (🤖) เป็น advisory เท่านั้น เชื่อเป็น QC ไม่ได้.
+- **⚠️ Deploy IIS ในอนาคต (ยังไม่ทำ — บันทึกไว้ก่อน):** package ที่ลง user-site ของ dev
+  **IIS Application Pool identity เข้าไม่ถึง** → ชั้น dict หายเงียบใน production. วิธีแก้ตอน deploy คือทำ
+  **venv ในโฟลเดอร์โปรเจกต์** (`py -3.9 -m venv .venv` + `pip install -r requirements.txt`) แล้วชี้ IIS
+  FastCGI/HttpPlatform ไปที่ `.venv\Scripts\python.exe` (package อยู่กับโค้ด ทุก identity เห็นเท่ากัน).
+  **ระหว่างพัฒนาบนสถานีไม่ต้องทำ venv** — จะแยกเป็น 2 environment ทำให้สับสน + ดึง accel คนละชุด.
+  **⚠️ ก่อนสร้าง venv ต้อง pin accel ก่อน:** `requirements.txt` ปัจจุบัน **ไม่ตรงกับ stack ที่จูนไว้**
+  (`onnxruntime==1.19.2` comment ทิ้ง, `openvino` ไม่ pin เป็น 2024.6.0) — venv สดจะได้ accel ต่างจาก
+  สถานี = อาจตรวจช้าลงหรือเจอ bug OpenVINO 2025 ตรวจไม่เจอแบบเงียบๆ (ดูหัวข้อ OpenVINO ด้านบน).
 
 ---
 
