@@ -7,7 +7,7 @@ import os
 
 # Bump this whenever a config default changes so a running deployment can
 # print it on startup and confirm it is actually executing the new code.
-CONFIG_VERSION = "2026.07.02-ov-igpu-ON"
+CONFIG_VERSION = "2026.07.04-port-5000-back"
 
 # ====================
 # CAMERA CONFIGURATION
@@ -264,13 +264,18 @@ MAX_DEFECTS_PER_FRAME = 5
 # APPLICATION CONFIGURATION
 # ====================
 FLASK_HOST = "0.0.0.0"
-FLASK_PORT = 5000
+# override ได้โดยไม่ต้องแก้โค้ด: ตั้ง env var FLASK_PORT ก่อนรัน.
+# ถ้าวันไหน bind ไม่ได้ (WinError 10013) = port ถูก Windows/Hyper-V จองตอน
+# Docker Desktop เปิด — เช็คช่วงที่ถูกจองด้วย:
+#   netsh interface ipv4 show excludedportrange protocol=tcp
+# แล้วตั้ง FLASK_PORT เป็นเลขนอกช่วง (เช่น set FLASK_PORT=8443) ชั่วคราวได้.
+FLASK_PORT = int(os.getenv("FLASK_PORT", "5000"))
 FLASK_DEBUG = False
 
 # ── HTTPS (จำเป็นสำหรับโหมด STREAM / getUserMedia บนเครื่องอื่นใน LAN) ──────
 # เบราว์เซอร์อนุญาตให้เข้าถึงกล้อง (getUserMedia) เฉพาะ "secure context" คือ
 # HTTPS หรือ localhost เท่านั้น. เปิด USE_HTTPS=True แล้วชี้ไปที่ไฟล์ cert/key
-# (สร้างได้ด้วย `python generate_cert.py`) เพื่อให้เข้าผ่าน https://<ip>:5000 ได้.
+# (สร้างได้ด้วย `python generate_cert.py`) เพื่อให้เข้าผ่าน https://<ip>:<FLASK_PORT> ได้.
 # ค่า default = ปิด → app.run ทำงานเหมือนเดิมทุกประการ (ไม่กระทบของเดิม).
 USE_HTTPS = True
 SSL_CERT_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "certs", "cert.pem")

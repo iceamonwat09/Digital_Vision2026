@@ -119,7 +119,7 @@ SQL_PASSWORD = "********"
 
 # ── Flask ────────────────────────────────────────────
 FLASK_HOST = "0.0.0.0"
-FLASK_PORT = 5000
+FLASK_PORT = 5000   # override ได้ผ่าน env var FLASK_PORT (ไม่ต้องแก้โค้ด)
 FLASK_DEBUG = False
 
 # ── HTTPS (จำเป็นสำหรับโหมด STREAM / กล้องของ Client) ─
@@ -164,7 +164,7 @@ FRAME_CAPTURE_EDGE_MARGIN = 0.02   # กระป๋องต้องห่า�
 ```bash
 python app.py
 ```
-เปิดเบราว์เซอร์ไปที่ `http://localhost:5000` (หรือ `http://<ip เครื่อง>:5000`)
+เปิดเบราว์เซอร์ไปที่ `http://localhost:5000` (หรือ `http://<ip เครื่อง>:5000` — port ตาม `FLASK_PORT`)
 รองรับ HTTPS ด้วยเช่นกัน (ดูด้านล่าง) — แค่ตั้ง `USE_HTTPS = True` แล้วรันคำสั่งเดิม
 `app.py` ใช้ `threaded=True` อยู่แล้ว จึงรับหลาย client พร้อมกันได้ และตั้งแต่โหมด
 STREAM เปลี่ยนมาเป็น request/response สั้นๆ ต่อเฟรม (`POST /api/stream/infer`,
