@@ -121,6 +121,10 @@
                 <video id="streamVideo" autoplay playsinline muted style="display:none"></video>
                 <canvas id="streamOverlay" style="display:none"></canvas>
                 <div id="streamStats" style="display:none">—</div>
+                <!-- USB live: server-pipeline stats badge (same look as the STREAM
+                     one). Values come from /api/detection/status → perf and are
+                     refreshed by the existing 1s status poll. USB tab only. -->
+                <div id="liveStats" style="display:none">—</div>
             </div>
 
             <div class="stats-row">
@@ -319,7 +323,7 @@
     #streamVideo { display: block; width: 100%; height: auto; }
     /* size/position are set per-frame in JS to match the <video> exactly */
     #streamOverlay { position: absolute; left: 0; top: 0; pointer-events: none; }
-    #streamStats {
+    #streamStats, #liveStats {
         position: absolute; left: 10px; top: 10px; z-index: 2;
         background: rgba(15, 23, 42, .65); color: #e2e8f0;
         font: 600 11px/1.4 ui-monospace, monospace;
@@ -345,6 +349,7 @@
     const modelSelect    = document.getElementById('modelSelect');
     const refreshModelsBtn = document.getElementById('refreshModelsBtn');
     const videoStream    = document.getElementById('videoStream');
+    const liveStats      = document.getElementById('liveStats');   // USB perf badge
 
     const streamCameraSelect   = document.getElementById('streamCameraSelect');
     const refreshStreamCamsBtn = document.getElementById('refreshStreamCamsBtn');
@@ -812,6 +817,7 @@
                 // gate the STREAM controls or show its video here. Keep neutral.
                 if (currentSource === 'stream') {
                     if (videoStream.getAttribute('src')) videoStream.removeAttribute('src');
+                    liveStats.style.display = 'none';   // USB badge never shows on STREAM tab
                     statusDot.className = 'status-dot status-inactive';
                     statusText.textContent = 'Inactive';
                     startBtn.disabled = false;
@@ -854,6 +860,28 @@
                 activeDefects.textContent   = data.stats.current_defects || 0;
                 totalDetected.textContent   = data.stats.total_detected  || 0;
                 detectionStatus.textContent = isActive ? 'Detecting...' : 'Ready';
+
+                // ── USB perf badge (mirrors the STREAM badge) ──────────────
+                // Server-pipeline timing from /api/detection/status → perf:
+                //   FPS  = effective inference rate (boxes update rate)
+                //   KB   = MJPEG frame payload
+                //   cam  = camera capture rate  · inf = YOLO inference (ms)
+                //   enc  = JPEG encode (ms)     · disp = new-frame display rate
+                // Shown only on the USB tab while detection runs — RTSP/STREAM
+                // and every other mode are untouched.
+                const p = data.perf || {};
+                if (currentSource === 'usb' && isActive && p.inf_ms != null) {
+                    liveStats.textContent =
+                        'FPS ' + (p.inf_fps != null ? p.inf_fps.toFixed(1) : '?') + ' · ' +
+                        (p.jpg_kb != null ? Math.round(p.jpg_kb) : '?') + 'KB · ' +
+                        'cam ' + (p.cam_fps != null ? Math.round(p.cam_fps) : '?') + 'fps' +
+                        ' / inf ' + Math.round(p.inf_ms) + 'ms' +
+                        ' / enc ' + (p.enc_ms != null ? p.enc_ms.toFixed(1) : '?') + 'ms' +
+                        ' / disp ' + (p.disp_fps != null ? Math.round(p.disp_fps) : '?') + 'fps';
+                    liveStats.style.display = '';
+                } else {
+                    liveStats.style.display = 'none';
+                }
             })
             .catch(err => console.error('Status error:', err));
     }

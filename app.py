@@ -130,6 +130,53 @@ pool_best_frame = None
 pool_best_score = -1.0
 pool_collecting = False
 
+# ── Live pipeline perf stats (USB/RTSP diagnostics badge) ────────────────────
+# Pure measurement of the server-side live pipeline, mirroring the client-side
+# badge STREAM mode already has. Updated by the pipeline threads, exposed as
+# the additive "perf" field on /api/detection/status, rendered by the USB tab.
+# Never affects capture/inference/counting/DB — every helper swallows errors.
+_perf_lock = threading.Lock()
+live_perf = {}      # EMA-smoothed values: cam_fps, inf_fps, inf_ms, enc_ms, jpg_kb, disp_fps
+_perf_marks = {}    # last-tick timestamps per rate key (one writer thread per key)
+
+
+def _perf_note(key, value, alpha=0.3):
+    """EMA-smooth a diagnostic value into live_perf (same 0.7/0.3 smoothing as
+    the STREAM badge). Never raises into a pipeline thread."""
+    try:
+        with _perf_lock:
+            prev = live_perf.get(key)
+            live_perf[key] = value if prev is None else prev * (1 - alpha) + value * alpha
+    except Exception:
+        pass
+
+
+def _perf_tick(key):
+    """Note one occurrence of a repeating event and store its rate (Hz) EMA.
+    With several MJPEG viewers the disp_fps ticks interleave — diagnostics only,
+    the numbers just read high; single-viewer (the normal case) is accurate."""
+    try:
+        now = time.perf_counter()
+        prev = _perf_marks.get(key)
+        _perf_marks[key] = now
+        if prev is not None and now > prev:
+            _perf_note(key, 1.0 / (now - prev))
+    except Exception:
+        pass
+
+
+def _perf_reset():
+    """Clear stats at the start of a detection session."""
+    with _perf_lock:
+        live_perf.clear()
+    _perf_marks.clear()
+
+
+def _perf_snapshot():
+    """Rounded copy for the status endpoint."""
+    with _perf_lock:
+        return {k: round(v, 1) for k, v in live_perf.items()}
+
 
 def _dent_sharpness(frame, bbox):
     """
@@ -324,6 +371,7 @@ def capture_loop():
             with raw_lock:
                 latest_raw_frame = frame
                 raw_frame_seq += 1
+            _perf_tick("cam_fps")
 
             # Frame Capture candidate pool: score this raw frame and keep the
             # sharpest. Only while the mode is on AND a defect is currently on
@@ -378,7 +426,10 @@ def inference_loop():
             last_seq = seq
 
             if detector is not None and detector.model is not None:
+                _t_inf = time.perf_counter()
                 detections = detector.detect(frame)
+                _perf_note("inf_ms", (time.perf_counter() - _t_inf) * 1000.0)
+                _perf_tick("inf_fps")
             else:
                 detections = []
 
@@ -560,9 +611,16 @@ def generate_frames():
                             (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8,
                             (0, 165, 255), 2)
 
+            _t_enc = time.perf_counter()
             ret, buffer = cv2.imencode('.jpg', annotated, _JPEG_PARAMS)
             if ret:
                 frame_bytes = buffer.tobytes()
+                # Perf badge: encode time / payload size / display refresh rate
+                # (only when a NEW frame was actually encoded, like the re-encode
+                # guard above — idle repeats don't count as display frames).
+                _perf_note("enc_ms", (time.perf_counter() - _t_enc) * 1000.0)
+                _perf_note("jpg_kb", len(frame_bytes) / 1024.0)
+                _perf_tick("disp_fps")
 
         yield (b'--frame\r\n'
                b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
@@ -823,6 +881,7 @@ def start_detection():
         pool_best_frame = None
         pool_best_score = -1.0
     pool_collecting = False
+    _perf_reset()                      # fresh perf-badge stats for this session
 
     detection_active = True
     capture_thread = threading.Thread(target=capture_loop, daemon=True)
@@ -890,6 +949,9 @@ def get_detection_status():
     return jsonify({
         "active": detection_active,
         "stats": detection_stats,
+        # Live-pipeline perf numbers for the USB stats badge (additive field —
+        # older clients simply ignore it). Empty dict until the loops warm up.
+        "perf": _perf_snapshot(),
         "camera_initialized": camera.is_initialized if camera else False,
         "detector_loaded": detector.model is not None if detector else False,
         "database_connected": db.is_connected if db else False,
