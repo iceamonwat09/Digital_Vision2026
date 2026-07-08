@@ -263,15 +263,22 @@
       // Purely informational — never feeds the status column above.
       // Three states, NOT two: "checked, clean" must look different from
       // "AI never ran" (N8N not updated yet) — both used to render "—".
+      // kind "variant" = correct regional spelling (fibre/fiber) — shown
+      // as info, not warning. reason = short Thai explanation from the
+      // model. Both optional (old caches / old N8N workflow omit them).
       const aiSpell = r.ai_spell || {};
       let ai;
       if (!result || !result.ai_spell_available) {
         ai = '<span class="aw-status-unavail">ยังไม่รองรับ</span>';
       } else if (aiSpell.flagged) {
-        ai = '<span class="aw-status-warn">🤖 น่าสงสัย</span>';
+        ai = aiSpell.kind === "variant"
+          ? '<span class="aw-status-info">🤖 ทางเลือกการสะกด (ไม่ใช่คำผิด)</span>'
+          : '<span class="aw-status-warn">🤖 น่าสงสัย</span>';
         if (aiSpell.suggestion)
           ai += '<span class="aw-suggest">→ <code>' +
             esc(aiSpell.suggestion) + "</code></span>";
+        if (aiSpell.reason)
+          ai += '<span class="aw-ai-reason">' + esc(aiSpell.reason) + "</span>";
       } else {
         ai = '<span class="aw-status-ok">✓ ไม่พบ</span>';
       }

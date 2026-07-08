@@ -7,7 +7,7 @@ import os
 
 # Bump this whenever a config default changes so a running deployment can
 # print it on startup and confirm it is actually executing the new code.
-CONFIG_VERSION = "2026.07.07-usb-live-stats-badge"
+CONFIG_VERSION = "2026.07.08-artwork-ai-spell-reason"
 
 # ====================
 # CAMERA CONFIGURATION

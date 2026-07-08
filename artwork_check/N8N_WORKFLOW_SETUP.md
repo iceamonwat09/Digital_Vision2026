@@ -167,9 +167,9 @@ Webhook ──> Code in JavaScript2 ──> If ──true──> HTTP Request (G
 | Node | หน้าที่ |
 |---|---|
 | **Webhook** | รับ `POST` JSON `{"lines": ["บรรทัด1", "บรรทัด2", ...]}` (path: `artwork-translate`) |
-| **Code in JavaScript2** | ตรวจว่า `lines` เป็น array (≤ 400 บรรทัด) แล้วประกอบ Gemini request สั่งแปลทุกบรรทัดเป็น EN **และ** สแกนคำสะกดผิดในต้นฉบับแบบ advisory — `temperature 0`, responseSchema บังคับตอบ `{"translations":[...], "spell":[...]}` |
+| **Code in JavaScript2** | ตรวจว่า `lines` เป็น array (≤ 400 บรรทัด) แล้วประกอบ Gemini request สั่งแปลทุกบรรทัดเป็น EN **และ** สแกนคำสะกดผิดในต้นฉบับแบบ advisory — `temperature 0`, responseSchema บังคับตอบ `{"translations":[...], "spell":[...]}` โดยแต่ละ finding มี `kind` (`typo`/`truncated`/`variant`) + `reason` (คำอธิบายสั้นภาษาไทย) |
 | **If / HTTP Request / Code in JavaScript** | เหมือน workflow OCR (ยิง Gemini, retry 2, แกะ JSON ทั้ง `translations`/`spell`, กัน error) |
-| **Respond to Webhook** | ตอบ `{"translations": ["en1", ...], "spell": [{"flagged": false, "suggestion": null}, ...]}` เรียงตรงกับ input |
+| **Respond to Webhook** | ตอบ `{"translations": ["en1", ...], "spell": [{"flagged": false, "suggestion": null, "kind": null, "reason": null}, ...]}` เรียงตรงกับ input |
 
 ## ขั้นตอน
 
@@ -209,8 +209,8 @@ workflow เก่าด้วยมือ (วาง code ทับเฉพา
 
 | Node | ต้องมี/ทำอะไรเพิ่มเพื่อรองรับ `spell` |
 |---|---|
-| **Code in JavaScript2** (validate+build) | prompt ต้องสั่งให้ Gemini คืนทั้ง `translations` **และ** `spell` พร้อม `responseSchema` ที่มี property `spell` (array of `{flagged: boolean, suggestion: string\|null}`) — และคืน `lines`/`line_count` ออกมาด้วยให้ node ถัดไปใช้ align ความยาว |
-| **Code in JavaScript** (parse) | ต้อง parse ทั้ง `parsed.translations` และ `parsed.spell`, normalize ให้เป็น `{flagged, suggestion}` เสมอ, pad/truncate ให้ยาวเท่า `line_count` |
+| **Code in JavaScript2** (validate+build) | prompt ต้องสั่งให้ Gemini คืนทั้ง `translations` **และ** `spell` พร้อม `responseSchema` ที่มี property `spell` (array of `{original, suggestion, kind, reason}`) — และคืน `lines`/`line_count` ออกมาด้วยให้ node ถัดไปใช้ align ความยาว |
+| **Code in JavaScript** (parse) | ต้อง parse ทั้ง `parsed.translations` และ `parsed.spell`, normalize ให้เป็น `{flagged, suggestion, kind, reason}` เสมอ, pad/truncate ให้ยาวเท่า `line_count` |
 | **Respond to Webhook** (200) | **ต้องมี `spell: $json.spell` ใน responseBody ด้วย** — แค่แก้ 2 node โค้ดแล้วลืมจุดนี้ คือสาเหตุอันดับ 1 ที่ทำให้คอลัมน์ AI ในแอปไม่มีข้อมูลเลย ถึงแม้ Gemini จะตอบ `spell` มาให้ตั้งแต่ใน node ก่อนหน้าแล้วก็ตาม |
 | **Respond to Webhook1** (400, error path) | ควรมี `spell: []` ด้วย เพื่อให้ shape ตรงกันทั้งสองทาง |
 
@@ -262,9 +262,9 @@ curl -s -X POST "http://172.32.201.106:5678/webhook/artwork-translate" \
 {
   "translations": ["Type of fish: Katsuwonus pelamis", "Net Weight: 200 gm", "16785"],
   "spell": [
-    {"flagged": false, "suggestion": null},
-    {"flagged": false, "suggestion": null},
-    {"flagged": false, "suggestion": null}
+    {"flagged": false, "suggestion": null, "kind": null, "reason": null},
+    {"flagged": false, "suggestion": null, "kind": null, "reason": null},
+    {"flagged": false, "suggestion": null, "kind": null, "reason": null}
   ]
 }
 ```
@@ -317,8 +317,16 @@ $res | ConvertTo-Json -Depth 10
     `flagged = false` แปลว่า AI ตรวจแล้วจริง แค่ไม่เจอจุดที่น่าสงสัยใน
     บรรทัดนั้น
   - **"🤖 น่าสงสัย"** (เหลือง/ส้ม) — `flagged = true` พร้อม
-    `suggestion` คำที่ AI เสนอแก้ — เป็นคำแนะนำอย่างเดียว คนตรวจต้อง
-    พิจารณาเอง
+    `suggestion` คำที่ AI เสนอแก้ และ `reason` คำอธิบายสั้นๆ ภาษาไทย
+    ว่าทำไมถึงถูก flag (เช่น "คำถูกตัดปลาย น่าจะเป็น Ingredients") —
+    เป็นคำแนะนำอย่างเดียว คนตรวจต้องพิจารณาเอง
+  - **"🤖 ทางเลือกการสะกด (ไม่ใช่คำผิด)"** (ฟ้า) — `flagged = true` +
+    `kind = "variant"` แปลว่าคำนั้น**ถูกต้อง** แต่เป็นการสะกดตามภูมิภาค
+    (เช่น British "fibre" กับ American "fiber") — AI จะบอกอีกรูปสะกดใน
+    `suggestion` พร้อมเหตุผลใน `reason` ให้คนตรวจยืนยันว่าตรงกับตลาด
+    เป้าหมายของฉลากหรือไม่ ไม่ต้องแก้ artwork ถ้าเลือกใช้รูปนั้นอยู่แล้ว
+  - workflow เก่าที่ยังไม่คืน `kind`/`reason` ใช้งานต่อได้ทันที — แอปจะ
+    โชว์แบบเดิม (ไม่มีคำอธิบาย) โดยไม่ error และแคชแปลเก่าก็ยังเปิดดูได้
   - ถ้าทุกแถวในตารางโชว์ "ยังไม่รองรับ" ทั้งหมด ให้สงสัยก่อนว่า
     workflow `artwork-translate` ยังไม่ได้แก้ให้ส่ง `spell` ออกมา —
     ลองยิง request ทดสอบตรงๆ ตามหัวข้อ "ทดสอบเร็ว" ด้านบน แล้วเช็คว่า

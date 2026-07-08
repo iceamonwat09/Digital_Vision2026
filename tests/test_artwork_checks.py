@@ -401,9 +401,9 @@ def test_translate_lines_alignment(monkeypatch):
     assert out["translations"] == ["a", "b", ""]          # padded to len 3
     assert out["spell_available"] is True
     assert out["spell"] == [
-        {"flagged": True, "suggestion": "A"},
-        {"flagged": False, "suggestion": None},
-        {"flagged": False, "suggestion": None},
+        {"flagged": True, "suggestion": "A", "kind": None, "reason": None},
+        {"flagged": False, "suggestion": None, "kind": None, "reason": None},
+        {"flagged": False, "suggestion": None, "kind": None, "reason": None},
     ]
 
 
@@ -423,7 +423,46 @@ def test_translate_lines_no_spell_field_marks_unavailable(monkeypatch):
                         "http://x/webhook/artwork-translate")
     out = translate.translate_lines(["1"])
     assert out["spell_available"] is False
-    assert out["spell"] == [{"flagged": False, "suggestion": None}]
+    assert out["spell"] == [{"flagged": False, "suggestion": None,
+                             "kind": None, "reason": None}]
+
+
+def test_translate_lines_reason_and_kind(monkeypatch):
+    # New advisory fields: "reason" (short Thai explanation) + "kind"
+    # ("typo"/"truncated"/"variant"). Unknown kinds and blank reasons
+    # must degrade to None, never break the entry.
+    from artwork_check import translate
+
+    class FakeResp:
+        status_code = 200
+        def raise_for_status(self): pass
+        def json(self):
+            return {
+                "translations": ["Dietary fibre", "Ingredi", "x"],
+                "spell": [
+                    {"flagged": True, "suggestion": "Dietary fiber",
+                     "kind": "variant",
+                     "reason": "fibre เป็นการสะกดแบบ British English"},
+                    {"flagged": True, "suggestion": "Ingredients",
+                     "kind": "banana", "reason": "   "},
+                    {"flagged": False, "suggestion": None},
+                ],
+            }
+
+    monkeypatch.setattr(translate.requests, "post",
+                        lambda *a, **k: FakeResp())
+    monkeypatch.setattr(translate.config, "N8N_TRANSLATE_WEBHOOK_URL",
+                        "http://x/webhook/artwork-translate")
+    out = translate.translate_lines(["Dietary fibre", "Ingredi", "x"])
+    assert out["spell_available"] is True
+    assert out["spell"][0] == {
+        "flagged": True, "suggestion": "Dietary fiber",
+        "kind": "variant", "reason": "fibre เป็นการสะกดแบบ British English"}
+    # invalid kind + whitespace-only reason -> None, entry still usable
+    assert out["spell"][1] == {"flagged": True, "suggestion": "Ingredients",
+                               "kind": None, "reason": None}
+    assert out["spell"][2] == {"flagged": False, "suggestion": None,
+                               "kind": None, "reason": None}
 
 
 def test_translate_lines_network_failure_returns_empty(monkeypatch):
