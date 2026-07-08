@@ -281,10 +281,25 @@
           ai += '<span class="aw-ai-reason">' + esc(aiSpell.reason) + "</span>";
       } else {
         ai = '<span class="aw-status-ok">✓ ไม่พบ</span>';
+        // dict flagged the line but the AI thinks it's fine — most often a
+        // loanword / brand / proper noun missing from the dictionary.
+        if (r.status === "spell")
+          ai += '<span class="aw-ai-reason">dict ไม่รู้จักแต่ AI ว่าถูก — ' +
+            "มักเป็นคำทับศัพท์/ชื่อเฉพาะ</span>";
       }
       html += "<td>" + ai + "</td></tr>";
     });
     html += "</tbody></table>";
+    html += '<div class="aw-tlegend"><b>หมายเหตุ:</b><ul>' +
+      '<li>คอลัมน์ <b>สถานะ</b> มาจากการตรวจแบบ deterministic (dictionary + เทียบข้าม panel) ' +
+        'ส่วนคอลัมน์ <b>🤖</b> เป็นความเห็นของ AI ใช้ประกอบการพิจารณาเท่านั้น ไม่มีผลต่อ PASS/FAIL</li>' +
+      '<li><b>⚠️ dict: สะกดน่าสงสัย</b> แต่ AI <b>✓ ไม่พบ</b> — มักเป็นคำทับศัพท์ ชื่อแบรนด์ ' +
+        'หรือชื่อเฉพาะที่ไม่มีใน dictionary ไม่ใช่คำผิดเสมอไป ยืนยันด้วยตาแล้วเพิ่มเข้าคลังคำแบรนด์ได้' +
+        'เพื่อไม่ให้แจ้งซ้ำ</li>' +
+      '<li><b>🤖 น่าสงสัย</b> — AI คาดว่าสะกดผิดหรือคำถูกตัดปลาย (มีเหตุผลกำกับ) ต้องยืนยันด้วยตา</li>' +
+      '<li><b>🤖 ทางเลือกการสะกด (ไม่ใช่คำผิด)</b> — คำถูกต้องแต่เป็นการสะกดตามภูมิภาค ' +
+        'เช่น fibre (อังกฤษ) / fiber (อเมริกัน) ให้ยืนยันว่าตรงกับตลาดเป้าหมายของฉลาก</li>' +
+      "</ul></div>";
     box.innerHTML = html;
   }
   window.awRenderTextTable = renderTextTable;

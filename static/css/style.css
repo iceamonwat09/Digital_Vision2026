@@ -72,9 +72,13 @@ h1, h2, h3, h4 { letter-spacing: -0.01em; }
     justify-content: space-between;
     align-items: center;
     height: 56px;
+    gap: 1rem;
 }
 
-.nav-brand { display: flex; align-items: center; gap: 0.8rem; text-decoration: none; }
+/* min-width:0 + ellipsis: เมื่อที่ไม่พอ (เช่น CONFIG_VERSION ยาว) ให้ย่อ
+   บรรทัด brand-sub เป็น "…" แทนที่จะดันเมนู/ปุ่มทั้งแถวให้ตัดบรรทัดจนเพี้ยน */
+.nav-brand { display: flex; align-items: center; gap: 0.8rem; text-decoration: none;
+             flex: 0 1 auto; min-width: 0; }
 
 .brand-logo {
     width: 38px;
@@ -96,6 +100,7 @@ h1, h2, h3, h4 { letter-spacing: -0.01em; }
     display: flex;
     flex-direction: column;
     gap: 0;
+    min-width: 0;
 }
 
 .brand-name {
@@ -112,6 +117,9 @@ h1, h2, h3, h4 { letter-spacing: -0.01em; }
     font-weight: 400;
     letter-spacing: 0.4px;
     line-height: 1.3;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .brand-version {
@@ -125,16 +133,17 @@ h1, h2, h3, h4 { letter-spacing: -0.01em; }
     vertical-align: middle;
 }
 
-.nav-menu { display: flex; list-style: none; gap: 0.25rem; }
+.nav-menu { display: flex; list-style: none; gap: 0.25rem; flex-shrink: 0; }
 
 .nav-link {
     color: rgba(255,255,255,0.82);
     text-decoration: none;
-    padding: 0.45rem 1rem;
+    padding: 0.45rem 0.8rem;
     border-radius: 6px;
     font-size: 0.875rem;
     font-weight: 500;
     transition: background .2s, color .2s;
+    white-space: nowrap;
 }
 
 .nav-link:hover, .nav-link.active {

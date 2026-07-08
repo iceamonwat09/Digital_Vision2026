@@ -7,7 +7,9 @@ import os
 
 # Bump this whenever a config default changes so a running deployment can
 # print it on startup and confirm it is actually executing the new code.
-CONFIG_VERSION = "2026.07.08-artwork-ai-spell-reason"
+# NOTE: shown on the navbar badge too — keep it short (<= ~28 chars) or it
+# gets ellipsized there (full value always visible in the footer / hover).
+CONFIG_VERSION = "2026.07.08-aw-legend-navfix"
 
 # ====================
 # CAMERA CONFIGURATION
