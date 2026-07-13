@@ -271,9 +271,18 @@
       if (!result || !result.ai_spell_available) {
         ai = '<span class="aw-status-unavail">ยังไม่รองรับ</span>';
       } else if (aiSpell.flagged) {
-        ai = aiSpell.kind === "variant"
-          ? '<span class="aw-status-info">🤖 ทางเลือกการสะกด (ไม่ใช่คำผิด)</span>'
-          : '<span class="aw-status-warn">🤖 น่าสงสัย</span>';
+        // Label by the AI's own kind. variant = correct regional spelling
+        // (blue info). typo / truncated get clearer wording than the old
+        // generic "น่าสงสัย". Any missing / unknown kind (old caches, old
+        // N8N workflow) falls back to "น่าสงสัย" — never breaks.
+        if (aiSpell.kind === "variant")
+          ai = '<span class="aw-status-info">🤖 ทางเลือกการสะกด (ไม่ใช่คำผิด)</span>';
+        else if (aiSpell.kind === "typo")
+          ai = '<span class="aw-status-warn">🤖 น่าจะสะกดผิด</span>';
+        else if (aiSpell.kind === "truncated")
+          ai = '<span class="aw-status-warn">🤖 คำไม่ครบ (ถูกตัด)</span>';
+        else
+          ai = '<span class="aw-status-warn">🤖 น่าสงสัย</span>';
         if (aiSpell.suggestion)
           ai += '<span class="aw-suggest">→ <code>' +
             esc(aiSpell.suggestion) + "</code></span>";
@@ -296,7 +305,8 @@
       '<li><b>⚠️ dict: สะกดน่าสงสัย</b> แต่ AI <b>✓ ไม่พบ</b> — มักเป็นคำทับศัพท์ ชื่อแบรนด์ ' +
         'หรือชื่อเฉพาะที่ไม่มีใน dictionary ไม่ใช่คำผิดเสมอไป ยืนยันด้วยตาแล้วเพิ่มเข้าคลังคำแบรนด์ได้' +
         'เพื่อไม่ให้แจ้งซ้ำ</li>' +
-      '<li><b>🤖 น่าสงสัย</b> — AI คาดว่าสะกดผิดหรือคำถูกตัดปลาย (มีเหตุผลกำกับ) ต้องยืนยันด้วยตา</li>' +
+      '<li><b>🤖 น่าจะสะกดผิด</b> / <b>🤖 คำไม่ครบ (ถูกตัด)</b> — AI คาดว่าคำนั้นสะกดผิด ' +
+        'หรือถูกตัดปลาย (มีเหตุผลกำกับ) ต้องยืนยันด้วยตา</li>' +
       '<li><b>🤖 ทางเลือกการสะกด (ไม่ใช่คำผิด)</b> — คำถูกต้องแต่เป็นการสะกดตามภูมิภาค ' +
         'เช่น fibre (อังกฤษ) / fiber (อเมริกัน) ให้ยืนยันว่าตรงกับตลาดเป้าหมายของฉลาก</li>' +
       "</ul></div>";
