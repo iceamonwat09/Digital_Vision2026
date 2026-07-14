@@ -232,7 +232,9 @@
         (onlyIssues ? "ไม่มีบรรทัดที่น่าสงสัย" : "ไม่มีข้อความให้แสดง") + "</div>";
       return;
     }
-    html += '<table class="aw-ttable"><thead><tr>' +
+    html += '<div class="aw-ttable-scroll"><table class="aw-ttable"><colgroup>' +
+      '<col style="width:9%"><col style="width:26%"><col style="width:23%">' +
+      '<col style="width:20%"><col style="width:22%"></colgroup><thead><tr>' +
       "<th>โซน</th><th>ข้อความบนฉลาก</th><th>คำแปล EN</th><th>สถานะ</th>" +
       "<th>🤖 ตรวจสะกดโดย AI</th>" +
       "</tr></thead><tbody>";
@@ -298,7 +300,7 @@
       }
       html += "<td>" + ai + "</td></tr>";
     });
-    html += "</tbody></table>";
+    html += "</tbody></table></div>";
     html += '<div class="aw-tlegend"><b>หมายเหตุ:</b><ul>' +
       '<li>คอลัมน์ <b>สถานะ</b> มาจากการตรวจแบบ deterministic (dictionary + เทียบข้าม panel) ' +
         'ส่วนคอลัมน์ <b>🤖</b> เป็นความเห็นของ AI ใช้ประกอบการพิจารณาเท่านั้น ไม่มีผลต่อ PASS/FAIL</li>' +

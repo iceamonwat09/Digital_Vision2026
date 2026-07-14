@@ -139,7 +139,11 @@
   .aw-textbar { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; }
   .aw-textfilter { font-size:13px; color:#555; cursor:pointer; }
   .aw-textmsg { font-size:12px; color:#78909c; margin:8px 0; min-height:16px; }
-  .aw-ttable { width:100%; border-collapse:collapse; font-size:13px; }
+  /* fixed layout: 5 คอลัมน์แบ่งความกว้าง panel กันเอง + ตัดคำยาว/URL ให้ wrap
+     ในเซลล์ ไม่ให้ล้นออกนอกกรอบ; .aw-ttable-scroll เป็นตาข่ายกันจอแคบมาก */
+  .aw-ttable-scroll { overflow-x:auto; }
+  .aw-ttable { width:100%; border-collapse:collapse; font-size:13px; table-layout:fixed; }
+  .aw-ttable th, .aw-ttable td { overflow-wrap:anywhere; word-break:break-word; }
   .aw-ttable th { text-align:left; background:#f8fafc; color:#37474f; font-size:11px; letter-spacing:.4px;
                   text-transform:uppercase; padding:7px 9px; border-bottom:2px solid #e3e7ec; position:sticky; top:0; }
   .aw-ttable td { padding:7px 9px; border-bottom:1px solid #eceff1; vertical-align:top; }
