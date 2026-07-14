@@ -10,9 +10,15 @@
 
   /* minmax(0,…) + min-width:0 กันรูป preview ที่ซูม (max-width:none) ดันคอลัมน์ซ้าย
      ให้กว้างเกิน track จนไปเบียดกรอบ ② — การซูมจะ scroll อยู่ใน .aw-stage-box เท่านั้น */
-  .aw-grid   { display:grid; grid-template-columns: minmax(0,7fr) minmax(0,5fr); gap:20px; }
+  .aw-grid   { display:grid; grid-template-columns: minmax(0,7fr) minmax(0,5fr); gap:20px;
+               transition: grid-template-columns .25s ease; }
   .aw-grid > .aw-panel { min-width:0; }
   @media (max-width: 1000px) { .aw-grid { grid-template-columns: minmax(0,1fr); } }
+  /* หลังมีผลตรวจ/ตารางข้อมูลแล้ว สลับให้ฝั่งขวา (ผลตรวจ) กว้างขึ้นอ่านตารางสะดวก
+     — scope เฉพาะจอกว้าง (>1000px); จอแคบ grid ยุบเป็น 1 คอลัมน์อยู่แล้ว */
+  @media (min-width: 1001px) {
+    .aw-grid.results-wide { grid-template-columns: minmax(0,5fr) minmax(0,7fr); }
+  }
 
   .aw-panel  { background:#fff; border:1px solid #e3e7ec; border-radius:8px; padding:16px 18px; }
   .aw-panel h3 { margin:0 0 12px 0; font-size:16px; color:#0d47a1; }
@@ -139,7 +145,11 @@
   .aw-textbar { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; }
   .aw-textfilter { font-size:13px; color:#555; cursor:pointer; }
   .aw-textmsg { font-size:12px; color:#78909c; margin:8px 0; min-height:16px; }
-  .aw-ttable { width:100%; border-collapse:collapse; font-size:13px; }
+  /* fixed layout: 5 คอลัมน์แบ่งความกว้าง panel กันเอง + ตัดคำยาว/URL ให้ wrap
+     ในเซลล์ ไม่ให้ล้นออกนอกกรอบ; .aw-ttable-scroll เป็นตาข่ายกันจอแคบมาก */
+  .aw-ttable-scroll { overflow-x:auto; }
+  .aw-ttable { width:100%; border-collapse:collapse; font-size:13px; table-layout:fixed; }
+  .aw-ttable th, .aw-ttable td { overflow-wrap:anywhere; word-break:break-word; }
   .aw-ttable th { text-align:left; background:#f8fafc; color:#37474f; font-size:11px; letter-spacing:.4px;
                   text-transform:uppercase; padding:7px 9px; border-bottom:2px solid #e3e7ec; position:sticky; top:0; }
   .aw-ttable td { padding:7px 9px; border-bottom:1px solid #eceff1; vertical-align:top; }
@@ -152,8 +162,15 @@
   .aw-ttable mark { background:#ffcdd2; color:#b71c1c; border-radius:2px; padding:0 2px; font-weight:600; }
   .aw-status-ok   { color:#2e7d32; }
   .aw-status-warn { color:#ef6c00; font-weight:600; }
+  .aw-status-bad  { color:#c62828; font-weight:700; }
+  .aw-status-info { color:#1565c0; font-weight:600; }
   .aw-status-unavail { color:#b0bec5; font-style:italic; }
   .aw-suggest { display:block; margin-top:3px; font-size:12px; color:#1b5e20; }
+  .aw-ai-reason { display:block; margin-top:3px; font-size:11.5px; color:#78909c; }
+  .aw-tlegend { margin-top:10px; padding:9px 12px; background:#f8fafc; border:1px solid #e3e7ec;
+                border-radius:6px; font-size:12px; color:#546e7a; line-height:1.55; }
+  .aw-tlegend ul { margin:4px 0 0 18px; padding:0; }
+  .aw-tlegend li { margin-top:3px; }
   .aw-suggest code { background:#e8f5e9; padding:0 4px; border-radius:3px; font-family:var(--font-mono,ui-monospace,monospace); }
   .aw-note { background:#fff3e0; border-left:4px solid #fb8c00; padding:8px 12px; border-radius:4px;
              font-size:13px; color:#6d4c00; margin-bottom:10px; }

@@ -232,7 +232,9 @@
         (onlyIssues ? "ไม่มีบรรทัดที่น่าสงสัย" : "ไม่มีข้อความให้แสดง") + "</div>";
       return;
     }
-    html += '<table class="aw-ttable"><thead><tr>' +
+    html += '<div class="aw-ttable-scroll"><table class="aw-ttable"><colgroup>' +
+      '<col style="width:9%"><col style="width:26%"><col style="width:23%">' +
+      '<col style="width:20%"><col style="width:22%"></colgroup><thead><tr>' +
       "<th>โซน</th><th>ข้อความบนฉลาก</th><th>คำแปล EN</th><th>สถานะ</th>" +
       "<th>🤖 ตรวจสะกดโดย AI</th>" +
       "</tr></thead><tbody>";
@@ -263,21 +265,53 @@
       // Purely informational — never feeds the status column above.
       // Three states, NOT two: "checked, clean" must look different from
       // "AI never ran" (N8N not updated yet) — both used to render "—".
+      // kind "variant" = correct regional spelling (fibre/fiber) — shown
+      // as info, not warning. reason = short Thai explanation from the
+      // model. Both optional (old caches / old N8N workflow omit them).
       const aiSpell = r.ai_spell || {};
       let ai;
       if (!result || !result.ai_spell_available) {
         ai = '<span class="aw-status-unavail">ยังไม่รองรับ</span>';
       } else if (aiSpell.flagged) {
-        ai = '<span class="aw-status-warn">🤖 น่าสงสัย</span>';
+        // Label by the AI's own kind. variant = correct regional spelling
+        // (blue info). typo / truncated get clearer wording than the old
+        // generic "น่าสงสัย". Any missing / unknown kind (old caches, old
+        // N8N workflow) falls back to "น่าสงสัย" — never breaks.
+        if (aiSpell.kind === "variant")
+          ai = '<span class="aw-status-info">🤖 ทางเลือกการสะกด (ไม่ใช่คำผิด)</span>';
+        else if (aiSpell.kind === "typo")
+          ai = '<span class="aw-status-bad">🤖 สะกดผิด</span>';
+        else if (aiSpell.kind === "truncated")
+          ai = '<span class="aw-status-warn">🤖 คำไม่ครบ (ถูกตัด)</span>';
+        else
+          ai = '<span class="aw-status-warn">🤖 น่าสงสัย</span>';
         if (aiSpell.suggestion)
           ai += '<span class="aw-suggest">→ <code>' +
             esc(aiSpell.suggestion) + "</code></span>";
+        if (aiSpell.reason)
+          ai += '<span class="aw-ai-reason">' + esc(aiSpell.reason) + "</span>";
       } else {
         ai = '<span class="aw-status-ok">✓ ไม่พบ</span>';
+        // dict flagged the line but the AI thinks it's fine — most often a
+        // loanword / brand / proper noun missing from the dictionary.
+        if (r.status === "spell")
+          ai += '<span class="aw-ai-reason">dict ไม่รู้จักแต่ AI ว่าถูก — ' +
+            "มักเป็นคำทับศัพท์/ชื่อเฉพาะ</span>";
       }
       html += "<td>" + ai + "</td></tr>";
     });
-    html += "</tbody></table>";
+    html += "</tbody></table></div>";
+    html += '<div class="aw-tlegend"><b>หมายเหตุ:</b><ul>' +
+      '<li>คอลัมน์ <b>สถานะ</b> มาจากการตรวจแบบ deterministic (dictionary + เทียบข้าม panel) ' +
+        'ส่วนคอลัมน์ <b>🤖</b> เป็นความเห็นของ AI ใช้ประกอบการพิจารณาเท่านั้น ไม่มีผลต่อ PASS/FAIL</li>' +
+      '<li><b>⚠️ dict: สะกดน่าสงสัย</b> แต่ AI <b>✓ ไม่พบ</b> — มักเป็นคำทับศัพท์ ชื่อแบรนด์ ' +
+        'หรือชื่อเฉพาะที่ไม่มีใน dictionary ไม่ใช่คำผิดเสมอไป ยืนยันด้วยตาแล้วเพิ่มเข้าคลังคำแบรนด์ได้' +
+        'เพื่อไม่ให้แจ้งซ้ำ</li>' +
+      '<li><b>🤖 สะกดผิด</b> / <b>🤖 คำไม่ครบ (ถูกตัด)</b> — AI คาดว่าคำนั้นสะกดผิด ' +
+        'หรือถูกตัดปลาย (มีเหตุผลกำกับ) ต้องยืนยันด้วยตา</li>' +
+      '<li><b>🤖 ทางเลือกการสะกด (ไม่ใช่คำผิด)</b> — คำถูกต้องแต่เป็นการสะกดตามภูมิภาค ' +
+        'เช่น fibre (อังกฤษ) / fiber (อเมริกัน) ให้ยืนยันว่าตรงกับตลาดเป้าหมายของฉลาก</li>' +
+      "</ul></div>";
     box.innerHTML = html;
   }
   window.awRenderTextTable = renderTextTable;
@@ -299,6 +333,13 @@
   const previewImg = $("awPreviewImg");
   const propsBox = $("awProps");
   const resultBox = $("awResult");
+  // Give the right (results) panel more width once real result/table data
+  // exists; keep the editing-favored 7/5 while the user is still placing
+  // zones. Toggled true after inspect/translate, false on a new upload.
+  const awGrid = document.querySelector(".aw-grid");
+  function setResultsWide(wide) {
+    if (awGrid) awGrid.classList.toggle("results-wide", !!wide);
+  }
   function setBusy(b) {
     busy = b;
     ["awInspect", "awAddZone", "awClearZones", "awRedetect",
@@ -311,6 +352,7 @@
   fileInput.addEventListener("change", async () => {
     const f = fileInput.files[0];
     if (!f) return;
+    setResultsWide(false);   // new file → back to zone-editing layout
     resultBox.innerHTML =
       '<div class="aw-empty"><span class="aw-spin"></span>กำลังเปิดไฟล์และเสนอโซน…</div>';
     try {
@@ -670,6 +712,7 @@
       showTabs(true);
       switchTab("result");
       resetTextTab();
+      setResultsWide(true);   // results exist → widen the results panel
     } catch (e) {
       resultBox.innerHTML = '<div class="aw-empty">ตรวจไม่สำเร็จ: ' + esc(e.message) + "</div>";
     } finally {
@@ -720,6 +763,7 @@
         body: JSON.stringify({ zones: zones, brand: brandInput.value.trim() }),
       });
       renderTextTable(textResult, textTableWrap, onlyIssuesCb.checked);
+      setResultsWide(true);   // table now has data → widen the results panel
       if (textResult.translated)
         textMsg.textContent = textResult.cached ? "✓ แปลแล้ว (จากแคช)" : "✓ แปลเรียบร้อย";
       else

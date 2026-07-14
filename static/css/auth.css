@@ -203,6 +203,7 @@
     align-items: center;
     gap: 10px;
     color: var(--white);
+    flex-shrink: 0;
 }
 .nav-user .nav-username { font-size: .85rem; font-weight: 500; }
 .nav-user .nav-role {
@@ -220,6 +221,7 @@
     font-size: .82rem;
     font-family: var(--font-sans);
     cursor: pointer;
+    white-space: nowrap;
 }
 .nav-user .logout-btn:hover { background: rgba(255, 255, 255, .28); }
 

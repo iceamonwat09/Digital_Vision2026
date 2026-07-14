@@ -40,11 +40,26 @@ def is_enabled() -> bool:
 
 # ── deterministic spell suggestions (advisory only) ───────────────────
 
+# When a word is in no dictionary, pyspellchecker offers every same-edit
+# distance word. For a real single-answer typo that is a tiny set
+# ("caliddd" -> {calidad}; "Phosphours" -> {phosphorus, phosphors}). For a
+# word the dictionary simply cannot place — a loanword/brand ("Guar",
+# "Samut") or a typo whose fix needs context ("Cude" -> code/cute/cure/
+# crude/rude/... 28 candidates) — it is a large scatter. Showing 3
+# arbitrary scatter words is misleading noise next to the real answer, so
+# dictionary guesses are surfaced ONLY when the candidate set is small
+# enough to be unambiguous; otherwise the reviewer sees just the "not in
+# dictionary" flag (and the advisory AI column). Honors the project rule
+# that the system never guesses a word it isn't confident about.
+_SUGGEST_MAX_DICT_CANDIDATES = 2
+
+
 def _suggest(word: str, vocab: set, consensus: set) -> List[str]:
     """
     Closest known forms of ``word`` from trusted, deterministic sources.
-    Returns [] when nothing close is found — the system never guesses
-    beyond its dictionaries and the user's own approved vocabulary.
+    Returns [] when nothing close/confident is found — the system never
+    guesses beyond its dictionaries and the user's own approved vocabulary,
+    and stays silent when the dictionary offers only an ambiguous scatter.
     """
     lw = word.lower()
     out: List[str] = []
@@ -59,22 +74,29 @@ def _suggest(word: str, vocab: set, consensus: set) -> List[str]:
                 if cand not in out:
                     out.append(cand)
 
-    # 2. dictionary candidates (pyspellchecker, edit-distance based)
+    # 2. dictionary candidates — ONLY when unambiguous. Gather the distinct
+    #    edit-distance candidates across every enabled language; show them
+    #    (ranked by word frequency) only if there are few. A large scatter
+    #    means the dictionary can't tell which is right → suggest nothing.
+    dict_cands: Dict[str, float] = {}
     for c in checks._get_spellcheckers():
         try:
             cands = c.candidates(lw) or set()
         except Exception:
             cands = set()
-        for cand in sorted(cands):
-            if cand.lower() != lw and cand not in out:
+        for cand in cands:
+            if cand.lower() == lw:
+                continue
+            try:
+                freq = c.word_frequency[cand]
+            except Exception:
+                freq = 0
+            dict_cands[cand] = max(dict_cands.get(cand, 0), freq)
+    if 0 < len(dict_cands) <= _SUGGEST_MAX_DICT_CANDIDATES:
+        for cand in sorted(dict_cands, key=lambda w: dict_cands[w],
+                           reverse=True):
+            if cand not in out:
                 out.append(cand)
-        corr = None
-        try:
-            corr = c.correction(lw)
-        except Exception:
-            pass
-        if corr and corr.lower() != lw and corr not in out:
-            out.insert(0, corr)
 
     return out[:3]
 
@@ -202,6 +224,14 @@ def build_table(zones: List[dict], ocr_results: List[dict],
 
 # ── translation via N8N (text-only, one request) ──────────────────────
 
+_SPELL_KINDS = ("typo", "truncated", "variant")
+
+
+def _clean_spell() -> dict:
+    """Default advisory-spell entry for an unflagged / unknown line."""
+    return {"flagged": False, "suggestion": None, "kind": None,
+            "reason": None}
+
 def translate_lines(lines: List[str],
                     url: Optional[str] = None,
                     timeout: Optional[float] = None) -> Dict[str, list]:
@@ -221,9 +251,13 @@ def translate_lines(lines: List[str],
     list with ``spell_available: True`` means. Without this flag the UI
     cannot tell "AI checked, all clean" apart from "AI never ran".
 
-    ``spell`` entries are {"flagged": bool, "suggestion": str|None} and
+    ``spell`` entries are {"flagged": bool, "suggestion": str|None,
+    "kind": "typo"|"truncated"|"variant"|None, "reason": str|None} and
     are PURELY advisory (AI-generated) — they never feed into the
-    deterministic PASS/FAIL verdict in checks.py.
+    deterministic PASS/FAIL verdict in checks.py. ``reason`` is a short
+    Thai explanation of WHY the line was flagged; ``kind`` separates a
+    real typo / cut-off word from a correct regional spelling variant
+    (fibre/fiber). Both are None when the N8N workflow predates them.
     """
     empty = {"translations": [], "spell": [], "spell_available": False}
     target = (url if url is not None
@@ -272,17 +306,21 @@ def translate_lines(lines: List[str],
     if spell_available:
         for item in spell_raw:
             if isinstance(item, dict):
+                kind = item.get("kind")
+                reason = item.get("reason")
+                reason = str(reason).strip() if reason is not None else ""
                 spell.append({
                     "flagged": bool(item.get("flagged")),
                     "suggestion": (str(item["suggestion"])
                                   if item.get("suggestion") is not None
                                   else None),
+                    "kind": (kind if kind in _SPELL_KINDS else None),
+                    "reason": reason or None,
                 })
             else:
-                spell.append({"flagged": False, "suggestion": None})
+                spell.append(_clean_spell())
     if len(spell) < len(lines):
-        spell += [{"flagged": False, "suggestion": None}] * (
-            len(lines) - len(spell))
+        spell += [_clean_spell() for _ in range(len(lines) - len(spell))]
     spell = spell[:len(lines)]
 
     return {"translations": out, "spell": spell,
@@ -329,7 +367,8 @@ def save_cache(insp_dir: str, rows: List[dict],
 def translate_table(insp_dir: str, rows: List[dict]) -> dict:
     """
     Attach an ``en`` field and an advisory ``ai_spell`` field
-    ({"flagged": bool, "suggestion": str|None}) to each row, using cache
+    ({"flagged": bool, "suggestion": str|None, "kind": str|None,
+    "reason": str|None}) to each row, using cache
     when the source text is unchanged. ``ai_spell`` is purely informational
     — it never affects the deterministic ``status``/verdict already set
     by ``build_table``. Returns
@@ -350,7 +389,7 @@ def translate_table(insp_dir: str, rows: List[dict]) -> dict:
     if not is_enabled():
         for r in rows:
             r["en"] = ""
-            r["ai_spell"] = {"flagged": False, "suggestion": None}
+            r["ai_spell"] = _clean_spell()
         return {"rows": rows, "translated": False, "ai_spell_available": False,
                 "note": "ยังไม่ได้ตั้งค่า N8N_TRANSLATE_WEBHOOK_URL — "
                         "แสดงข้อความและคำแนะนำการสะกดได้ แต่ยังไม่มีคำแปล"}
@@ -365,7 +404,7 @@ def translate_table(insp_dir: str, rows: List[dict]) -> dict:
     if not en or not any(t.strip() for t in en):
         for r in rows:
             r["en"] = ""
-            r["ai_spell"] = {"flagged": False, "suggestion": None}
+            r["ai_spell"] = _clean_spell()
         return {"rows": rows, "translated": False, "ai_spell_available": False,
                 "note": "เรียกบริการแปลไม่สำเร็จ — แสดงเฉพาะข้อความต้นฉบับ"}
 
