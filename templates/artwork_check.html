@@ -10,9 +10,15 @@
 
   /* minmax(0,…) + min-width:0 กันรูป preview ที่ซูม (max-width:none) ดันคอลัมน์ซ้าย
      ให้กว้างเกิน track จนไปเบียดกรอบ ② — การซูมจะ scroll อยู่ใน .aw-stage-box เท่านั้น */
-  .aw-grid   { display:grid; grid-template-columns: minmax(0,7fr) minmax(0,5fr); gap:20px; }
+  .aw-grid   { display:grid; grid-template-columns: minmax(0,7fr) minmax(0,5fr); gap:20px;
+               transition: grid-template-columns .25s ease; }
   .aw-grid > .aw-panel { min-width:0; }
   @media (max-width: 1000px) { .aw-grid { grid-template-columns: minmax(0,1fr); } }
+  /* หลังมีผลตรวจ/ตารางข้อมูลแล้ว สลับให้ฝั่งขวา (ผลตรวจ) กว้างขึ้นอ่านตารางสะดวก
+     — scope เฉพาะจอกว้าง (>1000px); จอแคบ grid ยุบเป็น 1 คอลัมน์อยู่แล้ว */
+  @media (min-width: 1001px) {
+    .aw-grid.results-wide { grid-template-columns: minmax(0,5fr) minmax(0,7fr); }
+  }
 
   .aw-panel  { background:#fff; border:1px solid #e3e7ec; border-radius:8px; padding:16px 18px; }
   .aw-panel h3 { margin:0 0 12px 0; font-size:16px; color:#0d47a1; }

@@ -333,6 +333,13 @@
   const previewImg = $("awPreviewImg");
   const propsBox = $("awProps");
   const resultBox = $("awResult");
+  // Give the right (results) panel more width once real result/table data
+  // exists; keep the editing-favored 7/5 while the user is still placing
+  // zones. Toggled true after inspect/translate, false on a new upload.
+  const awGrid = document.querySelector(".aw-grid");
+  function setResultsWide(wide) {
+    if (awGrid) awGrid.classList.toggle("results-wide", !!wide);
+  }
   function setBusy(b) {
     busy = b;
     ["awInspect", "awAddZone", "awClearZones", "awRedetect",
@@ -345,6 +352,7 @@
   fileInput.addEventListener("change", async () => {
     const f = fileInput.files[0];
     if (!f) return;
+    setResultsWide(false);   // new file → back to zone-editing layout
     resultBox.innerHTML =
       '<div class="aw-empty"><span class="aw-spin"></span>กำลังเปิดไฟล์และเสนอโซน…</div>';
     try {
@@ -704,6 +712,7 @@
       showTabs(true);
       switchTab("result");
       resetTextTab();
+      setResultsWide(true);   // results exist → widen the results panel
     } catch (e) {
       resultBox.innerHTML = '<div class="aw-empty">ตรวจไม่สำเร็จ: ' + esc(e.message) + "</div>";
     } finally {
@@ -754,6 +763,7 @@
         body: JSON.stringify({ zones: zones, brand: brandInput.value.trim() }),
       });
       renderTextTable(textResult, textTableWrap, onlyIssuesCb.checked);
+      setResultsWide(true);   // table now has data → widen the results panel
       if (textResult.translated)
         textMsg.textContent = textResult.cached ? "✓ แปลแล้ว (จากแคช)" : "✓ แปลเรียบร้อย";
       else
