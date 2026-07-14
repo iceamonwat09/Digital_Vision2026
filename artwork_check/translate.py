@@ -40,11 +40,26 @@ def is_enabled() -> bool:
 
 # ── deterministic spell suggestions (advisory only) ───────────────────
 
+# When a word is in no dictionary, pyspellchecker offers every same-edit
+# distance word. For a real single-answer typo that is a tiny set
+# ("caliddd" -> {calidad}; "Phosphours" -> {phosphorus, phosphors}). For a
+# word the dictionary simply cannot place — a loanword/brand ("Guar",
+# "Samut") or a typo whose fix needs context ("Cude" -> code/cute/cure/
+# crude/rude/... 28 candidates) — it is a large scatter. Showing 3
+# arbitrary scatter words is misleading noise next to the real answer, so
+# dictionary guesses are surfaced ONLY when the candidate set is small
+# enough to be unambiguous; otherwise the reviewer sees just the "not in
+# dictionary" flag (and the advisory AI column). Honors the project rule
+# that the system never guesses a word it isn't confident about.
+_SUGGEST_MAX_DICT_CANDIDATES = 2
+
+
 def _suggest(word: str, vocab: set, consensus: set) -> List[str]:
     """
     Closest known forms of ``word`` from trusted, deterministic sources.
-    Returns [] when nothing close is found — the system never guesses
-    beyond its dictionaries and the user's own approved vocabulary.
+    Returns [] when nothing close/confident is found — the system never
+    guesses beyond its dictionaries and the user's own approved vocabulary,
+    and stays silent when the dictionary offers only an ambiguous scatter.
     """
     lw = word.lower()
     out: List[str] = []
@@ -59,22 +74,29 @@ def _suggest(word: str, vocab: set, consensus: set) -> List[str]:
                 if cand not in out:
                     out.append(cand)
 
-    # 2. dictionary candidates (pyspellchecker, edit-distance based)
+    # 2. dictionary candidates — ONLY when unambiguous. Gather the distinct
+    #    edit-distance candidates across every enabled language; show them
+    #    (ranked by word frequency) only if there are few. A large scatter
+    #    means the dictionary can't tell which is right → suggest nothing.
+    dict_cands: Dict[str, float] = {}
     for c in checks._get_spellcheckers():
         try:
             cands = c.candidates(lw) or set()
         except Exception:
             cands = set()
-        for cand in sorted(cands):
-            if cand.lower() != lw and cand not in out:
+        for cand in cands:
+            if cand.lower() == lw:
+                continue
+            try:
+                freq = c.word_frequency[cand]
+            except Exception:
+                freq = 0
+            dict_cands[cand] = max(dict_cands.get(cand, 0), freq)
+    if 0 < len(dict_cands) <= _SUGGEST_MAX_DICT_CANDIDATES:
+        for cand in sorted(dict_cands, key=lambda w: dict_cands[w],
+                           reverse=True):
+            if cand not in out:
                 out.append(cand)
-        corr = None
-        try:
-            corr = c.correction(lw)
-        except Exception:
-            pass
-        if corr and corr.lower() != lw and corr not in out:
-            out.insert(0, corr)
 
     return out[:3]
 

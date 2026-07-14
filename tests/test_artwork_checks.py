@@ -368,7 +368,25 @@ def test_build_table_flags_unknown_word_with_consensus_suggestion():
     bad = [r for r in rows if "caliddd" in r["src"]][0]
     assert bad["status"] == "spell"
     assert "caliddd" in bad["flagged"]
+    # a confident single-answer typo keeps its dictionary suggestion
     assert "calidad" in bad["suggest"].get("caliddd", [])
+
+
+def test_build_table_drops_scatter_dict_guesses():
+    # "Cude" sits at edit-distance 1 from many unrelated words across
+    # languages (code/cute/cure/crude/rude/...). The dictionary cannot say
+    # which is intended, so the column must FLAG it but suggest nothing —
+    # not the old misleading "aude cade cede". Detection is unchanged.
+    from artwork_check import translate
+    if not checks.spell_layer_available():
+        pytest.skip("pyspellchecker not installed")
+    zones = [_zone("z1", group="")]
+    ocr = [{"zone_id": "z1", "text": "Cude Protein"}]
+    rows = translate.build_table(zones, ocr)
+    bad = [r for r in rows if "Cude" in r["src"]][0]
+    assert bad["status"] == "spell"                 # still flagged
+    assert "Cude" in bad["flagged"]
+    assert bad["suggest"].get("Cude", []) == []     # no scatter guess
 
 
 def test_build_table_respects_vocab():
