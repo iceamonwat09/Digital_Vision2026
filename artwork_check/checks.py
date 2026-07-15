@@ -21,6 +21,7 @@ A defect dict:
 from __future__ import annotations
 
 import re
+import unicodedata
 from collections import Counter
 from typing import Dict, List, Optional
 
@@ -62,20 +63,44 @@ def _norm_flat(s: str) -> str:
 
 _AR_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹", "01234567890123456789")
 
+# Arabic orthographic normalization — the same rule set as the standard
+# Lucene/Elasticsearch ArabicNormalizer. OCR of PRINTED Arabic cannot
+# reliably distinguish these forms (the same photo OCR'd twice returned
+# "انظر" and "أنظر"; one real label spells الصافي/الصافى both ways), so
+# treating them as different letters produces pure false MISMATCH noise.
+_AR_LETTERS = str.maketrans({
+    "أ": "ا", "إ": "ا", "آ": "ا", "ٱ": "ا",   # hamza/madda alef forms → alef
+    "ى": "ي",                                  # alef maqsura → yeh
+    "ة": "ه",                                  # taa marbuta → heh
+    "×": "X",              # multiplication sign ↔ letter x OCR confusion
+})
+# Harakat (short-vowel diacritics U+064B–U+0652), superscript alef
+# (U+0670) and tatweel (U+0640) — decorative in print, OCR reads them
+# in or out at random.
+_AR_MARKS = re.compile("[ً-ْٰـ]")
+
 
 def _norm_key(s: str) -> str:
     """
-    Aggressive comparison key: Arabic-Indic digits → ASCII, uppercase,
-    then keep ONLY letters and digits.
+    Aggressive comparison key: Unicode NFKC (folds full-width forms,
+    ligatures, Arabic presentation forms), Arabic orthography
+    normalized (hamza forms → ا, ى → ي, ة → ه, harakat/tatweel
+    stripped), Arabic-Indic digits → ASCII, uppercase, then keep ONLY
+    letters and digits.
 
     Two OCR passes over the SAME printed text routinely disagree on
     punctuation: "EL - OBOUR – BLOCK" vs "ELOBOUR-BLOCK", "٧٠٪" vs
-    "%٧٠%" (bidi reordering of the percent sign), en-dash vs hyphen.
+    "%٧٠%" (bidi reordering of the percent sign), en-dash vs hyphen —
+    and on Arabic hamza/diacritic marks and CJK full-width Latin.
     Those are transcription noise, not print defects, so comparisons
     fall back to this key. Letter/digit differences — the defects this
-    mode exists to catch — still mismatch ("CALIDDD" ≠ "CALIDAD").
+    mode exists to catch — still mismatch ("CALIDDD" ≠ "CALIDAD",
+    "التخزين" ≠ "التحزين"). European accents are kept (é ≠ e is a real
+    spelling difference on ES/FR labels).
     """
-    s = s.translate(_AR_DIGITS).upper()
+    s = unicodedata.normalize("NFKC", s)
+    s = _AR_MARKS.sub("", s)
+    s = s.translate(_AR_LETTERS).translate(_AR_DIGITS).upper()
     return re.sub(r"[\W_]+", "", s)
 
 
@@ -305,7 +330,63 @@ def _vote_panels(gname: str, panels: List[dict],
                     f"{z.get('label') or z['id']}",
                     reference=m,
                     ref_zone_ids=_ref_ids_for(m, other_zones)))
+
+    # กลุ่ม 2 panel ข้ามไฟล์ (ไฟล์หลัก a + ไฟล์อ้างอิง b) ไม่มีเสียงข้าง
+    # มากให้ตัดสิน — ความต่างจุดเดียวจึงเคยฟ้องซ้ำ 2 ใบ ("พบเฉพาะใน" ทั้ง
+    # สองฝั่ง). จับคู่บรรทัดที่ใกล้เคียงกันเป็น defect เดียว ชี้ที่ไฟล์หลัก
+    # พร้อมข้อความอ้างอิงจากไฟล์อ้างอิง. scope เฉพาะคู่ข้ามไฟล์เท่านั้น —
+    # กลุ่ม 2 panel ภายในไฟล์เดียวพฤติกรรมเดิมทุกอย่าง.
+    if n == 2 and panels[0].get("doc", "a") != panels[1].get("doc", "a"):
+        defects = _pair_cross_doc_extras(gname, panels, defects)
     return defects
+
+
+def _pair_cross_doc_extras(gname: str, panels: List[dict],
+                           defects: List[dict]) -> List[dict]:
+    """Merge complementary found-only defects of a 2-panel cross-file
+    group into single found/reference defects attributed to the primary
+    file. Verdict-neutral: pairs stay MISMATCH_PANELS (critical);
+    unpairable lines keep their original defects."""
+    prim = next(p for p in panels if p.get("doc", "a") == "a")
+    ref = next(p for p in panels if p.get("doc", "a") == "b")
+
+    def found_only(zid):
+        return [d for d in defects
+                if d["class"] == "MISMATCH_PANELS" and d["zone_id"] == zid
+                and d.get("found") and not d.get("reference")]
+
+    a_list, b_list = found_only(prim["id"]), found_only(ref["id"])
+    if not a_list or not b_list:
+        return defects
+
+    pairs = []
+    used_b: set = set()
+    for da in a_list:
+        best, best_d = None, None
+        for idx, db in enumerate(b_list):
+            if idx in used_b:
+                continue
+            d = levenshtein(da["found"].upper(), db["found"].upper())
+            if best_d is None or d < best_d:
+                best, best_d = idx, d
+        if best is not None:
+            db = b_list[best]
+            # เกณฑ์ความใกล้เดียวกับการจับคู่ extra↔missing เดิม
+            if best_d <= max(len(da["found"]), len(db["found"])) // 2:
+                used_b.add(best)
+                pairs.append((da, db))
+    if not pairs:
+        return defects
+
+    drop = {id(d) for pair in pairs for d in pair}
+    out = [d for d in defects if id(d) not in drop]
+    for da, db in pairs:
+        out.append(_defect(
+            "MISMATCH_PANELS", prim["id"],
+            f"กลุ่ม {gname}: ข้อความบนไฟล์หลักไม่ตรงกับไฟล์อ้างอิง (ฉบับเก่า)",
+            found=da["found"], reference=db["found"],
+            ref_zone_ids=[ref["id"]]))
+    return out
 
 
 def _check_zooms(gname: str, zooms: List[dict], panels: List[dict],
@@ -407,8 +488,6 @@ _RE_OZ = re.compile(r"(?<![x×•·*\d.])\s*(\d+(?:\.\d+)?)\s*OZ\b",
                     re.IGNORECASE)
 _RE_G = re.compile(r"\(?\s*(\d+(?:\.\d+)?)\s*G\.?\s*\)?(?![A-Za-z])",
                    re.IGNORECASE)
-_RE_DIGITRUN = re.compile(r"(?<!\d)(\d[\d ]{10,20}\d)(?!\d)")
-
 
 def _decimals(s: str) -> int:
     return len(s.split(".")[1]) if "." in s else 0
@@ -483,15 +562,31 @@ def check_numbers(zones: List[dict], texts: Dict[str, str]) -> List[dict]:
                         found=f"{g_s} g",
                         reference=f"{oz_s} OZ = {calc_g:.1f} g"))
 
-        # barcode human-readable digits → check digit
-        for run in _RE_DIGITRUN.findall(text):
-            digits = run.replace(" ", "")
-            if len(digits) in (12, 13, 14) and not gs1_check_digit_ok(digits):
-                defects.append(_defect(
-                    "NUMBER_FAIL", zid,
-                    f"เลขบาร์โค้ด {digits} check digit ไม่ถูกต้อง "
-                    f"(ตามสูตร GS1 mod-10)",
-                    found=digits))
+        # barcode human-readable digits → check digit.
+        # EAN-13 พิมพ์หลักแรกแยกไว้ที่โคนบาร์โค้ด — OCR ของบาร์โค้ดแนวตั้ง
+        # จึงมักได้ "9" กับอีก 12 หลักเป็นคนละ run. ก่อนฟ้อง จึงลองต่อ run
+        # เลขที่อยู่ติดกันในโซนเดียวกัน: ถ้าคอมโบใด check digit ผ่าน แปลว่า
+        # เป็นบาร์โค้ดถูกที่ถูก OCR ตัดแยก ไม่ใช่เลขผิด (deterministic —
+        # ทดสอบ segmentation ทางเลือก ไม่ใช่การเดาเลขใหม่).
+        seqs = [m.replace(" ", "")
+                for m in re.findall(r"\d[\d ]*\d|\d", text)]
+        for i, digits in enumerate(seqs):
+            if len(digits) not in (12, 13, 14) or gs1_check_digit_ok(digits):
+                continue
+            joined_ok = False
+            for j in (i - 1, i + 1):
+                if 0 <= j < len(seqs):
+                    for combo in (seqs[j] + digits, digits + seqs[j]):
+                        if (len(combo) in (12, 13, 14)
+                                and gs1_check_digit_ok(combo)):
+                            joined_ok = True
+            if joined_ok:
+                continue
+            defects.append(_defect(
+                "NUMBER_FAIL", zid,
+                f"เลขบาร์โค้ด {digits} check digit ไม่ถูกต้อง "
+                f"(ตามสูตร GS1 mod-10)",
+                found=digits))
     return defects
 
 
@@ -501,6 +596,10 @@ _RE_WORD = re.compile(
     r"[A-Za-zÀ-ÖØ-öø-ÿЀ-ӿ؀-ۿ]+"
     r"(?:['’][A-Za-zÀ-ÖØ-öø-ÿЀ-ӿ؀-ۿ]+)?"
 )
+
+# URL/technical tokens ที่ _RE_WORD ตัดออกมาจากที่อยู่เว็บ/อีเมลบนฉลาก —
+# ไม่ใช่คำสะกด ไม่ควรฟ้อง SPELL_FAIL (เช่น "https" จาก https://…)
+_SPELL_STOPLIST = {"http", "https", "www", "mailto"}
 
 _spellcheckers: Optional[list] = None
 
@@ -549,6 +648,8 @@ def check_spelling(zones: List[dict], texts: Dict[str, str],
             if len(word) < config.SPELL_MIN_WORD_LEN:
                 continue
             lw = word.lower()
+            if lw in _SPELL_STOPLIST:
+                continue
             if lw in vocab:
                 continue
             if any(ch.isdigit() for ch in word):

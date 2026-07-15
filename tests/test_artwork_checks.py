@@ -827,3 +827,147 @@ def test_composable_fragment_rules():
     # อักษรจีนตัวเดียวเป็นชิ้นได้ / ละตินตัวเดียวไม่ได้
     assert _composable_from("品名", ["品", "名"])
     assert not _composable_from("AB", ["A", "B"])
+
+
+# ── Arabic orthography normalization (เคสจริง: ฉลาก John West อาหรับ) ──
+
+_AR_BASE = """المكونات: تونا، زيت دوار الشمس، ماء، ملح.
+شروط التخزين: يحفظ في مكان جاف بارد وجيد التهوية.
+تاريخ الإنتاج والانتهاء: انظر العبوة.
+الوزن الصافي: 170 جم الوزن المصفى: 120 جم
+Ingredients: Tuna, Sunflower Oil, Water, Salt.
+Produced in Thailand
+NET WEIGHT 170g DRAINED WEIGHT 120g"""
+
+
+def _cross_zones():
+    return [dict(_zone("z1"), doc="a"), dict(_zone("b1"), doc="b")]
+
+
+def _mm(texts):
+    return [d for d in check_group_consistency(_cross_zones(), texts)
+            if d["class"].startswith("MISMATCH")]
+
+
+def test_arabic_hamza_variance_forgiven():
+    """รูปเดียวกัน OCR ได้ انظر/أنظر (ا vs أ) — transcription noise."""
+    assert _mm({"z1": _AR_BASE,
+                "b1": _AR_BASE.replace("انظر", "أنظر")}) == []
+
+
+def test_arabic_maqsura_variance_forgiven():
+    """ى/ي — ฉลากจริงยังสะกดปนกันเองบนใบเดียว (الصافي/الصافى)."""
+    assert _mm({"z1": _AR_BASE,
+                "b1": _AR_BASE.replace("الصافي", "الصافى")}) == []
+
+
+def test_arabic_harakat_variance_forgiven():
+    assert _mm({"z1": _AR_BASE,
+                "b1": _AR_BASE.replace("تونا", "تُونا")}) == []
+
+
+def test_fullwidth_variance_forgiven():
+    assert _mm({"z1": _AR_BASE,
+                "b1": _AR_BASE.replace("NET WEIGHT 170g",
+                                       "ＮＥＴ ＷＥＩＧＨＴ １７０ｇ")}) == []
+
+
+def test_arabic_real_letter_typo_still_flagged():
+    """خ→ح คือตัวอักษรคนละตัวจริง — normalize ต้องไม่กลบ."""
+    assert _mm({"z1": _AR_BASE,
+                "b1": _AR_BASE.replace("التخزين", "التحزين")})
+
+
+def test_arabic_real_word_missing_still_flagged():
+    assert _mm({"z1": _AR_BASE,
+                "b1": _AR_BASE.replace("ماء، ملح", "ملح")})
+
+
+def test_real_number_diff_still_flagged():
+    assert _mm({"z1": _AR_BASE,
+                "b1": _AR_BASE.replace("170 جم", "190 جم")})
+
+
+def test_latin_accent_still_meaningful():
+    """é ≠ e มีความหมายจริงบนฉลากสเปน/ฝรั่งเศส — ต้องไม่ถูก normalize ทิ้ง."""
+    from artwork_check.checks import _norm_key
+    assert _norm_key("mejoré") != _norm_key("mejore")
+
+
+# ── Barcode: EAN-13 พิมพ์หลักแรกแยกโคนบาร์โค้ด (เคสจริง: ฉลาก AYAM) ──
+
+def _barcode_flags(text):
+    z = [{"id": "z1", "type": "panel", "group": "",
+          "bbox": [0.1, 0.1, 0.2, 0.2]}]
+    return [d for d in check_numbers(z, {"z1": text})
+            if "บาร์โค้ด" in d["message"]]
+
+
+def test_barcode_split_leading_digit_not_flagged():
+    """OCR อ่าน "9" แยกจาก 12 หลักที่เหลือ — 13 หลักรวมกัน valid
+    ต้องไม่ฟ้อง (เดิมตีความ 12 หลักเป็น UPC-A แล้ว FAIL ปลอม)."""
+    assert _barcode_flags("9\n556041641272\nGC (SG) A / 003") == []
+
+
+def test_barcode_split_with_real_bad_digit_still_flagged():
+    assert _barcode_flags("9\n556041641273")
+
+
+def test_barcode_full_bad_check_digit_still_flagged():
+    assert _barcode_flags("9556041641279")
+
+
+def test_barcode_full_valid_not_flagged():
+    assert _barcode_flags("9556041641272") == []
+
+
+def test_phone_number_run_not_treated_as_barcode():
+    assert _barcode_flags("toll free line: 1800 45 45 457") == []
+
+
+# ── Phase 2: จับคู่ความต่างข้ามไฟล์เป็น defect เดียว (พบ/เทียบกับ) ────
+
+def test_cross_doc_pair_merges_to_single_defect():
+    a = "HIDDEN BAY\nSKIPJAK TUNA\nPACKED IN WATER"    # ไฟล์หลัก (typo)
+    b = "HIDDEN BAY\nSKIPJACK TUNA\nPACKED IN WATER"   # ไฟล์อ้างอิง
+    mm = _mm({"z1": a, "b1": b})
+    assert len(mm) == 1
+    assert mm[0]["zone_id"] == "z1"                     # ชี้ไฟล์หลัก
+    assert mm[0]["found"] == "SKIPJAK TUNA"
+    assert mm[0]["reference"] == "SKIPJACK TUNA"
+    assert mm[0]["ref_zone_ids"] == ["b1"]
+
+
+def test_same_doc_two_panel_behavior_unchanged():
+    """กลุ่ม 2 panel ภายในไฟล์เดียว — ยังฟ้องแยก 2 ใบตามพฤติกรรมเดิม."""
+    zones = [_zone("z1"), _zone("z2")]
+    texts = {"z1": "HIDDEN BAY\nSKIPJAK TUNA",
+             "z2": "HIDDEN BAY\nSKIPJACK TUNA"}
+    mm = [d for d in check_group_consistency(zones, texts)
+          if d["class"] == "MISMATCH_PANELS"]
+    assert len(mm) == 2
+
+
+def test_cross_doc_unrelated_lines_not_paired():
+    mm = _mm({"z1": "HIDDEN BAY\nTOTALLY DIFFERENT LINE",
+              "b1": "HIDDEN BAY\nANOTHER THING HERE XYZ"})
+    assert len(mm) == 2
+
+
+# ── Phase 3: spell stoplist ────────────────────────────────────────────
+
+@pytest.mark.skipif(not checks.spell_layer_available(),
+                    reason="pyspellchecker not installed")
+def test_spell_skips_url_tokens():
+    zones = [_zone("z1", group="")]
+    texts = {"z1": "Visit https://www.example.com for details"}
+    words = [d["found"] for d in checks.check_spelling(zones, texts)]
+    assert "https" not in words and "www" not in words
+
+
+# ── ตัวอักษรเว้นช่อง O P E N (ภาพจริง: OPEN & EAT) ────────────────────
+
+def test_letter_spaced_caps_split_lines_forgiven():
+    merged = "OPEN & EAT\non SANDWICH, TACO or WRAP"
+    split = "O\nP\nE\nN\n&\nE\nA\nT\non SANDWICH, TACO or WRAP"
+    assert _mm({"z1": merged, "b1": split}) == []
