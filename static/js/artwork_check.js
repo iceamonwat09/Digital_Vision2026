@@ -51,19 +51,34 @@
     html += "</div>";
 
     // ── 2 รูปเคียงกัน: Artwork ต้นฉบับ + ผลตรวจ (overlay) ──────────
+    // เมื่อ has_ref (เทียบข้ามไฟล์) เพิ่มคู่รูปของ 🅱 ไฟล์อ้างอิงอีกแถว
     const ts = Date.now();
+    const hasRef = !!rep.has_ref;
+    function imgPairHtml(prevUrl, ovUrl, tagP, tagO, refCls) {
+      return '<div class="aw-img-pair">' +
+        '<div class="aw-img-card">' +
+          '<div class="aw-img-label' + (refCls ? " ref-label" : "") + '">' + tagP +
+            ' <span style="font-weight:400;opacity:.7;">(คลิกขยาย)</span></div>' +
+          '<img src="' + prevUrl + '" alt="artwork preview" class="aw-zoomable" data-caption="' + tagP + '" data-src="' + prevUrl + '">' +
+        '</div>' +
+        '<div class="aw-img-card">' +
+          '<div class="aw-img-label overlay-label">' + tagO +
+            ' <span style="font-weight:400;opacity:.7;">(คลิกขยาย)</span></div>' +
+          '<img src="' + ovUrl + '" alt="overlay" class="aw-zoomable" data-caption="' + tagO + '" data-src="' + ovUrl + '">' +
+        '</div>' +
+      '</div>';
+    }
     const previewUrl = "/api/artwork/" + esc(rep.id) + "/preview.png?t=" + ts;
     const overlayUrl = "/api/artwork/" + esc(rep.id) + "/overlay.png?t=" + ts;
-    html += '<div class="aw-img-pair">' +
-      '<div class="aw-img-card">' +
-        '<div class="aw-img-label">🖼 Artwork ต้นฉบับ <span style="font-weight:400;opacity:.7;">(คลิกขยาย)</span></div>' +
-        '<img src="' + previewUrl + '" alt="artwork preview" class="aw-zoomable" data-caption="Artwork ต้นฉบับ" data-src="' + previewUrl + '">' +
-      '</div>' +
-      '<div class="aw-img-card">' +
-        '<div class="aw-img-label overlay-label">🔍 ผลตรวจ — โซนที่พบปัญหา <span style="font-weight:400;opacity:.7;">(คลิกขยาย)</span></div>' +
-        '<img src="' + overlayUrl + '" alt="overlay" class="aw-zoomable" data-caption="ผลตรวจ (Overlay)" data-src="' + overlayUrl + '">' +
-      '</div>' +
-    '</div>';
+    html += imgPairHtml(previewUrl, overlayUrl,
+      (hasRef ? "🅰 " : "") + "🖼 Artwork ต้นฉบับ",
+      (hasRef ? "🅰 " : "") + "🔍 ผลตรวจ — โซนที่พบปัญหา", false);
+    if (hasRef) {
+      const previewUrlB = "/api/artwork/" + esc(rep.id) + "/preview_b.png?t=" + ts;
+      const overlayUrlB = "/api/artwork/" + esc(rep.id) + "/overlay_b.png?t=" + ts;
+      html += imgPairHtml(previewUrlB, overlayUrlB,
+        "🅱 ไฟล์อ้างอิง (ฉบับเก่า)", "🅱 ผลตรวจ — โซนที่พบปัญหา", true);
+    }
 
     const zoneById = {};
     (rep.zones || []).forEach((z) => { zoneById[z.id] = z; });
@@ -85,13 +100,17 @@
         if (d.reference) html += ' &nbsp;เทียบกับ: <span class="ref">' + esc(d.reference) + "</span>";
 
         // ── 2-crop comparison (auto-load ทันที ไม่ต้องคลิก) ───────────
+        // crop ต้องดึงจากไฟล์ของโซนนั้นเอง (doc a/b) — report เก่าไม่มี
+        // field doc → เป็น "a" เหมือนเดิม
+        const docOf = (zz) => (zz.doc === "b" ? "b" : "a");
+        const docTag = (zz) => (hasRef ? (docOf(zz) === "b" ? "🅱 " : "🅰 ") : "");
         if (z && refZ) {
-          const qA = "x=" + z.bbox[0] + "&y=" + z.bbox[1] + "&w=" + z.bbox[2] + "&h=" + z.bbox[3];
-          const qB = "x=" + refZ.bbox[0] + "&y=" + refZ.bbox[1] + "&w=" + refZ.bbox[2] + "&h=" + refZ.bbox[3];
+          const qA = "x=" + z.bbox[0] + "&y=" + z.bbox[1] + "&w=" + z.bbox[2] + "&h=" + z.bbox[3] + "&doc=" + docOf(z);
+          const qB = "x=" + refZ.bbox[0] + "&y=" + refZ.bbox[1] + "&w=" + refZ.bbox[2] + "&h=" + refZ.bbox[3] + "&doc=" + docOf(refZ);
           const cropA = "/api/artwork/" + esc(rep.id) + "/crop?" + qA;
           const cropB = "/api/artwork/" + esc(rep.id) + "/crop?" + qB;
-          const labelA = d.zone_id + (z.label ? " · " + z.label : "");
-          const labelB = refZ.id + (refZ.label ? " · " + refZ.label : "") + " (อ้างอิง)";
+          const labelA = docTag(z) + d.zone_id + (z.label ? " · " + z.label : "");
+          const labelB = docTag(refZ) + refZ.id + (refZ.label ? " · " + refZ.label : "") + " (อ้างอิง)";
           html += '<div class="aw-img-pair" style="margin-top:8px;">' +
             '<div class="aw-img-card">' +
               '<div class="aw-img-label overlay-label">⚠ ' + esc(labelA) + '</div>' +
@@ -106,9 +125,9 @@
           '</div>';
         } else if (z) {
           // fallback: แค่โซนเดียว (ไม่มี ref zone)
-          const q = "x=" + z.bbox[0] + "&y=" + z.bbox[1] + "&w=" + z.bbox[2] + "&h=" + z.bbox[3];
+          const q = "x=" + z.bbox[0] + "&y=" + z.bbox[1] + "&w=" + z.bbox[2] + "&h=" + z.bbox[3] + "&doc=" + docOf(z);
           const cropUrl = "/api/artwork/" + esc(rep.id) + "/crop?" + q;
-          const caption = d.zone_id + (z.label ? " · " + z.label : "");
+          const caption = docTag(z) + d.zone_id + (z.label ? " · " + z.label : "");
           html += '<div style="margin-top:8px;">' +
             '<img src="' + esc(cropUrl) + '" alt="crop"' +
               ' class="aw-zoomable" data-src="' + esc(cropUrl) + '" data-caption="' + esc(caption) + '"' +
@@ -321,18 +340,47 @@
 
   // ── state ──────────────────────────────────────────────────────────
   let inspectionId = null;
-  let zones = [];            // [{id,type,group,bbox:[x,y,w,h],label}]
+  let zones = [];            // [{id,type,group,bbox:[x,y,w,h],label,doc}]
   let selectedId = null;
-  let natW = 0, natH = 0;    // preview natural size
+  let natW = 0, natH = 0;    // preview natural size (ของ doc ที่แสดงอยู่)
   let zoomPct = 100;
   let busy = false;
+  // cross-file compare: doc "a" = ไฟล์หลัก (ค่าเริ่มต้น — โหมดไฟล์เดียว
+  // ทำงานเหมือนเดิมทุกอย่าง), doc "b" = ไฟล์อ้างอิง (ฉบับเก่า) ที่ opt-in
+  let activeDoc = "a";
+  let refAttached = false;
+  const docMeta = { a: null, b: null };   // {w, h, url} ต่อ doc
 
   // ── dom ────────────────────────────────────────────────────────────
   const fileInput = $("awFile"), brandInput = $("awBrand");
+  const fileInputB = $("awFileB");
   const stage = $("awStage"), stageEmpty = $("awStageEmpty");
   const previewImg = $("awPreviewImg");
   const propsBox = $("awProps");
   const resultBox = $("awResult");
+  const docTabs = $("awDocTabs");
+
+  const docOfZone = (z) => (z.doc === "b" ? "b" : "a");
+
+  function updateDocTabs() {
+    docTabs.style.display = refAttached ? "" : "none";
+    $("awDocTabA").classList.toggle("active-a", activeDoc === "a");
+    $("awDocTabB").classList.toggle("active-b", activeDoc === "b");
+  }
+
+  // สลับ stage ไปแสดงไฟล์ a/b (โหมดไฟล์เดียวมีแค่ a และไม่มีแท็บให้กด)
+  function showDoc(doc) {
+    const m = docMeta[doc];
+    if (!m) return;
+    activeDoc = doc;
+    natW = m.w;
+    natH = m.h;
+    cancelDraw();
+    updateDocTabs();
+    previewImg.src = m.url;   // onload → applyZoom + renderZones
+    if (previewImg.complete) { applyZoom(); renderZones(); }
+  }
+  previewImg.onload = () => { applyZoom(); renderZones(); };
   // Give the right (results) panel more width once real result/table data
   // exists; keep the editing-favored 7/5 while the user is still placing
   // zones. Toggled true after inspect/translate, false on a new upload.
@@ -343,9 +391,10 @@
   function setBusy(b) {
     busy = b;
     ["awInspect", "awAddZone", "awClearZones", "awRedetect",
-     "awTemplateLoad", "awTemplateSave"].forEach((id) => {
+     "awTemplateLoad", "awTemplateSave", "awRefToggle"].forEach((id) => {
       $(id).disabled = b || !inspectionId;
     });
+    fileInputB.disabled = b;
   }
 
   // ── upload ─────────────────────────────────────────────────────────
@@ -361,22 +410,26 @@
       const res = await api("/api/artwork/upload", { method: "POST", body: fd });
       inspectionId = res.id;
       zones = res.zones || [];
-      natW = res.preview_size[0];
-      natH = res.preview_size[1];
       selectedId = null;
       cancelDraw();
+      // ไฟล์หลักใหม่ = inspection record ใหม่ → สถานะไฟล์อ้างอิงเดิมหลุด
+      // (ถ้าผู้ใช้ยังเลือกไฟล์ 🅱 ค้างไว้ จะผูกกับ record ใหม่ให้อัตโนมัติด้านล่าง)
+      docMeta.a = { w: res.preview_size[0], h: res.preview_size[1],
+                    url: "/api/artwork/" + inspectionId + "/preview.png?t=" + Date.now() };
+      docMeta.b = null;
+      refAttached = false;
       // Show the result tabs right after upload so the "ข้อความ + คำแปล" tab
       // can be used WITHOUT first pressing "ส่งตรวจสอบ" (OCR-only advisory).
       showTabs(true);
       switchTab("result");
       resetTextTab();
-      previewImg.src = "/api/artwork/" + inspectionId + "/preview.png?t=" + Date.now();
-      previewImg.onload = () => { applyZoom(); renderZones(); };
+      showDoc("a");
       stage.style.display = "inline-block";
       stageEmpty.style.display = "none";
       $("awZoomBar").style.display = "";
       setBusy(false);
       resultBox.innerHTML = '<div class="aw-empty">ปรับโซนแล้วกด "ส่งตรวจสอบ"</div>';
+      if (fileInputB.files[0]) await uploadRef(false);
 
       const warns = [];
       if (res.has_text_layer)
@@ -391,6 +444,62 @@
     } catch (e) {
       resultBox.innerHTML = '<div class="aw-empty">เปิดไฟล์ไม่สำเร็จ: ' + esc(e.message) + "</div>";
     }
+  });
+
+  // ── cross-file compare: แนบ/ถอดไฟล์อ้างอิง (ฉบับเก่า) + แท็บ a/b ────
+  async function uploadRef(switchToB) {
+    const f = fileInputB.files[0];
+    if (!f) return;
+    if (!inspectionId) {
+      alert("เลือกไฟล์หลัก (🅰) ก่อน แล้วจึงแนบไฟล์อ้างอิง");
+      fileInputB.value = "";
+      return;
+    }
+    setBusy(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", f);
+      const res = await api("/api/artwork/" + inspectionId + "/upload_ref",
+                            { method: "POST", body: fd });
+      docMeta.b = { w: res.preview_size[0], h: res.preview_size[1],
+                    url: "/api/artwork/" + inspectionId + "/preview_b.png?t=" + Date.now() };
+      refAttached = true;
+      // โซนฝั่ง b เดิม (จากไฟล์อ้างอิงก่อนหน้า) แทนที่ด้วยข้อเสนอชุดใหม่
+      zones = zones.filter((z) => docOfZone(z) !== "b").concat(res.zones || []);
+      selectedId = null;
+      updateDocTabs();
+      if (switchToB !== false) showDoc("b"); else renderZones();
+    } catch (e) {
+      alert("เปิดไฟล์อ้างอิงไม่สำเร็จ: " + e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  fileInputB.addEventListener("change", () => uploadRef(true));
+
+  $("awRefToggle").addEventListener("click", () => {
+    $("awRefToggleRow").style.display = "none";
+    $("awRefUploadRow").style.display = "";
+  });
+
+  $("awRefRemove").addEventListener("click", () => {
+    const bCount = zones.filter((z) => docOfZone(z) === "b").length;
+    if (bCount &&
+        !confirm("เอาไฟล์อ้างอิงออก และลบโซนฝั่งอ้างอิง " + bCount + " โซน?")) return;
+    fileInputB.value = "";
+    zones = zones.filter((z) => docOfZone(z) !== "b");
+    refAttached = false;
+    docMeta.b = null;
+    selectedId = null;
+    $("awRefUploadRow").style.display = "none";
+    $("awRefToggleRow").style.display = "";
+    if (docMeta.a) showDoc("a");
+    else { activeDoc = "a"; updateDocTabs(); renderZones(); }
+  });
+
+  $("awDocTabA").addEventListener("click", () => { if (activeDoc !== "a") showDoc("a"); });
+  $("awDocTabB").addEventListener("click", () => {
+    if (activeDoc !== "b" && refAttached) showDoc("b");
   });
 
   // ── zoom ───────────────────────────────────────────────────────────
@@ -442,12 +551,21 @@
   function dispH() { return previewImg.clientHeight || natH; }
 
   // ── zone rendering / editing ───────────────────────────────────────
+  // โซนที่มีคู่ group อยู่บนอีกไฟล์หนึ่ง (เทียบข้ามไฟล์)
+  function hasCrossPair(z) {
+    return !!z.group && zones.some((o) =>
+      o.id !== z.id && o.group === z.group && docOfZone(o) !== docOfZone(z));
+  }
+
   function renderZones() {
     stage.querySelectorAll(".aw-zone").forEach((el) => el.remove());
     const W = dispW(), H = dispH();
-    zones.forEach((z) => {
+    // แสดงเฉพาะโซนของไฟล์ที่ stage กำลังแสดง (โหมดไฟล์เดียว = doc a ทั้งหมด)
+    zones.filter((z) => docOfZone(z) === activeDoc).forEach((z) => {
       const el = document.createElement("div");
-      el.className = "aw-zone t-" + z.type + (z.id === selectedId ? " selected" : "");
+      el.className = "aw-zone t-" + z.type +
+        (docOfZone(z) === "b" ? " doc-b" : "") +
+        (z.id === selectedId ? " selected" : "");
       el.dataset.zid = z.id;
       el.style.left = (z.bbox[0] * W) + "px";
       el.style.top = (z.bbox[1] * H) + "px";
@@ -456,7 +574,8 @@
       const tag = document.createElement("div");
       tag.className = "aw-zone-tag";
       tag.textContent = z.id + (z.group ? " [" + z.group + "]" : "") +
-        (z.type !== "panel" ? " " + z.type : "");
+        (z.type !== "panel" ? " " + z.type : "") +
+        (hasCrossPair(z) ? " ⇄" : "");
       el.appendChild(tag);
       const handle = document.createElement("div");
       handle.className = "aw-handle";
@@ -479,7 +598,7 @@
       const res = await api("/api/artwork/" + inspectionId + "/snap", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ bbox: z.bbox }),
+        body: JSON.stringify({ bbox: z.bbox, doc: docOfZone(z) }),
       });
       if (res.bbox && res.bbox.length === 4) {
         z.bbox = res.bbox;
@@ -543,6 +662,23 @@
     $("awPropType").value = z.type;
     $("awPropGroup").value = z.group || "";
     $("awPropLabel").value = z.label || "";
+    // badge บอกว่าโซนอยู่ไฟล์ไหน + จับคู่ข้ามไฟล์กับใคร (เฉพาะตอนเทียบ 2 ไฟล์)
+    const pd = $("awPropDoc"), pp = $("awPropPair");
+    if (refAttached) {
+      const doc = docOfZone(z);
+      pd.style.display = "";
+      pd.className = "aw-doc-badge " + (doc === "b" ? "doc-b" : "doc-a");
+      pd.textContent = doc === "b" ? "🅱 ฉบับเก่า" : "🅰 ไฟล์หลัก";
+      const partners = z.group
+        ? zones.filter((o) => o.id !== z.id && o.group === z.group &&
+                              docOfZone(o) !== doc).map((o) => o.id)
+        : [];
+      pp.textContent = partners.length
+        ? "⇄ เทียบข้ามไฟล์กับ " + partners.join(", ") : "";
+    } else {
+      pd.style.display = "none";
+      pp.textContent = "";
+    }
   }
   $("awPropType").addEventListener("change", () => {
     const z = selectedZone(); if (z) { z.type = $("awPropType").value; renderZones(); }
@@ -624,13 +760,15 @@
     setDrawMode(false);
     if (q.w < 8 || q.h < 8) return;   // คลิกเฉยๆ/กรอบจิ๋ว = ยกเลิก
     const W = dispW(), H = dispH();
+    // โซนใหม่เป็นของไฟล์ที่ stage กำลังแสดง — id ฝั่งอ้างอิงขึ้นต้น b กันชน
+    const prefix = activeDoc === "b" ? "b" : "z";
     let n = zones.length + 1;
-    while (zones.some((z) => z.id === "z" + n)) n++;
+    while (zones.some((z) => z.id === prefix + n)) n++;
     const z = {
-      id: "z" + n, type: "panel", group: "",
+      id: prefix + n, type: "panel", group: "", doc: activeDoc,
       bbox: [q.x / W, q.y / H, q.w / W, q.h / H]
         .map((v) => Math.round(v * 1e5) / 1e5),
-      label: "โซน " + n,
+      label: (activeDoc === "b" ? "อ้างอิง " : "โซน ") + n,
     };
     zones.push(z);
     selectedId = z.id;
@@ -642,10 +780,19 @@
   });
 
   // ── clear all zones ────────────────────────────────────────────────
+  // โหมดไฟล์เดียว: ลบทั้งหมดเหมือนเดิม / โหมดเทียบ 2 ไฟล์: ลบเฉพาะโซนของ
+  // ไฟล์ที่กำลังแสดง (กันลบโซนอีกไฟล์ที่มองไม่เห็นโดยไม่ตั้งใจ)
   $("awClearZones").addEventListener("click", () => {
-    if (busy || !zones.length) return;
-    if (!confirm("ลบโซนทั้งหมด " + zones.length + " โซน?")) return;
-    zones = [];
+    if (busy) return;
+    const scoped = refAttached
+      ? zones.filter((z) => docOfZone(z) === activeDoc) : zones;
+    if (!scoped.length) return;
+    const what = refAttached
+      ? (activeDoc === "b" ? "ของ 🅱 ไฟล์อ้างอิง" : "ของ 🅰 ไฟล์หลัก")
+      : "ทั้งหมด";
+    if (!confirm("ลบโซน" + what + " " + scoped.length + " โซน?")) return;
+    zones = refAttached
+      ? zones.filter((z) => docOfZone(z) !== activeDoc) : [];
     selectedId = null;
     cancelDraw();
     renderZones();
@@ -677,6 +824,10 @@
       zones = res.zones || [];
       selectedId = null;
       renderZones();
+      const bCount = zones.filter((z) => docOfZone(z) === "b").length;
+      if (bCount && !refAttached)
+        alert("template นี้มีโซนของ 🅱 ไฟล์อ้างอิง " + bCount + " โซน — " +
+              "แนบไฟล์อ้างอิง (ฉบับเก่า) ก่อนจึงจะเห็น/แก้ไข/ส่งตรวจโซนเหล่านั้นได้");
     } catch (e) { alert("โหลด template ไม่สำเร็จ: " + e.message); }
   });
   $("awTemplateSave").addEventListener("click", async () => {
@@ -698,6 +849,12 @@
   $("awInspect").addEventListener("click", async () => {
     if (!inspectionId || busy) return;
     if (!zones.length) { alert("ต้องมีอย่างน้อย 1 โซน"); return; }
+    // โซนฝั่งไฟล์อ้างอิงค้างอยู่ (เช่นจาก template) แต่ยังไม่ได้แนบไฟล์
+    if (!refAttached && zones.some((z) => docOfZone(z) === "b")) {
+      alert("มีโซนของ 🅱 ไฟล์อ้างอิง (ฉบับเก่า) แต่ยังไม่ได้แนบไฟล์อ้างอิง — " +
+            "แนบไฟล์ หรือลบโซนเหล่านั้นก่อนส่งตรวจ");
+      return;
+    }
     setBusy(true);
     resultBox.innerHTML =
       '<div class="aw-empty"><span class="aw-spin"></span>กำลัง OCR ทีละโซนและตรวจทุกชั้น — ' +

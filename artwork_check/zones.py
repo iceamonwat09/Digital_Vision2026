@@ -11,8 +11,17 @@ A zone is a dict:
                                      # cross-compared (majority voting);
                                      # "" = standalone zone
       "bbox":  [x, y, w, h],         # normalized 0..1 page coordinates
-      "label": "SIDE 1"              # free text for the human
+      "label": "SIDE 1",             # free text for the human
+      "doc":   "a" | "b"             # which uploaded file the zone lives
+                                     # on: "a" = primary artwork (default,
+                                     # the only doc before the cross-file
+                                     # compare feature), "b" = optional
+                                     # reference file (ฉบับเก่า)
     }
+
+Zones from doc "a" and doc "b" sharing a ``group`` are compared by the
+same majority-vote / zoom-reference logic in ``checks.py`` — the check
+layers never look at ``doc``, only at the text keyed by zone id.
 
 Auto-proposal only has to be *good enough to adjust*, not perfect — the
 UI lets the user move/resize/retype every box, and the layout can be
@@ -208,12 +217,19 @@ def sanitize_zones(raw) -> List[dict]:
             raise ValueError(f"zone {zid}: bbox out of 0..1 range")
         x, y = max(0.0, x), max(0.0, y)
         w, h = min(w, 1.0 - x), min(h, 1.0 - y)
+        # doc: which uploaded file the zone belongs to. Absent (all
+        # payloads/templates from before the cross-file compare feature)
+        # → "a", so the single-file flow is byte-for-byte unchanged.
+        doc = str(z.get("doc", "a") or "a").lower()
+        if doc not in ("a", "b"):
+            raise ValueError(f"zone {zid}: bad doc {doc!r}")
         out.append({
             "id": zid,
             "type": ztype,
             "group": re.sub(r"[^A-Za-z0-9_-]", "", str(z.get("group", "")))[:12],
             "bbox": [round(x, 5), round(y, 5), round(w, 5), round(h, 5)],
             "label": str(z.get("label", ""))[:80],
+            "doc": doc,
         })
     return out
 

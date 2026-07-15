@@ -584,3 +584,106 @@ def test_run_ocr_only_missing_upload_raises(tmp_path, monkeypatch):
         pipeline.run_ocr_only("20260101-000000-abcdef",
                               [{"id": "z1", "type": "panel", "group": "",
                                 "bbox": [0.1, 0.1, 0.2, 0.2]}])
+
+
+# ── Cross-file compare (doc "a" = ไฟล์หลัก, doc "b" = ไฟล์อ้างอิง) ─────
+
+def test_sanitize_zones_doc_field_defaults_and_validates():
+    from artwork_check.zones import sanitize_zones
+
+    # payload เก่า (ไม่มี doc) → "a" เสมอ = พฤติกรรมไฟล์เดียวเดิม
+    out = sanitize_zones([{"id": "z1", "type": "panel", "group": "",
+                           "bbox": [0.1, 0.1, 0.2, 0.2]}])
+    assert out[0]["doc"] == "a"
+
+    out = sanitize_zones([{"id": "b1", "type": "panel", "group": "G",
+                           "bbox": [0.1, 0.1, 0.2, 0.2], "doc": "B"}])
+    assert out[0]["doc"] == "b"          # normalize เป็นตัวเล็ก
+
+    with pytest.raises(ValueError):
+        sanitize_zones([{"id": "z1", "type": "panel", "group": "",
+                         "bbox": [0.1, 0.1, 0.2, 0.2], "doc": "c"}])
+
+
+def test_cross_file_group_voting_ignores_doc():
+    """ชั้นตรวจไม่รู้จักไฟล์ — โซนต่างไฟล์ที่ group เดียวกันถูกเทียบ
+    เหมือน panel ในไฟล์เดียวทุกอย่าง (นี่คือหัวใจของ cross-file compare)."""
+    zones = [dict(_zone("z1"), doc="a"), dict(_zone("z2"), doc="a"),
+             dict(_zone("b1"), doc="b")]
+    texts = {"z1": PANEL_OK, "z2": PANEL_OK, "b1": PANEL_TYPO}
+    defects = check_group_consistency(zones, texts)
+    assert any(d["class"] == "MISMATCH_PANELS" and d["zone_id"] == "b1"
+               for d in defects)
+
+
+def test_cross_file_zoom_reference_attributes_to_primary():
+    """โซนฝั่งไฟล์อ้างอิง (ฉบับเก่า) ตั้ง type=zoom → เป็น "ต้นแบบอ้างอิง"
+    ความผิดถูกชี้ไปที่โซนไฟล์หลัก (ของที่กำลังจะพิมพ์) พร้อม reference."""
+    zones = [dict(_zone("z1"), doc="a"),
+             dict(_zone("b1", ztype="zoom"), doc="b")]
+    texts = {"z1": "¡Para mejor caliddd", "b1": "¡Para mejor calidad!"}
+    defects = check_group_consistency(zones, texts)
+    hits = [d for d in defects if d["class"] == "MISMATCH_ZOOM"]
+    assert hits and hits[0]["zone_id"] == "z1"
+    assert "calidad" in hits[0]["reference"]
+
+
+def test_read_all_docs_routes_each_zone_to_its_own_file(tmp_path, monkeypatch):
+    import os
+    from artwork_check import pipeline, report
+
+    rec_id = "20260101-000000-abc123"
+    monkeypatch.setattr(report.config, "INSPECTIONS_DIR", str(tmp_path))
+    d = report.inspection_dir(rec_id, create=True)
+    for base in ("source.png", "source_b.png"):
+        with open(os.path.join(d, base), "wb") as f:
+            f.write(b"x")
+
+    opened = []
+    monkeypatch.setattr(pipeline, "ArtworkDocument",
+                        lambda path, *a, **k: opened.append(
+                            os.path.basename(path)) or object())
+    monkeypatch.setattr(
+        pipeline.ocr, "read_all_zones",
+        lambda doc, zones: [{"zone_id": z["id"], "text": "T",
+                             "engine": "stub", "conf": None} for z in zones])
+
+    za = [{"id": "z1", "type": "panel", "group": "G",
+           "bbox": [0.1, 0.1, 0.2, 0.2], "doc": "a"}]
+    zb = [{"id": "b1", "type": "panel", "group": "G",
+           "bbox": [0.1, 0.1, 0.2, 0.2], "doc": "b"}]
+    results = pipeline._read_all_docs(d, za, zb)
+    assert [r["zone_id"] for r in results] == ["z1", "b1"]
+    assert opened == ["source.png", "source_b.png"]
+
+    # ไม่มีโซนฝั่ง b → เปิดไฟล์หลักไฟล์เดียว = เส้นทางไฟล์เดียวเดิมเป๊ะ
+    opened.clear()
+    pipeline._read_all_docs(d, za, [])
+    assert opened == ["source.png"]
+
+
+def test_read_all_docs_missing_ref_file_raises(tmp_path, monkeypatch):
+    import os
+    from artwork_check import pipeline, report
+
+    rec_id = "20260101-000000-abc456"
+    monkeypatch.setattr(report.config, "INSPECTIONS_DIR", str(tmp_path))
+    d = report.inspection_dir(rec_id, create=True)
+    with open(os.path.join(d, "source.png"), "wb") as f:
+        f.write(b"x")
+    monkeypatch.setattr(pipeline, "ArtworkDocument", lambda *a, **k: object())
+    monkeypatch.setattr(pipeline.ocr, "read_all_zones", lambda doc, zones: [])
+
+    zb = [{"id": "b1", "type": "panel", "group": "G",
+           "bbox": [0.1, 0.1, 0.2, 0.2], "doc": "b"}]
+    with pytest.raises(ValueError):
+        pipeline._read_all_docs(d, [], zb)
+
+
+def test_zones_signature_includes_doc():
+    """เปลี่ยนไฟล์ของโซน (doc) ต้องทำให้แคช OCR-only ของแท็บแปล invalidate."""
+    from artwork_check import pipeline
+    za = [{"id": "z1", "type": "panel", "group": "",
+           "bbox": [0.1, 0.1, 0.2, 0.2], "doc": "a"}]
+    zb = [dict(za[0], doc="b")]
+    assert pipeline._zones_signature(za) != pipeline._zones_signature(zb)
