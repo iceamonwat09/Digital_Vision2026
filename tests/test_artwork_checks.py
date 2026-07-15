@@ -773,3 +773,57 @@ def test_composable_from_basics():
     assert not _composable_from("AABX", ["AA", "BBB"])
     assert not _composable_from("", ["AA"])
     assert not _composable_from("AA", [])
+
+
+# ── OCR แตกหัวตาราง CJK เป็นตัวอักษรละบรรทัด (เคสจริง: 品 名) ─────────
+
+def test_voting_forgives_cjk_header_split_per_char():
+    """b3 อ่าน "品 名" เป็น 2 บรรทัด ตัวละตัว (แถมสลับลำดับ: 名, 品)
+    ขณะที่ z4 อ่านรวมเป็น "品名" — ต้องไม่ฟ้อง MISMATCH_PANELS."""
+    zones = [dict(_zone("z4"), doc="a"), dict(_zone("b3"), doc="b")]
+    texts = {
+        "z4": "品名\nPuffy帕菲Nee泥泥愛貓肉泥條(雞肉+牛磺酸)\n淨重\n70公克(7公克×10包)",
+        "b3": "名\n品\nPuffy帕菲Nee泥泥愛貓肉泥條(雞肉+牛磺酸)\n淨重\n70公克(7公克×10包)",
+    }
+    defects = check_group_consistency(zones, texts)
+    assert [d for d in defects if d["class"] == "MISMATCH_PANELS"] == []
+
+
+def test_voting_still_flags_cjk_char_order_swap():
+    """ตัวอักษรจีนสลับลำดับจริงในบรรทัดเดียว (品名 vs 名品 โดยไม่ได้แตก
+    เป็นตัวละบรรทัด) = ความต่างจริง ต้องถูกฟ้อง."""
+    zones = [_zone("z1"), _zone("z2")]
+    texts = {"z1": "品名\n淨重70公克", "z2": "名品\n淨重70公克"}
+    defects = check_group_consistency(zones, texts)
+    assert any(d["class"] == "MISMATCH_PANELS" for d in defects)
+
+
+# ── OCR ฉีกเศษท้ายแถวไปแปะบรรทัดอื่น (เคสจริง: ภาพใหญ่ทั้งฉลาก) ───────
+
+def test_voting_forgives_row_tail_glued_to_other_row():
+    """b2 อ่านค่าของแถว Fat (0.2%以上 Min) ไปต่อท้ายแถว Protein
+    ทำให้ทั้งสองฝั่งมีบรรทัดที่หาแบบ "ทั้งบรรทัด" ในอีกฝั่งไม่เจอ —
+    เศษ ≥6 ตัวอักษร 1 ชิ้นต้องถูกยกโทษ."""
+    zones = [dict(_zone("z1"), doc="a"), dict(_zone("b2"), doc="b")]
+    texts = {
+        "z1": ("營養標示分析\n粗蛋白質 Cude Protein 8.0%以上 Min\n"
+               "粗脂肪 Cude Fat 0.2%以上 Min\n灰分 Ash 2.0%以下 Max"),
+        "b2": ("營養標示分析\n粗蛋白質 Cude Protein 8.0%以上 Min 0.2%以上 Min\n"
+               "粗脂肪 Cude Fat\n灰分 Ash 2.0%以下 Max"),
+    }
+    defects = check_group_consistency(zones, texts)
+    assert [d for d in defects if d["class"] == "MISMATCH_PANELS"] == []
+
+
+def test_composable_fragment_rules():
+    from artwork_check.checks import _composable_from
+    lines = ["ABCDEFGH", "XYZ12345"]
+    # ทั้งบรรทัด + เศษยาว 1 ชิ้น → ได้
+    assert _composable_from("ABCDEFGHXYZ123", lines)          # whole + frag(6)
+    # เศษสั้นกว่า 6 → ไม่ได้
+    assert not _composable_from("ABCDEFGHXYZ", lines)         # frag len 3
+    # ต้องใช้เศษ 2 ชิ้น → ไม่ได้ (กัน typo/ค่าสลับแถวถูกกลบ)
+    assert not _composable_from("ABCDEFXYZ123", lines)        # frag(6)+frag(6)
+    # อักษรจีนตัวเดียวเป็นชิ้นได้ / ละตินตัวเดียวไม่ได้
+    assert _composable_from("品名", ["品", "名"])
+    assert not _composable_from("AB", ["A", "B"])

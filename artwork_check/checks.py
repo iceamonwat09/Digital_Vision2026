@@ -85,11 +85,18 @@ def _key_tokens(line: str, min_len: int = 2) -> List[str]:
             if len(t) >= min_len]
 
 
+def _is_cjk_char(p: str) -> bool:
+    """Single CJK ideograph (incl. Ext A + compatibility block)."""
+    return len(p) == 1 and ("㐀" <= p <= "鿿"
+                            or "豈" <= p <= "﫿")
+
+
 def _composable_from(key: str, piece_keys: List[str],
-                     min_piece: int = 2) -> bool:
+                     min_piece: int = 2, frag_min: int = 6) -> bool:
     """
     True when ``key`` can be written as a concatenation of FULL line
-    keys from ``piece_keys``.
+    keys from ``piece_keys`` — plus, AT MOST ONCE, one contiguous
+    fragment (>= ``frag_min`` chars) of one of those lines.
 
     Why: two OCR passes over the SAME printed table routinely disagree
     on line segmentation — one reads a two-column row as ONE line
@@ -100,24 +107,49 @@ def _composable_from(key: str, piece_keys: List[str],
     misses it and a false MISMATCH_PANELS is raised (seen with two
     uploads of the same photo).
 
-    Requiring every segment to be an ENTIRE line elsewhere keeps this
-    strict: a real typo ("SKIPJAKTUNA") or swapped values ("PROTEIN
-    0.2" vs "PROTEIN 8.0") cannot be assembled from whole lines of the
-    correct text, so genuine defects are still flagged.
+    Requiring segments to be ENTIRE lines elsewhere keeps this strict:
+    a real typo ("SKIPJAKTUNA") or swapped values ("PROTEIN 0.2" vs
+    "PROTEIN 8.0") cannot be assembled from whole lines of the correct
+    text, so genuine defects are still flagged. Two relaxations, both
+    measured against real station OCR output:
+
+    • single-character pieces are allowed only for CJK ideographs —
+      OCR reads a spaced CJK table header ("品 名") as one line per
+      character (even reordered), and one ideograph is a whole word.
+      Single Latin letters/digits stay banned (they would let nearly
+      anything be assembled).
+    • one fragment >= frag_min chars of a single line — OCR sometimes
+      glues the TAIL of one row onto another row ("… 8.0%以上 Min
+      0.2%以上 Min"); the orphaned tail is then a fragment, not a whole
+      line, on the other side. Capping it at ONE long fragment keeps
+      typos/swaps unforgivable (they would need two fragments or a
+      too-short one).
     """
-    pieces = {p for p in piece_keys if len(p) >= min_piece}
-    if not key or not pieces:
+    pieces = {p for p in piece_keys
+              if len(p) >= min_piece or _is_cjk_char(p)}
+    if not key:
         return False
     n = len(key)
-    reach = [False] * (n + 1)
-    reach[0] = True
+    frag_lines = [p for p in piece_keys if len(p) >= frag_min]
+    reach0 = [False] * (n + 1)   # composed without using the fragment
+    reach1 = [False] * (n + 1)   # fragment already spent
+    reach0[0] = True
     for i in range(n):
-        if not reach[i]:
+        if not (reach0[i] or reach1[i]):
             continue
         for p in pieces:
             if key.startswith(p, i):
-                reach[i + len(p)] = True
-    return reach[n]
+                j = i + len(p)
+                reach0[j] = reach0[j] or reach0[i]
+                reach1[j] = reach1[j] or reach1[i]
+        if reach0[i]:
+            for j in range(i + frag_min, n + 1):
+                frag = key[i:j]
+                if any(frag in ln for ln in frag_lines):
+                    reach1[j] = True
+                else:
+                    break   # longer frags contain this one → also absent
+    return reach0[n] or reach1[n]
 
 
 def _lines(text: str) -> List[str]:
