@@ -85,6 +85,41 @@ def _key_tokens(line: str, min_len: int = 2) -> List[str]:
             if len(t) >= min_len]
 
 
+def _composable_from(key: str, piece_keys: List[str],
+                     min_piece: int = 2) -> bool:
+    """
+    True when ``key`` can be written as a concatenation of FULL line
+    keys from ``piece_keys``.
+
+    Why: two OCR passes over the SAME printed table routinely disagree
+    on line segmentation — one reads a two-column row as ONE line
+    ("粗蛋白質 Cude Protein 8.0%以上 Min"), the other reads the columns
+    as separate, NON-adjacent lines ("粗蛋白質 Cude Protein" … "8.0%以上
+    Min"). The merged line is then not a contiguous substring of the
+    other panel's text, so the plain flat/key substring forgiveness
+    misses it and a false MISMATCH_PANELS is raised (seen with two
+    uploads of the same photo).
+
+    Requiring every segment to be an ENTIRE line elsewhere keeps this
+    strict: a real typo ("SKIPJAKTUNA") or swapped values ("PROTEIN
+    0.2" vs "PROTEIN 8.0") cannot be assembled from whole lines of the
+    correct text, so genuine defects are still flagged.
+    """
+    pieces = {p for p in piece_keys if len(p) >= min_piece}
+    if not key or not pieces:
+        return False
+    n = len(key)
+    reach = [False] * (n + 1)
+    reach[0] = True
+    for i in range(n):
+        if not reach[i]:
+            continue
+        for p in pieces:
+            if key.startswith(p, i):
+                reach[i + len(p)] = True
+    return reach[n]
+
+
 def _lines(text: str) -> List[str]:
     return [_norm_line(l) for l in text.splitlines() if _norm_line(l)]
 
@@ -151,6 +186,11 @@ def _vote_panels(gname: str, panels: List[dict],
                   for z in panels}
     zone_flat = {z["id"]: _norm_flat(texts[z["id"]]) for z in panels}
     zone_key = {z["id"]: _norm_key(texts[z["id"]]) for z in panels}
+    # per-line keys — used to forgive OCR line-merge/split noise where a
+    # line equals a concatenation of WHOLE lines elsewhere (see
+    # _composable_from)
+    zone_line_keys = {zid: [_norm_key(l) for l in lines]
+                      for zid, lines in zone_lines.items()}
 
     counts: Counter = Counter()
     for zid, lines in zone_lines.items():
@@ -178,20 +218,26 @@ def _vote_panels(gname: str, panels: List[dict],
         other_zones = [o for o in panels if o["id"] != zid]
         others = [o["id"] for o in other_zones]
 
-        # consensus lines absent here (forgive if present after re-wrap
-        # or modulo OCR punctuation noise)
+        # consensus lines absent here (forgive if present after re-wrap,
+        # modulo OCR punctuation noise, or split across this panel's own
+        # lines by a different OCR segmentation)
         missing = [l for l in consensus
                    if l not in own and _norm_flat(l) not in flat
-                   and _norm_key(l) not in key]
+                   and _norm_key(l) not in key
+                   and not _composable_from(_norm_key(l),
+                                            zone_line_keys[zid])]
         # lines only this panel has (forgive if most others contain it
-        # flattened — then it was just wrapped differently elsewhere)
+        # flattened — then it was just wrapped differently elsewhere —
+        # or if it is a merge of whole lines the others carry separately)
         extra = []
         for l in zone_lines[zid]:
             if l in consensus:
                 continue
+            lk = _norm_key(l)
             hits = sum(1 for oid in others
                        if _norm_flat(l) in zone_flat[oid]
-                       or _norm_key(l) in zone_key[oid])
+                       or lk in zone_key[oid]
+                       or _composable_from(lk, zone_line_keys[oid]))
             if hits + 1 < majority:
                 extra.append(l)
 

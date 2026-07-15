@@ -687,3 +687,89 @@ def test_zones_signature_includes_doc():
            "bbox": [0.1, 0.1, 0.2, 0.2], "doc": "a"}]
     zb = [dict(za[0], doc="b")]
     assert pipeline._zones_signature(za) != pipeline._zones_signature(zb)
+
+
+# ── OCR line-segmentation noise (เคสจริง: รูปเดียวกันอัปโหลด 2 ครั้ง) ──
+
+# ข้อความ OCR จริงจากสถานี — ภาพเดียวกัน แต่รอบแรกอ่านแยกคอลัมน์
+# (label กับค่าคนละบรรทัด, ไม่ติดกัน) รอบสองอ่านรวมเป็นแถวเดียว
+_GA_SPLIT = """營養標示分析
+Guaranteed Analysis
+每100
+公克(Per 100g)
+粗蛋白質 Cude Protein
+粗脂肪 Cude Fat
+8.0%以上 Min
+0.2%以上 Min
+灰分 Ash
+2.0%以下 Max
+粗纖維 Cude Fiber
+1.0%以下
+Max
+水分 Moisture
+90.0%以下
+Max
+磷 Phosphours
+0.040%以上 Min
+3.08
+熱量 Energy
+kcal/7公克(g)"""
+
+_GA_MERGED = """營養標示分析
+Guaranteed Analysis
+每100公克(Per 100g)
+粗蛋白質 Cude Protein 8.0%以上 Min
+粗脂肪 Cude Fat
+0.2%以上 Min
+灰分 Ash
+2.0%以下 Max
+粗纖維 Cude Fiber
+1.0%以下 Max
+水分 Moisture
+90.0%以下 Max
+磷 Phosphours
+0.040%以上 Min
+熱量 Energy
+3.08 kcal/7公克(g)"""
+
+
+def test_voting_forgives_ocr_column_merge_noise():
+    """รูปเดียวกันสองไฟล์ — บรรทัดที่ OCR merge มาจากคนละตำแหน่ง
+    (ไม่ติดกัน) ของอีกฝั่ง ต้องไม่ถูกฟ้องเป็น MISMATCH_PANELS."""
+    zones = [dict(_zone("z1"), doc="a"), dict(_zone("b2"), doc="b")]
+    texts = {"z1": _GA_SPLIT, "b2": _GA_MERGED}
+    defects = check_group_consistency(zones, texts)
+    assert [d for d in defects if d["class"] == "MISMATCH_PANELS"] == []
+
+
+def test_voting_still_flags_typo_despite_merge_forgiveness():
+    """การ forgive แบบต่อทั้งบรรทัดต้องไม่กลบ typo จริง."""
+    typo = _GA_MERGED.replace("Guaranteed", "Guarenteed")
+    zones = [_zone("z1"), _zone("z2")]
+    texts = {"z1": _GA_SPLIT, "z2": typo}
+    defects = check_group_consistency(zones, texts)
+    assert any(d["class"] == "MISMATCH_PANELS" and
+               "Guarenteed" in (d["found"] + d["reference"])
+               for d in defects)
+
+
+def test_voting_still_flags_swapped_values():
+    """ค่าที่สลับแถวกัน (8.0 ↔ 0.2) ประกอบจาก "ทั้งบรรทัด" ของอีกฝั่ง
+    ไม่ได้ → ต้องถูกฟ้อง ไม่ถูก forgive."""
+    zones = [_zone("z1"), _zone("z2")]
+    texts = {
+        "z1": "Protein 8.0% Min\nFat 0.2% Min",
+        "z2": "Protein 0.2% Min\nFat 8.0% Min",
+    }
+    defects = check_group_consistency(zones, texts)
+    assert any(d["class"] == "MISMATCH_PANELS" for d in defects)
+
+
+def test_composable_from_basics():
+    from artwork_check.checks import _composable_from
+    # merge ของสองบรรทัดเต็ม → ประกอบได้
+    assert _composable_from("AABBB", ["AA", "BBB", "CC"])
+    # ชิ้นส่วนไม่ตรงทั้งบรรทัด → ไม่ได้
+    assert not _composable_from("AABX", ["AA", "BBB"])
+    assert not _composable_from("", ["AA"])
+    assert not _composable_from("AA", [])
