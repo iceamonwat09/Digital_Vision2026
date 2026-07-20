@@ -11,8 +11,17 @@ A zone is a dict:
                                      # cross-compared (majority voting);
                                      # "" = standalone zone
       "bbox":  [x, y, w, h],         # normalized 0..1 page coordinates
-      "label": "SIDE 1"              # free text for the human
+      "label": "SIDE 1",             # free text for the human
+      "doc":   "a" | "b"             # which uploaded file the zone lives
+                                     # on: "a" = primary artwork (default,
+                                     # the only doc before the cross-file
+                                     # compare feature), "b" = optional
+                                     # reference file (ฉบับเก่า)
     }
+
+Zones from doc "a" and doc "b" sharing a ``group`` are compared by the
+same majority-vote / zoom-reference logic in ``checks.py`` — the check
+layers never look at ``doc``, only at the text keyed by zone id.
 
 Auto-proposal only has to be *good enough to adjust*, not perfect — the
 UI lets the user move/resize/retype every box, and the layout can be
@@ -35,6 +44,20 @@ from . import config
 
 VALID_TYPES = ("panel", "zoom", "header", "ignore")
 
+# ลำดับ group อัตโนมัติ — ข้าม I/O กันสับสนกับเลข 1/0 (ชุดเดียวกับที่
+# ฝั่ง JS ใช้ตอนลากวาดโซนเพิ่มเอง — ห้ามแก้ข้างเดียว)
+GROUP_LETTERS = "ABCDEFGHJKLMNPQRSTUVWXYZ"
+
+
+def seq_group(i: int) -> str:
+    """Group ลำดับที่ ``i`` (เริ่ม 0): A..Z แล้วต่อ A2..Z2, A3.. —
+    ใช้ร่วมกันทั้งการเสนอโซนไฟล์หลักและไฟล์ชิ้นงาน เพื่อให้โซนลำดับ
+    เดียวกันของสองไฟล์ได้ group ตรงกันและจับคู่เทียบข้ามไฟล์อัตโนมัติ."""
+    n = len(GROUP_LETTERS)
+    letter = GROUP_LETTERS[i % n]
+    rnd = i // n
+    return letter if rnd == 0 else f"{letter}{rnd + 1}"
+
 
 def propose_zones(preview_bgr: np.ndarray,
                   max_zones: int = 24) -> List[dict]:
@@ -43,8 +66,13 @@ def propose_zones(preview_bgr: np.ndarray,
 
     Morphological closing over an inverted-threshold image merges glyphs
     into blocks; blocks are filtered by size and returned largest-first.
-    Groups are pre-assigned by matching block sizes (repeated carton
-    panels have near-identical dimensions).
+    Groups are assigned SEQUENTIALLY in reading order (A, B, C, …) so
+    the same-ordinal zone of the other file in cross-file compare gets
+    the same group and pairs automatically. (Replaced the old
+    size-cluster heuristic — approved 2026-07-20: it never fired on the
+    real photo-label workflow and could silently mis-pair same-size
+    blocks; repeated-panel dielines can still share a group manually or
+    via a saved template.)
     """
     gray = cv2.cvtColor(preview_bgr, cv2.COLOR_BGR2GRAY)
     H, W = gray.shape[:2]
@@ -93,40 +121,20 @@ def propose_zones(preview_bgr: np.ndarray,
     # Reading order for stable ids.
     rects.sort(key=lambda r: (r[1] // max(1, H // 20), r[0]))
 
-    # Pre-group near-identical sizes → likely repeated panels.
+    # Sequential groups in reading order (z1→A, z2→B, …). Single-member
+    # groups are kept — voting needs ≥2 readable panels in a group, so a
+    # lone letter can never produce a defect; its partner arrives later
+    # from the reference file (or a hand-drawn zone with the same letter).
     zones: List[dict] = []
-    group_letters = iter("ABCDEFGHJKLMNPQRSTUVWXYZ")
-    size_groups: List[dict] = []   # {"w":..,"h":..,"name":..,"count":..}
     for i, (x, y, w, h) in enumerate(rects):
-        gname = ""
-        for sg in size_groups:
-            if (abs(w - sg["w"]) / max(w, sg["w"]) < 0.06 and
-                    abs(h - sg["h"]) / max(h, sg["h"]) < 0.06):
-                sg["count"] += 1
-                gname = sg["name"]
-                break
-        else:
-            try:
-                gname = next(group_letters)
-            except StopIteration:
-                gname = ""
-            size_groups.append({"w": w, "h": h, "name": gname, "count": 1})
         zones.append({
             "id": f"z{i + 1}",
             "type": "panel",
-            "group": gname,
+            "group": seq_group(i),
             "bbox": [round(x / W, 5), round(y / H, 5),
                      round(w / W, 5), round(h / H, 5)],
             "label": f"โซน {i + 1}",
         })
-
-    # Groups that ended up with a single member are standalone.
-    counts: dict = {}
-    for z in zones:
-        counts[z["group"]] = counts.get(z["group"], 0) + 1
-    for z in zones:
-        if counts.get(z["group"], 0) < 2:
-            z["group"] = ""
     return zones
 
 
@@ -208,12 +216,19 @@ def sanitize_zones(raw) -> List[dict]:
             raise ValueError(f"zone {zid}: bbox out of 0..1 range")
         x, y = max(0.0, x), max(0.0, y)
         w, h = min(w, 1.0 - x), min(h, 1.0 - y)
+        # doc: which uploaded file the zone belongs to. Absent (all
+        # payloads/templates from before the cross-file compare feature)
+        # → "a", so the single-file flow is byte-for-byte unchanged.
+        doc = str(z.get("doc", "a") or "a").lower()
+        if doc not in ("a", "b"):
+            raise ValueError(f"zone {zid}: bad doc {doc!r}")
         out.append({
             "id": zid,
             "type": ztype,
             "group": re.sub(r"[^A-Za-z0-9_-]", "", str(z.get("group", "")))[:12],
             "bbox": [round(x, 5), round(y, 5), round(w, 5), round(h, 5)],
             "label": str(z.get("label", ""))[:80],
+            "doc": doc,
         })
     return out
 

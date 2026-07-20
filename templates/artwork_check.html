@@ -36,6 +36,30 @@
   .aw-btn:disabled, .aw-btn-primary:disabled { background:#b0bec5; border-color:#b0bec5; color:#fff; cursor:not-allowed; }
   .aw-btn-danger { color:#c62828; border-color:#ef9a9a; }
   .aw-btn-drawing { background:#1565c0; border-color:#1565c0; color:#fff; }
+  .aw-btn-ghost  { border-style:dashed; color:#607d8b; background:transparent; font-size:13px; }
+  .aw-btn-ghost:hover { color:#00695c; border-color:#4db6ac; background:#f5f7fa; }
+
+  /* ── cross-file compare (doc B = ไฟล์อ้างอิง/ฉบับเก่า, teal) ─────────
+     ทุก element ของฟีเจอร์นี้ display:none โดย default — หน้าโหมดไฟล์เดียว
+     หน้าตาเดิม 100% */
+  .aw-doc-tabs { display:flex; gap:4px; margin-right:8px; }
+  .aw-doc-tab  { padding:2px 10px; border:1px solid #cfd8dc; background:#fff; border-radius:12px;
+                 font-size:12px; cursor:pointer; color:#546e7a; font-weight:600; line-height:1.5; }
+  .aw-doc-tab:hover { background:#f5f7fa; }
+  .aw-doc-tab.active-a { background:#1976d2; border-color:#1976d2; color:#fff; }
+  .aw-doc-tab.active-b { background:#00897b; border-color:#00897b; color:#fff; }
+  .aw-doc-badge { display:inline-block; padding:1px 8px; border-radius:10px; font-size:11px;
+                  font-weight:700; vertical-align:1px; }
+  .aw-doc-badge.doc-a { background:#e3f2fd; color:#0d47a1; }
+  .aw-doc-badge.doc-b { background:#e0f2f1; color:#00695c; }
+  .aw-pair-note { font-size:11px; color:#00897b; font-weight:600; }
+  /* โซนของไฟล์อ้างอิง — teal; ระบุเฉพาะสี เพื่อคง border-style ตาม type
+     (เช่น zoom เป็นเส้นประ) และให้ .selected (แดง) ชนะเหมือนเดิม */
+  .aw-zone.doc-b { border-color:rgba(0,137,123,.85); background:rgba(0,137,123,.07); }
+  .aw-zone.doc-b .aw-zone-tag { background:rgba(0,137,123,.9); }
+  .aw-zone.doc-b.selected { border-color:#e53935; background:rgba(229,57,53,.08); }
+  .aw-zone.doc-b.selected .aw-zone-tag { background:rgba(229,57,53,.92); }
+  .aw-img-label.ref-label { background:#e0f2f1; color:#00695c; border-bottom-color:#b2dfdb; }
 
   /* rubber-band rectangle while drawing a new zone */
   .aw-drawbox { position:absolute; border:2px dashed #1565c0;
@@ -208,6 +232,21 @@
         </div>
       </div>
 
+      <!-- cross-file compare: ปุ่ม opt-in → ช่องแนบไฟล์อ้างอิง (ฉบับเก่า) -->
+      <div class="aw-row" id="awRefToggleRow">
+        <button id="awRefToggle" class="aw-btn aw-btn-ghost" disabled
+                title="แนบไฟล์ที่สอง (เช่นชิ้นงานที่ approve แล้ว) เพื่อเทียบข้อความข้ามไฟล์">
+          + แนบไฟล์อ้างอิงเพื่อเทียบ (ชิ้นงาน)</button>
+      </div>
+      <div class="aw-row" id="awRefUploadRow" style="display:none;">
+        <div style="flex:2; min-width:200px;">
+          <label class="aw-label"><span class="aw-doc-badge doc-b">🅱 ไฟล์อ้างอิง (ชิ้นงาน)</span>
+            — PDF / PNG / JPG</label>
+          <input id="awFileB" type="file" accept=".pdf,.png,.jpg,.jpeg" class="aw-input" style="width:100%;">
+        </div>
+        <button id="awRefRemove" class="aw-btn aw-btn-danger" title="เอาไฟล์อ้างอิงออก (โซนฝั่งอ้างอิงจะถูกลบ)">✕ เอาออก</button>
+      </div>
+
       <div class="aw-row">
         <select id="awTemplateSel" class="aw-input" title="โหลดโซนจาก template ที่บันทึกไว้">
           <option value="">— Template โซน (ต่อ layout โรงพิมพ์) —</option>
@@ -218,6 +257,10 @@
 
       <div class="aw-stage-box" style="margin-top:12px;">
         <div id="awZoomBar" class="aw-zoom-bar" style="display:none;">
+          <span id="awDocTabs" class="aw-doc-tabs" style="display:none;">
+            <button type="button" id="awDocTabA" class="aw-doc-tab active-a">🅰 ไฟล์หลัก</button>
+            <button type="button" id="awDocTabB" class="aw-doc-tab">🅱 ชิ้นงาน</button>
+          </span>
           <span>🔍 ซูม</span>
           <input id="awZoomRange" type="range" min="30" max="300" value="100"
                  style="width:120px; vertical-align:middle;" title="ดับเบิลคลิกเพื่อกลับ 100%">
@@ -226,7 +269,8 @@
         </div>
         <div id="awStageEmpty" class="aw-empty">
           ยังไม่มีไฟล์ — เลือกไฟล์ Artwork ด้านบน<br>
-          ระบบจะเสนอโซนอัตโนมัติ แล้วคุณปรับ/ย้าย/ลบ ได้ก่อนส่งตรวจ
+          จากนั้นกด "↻ เสนอโซนใหม่" ให้ระบบเสนอโซน หรือ "+ เพิ่มโซน" วาดเอง<br>
+          ปรับ/ย้าย/ลบ (ปุ่ม Delete) ได้ก่อนส่งตรวจ
         </div>
         <div id="awStage" class="aw-stage" style="display:none;">
           <img id="awPreviewImg" alt="artwork preview">
@@ -242,6 +286,8 @@
 
       <div id="awProps" class="aw-props" style="display:none;">
         <b>โซนที่เลือก: <span id="awPropId"></span></b>
+        <span id="awPropDoc" class="aw-doc-badge doc-a" style="display:none;"></span>
+        <span id="awPropPair" class="aw-pair-note"></span>
         <div class="aw-row">
           <select id="awPropType" class="aw-input">
             <option value="panel">panel — ฉลากจริงบน dieline</option>
@@ -263,7 +309,14 @@
           <li>วาดกรอบหยาบๆ ให้<b>ใหญ่กว่าเนื้อหาเล็กน้อย</b> แล้ว<b>ดับเบิลคลิกที่โซน</b> — ระบบจะขยับกรอบให้พอดีเนื้อหาเอง (คลิกซ้ำได้ถ้ายังไม่พอดี) อย่าวาดเล็กจนตัดข้อความ เพราะ OCR จะอ่านไม่ครบแล้วฟ้องว่าข้อความหาย</li>
           <li>panel ที่ซ้ำกัน (เช่น SIDE 1–4) ใส่<b>กลุ่มเดียวกัน</b> — ระบบจะโหวตเสียงข้างมากหา panel ที่สะกดต่าง</li>
           <li>โซน zoom ใส่กลุ่มเดียวกับ panel ที่มันขยาย — ระบบจะเช็คว่า zoom ตรงกับฉลากจริง</li>
+          <li>เทียบข้ามไฟล์: ระบบใส่กลุ่ม <b>A B C…</b> เรียงลำดับให้อัตโนมัติทั้งสองไฟล์
+              — โซนลำดับเดียวกันจับคู่กันเอง (สังเกต <b>⇄</b> บนแท็กโซน) ก่อนส่งตรวจให้กวาดตา
+              เช็คว่าคู่ถูกต้อง แก้ตัวอักษรกลุ่มทับได้ตามปกติ โซนที่วาดเพิ่มเองก็ได้ตัวอักษร
+              ถัดไปให้อัตโนมัติ (ตั้งโซนฝั่งชิ้นงานเป็น type <b>zoom</b> ถ้าต้องการให้ชิ้นงานเป็น
+              "ต้นแบบอ้างอิง" แล้วชี้ความผิดไปที่ไฟล์ใหม่)</li>
           <li>เส้น dieline / color bar ตั้งเป็น ignore</li>
+          <li>ข้อความหมุน 90° (รหัสข้างบาร์โค้ด/แถบ TM) และโลโก้อักษรวิจิตร — OCR อ่านไม่นิ่ง
+              ควรตั้งเป็น ignore (หรือยอมรับ warning "อ่านไม่ชัด")</li>
           <li>จัดเสร็จแล้วกด "บันทึก template" — layout เดิมของโรงพิมพ์เดิมจะโหลดมาใช้ซ้ำได้เลย</li>
         </ul>
       </div>

@@ -55,6 +55,47 @@ def api_upload():
     return jsonify(result)
 
 
+@artwork_bp.route("/api/artwork/<rec_id>/upload_ref", methods=["POST"])
+def api_upload_ref(rec_id):
+    """Attach the optional REFERENCE file (ฉบับเก่า) for cross-file
+    compare. The primary upload/inspect flow is untouched — an
+    inspection without this call behaves exactly as before."""
+    f = request.files.get("file")
+    if f is None or not f.filename:
+        return jsonify({"error": "ไม่พบไฟล์"}), 400
+    data = f.read()
+    if len(data) > MAX_UPLOAD_MB * 1024 * 1024:
+        return jsonify({"error": f"ไฟล์ใหญ่เกิน {MAX_UPLOAD_MB} MB"}), 400
+    try:
+        result = pipeline.start_ref(rec_id, data, f.filename)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except FileNotFoundError as e:
+        return jsonify({"error": str(e)}), 404
+    except Exception as e:
+        logger.exception("[artwork] ref upload failed for %s", rec_id)
+        return jsonify({"error": f"เปิดไฟล์อ้างอิงไม่สำเร็จ: {e}"}), 500
+    return jsonify(result)
+
+
+@artwork_bp.route("/api/artwork/<rec_id>/propose", methods=["POST"])
+def api_propose(rec_id):
+    """On-demand zone proposal for one document (ปุ่ม "เสนอโซนใหม่").
+    Body: {"doc": "a"|"b"} (default "a"). Read-only w.r.t. stored state."""
+    body = request.get_json(silent=True) or {}
+    doc = str(body.get("doc", "a")).lower()
+    try:
+        zones = pipeline.propose_for(rec_id, doc)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except FileNotFoundError as e:
+        return jsonify({"error": str(e)}), 404
+    except Exception as e:
+        logger.exception("[artwork] propose failed for %s", rec_id)
+        return jsonify({"error": f"เสนอโซนไม่สำเร็จ: {e}"}), 500
+    return jsonify({"zones": zones})
+
+
 @artwork_bp.route("/api/artwork/<rec_id>/inspect", methods=["POST"])
 def api_inspect(rec_id):
     body = request.get_json(silent=True) or {}
@@ -83,6 +124,16 @@ def api_overlay(rec_id):
     return _send_artifact(rec_id, "overlay.png")
 
 
+@artwork_bp.route("/api/artwork/<rec_id>/preview_b.png")
+def api_preview_b(rec_id):
+    return _send_artifact(rec_id, "preview_b.png")
+
+
+@artwork_bp.route("/api/artwork/<rec_id>/overlay_b.png")
+def api_overlay_b(rec_id):
+    return _send_artifact(rec_id, "overlay_b.png")
+
+
 def _send_artifact(rec_id, name):
     try:
         d = report.inspection_dir(rec_id)
@@ -95,13 +146,17 @@ def _send_artifact(rec_id, name):
 
 @artwork_bp.route("/api/artwork/<rec_id>/crop")
 def api_crop(rec_id):
-    """High-DPI crop for the defect table. Query: x,y,w,h (normalized)."""
+    """High-DPI crop for the defect table. Query: x,y,w,h (normalized)
+    + optional doc=a|b (b = crop from the attached reference file)."""
     try:
         bbox = [float(request.args.get(k, "")) for k in ("x", "y", "w", "h")]
     except ValueError:
         return jsonify({"error": "ต้องระบุ x,y,w,h"}), 400
+    doc = request.args.get("doc", "a").lower()
+    if doc not in ("a", "b"):
+        return jsonify({"error": "doc ต้องเป็น a หรือ b"}), 400
     try:
-        jpg = pipeline.zone_crop_jpg(rec_id, bbox)
+        jpg = pipeline.zone_crop_jpg(rec_id, bbox, doc=doc)
     except (ValueError, FileNotFoundError) as e:
         return jsonify({"error": str(e)}), 404
     import io
@@ -111,7 +166,8 @@ def api_crop(rec_id):
 @artwork_bp.route("/api/artwork/<rec_id>/snap", methods=["POST"])
 def api_snap(rec_id):
     """Fit a zone bbox to the content under it (double-click in the UI).
-    Body: {"bbox": [x, y, w, h]} normalized. Returns {"bbox": [...]}."""
+    Body: {"bbox": [x, y, w, h], "doc": "a"|"b"} normalized (doc
+    optional, default "a"). Returns {"bbox": [...]}."""
     body = request.get_json(silent=True) or {}
     raw = body.get("bbox")
     if not isinstance(raw, (list, tuple)) or len(raw) != 4:
@@ -123,11 +179,14 @@ def api_snap(rec_id):
     if not (0 <= bbox[0] < 1 and 0 <= bbox[1] < 1
             and 0 < bbox[2] <= 1 and 0 < bbox[3] <= 1):
         return jsonify({"error": "bbox นอกช่วง 0..1"}), 400
+    doc = str(body.get("doc", "a")).lower()
+    if doc not in ("a", "b"):
+        return jsonify({"error": "doc ต้องเป็น a หรือ b"}), 400
     try:
         d = report.inspection_dir(rec_id)
     except ValueError:
         return jsonify({"error": "bad id"}), 400
-    path = os.path.join(d, "preview.png")
+    path = os.path.join(d, "preview_b.png" if doc == "b" else "preview.png")
     if not os.path.exists(path):
         return jsonify({"error": "ไม่พบ preview"}), 404
     import cv2

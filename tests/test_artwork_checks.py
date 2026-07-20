@@ -584,3 +584,506 @@ def test_run_ocr_only_missing_upload_raises(tmp_path, monkeypatch):
         pipeline.run_ocr_only("20260101-000000-abcdef",
                               [{"id": "z1", "type": "panel", "group": "",
                                 "bbox": [0.1, 0.1, 0.2, 0.2]}])
+
+
+# ── Cross-file compare (doc "a" = ไฟล์หลัก, doc "b" = ไฟล์อ้างอิง) ─────
+
+def test_sanitize_zones_doc_field_defaults_and_validates():
+    from artwork_check.zones import sanitize_zones
+
+    # payload เก่า (ไม่มี doc) → "a" เสมอ = พฤติกรรมไฟล์เดียวเดิม
+    out = sanitize_zones([{"id": "z1", "type": "panel", "group": "",
+                           "bbox": [0.1, 0.1, 0.2, 0.2]}])
+    assert out[0]["doc"] == "a"
+
+    out = sanitize_zones([{"id": "b1", "type": "panel", "group": "G",
+                           "bbox": [0.1, 0.1, 0.2, 0.2], "doc": "B"}])
+    assert out[0]["doc"] == "b"          # normalize เป็นตัวเล็ก
+
+    with pytest.raises(ValueError):
+        sanitize_zones([{"id": "z1", "type": "panel", "group": "",
+                         "bbox": [0.1, 0.1, 0.2, 0.2], "doc": "c"}])
+
+
+def test_cross_file_group_voting_ignores_doc():
+    """ชั้นตรวจไม่รู้จักไฟล์ — โซนต่างไฟล์ที่ group เดียวกันถูกเทียบ
+    เหมือน panel ในไฟล์เดียวทุกอย่าง (นี่คือหัวใจของ cross-file compare)."""
+    zones = [dict(_zone("z1"), doc="a"), dict(_zone("z2"), doc="a"),
+             dict(_zone("b1"), doc="b")]
+    texts = {"z1": PANEL_OK, "z2": PANEL_OK, "b1": PANEL_TYPO}
+    defects = check_group_consistency(zones, texts)
+    assert any(d["class"] == "MISMATCH_PANELS" and d["zone_id"] == "b1"
+               for d in defects)
+
+
+def test_cross_file_zoom_reference_attributes_to_primary():
+    """โซนฝั่งไฟล์อ้างอิง (ฉบับเก่า) ตั้ง type=zoom → เป็น "ต้นแบบอ้างอิง"
+    ความผิดถูกชี้ไปที่โซนไฟล์หลัก (ของที่กำลังจะพิมพ์) พร้อม reference."""
+    zones = [dict(_zone("z1"), doc="a"),
+             dict(_zone("b1", ztype="zoom"), doc="b")]
+    texts = {"z1": "¡Para mejor caliddd", "b1": "¡Para mejor calidad!"}
+    defects = check_group_consistency(zones, texts)
+    hits = [d for d in defects if d["class"] == "MISMATCH_ZOOM"]
+    assert hits and hits[0]["zone_id"] == "z1"
+    assert "calidad" in hits[0]["reference"]
+
+
+def test_read_all_docs_routes_each_zone_to_its_own_file(tmp_path, monkeypatch):
+    import os
+    from artwork_check import pipeline, report
+
+    rec_id = "20260101-000000-abc123"
+    monkeypatch.setattr(report.config, "INSPECTIONS_DIR", str(tmp_path))
+    d = report.inspection_dir(rec_id, create=True)
+    for base in ("source.png", "source_b.png"):
+        with open(os.path.join(d, base), "wb") as f:
+            f.write(b"x")
+
+    opened = []
+    monkeypatch.setattr(pipeline, "ArtworkDocument",
+                        lambda path, *a, **k: opened.append(
+                            os.path.basename(path)) or object())
+    monkeypatch.setattr(
+        pipeline.ocr, "read_all_zones",
+        lambda doc, zones: [{"zone_id": z["id"], "text": "T",
+                             "engine": "stub", "conf": None} for z in zones])
+
+    za = [{"id": "z1", "type": "panel", "group": "G",
+           "bbox": [0.1, 0.1, 0.2, 0.2], "doc": "a"}]
+    zb = [{"id": "b1", "type": "panel", "group": "G",
+           "bbox": [0.1, 0.1, 0.2, 0.2], "doc": "b"}]
+    results = pipeline._read_all_docs(d, za, zb)
+    assert [r["zone_id"] for r in results] == ["z1", "b1"]
+    assert opened == ["source.png", "source_b.png"]
+
+    # ไม่มีโซนฝั่ง b → เปิดไฟล์หลักไฟล์เดียว = เส้นทางไฟล์เดียวเดิมเป๊ะ
+    opened.clear()
+    pipeline._read_all_docs(d, za, [])
+    assert opened == ["source.png"]
+
+
+def test_read_all_docs_missing_ref_file_raises(tmp_path, monkeypatch):
+    import os
+    from artwork_check import pipeline, report
+
+    rec_id = "20260101-000000-abc456"
+    monkeypatch.setattr(report.config, "INSPECTIONS_DIR", str(tmp_path))
+    d = report.inspection_dir(rec_id, create=True)
+    with open(os.path.join(d, "source.png"), "wb") as f:
+        f.write(b"x")
+    monkeypatch.setattr(pipeline, "ArtworkDocument", lambda *a, **k: object())
+    monkeypatch.setattr(pipeline.ocr, "read_all_zones", lambda doc, zones: [])
+
+    zb = [{"id": "b1", "type": "panel", "group": "G",
+           "bbox": [0.1, 0.1, 0.2, 0.2], "doc": "b"}]
+    with pytest.raises(ValueError):
+        pipeline._read_all_docs(d, [], zb)
+
+
+def test_zones_signature_includes_doc():
+    """เปลี่ยนไฟล์ของโซน (doc) ต้องทำให้แคช OCR-only ของแท็บแปล invalidate."""
+    from artwork_check import pipeline
+    za = [{"id": "z1", "type": "panel", "group": "",
+           "bbox": [0.1, 0.1, 0.2, 0.2], "doc": "a"}]
+    zb = [dict(za[0], doc="b")]
+    assert pipeline._zones_signature(za) != pipeline._zones_signature(zb)
+
+
+# ── OCR line-segmentation noise (เคสจริง: รูปเดียวกันอัปโหลด 2 ครั้ง) ──
+
+# ข้อความ OCR จริงจากสถานี — ภาพเดียวกัน แต่รอบแรกอ่านแยกคอลัมน์
+# (label กับค่าคนละบรรทัด, ไม่ติดกัน) รอบสองอ่านรวมเป็นแถวเดียว
+_GA_SPLIT = """營養標示分析
+Guaranteed Analysis
+每100
+公克(Per 100g)
+粗蛋白質 Cude Protein
+粗脂肪 Cude Fat
+8.0%以上 Min
+0.2%以上 Min
+灰分 Ash
+2.0%以下 Max
+粗纖維 Cude Fiber
+1.0%以下
+Max
+水分 Moisture
+90.0%以下
+Max
+磷 Phosphours
+0.040%以上 Min
+3.08
+熱量 Energy
+kcal/7公克(g)"""
+
+_GA_MERGED = """營養標示分析
+Guaranteed Analysis
+每100公克(Per 100g)
+粗蛋白質 Cude Protein 8.0%以上 Min
+粗脂肪 Cude Fat
+0.2%以上 Min
+灰分 Ash
+2.0%以下 Max
+粗纖維 Cude Fiber
+1.0%以下 Max
+水分 Moisture
+90.0%以下 Max
+磷 Phosphours
+0.040%以上 Min
+熱量 Energy
+3.08 kcal/7公克(g)"""
+
+
+def test_voting_forgives_ocr_column_merge_noise():
+    """รูปเดียวกันสองไฟล์ — บรรทัดที่ OCR merge มาจากคนละตำแหน่ง
+    (ไม่ติดกัน) ของอีกฝั่ง ต้องไม่ถูกฟ้องเป็น MISMATCH_PANELS."""
+    zones = [dict(_zone("z1"), doc="a"), dict(_zone("b2"), doc="b")]
+    texts = {"z1": _GA_SPLIT, "b2": _GA_MERGED}
+    defects = check_group_consistency(zones, texts)
+    assert [d for d in defects if d["class"] == "MISMATCH_PANELS"] == []
+
+
+def test_voting_still_flags_typo_despite_merge_forgiveness():
+    """การ forgive แบบต่อทั้งบรรทัดต้องไม่กลบ typo จริง."""
+    typo = _GA_MERGED.replace("Guaranteed", "Guarenteed")
+    zones = [_zone("z1"), _zone("z2")]
+    texts = {"z1": _GA_SPLIT, "z2": typo}
+    defects = check_group_consistency(zones, texts)
+    assert any(d["class"] == "MISMATCH_PANELS" and
+               "Guarenteed" in (d["found"] + d["reference"])
+               for d in defects)
+
+
+def test_voting_still_flags_swapped_values():
+    """ค่าที่สลับแถวกัน (8.0 ↔ 0.2) ประกอบจาก "ทั้งบรรทัด" ของอีกฝั่ง
+    ไม่ได้ → ต้องถูกฟ้อง ไม่ถูก forgive."""
+    zones = [_zone("z1"), _zone("z2")]
+    texts = {
+        "z1": "Protein 8.0% Min\nFat 0.2% Min",
+        "z2": "Protein 0.2% Min\nFat 8.0% Min",
+    }
+    defects = check_group_consistency(zones, texts)
+    assert any(d["class"] == "MISMATCH_PANELS" for d in defects)
+
+
+def test_composable_from_basics():
+    from artwork_check.checks import _composable_from
+    # merge ของสองบรรทัดเต็ม → ประกอบได้
+    assert _composable_from("AABBB", ["AA", "BBB", "CC"])
+    # ชิ้นส่วนไม่ตรงทั้งบรรทัด → ไม่ได้
+    assert not _composable_from("AABX", ["AA", "BBB"])
+    assert not _composable_from("", ["AA"])
+    assert not _composable_from("AA", [])
+
+
+# ── OCR แตกหัวตาราง CJK เป็นตัวอักษรละบรรทัด (เคสจริง: 品 名) ─────────
+
+def test_voting_forgives_cjk_header_split_per_char():
+    """b3 อ่าน "品 名" เป็น 2 บรรทัด ตัวละตัว (แถมสลับลำดับ: 名, 品)
+    ขณะที่ z4 อ่านรวมเป็น "品名" — ต้องไม่ฟ้อง MISMATCH_PANELS."""
+    zones = [dict(_zone("z4"), doc="a"), dict(_zone("b3"), doc="b")]
+    texts = {
+        "z4": "品名\nPuffy帕菲Nee泥泥愛貓肉泥條(雞肉+牛磺酸)\n淨重\n70公克(7公克×10包)",
+        "b3": "名\n品\nPuffy帕菲Nee泥泥愛貓肉泥條(雞肉+牛磺酸)\n淨重\n70公克(7公克×10包)",
+    }
+    defects = check_group_consistency(zones, texts)
+    assert [d for d in defects if d["class"] == "MISMATCH_PANELS"] == []
+
+
+def test_voting_still_flags_cjk_char_order_swap():
+    """ตัวอักษรจีนสลับลำดับจริงในบรรทัดเดียว (品名 vs 名品 โดยไม่ได้แตก
+    เป็นตัวละบรรทัด) = ความต่างจริง ต้องถูกฟ้อง."""
+    zones = [_zone("z1"), _zone("z2")]
+    texts = {"z1": "品名\n淨重70公克", "z2": "名品\n淨重70公克"}
+    defects = check_group_consistency(zones, texts)
+    assert any(d["class"] == "MISMATCH_PANELS" for d in defects)
+
+
+# ── OCR ฉีกเศษท้ายแถวไปแปะบรรทัดอื่น (เคสจริง: ภาพใหญ่ทั้งฉลาก) ───────
+
+def test_voting_forgives_row_tail_glued_to_other_row():
+    """b2 อ่านค่าของแถว Fat (0.2%以上 Min) ไปต่อท้ายแถว Protein
+    ทำให้ทั้งสองฝั่งมีบรรทัดที่หาแบบ "ทั้งบรรทัด" ในอีกฝั่งไม่เจอ —
+    เศษ ≥6 ตัวอักษร 1 ชิ้นต้องถูกยกโทษ."""
+    zones = [dict(_zone("z1"), doc="a"), dict(_zone("b2"), doc="b")]
+    texts = {
+        "z1": ("營養標示分析\n粗蛋白質 Cude Protein 8.0%以上 Min\n"
+               "粗脂肪 Cude Fat 0.2%以上 Min\n灰分 Ash 2.0%以下 Max"),
+        "b2": ("營養標示分析\n粗蛋白質 Cude Protein 8.0%以上 Min 0.2%以上 Min\n"
+               "粗脂肪 Cude Fat\n灰分 Ash 2.0%以下 Max"),
+    }
+    defects = check_group_consistency(zones, texts)
+    assert [d for d in defects if d["class"] == "MISMATCH_PANELS"] == []
+
+
+def test_composable_fragment_rules():
+    from artwork_check.checks import _composable_from
+    lines = ["ABCDEFGH", "XYZ12345"]
+    # ทั้งบรรทัด + เศษยาว 1 ชิ้น → ได้
+    assert _composable_from("ABCDEFGHXYZ123", lines)          # whole + frag(6)
+    # เศษสั้นกว่า 6 → ไม่ได้
+    assert not _composable_from("ABCDEFGHXYZ", lines)         # frag len 3
+    # ต้องใช้เศษ 2 ชิ้น → ไม่ได้ (กัน typo/ค่าสลับแถวถูกกลบ)
+    assert not _composable_from("ABCDEFXYZ123", lines)        # frag(6)+frag(6)
+    # อักษรจีนตัวเดียวเป็นชิ้นได้ / ละตินตัวเดียวไม่ได้
+    assert _composable_from("品名", ["品", "名"])
+    assert not _composable_from("AB", ["A", "B"])
+
+
+# ── Arabic orthography normalization (เคสจริง: ฉลาก John West อาหรับ) ──
+
+_AR_BASE = """المكونات: تونا، زيت دوار الشمس، ماء، ملح.
+شروط التخزين: يحفظ في مكان جاف بارد وجيد التهوية.
+تاريخ الإنتاج والانتهاء: انظر العبوة.
+الوزن الصافي: 170 جم الوزن المصفى: 120 جم
+Ingredients: Tuna, Sunflower Oil, Water, Salt.
+Produced in Thailand
+NET WEIGHT 170g DRAINED WEIGHT 120g"""
+
+
+def _cross_zones():
+    return [dict(_zone("z1"), doc="a"), dict(_zone("b1"), doc="b")]
+
+
+def _mm(texts):
+    return [d for d in check_group_consistency(_cross_zones(), texts)
+            if d["class"].startswith("MISMATCH")]
+
+
+def test_arabic_hamza_variance_forgiven():
+    """รูปเดียวกัน OCR ได้ انظر/أنظر (ا vs أ) — transcription noise."""
+    assert _mm({"z1": _AR_BASE,
+                "b1": _AR_BASE.replace("انظر", "أنظر")}) == []
+
+
+def test_arabic_maqsura_variance_forgiven():
+    """ى/ي — ฉลากจริงยังสะกดปนกันเองบนใบเดียว (الصافي/الصافى)."""
+    assert _mm({"z1": _AR_BASE,
+                "b1": _AR_BASE.replace("الصافي", "الصافى")}) == []
+
+
+def test_arabic_harakat_variance_forgiven():
+    assert _mm({"z1": _AR_BASE,
+                "b1": _AR_BASE.replace("تونا", "تُونا")}) == []
+
+
+def test_fullwidth_variance_forgiven():
+    assert _mm({"z1": _AR_BASE,
+                "b1": _AR_BASE.replace("NET WEIGHT 170g",
+                                       "ＮＥＴ ＷＥＩＧＨＴ １７０ｇ")}) == []
+
+
+def test_arabic_real_letter_typo_still_flagged():
+    """خ→ح คือตัวอักษรคนละตัวจริง — normalize ต้องไม่กลบ."""
+    assert _mm({"z1": _AR_BASE,
+                "b1": _AR_BASE.replace("التخزين", "التحزين")})
+
+
+def test_arabic_real_word_missing_still_flagged():
+    assert _mm({"z1": _AR_BASE,
+                "b1": _AR_BASE.replace("ماء، ملح", "ملح")})
+
+
+def test_real_number_diff_still_flagged():
+    assert _mm({"z1": _AR_BASE,
+                "b1": _AR_BASE.replace("170 جم", "190 جم")})
+
+
+def test_latin_accent_still_meaningful():
+    """é ≠ e มีความหมายจริงบนฉลากสเปน/ฝรั่งเศส — ต้องไม่ถูก normalize ทิ้ง."""
+    from artwork_check.checks import _norm_key
+    assert _norm_key("mejoré") != _norm_key("mejore")
+
+
+# ── Barcode: EAN-13 พิมพ์หลักแรกแยกโคนบาร์โค้ด (เคสจริง: ฉลาก AYAM) ──
+
+def _barcode_flags(text):
+    z = [{"id": "z1", "type": "panel", "group": "",
+          "bbox": [0.1, 0.1, 0.2, 0.2]}]
+    return [d for d in check_numbers(z, {"z1": text})
+            if "บาร์โค้ด" in d["message"]]
+
+
+def test_barcode_split_leading_digit_not_flagged():
+    """OCR อ่าน "9" แยกจาก 12 หลักที่เหลือ — 13 หลักรวมกัน valid
+    ต้องไม่ฟ้อง (เดิมตีความ 12 หลักเป็น UPC-A แล้ว FAIL ปลอม)."""
+    assert _barcode_flags("9\n556041641272\nGC (SG) A / 003") == []
+
+
+def test_barcode_split_with_real_bad_digit_still_flagged():
+    assert _barcode_flags("9\n556041641273")
+
+
+def test_barcode_full_bad_check_digit_still_flagged():
+    assert _barcode_flags("9556041641279")
+
+
+def test_barcode_full_valid_not_flagged():
+    assert _barcode_flags("9556041641272") == []
+
+
+def test_phone_number_run_not_treated_as_barcode():
+    assert _barcode_flags("toll free line: 1800 45 45 457") == []
+
+
+# ── Phase 2: จับคู่ความต่างข้ามไฟล์เป็น defect เดียว (พบ/เทียบกับ) ────
+
+def test_cross_doc_pair_merges_to_single_defect():
+    a = "HIDDEN BAY\nSKIPJAK TUNA\nPACKED IN WATER"    # ไฟล์หลัก (typo)
+    b = "HIDDEN BAY\nSKIPJACK TUNA\nPACKED IN WATER"   # ไฟล์อ้างอิง
+    mm = _mm({"z1": a, "b1": b})
+    assert len(mm) == 1
+    assert mm[0]["zone_id"] == "z1"                     # ชี้ไฟล์หลัก
+    assert mm[0]["found"] == "SKIPJAK TUNA"
+    assert mm[0]["reference"] == "SKIPJACK TUNA"
+    assert mm[0]["ref_zone_ids"] == ["b1"]
+
+
+def test_same_doc_two_panel_behavior_unchanged():
+    """กลุ่ม 2 panel ภายในไฟล์เดียว — ยังฟ้องแยก 2 ใบตามพฤติกรรมเดิม."""
+    zones = [_zone("z1"), _zone("z2")]
+    texts = {"z1": "HIDDEN BAY\nSKIPJAK TUNA",
+             "z2": "HIDDEN BAY\nSKIPJACK TUNA"}
+    mm = [d for d in check_group_consistency(zones, texts)
+          if d["class"] == "MISMATCH_PANELS"]
+    assert len(mm) == 2
+
+
+def test_cross_doc_unrelated_lines_not_paired():
+    mm = _mm({"z1": "HIDDEN BAY\nTOTALLY DIFFERENT LINE",
+              "b1": "HIDDEN BAY\nANOTHER THING HERE XYZ"})
+    assert len(mm) == 2
+
+
+# ── Phase 3: spell stoplist ────────────────────────────────────────────
+
+@pytest.mark.skipif(not checks.spell_layer_available(),
+                    reason="pyspellchecker not installed")
+def test_spell_skips_url_tokens():
+    zones = [_zone("z1", group="")]
+    texts = {"z1": "Visit https://www.example.com for details"}
+    words = [d["found"] for d in checks.check_spelling(zones, texts)]
+    assert "https" not in words and "www" not in words
+
+
+# ── ตัวอักษรเว้นช่อง O P E N (ภาพจริง: OPEN & EAT) ────────────────────
+
+def test_letter_spaced_caps_split_lines_forgiven():
+    merged = "OPEN & EAT\non SANDWICH, TACO or WRAP"
+    split = "O\nP\nE\nN\n&\nE\nA\nT\non SANDWICH, TACO or WRAP"
+    assert _mm({"z1": merged, "b1": split}) == []
+
+
+# ── Auto sequential groups (จับคู่ข้ามไฟล์อัตโนมัติตามลำดับ A B C…) ────
+
+def test_seq_group_sequence():
+    from artwork_check.zones import seq_group, GROUP_LETTERS
+    assert [seq_group(i) for i in range(4)] == ["A", "B", "C", "D"]
+    assert "I" not in GROUP_LETTERS and "O" not in GROUP_LETTERS
+    n = len(GROUP_LETTERS)
+    assert seq_group(n - 1) == "Z"
+    assert seq_group(n) == "A2"          # รอบสอง
+    assert seq_group(2 * n) == "A3"
+
+
+def test_propose_zones_sequential_groups():
+    """เสนอโซน → group ไล่ A,B,C.. ตามลำดับอ่าน ไม่ซ้ำ ไม่ถูกล้าง
+    แม้สองบล็อกจะขนาดเท่ากันเป๊ะ (heuristic ขนาดถูกถอดแล้ว)."""
+    np = pytest.importorskip("numpy")
+    cv2 = pytest.importorskip("cv2")
+    from artwork_check.zones import propose_zones, seq_group
+    img = np.full((800, 1200, 3), 255, np.uint8)
+    img[60:180, 80:520] = 0       # ขนาดเท่ากับบล็อกถัดไปเป๊ะ
+    img[60:180, 640:1080] = 0
+    img[380:560, 80:700] = 0
+    img[640:750, 80:400] = 0
+    zones = propose_zones(img)
+    assert len(zones) >= 3
+    assert [z["group"] for z in zones] == \
+        [seq_group(i) for i in range(len(zones))]
+    assert len({z["group"] for z in zones}) == len(zones)
+
+
+def test_start_ref_groups_align_with_primary(tmp_path, monkeypatch):
+    """แนบไฟล์ชิ้นงาน → b1..bN ได้ group ลำดับเดียวกับ z1..zN
+    (ไม่มี prefix 'b' อีกแล้ว) เพื่อจับคู่เทียบข้ามไฟล์อัตโนมัติ."""
+    np = pytest.importorskip("numpy")
+    cv2 = pytest.importorskip("cv2")
+    import os
+    from artwork_check import pipeline, report
+    monkeypatch.setattr(report.config, "INSPECTIONS_DIR", str(tmp_path))
+
+    img = np.full((600, 900, 3), 255, np.uint8)
+    img[50:150, 60:420] = 0
+    img[250:400, 60:500] = 0
+    img[460:560, 60:300] = 0
+    ok, buf = cv2.imencode(".png", img)
+    assert ok
+    res_a = pipeline.start_inspection(buf.tobytes(), "new.png")
+    res_b = pipeline.start_ref(res_a["id"], buf.tobytes(), "ref.png")
+
+    ga = [z["group"] for z in res_a["zones"]]
+    gb = [z["group"] for z in res_b["zones"]]
+    assert ga and ga == gb                       # ลำดับตรงกัน → จับคู่เอง
+    assert all(z["doc"] == "b" for z in res_b["zones"])
+    assert not any(z["group"].startswith("b") for z in res_b["zones"])
+
+
+def test_single_member_auto_groups_produce_no_defects():
+    """ช่องโหว่ที่ต้องกัน: โซนไฟล์เดียวได้ group เดี่ยว A,B,C.. ทุกโซน —
+    ห้ามมี defect โผล่จาก group ที่มีสมาชิกเดียว (voting ต้อง ≥2 panel)."""
+    zones = [dict(_zone("z1", group="A")), dict(_zone("z2", group="B")),
+             dict(_zone("z3", group="C"))]
+    texts = {"z1": "AAA BBB", "z2": "CCC DDD", "z3": "EEE FFF"}
+    assert check_group_consistency(zones, texts) == []
+
+
+def test_unequal_zone_counts_extra_group_is_inert():
+    """ไฟล์หลัก 3 โซน / ชิ้นงาน 2 โซน → group C เหลือเดี่ยว ต้องเงียบ
+    ส่วนคู่ A,B ที่ครบยังเทียบกันปกติ."""
+    zones = [dict(_zone("z1", group="A"), doc="a"),
+             dict(_zone("z2", group="B"), doc="a"),
+             dict(_zone("z3", group="C"), doc="a"),
+             dict(_zone("b1", group="A"), doc="b"),
+             dict(_zone("b2", group="B"), doc="b")]
+    texts = {"z1": "HELLO WORLD", "z2": "NET WEIGHT 170g",
+             "z3": "ONLY IN PRIMARY", "b1": "HELLO WORLD",
+             "b2": "NET WEIGHT 190g"}          # B ต่างจริง
+    defects = [d for d in check_group_consistency(zones, texts)
+               if d["class"] == "MISMATCH_PANELS"]
+    # กลุ่ม C (เดี่ยว) ต้องไม่ฟ้อง; กลุ่ม B ฟ้องคู่เดียวแบบ found/reference
+    assert all(d["zone_id"] != "z3" for d in defects)
+    assert len(defects) == 1 and defects[0]["zone_id"] == "z2"
+    assert "170" in defects[0]["found"] and "190" in defects[0]["reference"]
+
+
+# ── On-demand proposal (ปุ่ม "เสนอโซนใหม่" — ไม่เสนออัตโนมัติแล้ว) ────
+
+def test_propose_for_both_docs(tmp_path, monkeypatch):
+    np = pytest.importorskip("numpy")
+    cv2 = pytest.importorskip("cv2")
+    from artwork_check import pipeline, report
+    monkeypatch.setattr(report.config, "INSPECTIONS_DIR", str(tmp_path))
+
+    img = np.full((600, 900, 3), 255, np.uint8)
+    img[50:150, 60:420] = 0
+    img[250:400, 60:500] = 0
+    ok, buf = cv2.imencode(".png", img)
+    res_a = pipeline.start_inspection(buf.tobytes(), "new.png")
+
+    # doc a: id z*, ไม่มี doc field b
+    za = pipeline.propose_for(res_a["id"], "a")
+    assert za and all(z["id"].startswith("z") for z in za)
+
+    # doc b ก่อนแนบไฟล์ → FileNotFoundError ข้อความชัด
+    with pytest.raises(FileNotFoundError):
+        pipeline.propose_for(res_a["id"], "b")
+
+    pipeline.start_ref(res_a["id"], buf.tobytes(), "ref.png")
+    zb = pipeline.propose_for(res_a["id"], "b")
+    assert zb and all(z["doc"] == "b" and z["id"].startswith("b")
+                      for z in zb)
+    # ลำดับ group ตรงกับฝั่ง a (ภาพเดียวกัน) → จับคู่อัตโนมัติ
+    assert [z["group"] for z in za] == [z["group"] for z in zb]
+
+    with pytest.raises(ValueError):
+        pipeline.propose_for(res_a["id"], "x")
