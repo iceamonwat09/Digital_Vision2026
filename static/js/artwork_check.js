@@ -362,6 +362,25 @@
 
   const docOfZone = (z) => (z.doc === "b" ? "b" : "a");
 
+  // ลำดับ group อัตโนมัติ — ชุดเดียวกับ zones.py (GROUP_LETTERS/seq_group
+  // ฝั่ง server): A..Z ข้าม I/O แล้วต่อ A2..Z2, … ห้ามแก้ข้างเดียว.
+  // โซนที่ลากวาดใหม่ได้ "ตัวอักษรแรกในลำดับที่ยังว่างของไฟล์ตัวเอง" —
+  // การเติมช่องว่าง (เช่นลบ C ไปแล้ววาดใหม่ได้ C กลับมา) ทำให้โซนที่วาด
+  // ซ่อมแทนอันเดิมจับคู่ข้ามไฟล์ได้เองทันที
+  const GROUP_LETTERS = "ABCDEFGHJKLMNPQRSTUVWXYZ";
+  function nextGroupLetter(doc) {
+    const used = new Set(zones.filter((z) => docOfZone(z) === doc)
+                              .map((z) => z.group)
+                              .filter(Boolean));
+    for (let round = 0; round < 40; round++) {
+      for (const ch of GROUP_LETTERS) {
+        const g = round === 0 ? ch : ch + (round + 1);
+        if (!used.has(g)) return g;
+      }
+    }
+    return "";   // เกิน 960 โซน — เป็นไปไม่ได้ในทางปฏิบัติ
+  }
+
   function updateDocTabs() {
     docTabs.style.display = refAttached ? "" : "none";
     $("awDocTabA").classList.toggle("active-a", activeDoc === "a");
@@ -468,6 +487,7 @@
       zones = zones.filter((z) => docOfZone(z) !== "b").concat(res.zones || []);
       selectedId = null;
       updateDocTabs();
+      warnRefCountMismatch();
       if (switchToB !== false) showDoc("b"); else renderZones();
     } catch (e) {
       alert("เปิดไฟล์อ้างอิงไม่สำเร็จ: " + e.message);
@@ -476,6 +496,29 @@
     }
   }
   fileInputB.addEventListener("change", () => uploadRef(true));
+
+  // การจับคู่อัตโนมัติยึด "ลำดับ" — ถ้าสองไฟล์เสนอโซนได้จำนวนไม่เท่ากัน
+  // คู่หลังจุดที่ต่างจะเหลื่อม → เตือนให้ตรวจเครื่องหมาย ⇄ ก่อนส่งตรวจ.
+  // แสดงในกล่อง awEnvWarn เดิม (ลบคำเตือนเก่าของตัวเองก่อนเสมอ กันซ้ำ
+  // ตอนแนบไฟล์ชิ้นงานซ้ำหลายรอบ)
+  function warnRefCountMismatch() {
+    const w = $("awEnvWarn");
+    const old = w.querySelector(".aw-refcount-warn");
+    if (old) old.remove();
+    const aCount = zones.filter((z) => docOfZone(z) === "a").length;
+    const bCount = zones.filter((z) => docOfZone(z) === "b").length;
+    if (refAttached && aCount !== bCount) {
+      const div = document.createElement("div");
+      div.className = "aw-refcount-warn";
+      div.textContent = "⚠️ โซนที่เสนอได้สองไฟล์ไม่เท่ากัน (ไฟล์หลัก " +
+        aCount + " / ชิ้นงาน " + bCount + " โซน) — การจับคู่ตามลำดับอาจ" +
+        "เหลื่อม ตรวจเครื่องหมาย ⇄ บนแท็กโซน แล้วแก้กลุ่มให้ตรงก่อนส่งตรวจ";
+      w.appendChild(div);
+      w.style.display = "";
+    } else if (!w.textContent.trim()) {
+      w.style.display = "none";
+    }
+  }
 
   $("awRefToggle").addEventListener("click", () => {
     $("awRefToggleRow").style.display = "none";
@@ -765,7 +808,8 @@
     let n = zones.length + 1;
     while (zones.some((z) => z.id === prefix + n)) n++;
     const z = {
-      id: prefix + n, type: "panel", group: "", doc: activeDoc,
+      id: prefix + n, type: "panel", group: nextGroupLetter(activeDoc),
+      doc: activeDoc,
       bbox: [q.x / W, q.y / H, q.w / W, q.h / H]
         .map((v) => Math.round(v * 1e5) / 1e5),
       label: (activeDoc === "b" ? "อ้างอิง " : "โซน ") + n,

@@ -110,11 +110,11 @@ def start_ref(rec_id: str, file_bytes: bytes, filename: str) -> dict:
         z["id"] = f"b{i}"                    # never collides with z1..zN
         z["doc"] = "b"
         z["label"] = f"อ้างอิง {i}"
-        # Namespace auto-assigned groups so they can never accidentally
-        # pair with the primary file's auto groups ("A" vs "A") — the
-        # human links zones across files by typing a shared group.
-        if z.get("group"):
-            z["group"] = ("b" + z["group"])[:12]
+        # groups keep the same sequential letters the primary proposal
+        # uses (b1→A, b2→B, … in reading order) so the same-ordinal zone
+        # of the primary file pairs automatically — the human reviews
+        # the ⇄ pairing and edits letters where the order differs.
+        # (b-prefix namespacing removed — approved 2026-07-20.)
     embedded_chars = len(doc.embedded_text())
 
     logger.info("[artwork] ref %s file=%s zones=%d embedded_chars=%d",

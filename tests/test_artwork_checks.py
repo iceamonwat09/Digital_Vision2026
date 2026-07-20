@@ -971,3 +971,86 @@ def test_letter_spaced_caps_split_lines_forgiven():
     merged = "OPEN & EAT\non SANDWICH, TACO or WRAP"
     split = "O\nP\nE\nN\n&\nE\nA\nT\non SANDWICH, TACO or WRAP"
     assert _mm({"z1": merged, "b1": split}) == []
+
+
+# ── Auto sequential groups (จับคู่ข้ามไฟล์อัตโนมัติตามลำดับ A B C…) ────
+
+def test_seq_group_sequence():
+    from artwork_check.zones import seq_group, GROUP_LETTERS
+    assert [seq_group(i) for i in range(4)] == ["A", "B", "C", "D"]
+    assert "I" not in GROUP_LETTERS and "O" not in GROUP_LETTERS
+    n = len(GROUP_LETTERS)
+    assert seq_group(n - 1) == "Z"
+    assert seq_group(n) == "A2"          # รอบสอง
+    assert seq_group(2 * n) == "A3"
+
+
+def test_propose_zones_sequential_groups():
+    """เสนอโซน → group ไล่ A,B,C.. ตามลำดับอ่าน ไม่ซ้ำ ไม่ถูกล้าง
+    แม้สองบล็อกจะขนาดเท่ากันเป๊ะ (heuristic ขนาดถูกถอดแล้ว)."""
+    np = pytest.importorskip("numpy")
+    cv2 = pytest.importorskip("cv2")
+    from artwork_check.zones import propose_zones, seq_group
+    img = np.full((800, 1200, 3), 255, np.uint8)
+    img[60:180, 80:520] = 0       # ขนาดเท่ากับบล็อกถัดไปเป๊ะ
+    img[60:180, 640:1080] = 0
+    img[380:560, 80:700] = 0
+    img[640:750, 80:400] = 0
+    zones = propose_zones(img)
+    assert len(zones) >= 3
+    assert [z["group"] for z in zones] == \
+        [seq_group(i) for i in range(len(zones))]
+    assert len({z["group"] for z in zones}) == len(zones)
+
+
+def test_start_ref_groups_align_with_primary(tmp_path, monkeypatch):
+    """แนบไฟล์ชิ้นงาน → b1..bN ได้ group ลำดับเดียวกับ z1..zN
+    (ไม่มี prefix 'b' อีกแล้ว) เพื่อจับคู่เทียบข้ามไฟล์อัตโนมัติ."""
+    np = pytest.importorskip("numpy")
+    cv2 = pytest.importorskip("cv2")
+    import os
+    from artwork_check import pipeline, report
+    monkeypatch.setattr(report.config, "INSPECTIONS_DIR", str(tmp_path))
+
+    img = np.full((600, 900, 3), 255, np.uint8)
+    img[50:150, 60:420] = 0
+    img[250:400, 60:500] = 0
+    img[460:560, 60:300] = 0
+    ok, buf = cv2.imencode(".png", img)
+    assert ok
+    res_a = pipeline.start_inspection(buf.tobytes(), "new.png")
+    res_b = pipeline.start_ref(res_a["id"], buf.tobytes(), "ref.png")
+
+    ga = [z["group"] for z in res_a["zones"]]
+    gb = [z["group"] for z in res_b["zones"]]
+    assert ga and ga == gb                       # ลำดับตรงกัน → จับคู่เอง
+    assert all(z["doc"] == "b" for z in res_b["zones"])
+    assert not any(z["group"].startswith("b") for z in res_b["zones"])
+
+
+def test_single_member_auto_groups_produce_no_defects():
+    """ช่องโหว่ที่ต้องกัน: โซนไฟล์เดียวได้ group เดี่ยว A,B,C.. ทุกโซน —
+    ห้ามมี defect โผล่จาก group ที่มีสมาชิกเดียว (voting ต้อง ≥2 panel)."""
+    zones = [dict(_zone("z1", group="A")), dict(_zone("z2", group="B")),
+             dict(_zone("z3", group="C"))]
+    texts = {"z1": "AAA BBB", "z2": "CCC DDD", "z3": "EEE FFF"}
+    assert check_group_consistency(zones, texts) == []
+
+
+def test_unequal_zone_counts_extra_group_is_inert():
+    """ไฟล์หลัก 3 โซน / ชิ้นงาน 2 โซน → group C เหลือเดี่ยว ต้องเงียบ
+    ส่วนคู่ A,B ที่ครบยังเทียบกันปกติ."""
+    zones = [dict(_zone("z1", group="A"), doc="a"),
+             dict(_zone("z2", group="B"), doc="a"),
+             dict(_zone("z3", group="C"), doc="a"),
+             dict(_zone("b1", group="A"), doc="b"),
+             dict(_zone("b2", group="B"), doc="b")]
+    texts = {"z1": "HELLO WORLD", "z2": "NET WEIGHT 170g",
+             "z3": "ONLY IN PRIMARY", "b1": "HELLO WORLD",
+             "b2": "NET WEIGHT 190g"}          # B ต่างจริง
+    defects = [d for d in check_group_consistency(zones, texts)
+               if d["class"] == "MISMATCH_PANELS"]
+    # กลุ่ม C (เดี่ยว) ต้องไม่ฟ้อง; กลุ่ม B ฟ้องคู่เดียวแบบ found/reference
+    assert all(d["zone_id"] != "z3" for d in defects)
+    assert len(defects) == 1 and defects[0]["zone_id"] == "z2"
+    assert "170" in defects[0]["found"] and "190" in defects[0]["reference"]
