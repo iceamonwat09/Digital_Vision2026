@@ -383,7 +383,7 @@ def _pair_cross_doc_extras(gname: str, panels: List[dict],
     for da, db in pairs:
         out.append(_defect(
             "MISMATCH_PANELS", prim["id"],
-            f"กลุ่ม {gname}: ข้อความบนไฟล์หลักไม่ตรงกับไฟล์อ้างอิง (ฉบับเก่า)",
+            f"กลุ่ม {gname}: ข้อความบนไฟล์หลักไม่ตรงกับไฟล์อ้างอิง (ชิ้นงาน)",
             found=da["found"], reference=db["found"],
             ref_zone_ids=[ref["id"]]))
     return out

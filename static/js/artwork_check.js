@@ -77,7 +77,7 @@
       const previewUrlB = "/api/artwork/" + esc(rep.id) + "/preview_b.png?t=" + ts;
       const overlayUrlB = "/api/artwork/" + esc(rep.id) + "/overlay_b.png?t=" + ts;
       html += imgPairHtml(previewUrlB, overlayUrlB,
-        "🅱 ไฟล์อ้างอิง (ฉบับเก่า)", "🅱 ผลตรวจ — โซนที่พบปัญหา", true);
+        "🅱 ไฟล์อ้างอิง (ชิ้นงาน)", "🅱 ผลตรวจ — โซนที่พบปัญหา", true);
     }
 
     const zoneById = {};
@@ -668,7 +668,7 @@
       const doc = docOfZone(z);
       pd.style.display = "";
       pd.className = "aw-doc-badge " + (doc === "b" ? "doc-b" : "doc-a");
-      pd.textContent = doc === "b" ? "🅱 ฉบับเก่า" : "🅰 ไฟล์หลัก";
+      pd.textContent = doc === "b" ? "🅱 ชิ้นงาน" : "🅰 ไฟล์หลัก";
       const partners = z.group
         ? zones.filter((o) => o.id !== z.id && o.group === z.group &&
                               docOfZone(o) !== doc).map((o) => o.id)
@@ -827,7 +827,7 @@
       const bCount = zones.filter((z) => docOfZone(z) === "b").length;
       if (bCount && !refAttached)
         alert("template นี้มีโซนของ 🅱 ไฟล์อ้างอิง " + bCount + " โซน — " +
-              "แนบไฟล์อ้างอิง (ฉบับเก่า) ก่อนจึงจะเห็น/แก้ไข/ส่งตรวจโซนเหล่านั้นได้");
+              "แนบไฟล์อ้างอิง (ชิ้นงาน) ก่อนจึงจะเห็น/แก้ไข/ส่งตรวจโซนเหล่านั้นได้");
     } catch (e) { alert("โหลด template ไม่สำเร็จ: " + e.message); }
   });
   $("awTemplateSave").addEventListener("click", async () => {
@@ -851,7 +851,7 @@
     if (!zones.length) { alert("ต้องมีอย่างน้อย 1 โซน"); return; }
     // โซนฝั่งไฟล์อ้างอิงค้างอยู่ (เช่นจาก template) แต่ยังไม่ได้แนบไฟล์
     if (!refAttached && zones.some((z) => docOfZone(z) === "b")) {
-      alert("มีโซนของ 🅱 ไฟล์อ้างอิง (ฉบับเก่า) แต่ยังไม่ได้แนบไฟล์อ้างอิง — " +
+      alert("มีโซนของ 🅱 ไฟล์อ้างอิง (ชิ้นงาน) แต่ยังไม่ได้แนบไฟล์อ้างอิง — " +
             "แนบไฟล์ หรือลบโซนเหล่านั้นก่อนส่งตรวจ");
       return;
     }

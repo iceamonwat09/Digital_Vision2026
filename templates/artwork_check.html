@@ -235,12 +235,12 @@
       <!-- cross-file compare: ปุ่ม opt-in → ช่องแนบไฟล์อ้างอิง (ฉบับเก่า) -->
       <div class="aw-row" id="awRefToggleRow">
         <button id="awRefToggle" class="aw-btn aw-btn-ghost" disabled
-                title="แนบไฟล์ที่สอง (เช่นฉบับเก่าที่ approve แล้ว) เพื่อเทียบข้อความข้ามไฟล์">
-          + แนบไฟล์อ้างอิงเพื่อเทียบ (ฉบับเก่า)</button>
+                title="แนบไฟล์ที่สอง (เช่นชิ้นงานที่ approve แล้ว) เพื่อเทียบข้อความข้ามไฟล์">
+          + แนบไฟล์อ้างอิงเพื่อเทียบ (ชิ้นงาน)</button>
       </div>
       <div class="aw-row" id="awRefUploadRow" style="display:none;">
         <div style="flex:2; min-width:200px;">
-          <label class="aw-label"><span class="aw-doc-badge doc-b">🅱 ไฟล์อ้างอิง (ฉบับเก่า)</span>
+          <label class="aw-label"><span class="aw-doc-badge doc-b">🅱 ไฟล์อ้างอิง (ชิ้นงาน)</span>
             — PDF / PNG / JPG</label>
           <input id="awFileB" type="file" accept=".pdf,.png,.jpg,.jpeg" class="aw-input" style="width:100%;">
         </div>
@@ -259,7 +259,7 @@
         <div id="awZoomBar" class="aw-zoom-bar" style="display:none;">
           <span id="awDocTabs" class="aw-doc-tabs" style="display:none;">
             <button type="button" id="awDocTabA" class="aw-doc-tab active-a">🅰 ไฟล์หลัก</button>
-            <button type="button" id="awDocTabB" class="aw-doc-tab">🅱 ฉบับเก่า</button>
+            <button type="button" id="awDocTabB" class="aw-doc-tab">🅱 ชิ้นงาน</button>
           </span>
           <span>🔍 ซูม</span>
           <input id="awZoomRange" type="range" min="30" max="300" value="100"
@@ -308,9 +308,9 @@
           <li>วาดกรอบหยาบๆ ให้<b>ใหญ่กว่าเนื้อหาเล็กน้อย</b> แล้ว<b>ดับเบิลคลิกที่โซน</b> — ระบบจะขยับกรอบให้พอดีเนื้อหาเอง (คลิกซ้ำได้ถ้ายังไม่พอดี) อย่าวาดเล็กจนตัดข้อความ เพราะ OCR จะอ่านไม่ครบแล้วฟ้องว่าข้อความหาย</li>
           <li>panel ที่ซ้ำกัน (เช่น SIDE 1–4) ใส่<b>กลุ่มเดียวกัน</b> — ระบบจะโหวตเสียงข้างมากหา panel ที่สะกดต่าง</li>
           <li>โซน zoom ใส่กลุ่มเดียวกับ panel ที่มันขยาย — ระบบจะเช็คว่า zoom ตรงกับฉลากจริง</li>
-          <li>เทียบข้ามไฟล์: แนบ 🅱 ไฟล์อ้างอิง (ฉบับเก่า) แล้วใส่<b>กลุ่มเดียวกัน</b>ให้โซนของสองไฟล์
+          <li>เทียบข้ามไฟล์: แนบ 🅱 ไฟล์อ้างอิง (ชิ้นงาน) แล้วใส่<b>กลุ่มเดียวกัน</b>ให้โซนของสองไฟล์
               — ระบบจะเทียบข้อความข้ามไฟล์ให้เหมือนเทียบ panel ปกติ
-              (ตั้งโซนฝั่งฉบับเก่าเป็น type <b>zoom</b> ถ้าต้องการให้ฉบับเก่าเป็น "ต้นแบบอ้างอิง"
+              (ตั้งโซนฝั่งชิ้นงานเป็น type <b>zoom</b> ถ้าต้องการให้ชิ้นงานเป็น "ต้นแบบอ้างอิง"
               แล้วชี้ความผิดไปที่ไฟล์ใหม่)</li>
           <li>เส้น dieline / color bar ตั้งเป็น ignore</li>
           <li>ข้อความหมุน 90° (รหัสข้างบาร์โค้ด/แถบ TM) และโลโก้อักษรวิจิตร — OCR อ่านไม่นิ่ง

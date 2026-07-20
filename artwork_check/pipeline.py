@@ -146,7 +146,7 @@ def _read_all_docs(insp_dir: str, zones_a: List[dict],
             src_b = _find_source(insp_dir, "source_b")
         except FileNotFoundError:
             raise ValueError(
-                "มีโซนของไฟล์อ้างอิง (ฉบับเก่า) แต่ยังไม่ได้แนบไฟล์อ้างอิง — "
+                "มีโซนของไฟล์อ้างอิง (ชิ้นงาน) แต่ยังไม่ได้แนบไฟล์อ้างอิง — "
                 "แนบไฟล์อ้างอิง หรือลบโซนเหล่านั้นก่อนส่งตรวจ")
         results += ocr.read_all_zones(ArtworkDocument(src_b), zones_b)
     return results
@@ -298,4 +298,4 @@ def _find_source(insp_dir: str, base: str = "source") -> str:
             return p
     raise FileNotFoundError("ไม่พบไฟล์ต้นฉบับของการตรวจนี้"
                             if base == "source"
-                            else "ไม่พบไฟล์อ้างอิง (ฉบับเก่า) ของการตรวจนี้")
+                            else "ไม่พบไฟล์อ้างอิง (ชิ้นงาน) ของการตรวจนี้")
