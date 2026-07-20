@@ -78,6 +78,24 @@ def api_upload_ref(rec_id):
     return jsonify(result)
 
 
+@artwork_bp.route("/api/artwork/<rec_id>/propose", methods=["POST"])
+def api_propose(rec_id):
+    """On-demand zone proposal for one document (ปุ่ม "เสนอโซนใหม่").
+    Body: {"doc": "a"|"b"} (default "a"). Read-only w.r.t. stored state."""
+    body = request.get_json(silent=True) or {}
+    doc = str(body.get("doc", "a")).lower()
+    try:
+        zones = pipeline.propose_for(rec_id, doc)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except FileNotFoundError as e:
+        return jsonify({"error": str(e)}), 404
+    except Exception as e:
+        logger.exception("[artwork] propose failed for %s", rec_id)
+        return jsonify({"error": f"เสนอโซนไม่สำเร็จ: {e}"}), 500
+    return jsonify({"zones": zones})
+
+
 @artwork_bp.route("/api/artwork/<rec_id>/inspect", methods=["POST"])
 def api_inspect(rec_id):
     body = request.get_json(silent=True) or {}

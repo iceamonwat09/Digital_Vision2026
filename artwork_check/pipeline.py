@@ -105,16 +105,7 @@ def start_ref(rec_id: str, file_bytes: bytes, filename: str) -> dict:
     preview = doc.render(config.PREVIEW_DPI)
     cv2.imwrite(os.path.join(d, "preview_b.png"), preview)
 
-    proposed = zones_mod.propose_zones(preview)
-    for i, z in enumerate(proposed, 1):
-        z["id"] = f"b{i}"                    # never collides with z1..zN
-        z["doc"] = "b"
-        z["label"] = f"อ้างอิง {i}"
-        # groups keep the same sequential letters the primary proposal
-        # uses (b1→A, b2→B, … in reading order) so the same-ordinal zone
-        # of the primary file pairs automatically — the human reviews
-        # the ⇄ pairing and edits letters where the order differs.
-        # (b-prefix namespacing removed — approved 2026-07-20.)
+    proposed = _mark_ref_zones(zones_mod.propose_zones(preview))
     embedded_chars = len(doc.embedded_text())
 
     logger.info("[artwork] ref %s file=%s zones=%d embedded_chars=%d",
@@ -127,6 +118,47 @@ def start_ref(rec_id: str, file_bytes: bytes, filename: str) -> dict:
         "zones": proposed,
         "has_text_layer": embedded_chars >= config.EMBEDDED_TEXT_MIN_CHARS,
     }
+
+
+def _mark_ref_zones(proposed: List[dict]) -> List[dict]:
+    """Re-tag freshly proposed zones as reference-file zones: ids b1..bN
+    (never collide with z1..zN), doc="b", reference labels. Groups keep
+    the same sequential letters the primary proposal uses (b1→A, b2→B,
+    … in reading order) so the same-ordinal zone of the primary file
+    pairs automatically — the human reviews the ⇄ pairing and edits
+    letters where the order differs."""
+    for i, z in enumerate(proposed, 1):
+        z["id"] = f"b{i}"
+        z["doc"] = "b"
+        z["label"] = f"อ้างอิง {i}"
+    return proposed
+
+
+def propose_for(rec_id: str, doc: str = "a") -> List[dict]:
+    """
+    On-demand zone proposal (ปุ่ม "เสนอโซนใหม่") for one document of an
+    existing inspection — reads the stored preview, no re-upload, no
+    new inspection id. Returns proposed zones only; touches nothing on
+    disk, so it can never affect a saved report/overlay.
+    """
+    if doc not in ("a", "b"):
+        raise ValueError("doc ต้องเป็น a หรือ b")
+    d = report.inspection_dir(rec_id)
+    name = "preview_b.png" if doc == "b" else "preview.png"
+    path = os.path.join(d, name)
+    if not os.path.exists(path):
+        raise FileNotFoundError(
+            "ไม่พบไฟล์อ้างอิง (ชิ้นงาน) — แนบไฟล์ก่อนกดเสนอโซน"
+            if doc == "b" else "ไม่พบรายการอัปโหลดนี้")
+    img = cv2.imread(path)
+    if img is None:
+        raise ValueError("อ่านภาพ preview ไม่ได้")
+    proposed = zones_mod.propose_zones(img)
+    if doc == "b":
+        proposed = _mark_ref_zones(proposed)
+    logger.info("[artwork] propose %s doc=%s zones=%d",
+                rec_id, doc, len(proposed))
+    return proposed
 
 
 def _split_docs(zone_list: List[dict]) -> Tuple[List[dict], List[dict]]:

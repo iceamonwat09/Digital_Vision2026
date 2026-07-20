@@ -1054,3 +1054,36 @@ def test_unequal_zone_counts_extra_group_is_inert():
     assert all(d["zone_id"] != "z3" for d in defects)
     assert len(defects) == 1 and defects[0]["zone_id"] == "z2"
     assert "170" in defects[0]["found"] and "190" in defects[0]["reference"]
+
+
+# ── On-demand proposal (ปุ่ม "เสนอโซนใหม่" — ไม่เสนออัตโนมัติแล้ว) ────
+
+def test_propose_for_both_docs(tmp_path, monkeypatch):
+    np = pytest.importorskip("numpy")
+    cv2 = pytest.importorskip("cv2")
+    from artwork_check import pipeline, report
+    monkeypatch.setattr(report.config, "INSPECTIONS_DIR", str(tmp_path))
+
+    img = np.full((600, 900, 3), 255, np.uint8)
+    img[50:150, 60:420] = 0
+    img[250:400, 60:500] = 0
+    ok, buf = cv2.imencode(".png", img)
+    res_a = pipeline.start_inspection(buf.tobytes(), "new.png")
+
+    # doc a: id z*, ไม่มี doc field b
+    za = pipeline.propose_for(res_a["id"], "a")
+    assert za and all(z["id"].startswith("z") for z in za)
+
+    # doc b ก่อนแนบไฟล์ → FileNotFoundError ข้อความชัด
+    with pytest.raises(FileNotFoundError):
+        pipeline.propose_for(res_a["id"], "b")
+
+    pipeline.start_ref(res_a["id"], buf.tobytes(), "ref.png")
+    zb = pipeline.propose_for(res_a["id"], "b")
+    assert zb and all(z["doc"] == "b" and z["id"].startswith("b")
+                      for z in zb)
+    # ลำดับ group ตรงกับฝั่ง a (ภาพเดียวกัน) → จับคู่อัตโนมัติ
+    assert [z["group"] for z in za] == [z["group"] for z in zb]
+
+    with pytest.raises(ValueError):
+        pipeline.propose_for(res_a["id"], "x")

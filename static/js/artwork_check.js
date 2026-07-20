@@ -428,7 +428,9 @@
       fd.append("file", f);
       const res = await api("/api/artwork/upload", { method: "POST", body: fd });
       inspectionId = res.id;
-      zones = res.zones || [];
+      // เริ่มจากหน้าว่าง — เสนอโซนเฉพาะเมื่อผู้ใช้กด "เสนอโซนใหม่" เอง
+      // (res.zones จาก server ถูกละไว้โดยตั้งใจ)
+      zones = [];
       selectedId = null;
       cancelDraw();
       // ไฟล์หลักใหม่ = inspection record ใหม่ → สถานะไฟล์อ้างอิงเดิมหลุด
@@ -447,7 +449,8 @@
       stageEmpty.style.display = "none";
       $("awZoomBar").style.display = "";
       setBusy(false);
-      resultBox.innerHTML = '<div class="aw-empty">ปรับโซนแล้วกด "ส่งตรวจสอบ"</div>';
+      resultBox.innerHTML = '<div class="aw-empty">กด "↻ เสนอโซนใหม่" ให้ระบบเสนอโซน ' +
+        'หรือ "+ เพิ่มโซน" วาดเอง แล้วกด "ส่งตรวจสอบ"</div>';
       if (fileInputB.files[0]) await uploadRef(false);
 
       const warns = [];
@@ -483,8 +486,9 @@
       docMeta.b = { w: res.preview_size[0], h: res.preview_size[1],
                     url: "/api/artwork/" + inspectionId + "/preview_b.png?t=" + Date.now() };
       refAttached = true;
-      // โซนฝั่ง b เดิม (จากไฟล์อ้างอิงก่อนหน้า) แทนที่ด้วยข้อเสนอชุดใหม่
-      zones = zones.filter((z) => docOfZone(z) !== "b").concat(res.zones || []);
+      // โซนฝั่ง b ของไฟล์ก่อนหน้า (ถ้ามี) ทิ้ง — ไฟล์เปลี่ยนแล้ว. เริ่มจาก
+      // หน้าว่างเช่นเดียวกับไฟล์หลัก: เสนอโซนเฉพาะเมื่อกด "เสนอโซนใหม่"
+      zones = zones.filter((z) => docOfZone(z) !== "b");
       selectedId = null;
       updateDocTabs();
       warnRefCountMismatch();
@@ -507,7 +511,9 @@
     if (old) old.remove();
     const aCount = zones.filter((z) => docOfZone(z) === "a").length;
     const bCount = zones.filter((z) => docOfZone(z) === "b").length;
-    if (refAttached && aCount !== bCount) {
+    // เตือนเฉพาะเมื่อมีโซนแล้วทั้งสองฝั่ง — ตอนเพิ่งแนบไฟล์ (ยังไม่กดเสนอ
+    // โซน ฝั่งใดฝั่งหนึ่งเป็น 0) ไม่ใช่คู่เหลื่อม แค่ยังไม่เริ่ม
+    if (refAttached && aCount > 0 && bCount > 0 && aCount !== bCount) {
       const div = document.createElement("div");
       div.className = "aw-refcount-warn";
       div.textContent = "⚠️ โซนที่เสนอได้สองไฟล์ไม่เท่ากัน (ไฟล์หลัก " +
@@ -732,11 +738,13 @@
   $("awPropLabel").addEventListener("input", () => {
     const z = selectedZone(); if (z) z.label = $("awPropLabel").value;
   });
-  $("awPropDelete").addEventListener("click", () => {
+  function deleteSelectedZone() {
+    if (!selectedId) return;
     zones = zones.filter((z) => z.id !== selectedId);
     selectedId = null;
     renderZones();
-  });
+  }
+  $("awPropDelete").addEventListener("click", deleteSelectedZone);
 
   // ── add zone by drawing a rectangle on the preview ─────────────────
   const addZoneBtn = $("awAddZone");
@@ -820,7 +828,18 @@
   });
 
   document.addEventListener("keydown", (ev) => {
-    if (ev.key === "Escape") cancelDraw();
+    if (ev.key === "Escape") { cancelDraw(); return; }
+    // ปุ่ม Delete = ลบโซนที่เลือกอยู่ — ยกเว้นตอนกำลังพิมพ์ในช่องกรอก
+    // (group/label/แบรนด์ ฯลฯ) และตอน lightbox เปิด เพื่อไม่ลบโดยไม่ตั้งใจ
+    if (ev.key === "Delete") {
+      const t = ev.target;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" ||
+                t.tagName === "SELECT" || t.isContentEditable)) return;
+      if (busy || !selectedId) return;
+      if (lightbox && lightbox.classList.contains("open")) return;
+      ev.preventDefault();
+      deleteSelectedZone();
+    }
   });
 
   // ── clear all zones ────────────────────────────────────────────────
@@ -842,9 +861,34 @@
     renderZones();
   });
 
+  // ── เสนอโซนอัตโนมัติ (เฉพาะเมื่อกด) ────────────────────────────────
+  // ทำงานกับ "ไฟล์ที่กำลังแสดง" (แท็บ a/b) และแทนที่เฉพาะโซนของไฟล์นั้น
+  // — ไม่ re-upload, ไม่สร้าง inspection ใหม่, ไม่แตะโซนของอีกไฟล์
   $("awRedetect").addEventListener("click", async () => {
-    if (!fileInput.files[0]) return;
-    fileInput.dispatchEvent(new Event("change"));
+    if (busy || !inspectionId) return;
+    if (activeDoc === "b" && !refAttached) return;
+    const mine = zones.filter((z) => docOfZone(z) === activeDoc);
+    if (mine.length &&
+        !confirm("แทนที่โซนของไฟล์นี้ " + mine.length +
+                 " โซน ด้วยโซนที่ระบบเสนอให้ใหม่?")) return;
+    setBusy(true);
+    try {
+      const res = await api("/api/artwork/" + inspectionId + "/propose", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ doc: activeDoc }),
+      });
+      zones = zones.filter((z) => docOfZone(z) !== activeDoc)
+                   .concat(res.zones || []);
+      selectedId = null;
+      cancelDraw();
+      renderZones();
+      warnRefCountMismatch();
+    } catch (e) {
+      alert("เสนอโซนไม่สำเร็จ: " + e.message);
+    } finally {
+      setBusy(false);
+    }
   });
 
   // ── templates ──────────────────────────────────────────────────────
@@ -951,6 +995,13 @@
 
   $("awTranslateBtn").addEventListener("click", async () => {
     if (!inspectionId) return;
+    // ยังไม่มีโซน (ยังไม่ได้กดเสนอ/วาด) → บอกตรงๆ แทน error จาก server
+    if (!zones.length && !(await api("/api/artwork/" + inspectionId + "/report")
+                             .catch(() => null))) {
+      textMsg.textContent =
+        "ยังไม่มีโซน — กด \"↻ เสนอโซนใหม่\" หรือวาดโซนก่อน แล้วจึงแปล";
+      return;
+    }
     const btn = $("awTranslateBtn");
     btn.disabled = true;
     textMsg.innerHTML = '<span class="aw-spin"></span>กำลังสร้างตารางและแปล…';
