@@ -418,11 +418,12 @@ def test_translate_lines_alignment(monkeypatch):
     out = translate.translate_lines(["1", "2", "3"])
     assert out["translations"] == ["a", "b", ""]          # padded to len 3
     assert out["spell_available"] is True
-    assert out["spell"] == [
-        {"flagged": True, "suggestion": "A", "kind": None, "reason": None},
-        {"flagged": False, "suggestion": None, "kind": None, "reason": None},
-        {"flagged": False, "suggestion": None, "kind": None, "reason": None},
-    ]
+    # spell array ที่ยาวไม่ตรงจำนวนบรรทัด = ตำแหน่งเชื่อไม่ได้ทั้งก้อน
+    # (โมเดลอาจข้ามบรรทัดกลางลิสต์) → ทุกบรรทัดต้องถูกตีตรา "ตรวจไม่ครบ"
+    # ห้ามเติมท้ายด้วย flagged:False ปลอมๆ ที่จะโชว์เป็น "✓ ไม่พบ"
+    assert all(sp.get("missing") is True and sp["flagged"] is False
+               for sp in out["spell"])
+    assert len(out["spell"]) == 3
 
 
 def test_translate_lines_no_spell_field_marks_unavailable(monkeypatch):
@@ -1087,3 +1088,133 @@ def test_propose_for_both_docs(tmp_path, monkeypatch):
 
     with pytest.raises(ValueError):
         pipeline.propose_for(res_a["id"], "x")
+
+
+# ── Chunked translation (แบ่งก้อนละ 30 บรรทัด — แก้ AI เพี้ยนตอนโซนเยอะ) ─
+
+def _fake_ok_chunk(lines):
+    """คำตอบสมบูรณ์ 1 ก้อน: แปล = "EN:"+src, spell align ครบ."""
+    return {"translations": ["EN:" + l for l in lines],
+            "spell": [{"flagged": False, "suggestion": None,
+                       "kind": None, "reason": None} for _ in lines],
+            "spell_available": True}
+
+
+def test_chunked_splits_and_merges_in_order(monkeypatch):
+    from artwork_check import translate
+    calls = []
+    monkeypatch.setattr(translate, "translate_lines",
+                        lambda lines: calls.append(len(lines))
+                        or _fake_ok_chunk(lines))
+    lines = [f"L{i}" for i in range(70)]
+    out = translate.translate_lines_chunked(lines, chunk_size=30)
+    assert calls == [30, 30, 10]
+    assert out["translations"] == ["EN:" + l for l in lines]   # ลำดับคงเดิม
+    assert out["chunks_total"] == 3 and out["chunks_failed"] == 0
+    assert out["spell_available"] is True
+
+
+def test_chunked_zero_is_single_request_rollback(monkeypatch):
+    """ARTWORK_TRANSLATE_CHUNK_LINES=0 = ส่งก้อนเดียวแบบเดิม (ปุ่มถอยกลับ)."""
+    from artwork_check import translate
+    calls = []
+    monkeypatch.setattr(translate, "translate_lines",
+                        lambda lines: calls.append(len(lines))
+                        or _fake_ok_chunk(lines))
+    translate.translate_lines_chunked([f"L{i}" for i in range(70)],
+                                      chunk_size=0)
+    assert calls == [70]
+
+
+def test_chunked_failed_chunk_marks_missing_not_clean(monkeypatch):
+    """ก้อนที่ล้ม: แปลว่าง + spell = missing (ห้ามเป็น "ไม่พบ" ปลอม)
+    ก้อนอื่นต้องไม่ติดเชื้อ."""
+    from artwork_check import translate
+    n = {"i": 0}
+
+    def fake(lines):
+        n["i"] += 1
+        if n["i"] == 2:      # ก้อนกลางล้ม
+            return {"translations": [], "spell": [],
+                    "spell_available": False}
+        return _fake_ok_chunk(lines)
+
+    monkeypatch.setattr(translate, "translate_lines", fake)
+    lines = [f"L{i}" for i in range(70)]
+    out = translate.translate_lines_chunked(lines, chunk_size=30)
+    assert out["chunks_failed"] == 1 and out["chunks_total"] == 3
+    assert out["translations"][0] == "EN:L0"
+    assert out["translations"][30] == "" and out["translations"][59] == ""
+    assert out["translations"][60] == "EN:L60"
+    assert out["spell"][30].get("missing") is True
+    assert out["spell"][0].get("missing") is None
+    assert out["spell_available"] is True   # ก้อนที่สำเร็จมี spell ครบ
+
+
+def test_translate_table_partial_failure_not_cached(tmp_path, monkeypatch):
+    """ล้มบางก้อน → แสดงส่วนที่ได้ + note บอกตรง + ห้ามเขียนแคช
+    (กันบรรทัดว่างค้างถาวร — กดแปลซ้ำแล้วเติมได้)."""
+    import os
+    from artwork_check import translate
+    monkeypatch.setattr(translate.config, "N8N_TRANSLATE_WEBHOOK_URL",
+                        "http://x/webhook/artwork-translate")
+    monkeypatch.setattr(
+        translate, "translate_lines_chunked",
+        lambda lines: {
+            "translations": ["EN:" + l for l in lines[:1]] +
+                            [""] * (len(lines) - 1),
+            "spell": [translate._clean_spell()] +
+                     [translate._missing_spell()] * (len(lines) - 1),
+            "spell_available": True,
+            "chunks_total": 2, "chunks_failed": 1,
+        })
+    rows = [{"src": f"S{i}", "status": "ok", "flagged": [], "suggest": {}}
+            for i in range(3)]
+    res = translate.translate_table(str(tmp_path), rows)
+    assert res["translated"] is True
+    assert "1/2" in res["note"] or "แปลสำเร็จ 1/2" in res["note"]
+    assert not os.path.exists(os.path.join(str(tmp_path),
+                                           "translation.json"))
+    assert res["rows"][1]["ai_spell"].get("missing") is True
+
+
+def test_translate_table_complete_result_cached(tmp_path, monkeypatch):
+    """ครบทุกก้อน + align ครบ → เขียนแคชตามเดิม."""
+    import os
+    from artwork_check import translate
+    monkeypatch.setattr(translate.config, "N8N_TRANSLATE_WEBHOOK_URL",
+                        "http://x/webhook/artwork-translate")
+    monkeypatch.setattr(
+        translate, "translate_lines_chunked",
+        lambda lines: {
+            "translations": ["EN:" + l for l in lines],
+            "spell": [translate._clean_spell() for _ in lines],
+            "spell_available": True,
+            "chunks_total": 1, "chunks_failed": 0,
+        })
+    rows = [{"src": "S1", "status": "ok", "flagged": [], "suggest": {}}]
+    res = translate.translate_table(str(tmp_path), rows)
+    assert res["translated"] is True and "note" not in res
+    assert os.path.exists(os.path.join(str(tmp_path), "translation.json"))
+
+
+def test_translate_table_misaligned_spell_not_cached(tmp_path, monkeypatch):
+    """spell เหลื่อม (missing ทั้งก้อน) แม้แปลสำเร็จ → ไม่เขียนแคช
+    เพื่อให้กดแปลซ้ำแล้ว AI ได้ตรวจใหม่."""
+    import os
+    from artwork_check import translate
+    monkeypatch.setattr(translate.config, "N8N_TRANSLATE_WEBHOOK_URL",
+                        "http://x/webhook/artwork-translate")
+    monkeypatch.setattr(
+        translate, "translate_lines_chunked",
+        lambda lines: {
+            "translations": ["EN:" + l for l in lines],
+            "spell": [translate._missing_spell() for _ in lines],
+            "spell_available": True,
+            "chunks_total": 1, "chunks_failed": 0,
+        })
+    rows = [{"src": "S1", "status": "ok", "flagged": [], "suggest": {}}]
+    res = translate.translate_table(str(tmp_path), rows)
+    assert res["translated"] is True
+    assert not os.path.exists(os.path.join(str(tmp_path),
+                                           "translation.json"))

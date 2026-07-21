@@ -291,6 +291,10 @@
       let ai;
       if (!result || !result.ai_spell_available) {
         ai = '<span class="aw-status-unavail">ยังไม่รองรับ</span>';
+      } else if (aiSpell.missing) {
+        // AI ไม่ได้ตรวจบรรทัดนี้จริง (โมเดลตอบ array ไม่ตรงจำนวน หรือก้อน
+        // นั้นแปลไม่สำเร็จ) — ห้ามแสดง "✓ ไม่พบ" เพราะจะหลอกว่าปลอดภัย
+        ai = '<span class="aw-status-warn">⚠️ AI ตรวจไม่ครบ — ดูคอลัมน์สถานะแทน</span>';
       } else if (aiSpell.flagged) {
         // Label by the AI's own kind. variant = correct regional spelling
         // (blue info). typo / truncated get clearer wording than the old
@@ -330,6 +334,9 @@
         'หรือถูกตัดปลาย (มีเหตุผลกำกับ) ต้องยืนยันด้วยตา</li>' +
       '<li><b>🤖 ทางเลือกการสะกด (ไม่ใช่คำผิด)</b> — คำถูกต้องแต่เป็นการสะกดตามภูมิภาค ' +
         'เช่น fibre (อังกฤษ) / fiber (อเมริกัน) ให้ยืนยันว่าตรงกับตลาดเป้าหมายของฉลาก</li>' +
+      '<li><b>⚠️ AI ตรวจไม่ครบ</b> — AI ไม่ได้ตรวจบรรทัดนี้จริง (โมเดลตอบไม่ตรงจำนวนบรรทัด ' +
+        'หรือก้อนนั้นแปลไม่สำเร็จ) อย่าตีความว่าไม่มีปัญหา — ยึดคอลัมน์สถานะ ' +
+        'แล้วกดแปลอีกครั้งเพื่อให้ AI ตรวจซ้ำได้</li>' +
       "</ul></div>";
     box.innerHTML = html;
   }

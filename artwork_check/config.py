@@ -73,6 +73,11 @@ N8N_TRANSLATE_WEBHOOK_URL = os.getenv(
     "http://172.32.201.106:5678/webhook/artwork-translate",
 ).strip()
 N8N_TRANSLATE_TIMEOUT_S = float(os.getenv("N8N_TRANSLATE_TIMEOUT_S", "60"))
+# จำนวนบรรทัดสูงสุดต่อ 1 request แปล/AI-spell. ลิสต์ยาว (เทียบ 2 ไฟล์ =
+# ~140 บรรทัด) ทำให้ Gemini ตอบ array เหลื่อม/ไม่ครบ → คอลัมน์ AI เพี้ยน.
+# 30 = ขนาดที่พิสูจน์จากการใช้งานจริงว่านิ่ง (ยุคตรวจ 1-2 โซน).
+# ตั้ง 0 = ส่งก้อนเดียวทั้งหมดแบบเดิม (ปุ่ม rollback).
+TRANSLATE_CHUNK_LINES = int(os.getenv("ARTWORK_TRANSLATE_CHUNK_LINES", "30"))
 
 # ── Defect classes (severity drives the verdict) ─────────────────────
 #   critical → FAIL, warning → REVIEW, info → shown only
