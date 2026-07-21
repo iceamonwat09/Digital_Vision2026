@@ -1104,8 +1104,8 @@ def test_chunked_splits_and_merges_in_order(monkeypatch):
     from artwork_check import translate
     calls = []
     monkeypatch.setattr(translate, "translate_lines",
-                        lambda lines: calls.append(len(lines))
-                        or _fake_ok_chunk(lines))
+                        lambda lines, check_words=None:
+                        calls.append(len(lines)) or _fake_ok_chunk(lines))
     lines = [f"L{i}" for i in range(70)]
     out = translate.translate_lines_chunked(lines, chunk_size=30)
     assert calls == [30, 30, 10]
@@ -1119,8 +1119,8 @@ def test_chunked_zero_is_single_request_rollback(monkeypatch):
     from artwork_check import translate
     calls = []
     monkeypatch.setattr(translate, "translate_lines",
-                        lambda lines: calls.append(len(lines))
-                        or _fake_ok_chunk(lines))
+                        lambda lines, check_words=None:
+                        calls.append(len(lines)) or _fake_ok_chunk(lines))
     translate.translate_lines_chunked([f"L{i}" for i in range(70)],
                                       chunk_size=0)
     assert calls == [70]
@@ -1132,7 +1132,7 @@ def test_chunked_failed_chunk_marks_missing_not_clean(monkeypatch):
     from artwork_check import translate
     n = {"i": 0}
 
-    def fake(lines):
+    def fake(lines, check_words=None):
         n["i"] += 1
         if n["i"] == 2:      # ก้อนกลางล้ม
             return {"translations": [], "spell": [],
@@ -1160,7 +1160,7 @@ def test_translate_table_partial_failure_not_cached(tmp_path, monkeypatch):
                         "http://x/webhook/artwork-translate")
     monkeypatch.setattr(
         translate, "translate_lines_chunked",
-        lambda lines: {
+        lambda lines, check_words=None: {
             "translations": ["EN:" + l for l in lines[:1]] +
                             [""] * (len(lines) - 1),
             "spell": [translate._clean_spell()] +
@@ -1186,7 +1186,7 @@ def test_translate_table_complete_result_cached(tmp_path, monkeypatch):
                         "http://x/webhook/artwork-translate")
     monkeypatch.setattr(
         translate, "translate_lines_chunked",
-        lambda lines: {
+        lambda lines, check_words=None: {
             "translations": ["EN:" + l for l in lines],
             "spell": [translate._clean_spell() for _ in lines],
             "spell_available": True,
@@ -1207,7 +1207,7 @@ def test_translate_table_misaligned_spell_not_cached(tmp_path, monkeypatch):
                         "http://x/webhook/artwork-translate")
     monkeypatch.setattr(
         translate, "translate_lines_chunked",
-        lambda lines: {
+        lambda lines, check_words=None: {
             "translations": ["EN:" + l for l in lines],
             "spell": [translate._missing_spell() for _ in lines],
             "spell_available": True,
@@ -1218,3 +1218,82 @@ def test_translate_table_misaligned_spell_not_cached(tmp_path, monkeypatch):
     assert res["translated"] is True
     assert not os.path.exists(os.path.join(str(tmp_path),
                                            "translation.json"))
+
+
+# ── check_words: ส่งคำที่ dict ฟ้องให้ AI ตัดสินรายคำ (แก้ Phosphours หลุด) ─
+
+def test_translate_lines_sends_check_words(monkeypatch):
+    from artwork_check import translate
+    captured = {}
+
+    class FakeResp:
+        status_code = 200
+        def raise_for_status(self): pass
+        def json(self): return {"translations": ["a", "b"], "spell": []}
+
+    def fake_post(url, json=None, timeout=None):
+        captured["body"] = json
+        return FakeResp()
+
+    monkeypatch.setattr(translate.requests, "post", fake_post)
+    monkeypatch.setattr(translate.config, "N8N_TRANSLATE_WEBHOOK_URL",
+                        "http://x/webhook/artwork-translate")
+    translate.translate_lines(["磷 Phosphours", "OK line"],
+                              check_words=[["Phosphours"], []])
+    assert captured["body"]["lines"] == ["磷 Phosphours", "OK line"]
+    assert captured["body"]["check_words"] == [["Phosphours"], []]
+
+    # ไม่มีคำต้องสงสัยเลย → ไม่แนบ field (payload เหมือนก่อนฟีเจอร์นี้ 100%)
+    translate.translate_lines(["a"], check_words=[[]])
+    assert "check_words" not in captured["body"]
+    translate.translate_lines(["a"])
+    assert "check_words" not in captured["body"]
+
+
+def test_chunked_slices_check_words_per_chunk(monkeypatch):
+    from artwork_check import translate
+    got = []
+    monkeypatch.setattr(
+        translate, "translate_lines",
+        lambda lines, check_words=None: got.append(check_words)
+        or _fake_ok_chunk(lines))
+    lines = [f"L{i}" for i in range(70)]
+    cw = [[f"W{i}"] if i in (0, 35, 69) else [] for i in range(70)]
+    translate.translate_lines_chunked(lines, chunk_size=30, check_words=cw)
+    assert len(got) == 3
+    assert got[0][0] == ["W0"] and got[1][5] == ["W35"] and got[2][9] == ["W69"]
+    assert all(len(c) in (30, 10) for c in got)
+
+
+def test_translate_table_passes_dict_flags_as_check_words(tmp_path,
+                                                          monkeypatch):
+    from artwork_check import translate
+    seen = {}
+    monkeypatch.setattr(translate.config, "N8N_TRANSLATE_WEBHOOK_URL",
+                        "http://x/webhook/artwork-translate")
+    monkeypatch.setattr(
+        translate, "translate_lines_chunked",
+        lambda lines, check_words=None: seen.update(cw=check_words) or {
+            "translations": ["EN"] * len(lines),
+            "spell": [translate._clean_spell() for _ in lines],
+            "spell_available": True, "chunks_total": 1, "chunks_failed": 0,
+        })
+    rows = [
+        {"src": "磷 Phosphours", "status": "spell",
+         "flagged": ["Phosphours"], "suggest": {}},
+        {"src": "clean", "status": "ok", "flagged": [], "suggest": {}},
+    ]
+    translate.translate_table(str(tmp_path), rows)
+    assert seen["cw"] == [["Phosphours"], []]
+
+
+def test_workflow_json_has_adjudication_wiring():
+    """workflow ที่ให้ import ต้องมีทั้งการรับ check_words และ prompt
+    ตัดสินรายคำ — กัน regression ตอนแก้ workflow ครั้งหน้า."""
+    import json as _json
+    wf = _json.load(open("artwork_check/n8n_artwork_translate.workflow.json"))
+    node = next(n for n in wf["nodes"] if n["name"] == "Code in JavaScript2")
+    code = node["parameters"]["jsCode"]
+    assert "check_words" in code
+    assert "MANDATORY ADJUDICATION LIST" in code
+    assert "PROMPT + SUSPECTS" in code

@@ -315,11 +315,17 @@
           ai += '<span class="aw-ai-reason">' + esc(aiSpell.reason) + "</span>";
       } else {
         ai = '<span class="aw-status-ok">✓ ไม่พบ</span>';
-        // dict flagged the line but the AI thinks it's fine — most often a
-        // loanword / brand / proper noun missing from the dictionary.
-        if (r.status === "spell")
-          ai += '<span class="aw-ai-reason">dict ไม่รู้จักแต่ AI ว่าถูก — ' +
-            "มักเป็นคำทับศัพท์/ชื่อเฉพาะ</span>";
+        if (r.status === "spell") {
+          // dict ฟ้องแต่ AI ว่าถูก — ความหมายต่างกันมากตามความมั่นใจของ dict:
+          // ถ้า dict มีคำแนะนำแก้ (candidate ชัด เช่น Phosphours→phosphorus)
+          // = สองระบบขัดแย้งกันจริง ต้องให้คนชี้ขาด ห้ามกล่อมว่าเป็นคำทับศัพท์
+          const hasDictFix = r.suggest &&
+            Object.keys(r.suggest).some((w) => (r.suggest[w] || []).length);
+          ai += '<span class="aw-ai-reason">' + (hasDictFix
+            ? "⚠️ ขัดแย้งกัน: dict มีคำแนะนำแก้ (ดูคอลัมน์สถานะ) แต่ AI ไม่ฟ้อง — ยืนยันด้วยตา"
+            : "dict ไม่รู้จักแต่ AI ว่าถูก — มักเป็นคำทับศัพท์/ชื่อเฉพาะ") +
+            "</span>";
+        }
       }
       html += "<td>" + ai + "</td></tr>";
     });

@@ -244,7 +244,9 @@ def _missing_spell() -> dict:
 
 def translate_lines(lines: List[str],
                     url: Optional[str] = None,
-                    timeout: Optional[float] = None) -> Dict[str, list]:
+                    timeout: Optional[float] = None,
+                    check_words: Optional[List[List[str]]] = None
+                    ) -> Dict[str, list]:
     """
     Translate ``lines`` to English and run the advisory AI spell-check in
     ONE request (same webhook, same Gemini call — see
@@ -276,8 +278,21 @@ def translate_lines(lines: List[str],
         return empty
     t = float(timeout if timeout is not None
               else config.N8N_TRANSLATE_TIMEOUT_S)
+    body: dict = {"lines": lines}
+    # check_words: per-line words the DETERMINISTIC dict layer already
+    # flagged. Sent so the model ADJUDICATES each named word letter-by-
+    # letter instead of having to find suspects itself — open-ended
+    # scanning misses transposition typos ("Phosphours") because LLMs
+    # read tokens, not characters. Workflows that predate the field
+    # simply ignore it (fully backward compatible).
+    if check_words:
+        cw = [[str(w) for w in (ws or []) if str(w).strip()]
+              for ws in check_words]
+        cw = (cw + [[] for _ in lines])[:len(lines)]
+        if any(cw):
+            body["check_words"] = cw
     try:
-        resp = requests.post(target, json={"lines": lines}, timeout=t)
+        resp = requests.post(target, json=body, timeout=t)
         resp.raise_for_status()
         payload = resp.json()
     except (requests.RequestException, ValueError) as e:
@@ -345,7 +360,9 @@ def translate_lines(lines: List[str],
 
 
 def translate_lines_chunked(lines: List[str],
-                            chunk_size: Optional[int] = None) -> Dict:
+                            chunk_size: Optional[int] = None,
+                            check_words: Optional[List[List[str]]] = None
+                            ) -> Dict:
     """
     Same contract as ``translate_lines`` plus ``chunks_total`` /
     ``chunks_failed``, but the request is split into chunks of
@@ -363,7 +380,7 @@ def translate_lines_chunked(lines: List[str],
     size = (config.TRANSLATE_CHUNK_LINES if chunk_size is None
             else int(chunk_size))
     if size <= 0 or len(lines) <= size:
-        r = translate_lines(lines)
+        r = translate_lines(lines, check_words=check_words)
         ok = any(t.strip() for t in r["translations"])
         return {**r, "chunks_total": 1, "chunks_failed": 0 if ok else 1}
 
@@ -374,7 +391,9 @@ def translate_lines_chunked(lines: List[str],
     for i in range(0, len(lines), size):
         chunk = lines[i:i + size]
         total += 1
-        r = translate_lines(chunk)
+        r = translate_lines(
+            chunk,
+            check_words=(check_words[i:i + size] if check_words else None))
         if not any(t.strip() for t in r["translations"]):
             failed += 1
             translations += [""] * len(chunk)
@@ -462,7 +481,10 @@ def translate_table(insp_dir: str, rows: List[dict]) -> dict:
                 "note": "ยังไม่ได้ตั้งค่า N8N_TRANSLATE_WEBHOOK_URL — "
                         "แสดงข้อความและคำแนะนำการสะกดได้ แต่ยังไม่มีคำแปล"}
 
-    result = translate_lines_chunked([r["src"] for r in rows])
+    # ส่งคำที่ dict ฟ้อง (r["flagged"]) ให้โมเดลตัดสินรายคำแบบเทียบตัวอักษร
+    result = translate_lines_chunked(
+        [r["src"] for r in rows],
+        check_words=[r.get("flagged") or [] for r in rows])
     en = result["translations"]
     spell = result["spell"]
     spell_available = result["spell_available"]
