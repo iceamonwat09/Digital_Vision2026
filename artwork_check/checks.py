@@ -601,6 +601,36 @@ _RE_WORD = re.compile(
 # ไม่ใช่คำสะกด ไม่ควรฟ้อง SPELL_FAIL (เช่น "https" จาก https://…)
 _SPELL_STOPLIST = {"http", "https", "www", "mailto"}
 
+# Scripts whose pyspellchecker dictionary is unreliable enough that a
+# "not in dictionary" result is NOT trustworthy evidence of a typo, so a
+# failed word must NOT raise SPELL_FAIL (would falsely push the verdict
+# to REVIEW) and must NOT get an edit-distance suggestion (Arabic
+# morphology makes single-edit guesses wrong — "المهدرجة"→"المدرجة" is a
+# different word). These words are surfaced advisory-only in the
+# translate tab as "dict ไม่รองรับคำนี้ (<script>)" and defer to the AI
+# column + cross-panel comparison. Maps a script key → Thai name.
+UNSUPPORTED_SCRIPT_NAMES = {"arabic": "อาหรับ"}
+
+# Arabic Unicode blocks (base + supplement + extended-A + presentation
+# forms A/B) — a word carrying any of these is Arabic script.
+_AR_RANGES = ((0x0600, 0x06FF), (0x0750, 0x077F), (0x08A0, 0x08FF),
+              (0xFB50, 0xFDFF), (0xFE70, 0xFEFF))
+
+
+def word_script(word: str) -> Optional[str]:
+    """Return an UNSUPPORTED_SCRIPT_NAMES key if ``word`` is in a script
+    whose dictionary we treat as unreliable, else None (Latin/Cyrillic
+    are covered by their dictionaries). Currently detects Arabic."""
+    for ch in word:
+        o = ord(ch)
+        if any(lo <= o <= hi for lo, hi in _AR_RANGES):
+            return "arabic"
+    return None
+
+
+def is_dict_unsupported(word: str) -> bool:
+    return word_script(word) in UNSUPPORTED_SCRIPT_NAMES
+
 _spellcheckers: Optional[list] = None
 
 
@@ -632,8 +662,11 @@ def check_spelling(zones: List[dict], texts: Dict[str, str],
     Flag words found in no enabled dictionary and not in the brand
     vocabulary. NO suggestions are produced — per the project rule the
     system must not invent words. Thai/CJK have no enabled dictionary
-    and are left to the cross-panel layer; Cyrillic and Arabic are
-    covered when "ru"/"ar" are in SPELL_LANGUAGES.
+    and are left to the cross-panel layer; Cyrillic is covered when "ru"
+    is enabled. Arabic-script words are treated as dict-unsupported (see
+    UNSUPPORTED_SCRIPT_NAMES): a failed lookup does NOT raise SPELL_FAIL
+    (its dictionary is too unreliable to be verdict evidence) — those
+    words are surfaced advisory-only in the translate tab instead.
     """
     checkers = _get_spellcheckers()
     if not checkers:
@@ -654,6 +687,8 @@ def check_spelling(zones: List[dict], texts: Dict[str, str],
                 continue
             if any(ch.isdigit() for ch in word):
                 continue
+            if is_dict_unsupported(word):
+                continue          # dict can't judge → never a SPELL_FAIL
             known = any(c.known([lw]) for c in checkers)
             if not known:
                 unknown.setdefault(word, set()).add(z["id"])

@@ -153,11 +153,15 @@ def build_table(zones: List[dict], ocr_results: List[dict],
 
         {"zone_id", "label", "src", "status", "flagged", "suggest"}
 
-    status: "ok"       — clean line
-            "spell"    — word(s) not in any dictionary / vocabulary
-            "mismatch" — this line was flagged by the verification verdict
-                         (cross-panel / zoom / number / phrase). NEVER ✓.
-    flagged: list of suspicious words (to highlight in the UI)
+    status: "ok"          — clean line
+            "spell"       — word(s) not in any dictionary / vocabulary
+            "unsupported" — only failure(s) are dict-unsupported-script
+                            words (Arabic); advisory-only, never a defect
+            "mismatch"    — this line was flagged by the verification
+                            verdict (cross-panel/zoom/number/phrase).
+    flagged: red-highlight words (real dict failures)
+    unsupported: blue-highlight words (dict can't judge — see AI)
+    unsupported_langs: script names present, for the status message
     suggest: {word: [candidate, ...]}  (deterministic, may be empty)
     """
     texts = {r["zone_id"]: r.get("text", "") for r in ocr_results}
@@ -178,6 +182,8 @@ def build_table(zones: List[dict], ocr_results: List[dict],
             if not line:
                 continue
             flagged: List[str] = []
+            unsupported: List[str] = []
+            unsupported_langs: set = set()
             suggest: Dict[str, List[str]] = {}
             if checkers:
                 for w in checks._RE_WORD.findall(line):
@@ -189,6 +195,15 @@ def build_table(zones: List[dict], ocr_results: List[dict],
                     if lw in vocab:
                         continue
                     if any(c.known([lw]) for c in checkers):
+                        continue
+                    # Dict-unsupported script (Arabic): not a typo signal —
+                    # blue advisory, no suggestion (never guess a wrong fix).
+                    script = checks.word_script(w)
+                    if script in checks.UNSUPPORTED_SCRIPT_NAMES:
+                        if w not in unsupported:
+                            unsupported.append(w)
+                            unsupported_langs.add(
+                                checks.UNSUPPORTED_SCRIPT_NAMES[script])
                         continue
                     if w not in flagged:
                         flagged.append(w)
@@ -207,6 +222,8 @@ def build_table(zones: List[dict], ocr_results: List[dict],
                 status = "spell"
             elif mismatch:
                 status = "mismatch"
+            elif unsupported:
+                status = "unsupported"
             else:
                 status = "ok"
 
@@ -216,6 +233,8 @@ def build_table(zones: List[dict], ocr_results: List[dict],
                 "src": line,
                 "status": status,
                 "flagged": flagged,
+                "unsupported": unsupported,
+                "unsupported_langs": sorted(unsupported_langs),
                 "mismatch": mismatch,
                 "suggest": suggest,
             })

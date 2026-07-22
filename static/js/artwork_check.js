@@ -236,13 +236,16 @@
   // ── text + translation table (shared with history page) ───────────
   function reEsc(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
 
-  function highlightFlagged(src, flagged) {
+  function highlightFlagged(src, flagged, unsupported) {
     let html = esc(src);
-    (flagged || []).forEach((w) => {
+    // แดง = คำที่ dict ฟ้องจริง / ฟ้า = คำที่ dict ไม่รองรับ (อาหรับ)
+    const wrap = (words, cls) => (words || []).forEach((w) => {
       const re = new RegExp("(^|[^A-Za-z])(" + reEsc(esc(w)) +
                             ")(?![A-Za-z])", "g");
-      html = html.replace(re, "$1<mark>$2</mark>");
+      html = html.replace(re, '$1<mark' + cls + '>$2</mark>');
     });
+    wrap(flagged, "");
+    wrap(unsupported, ' class="unsup"');
     return html;
   }
 
@@ -251,8 +254,11 @@
     let html = "";
     if (result && result.note)
       html += '<div class="aw-note">' + esc(result.note) + "</div>";
+    // "unsupported" (dict ไม่รองรับ) เป็น advisory ไม่ใช่ "น่าสงสัย" —
+    // เข้า filter เฉพาะบรรทัดน่าสงสัยก็ต่อเมื่อ AI ฟ้องด้วย
     const shown = onlyIssues
-      ? rows.filter((r) => r.status !== "ok" || (r.ai_spell && r.ai_spell.flagged))
+      ? rows.filter((r) => r.status === "spell" || r.status === "mismatch" ||
+                           (r.ai_spell && r.ai_spell.flagged))
       : rows;
     if (!shown.length) {
       box.innerHTML = html + '<div class="aw-empty">' +
@@ -266,26 +272,34 @@
       "<th>🤖 ตรวจสะกดโดย AI</th>" +
       "</tr></thead><tbody>";
     shown.forEach((r) => {
-      const issue = r.status !== "ok";
       const aiFlagged = !!(r.ai_spell && r.ai_spell.flagged);
-      html += '<tr class="' + (issue ? "has-issue" : (aiFlagged ? "has-ai-issue" : "")) + '">';
+      const isProblem = r.status === "spell" || r.status === "mismatch";
+      const isUnsup = r.status === "unsupported";
+      const rowCls = isProblem ? "has-issue"
+        : (isUnsup ? "has-unsup" : (aiFlagged ? "has-ai-issue" : ""));
+      html += '<tr class="' + rowCls + '">';
       html += '<td class="zone-cell">' + esc(r.zone_id) + "</td>";
-      html += '<td class="src-cell">' + highlightFlagged(r.src, r.flagged) + "</td>";
+      html += '<td class="src-cell">' +
+        highlightFlagged(r.src, r.flagged, r.unsupported) + "</td>";
       const en = r.en || "";
       html += '<td class="en-cell' + (en ? "" : " empty") + '">' +
         (en ? esc(en) : "—") + "</td>";
       let st = '<span class="aw-status-ok">✓</span>';
-      if (issue) {
-        if (r.status === "mismatch")
-          st = '<span class="aw-status-warn">❌ ไม่ตรงกับฉลากจริง</span>';
-        else
-          st = '<span class="aw-status-warn">⚠️ dict: สะกดน่าสงสัย</span>';
+      if (r.status === "mismatch") {
+        st = '<span class="aw-status-warn">❌ ไม่ตรงกับฉลากจริง</span>';
+      } else if (r.status === "spell") {
+        st = '<span class="aw-status-warn">⚠️ dict: สะกดน่าสงสัย</span>';
         const sug = r.suggest || {};
         Object.keys(sug).forEach((w) => {
           if (sug[w] && sug[w].length)
             st += '<span class="aw-suggest">“' + esc(w) + "” → " +
               sug[w].map((s) => "<code>" + esc(s) + "</code>").join(" ") + "</span>";
         });
+      } else if (r.status === "unsupported") {
+        // dict ตัดสินภาษานี้ไม่ได้ — ไม่ใช่ "สะกดผิด" แค่ dict ไม่ครอบคลุม
+        const langs = (r.unsupported_langs || []).join("/") || "ภาษานี้";
+        st = '<span class="aw-status-info">ℹ️ dict ไม่รองรับคำนี้ (' +
+          esc(langs) + ") — พิจารณาผล AI</span>";
       }
       html += "<td>" + st + "</td>";
       // Advisory AI spell-check (Gemini, via the translate webhook).
@@ -341,9 +355,12 @@
     html += '<div class="aw-tlegend"><b>หมายเหตุ:</b><ul>' +
       '<li>คอลัมน์ <b>สถานะ</b> มาจากการตรวจแบบ deterministic (dictionary + เทียบข้าม panel) ' +
         'ส่วนคอลัมน์ <b>🤖</b> เป็นความเห็นของ AI ใช้ประกอบการพิจารณาเท่านั้น ไม่มีผลต่อ PASS/FAIL</li>' +
-      '<li><b>⚠️ dict: สะกดน่าสงสัย</b> แต่ AI <b>✓ ไม่พบ</b> — มักเป็นคำทับศัพท์ ชื่อแบรนด์ ' +
-        'หรือชื่อเฉพาะที่ไม่มีใน dictionary ไม่ใช่คำผิดเสมอไป ยืนยันด้วยตาแล้วเพิ่มเข้าคลังคำแบรนด์ได้' +
-        'เพื่อไม่ให้แจ้งซ้ำ</li>' +
+      '<li><span style="background:#ffcdd2;color:#b71c1c;padding:0 3px;border-radius:2px;">คำไฮไลต์แดง</span>' +
+        ' = dict ไม่รู้จัก (<b>⚠️ dict: สะกดน่าสงสัย</b>) แต่ถ้า AI <b>✓ ไม่พบ</b> ' +
+        'มักเป็นคำทับศัพท์ ชื่อแบรนด์ หรือชื่อเฉพาะ ยืนยันด้วยตาแล้วเพิ่มเข้าคลังคำแบรนด์ได้เพื่อไม่ให้แจ้งซ้ำ</li>' +
+      '<li><span style="background:#e3f2fd;color:#0d47a1;padding:0 3px;border-radius:2px;">คำไฮไลต์ฟ้า</span>' +
+        ' = <b>ℹ️ dict ไม่รองรับคำนี้</b> (ภาษาที่คลัง dict เชื่อถือไม่ได้ เช่นอาหรับ) — ' +
+        'ไม่ใช่คำผิด และไม่มีผลต่อ PASS/FAIL ให้ยึดคอลัมน์ 🤖 AI และการเทียบ panel เป็นหลัก</li>' +
       '<li><b>🤖 สะกดผิด</b> / <b>🤖 คำไม่ครบ (ถูกตัด)</b> — AI คาดว่าคำนั้นสะกดผิด ' +
         'หรือถูกตัดปลาย (มีเหตุผลกำกับ) ต้องยืนยันด้วยตา</li>' +
       '<li><b>🤖 ทางเลือกการสะกด (ไม่ใช่คำผิด)</b> — คำถูกต้องแต่เป็นการสะกดตามภูมิภาค ' +

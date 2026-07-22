@@ -1432,3 +1432,66 @@ def test_ocr_cache_signature_includes_rotate_and_flag():
     # flag หน้าเปลี่ยน = cache key เปลี่ยน (default resolve ต่างกัน)
     assert (pipeline._zones_signature(z0, auto_rotate=False)
             != pipeline._zones_signature(z0, auto_rotate=True))
+
+
+# ── Dict-unsupported script (Arabic): no red, no false REVIEW ──────────
+
+def test_word_script_arabic_detection():
+    from artwork_check import checks
+    assert checks.word_script("المهدرجة") == "arabic"
+    assert checks.word_script("الزيوت") == "arabic"
+    assert checks.word_script("hydrogenated") is None
+    assert checks.word_script("Phosphours") is None      # latin typo, not unsupported
+    assert checks.is_dict_unsupported("المصفى") is True
+    assert checks.is_dict_unsupported("Cude") is False
+
+
+@pytest.mark.skipif(not checks.spell_layer_available(),
+                    reason="pyspellchecker not installed")
+def test_check_spelling_skips_arabic_no_false_review():
+    """อาหรับที่ dict ไม่รู้จัก ต้องไม่สร้าง SPELL_FAIL (หยุด REVIEW ปลอม)
+    แต่คำอังกฤษผิดในบรรทัดเดียวกันยังฟ้อง."""
+    z = [_zone("z1", group="")]
+    d = checks.check_spelling(
+        z, {"z1": "خال من الزيوت المهدرجة المصفى"})
+    assert d == []                                       # ไม่มี defect เลย
+    d2 = checks.check_spelling(z, {"z1": "المهدرجة Analysiss"})
+    found = [x["found"] for x in d2]
+    assert "Analysiss" in found                          # อังกฤษผิด → ฟ้อง
+    assert all("المهدرجة" not in f for f in found)       # อาหรับ → ข้าม
+
+
+@pytest.mark.skipif(not checks.spell_layer_available(),
+                    reason="pyspellchecker not installed")
+def test_build_table_reclassifies_arabic_as_unsupported():
+    from artwork_check import translate
+    zones = [_zone("z1", group="")]
+    ocr = [{"zone_id": "z1",
+            "text": "خال من الزيوت المهدرجة\nGuaranteed Analysiss\n"
+                    "المهدرجة Phosphours"}]
+    rows = translate.build_table(zones, ocr)
+    ar, en, mix = rows[0], rows[1], rows[2]
+    # อาหรับล้วน → unsupported (ฟ้า), ไม่มี suggest, ไม่ใช่ spell
+    assert ar["status"] == "unsupported"
+    assert "المهدرجة" in ar["unsupported"]
+    assert ar["unsupported_langs"] == ["อาหรับ"]
+    assert ar["suggest"] == {} and ar["flagged"] == []
+    # อังกฤษผิด → spell (แดง) เหมือนเดิม
+    assert en["status"] == "spell" and "Analysiss" in en["flagged"]
+    # ปนกัน → spell ชนะ แต่คำอาหรับยังอยู่ใน unsupported (ไฮไลต์ฟ้าคู่)
+    assert mix["status"] == "spell"
+    assert "Phosphours" in mix["flagged"] and "المهدرجة" in mix["unsupported"]
+
+
+@pytest.mark.skipif(not checks.spell_layer_available(),
+                    reason="pyspellchecker not installed")
+def test_run_all_checks_arabic_specialized_word_not_review():
+    """ระดับ verdict: ฉลากที่มีศัพท์อาหรับเฉพาะทาง (المهدرجة) ต้องไม่ถูก
+    ดันเป็น REVIEW จาก SPELL_FAIL ปลอม."""
+    from artwork_check import report
+    zones = [_zone("z1", group="")]
+    ocr = [{"zone_id": "z1", "text": "خال من الزيوت المهدرجة", "engine": "x",
+            "conf": 0.9}]
+    defects = checks.run_all_checks(zones, ocr)
+    assert not any(d["class"] == "SPELL_FAIL" for d in defects)
+    assert report.compute_verdict(defects) == "PASS"
