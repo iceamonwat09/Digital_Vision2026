@@ -552,7 +552,7 @@ def test_run_ocr_only_caches_and_stays_isolated(tmp_path, monkeypatch):
     monkeypatch.setattr(pipeline, "ArtworkDocument", lambda *a, **k: object())
     calls = {"n": 0}
 
-    def fake_read(doc, zones):
+    def fake_read(doc, zones, page_auto=False):
         calls["n"] += 1
         return [{"zone_id": z["id"], "text": "Hello", "engine": "stub",
                  "conf": None} for z in zones]
@@ -646,7 +646,7 @@ def test_read_all_docs_routes_each_zone_to_its_own_file(tmp_path, monkeypatch):
                             os.path.basename(path)) or object())
     monkeypatch.setattr(
         pipeline.ocr, "read_all_zones",
-        lambda doc, zones: [{"zone_id": z["id"], "text": "T",
+        lambda doc, zones, page_auto=False: [{"zone_id": z["id"], "text": "T",
                              "engine": "stub", "conf": None} for z in zones])
 
     za = [{"id": "z1", "type": "panel", "group": "G",
@@ -673,7 +673,8 @@ def test_read_all_docs_missing_ref_file_raises(tmp_path, monkeypatch):
     with open(os.path.join(d, "source.png"), "wb") as f:
         f.write(b"x")
     monkeypatch.setattr(pipeline, "ArtworkDocument", lambda *a, **k: object())
-    monkeypatch.setattr(pipeline.ocr, "read_all_zones", lambda doc, zones: [])
+    monkeypatch.setattr(pipeline.ocr, "read_all_zones",
+                        lambda doc, zones, page_auto=False: [])
 
     zb = [{"id": "b1", "type": "panel", "group": "G",
            "bbox": [0.1, 0.1, 0.2, 0.2], "doc": "b"}]
@@ -1297,3 +1298,137 @@ def test_workflow_json_has_adjudication_wiring():
     assert "check_words" in code
     assert "MANDATORY ADJUDICATION LIST" in code
     assert "PROMPT + SUSPECTS" in code
+
+
+# ── Auto-rotate vertical zones before OCR (แก้ OCR hallucinate แนวตั้ง) ─
+
+def test_detect_orientation_and_apply():
+    np = pytest.importorskip("numpy")
+    cv2 = pytest.importorskip("cv2")
+    from artwork_check.pdf_ingest import (detect_orientation, apply_rotation,
+                                          ROTATE_VALUES)
+    # ข้อความแนวนอน = แถบกว้างกว่าสูง / แนวตั้ง = สูงกว่ากว้าง
+    horiz = np.full((60, 400, 3), 255, np.uint8)
+    cv2.putText(horiz, "HELLO WORLD", (10, 40),
+                cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 0, 0), 3)
+    vert = cv2.rotate(horiz, cv2.ROTATE_90_CLOCKWISE)
+    assert detect_orientation(horiz) == "horizontal"
+    assert detect_orientation(vert) == "vertical"
+    assert detect_orientation(np.full((20, 20, 3), 255, np.uint8)) == "empty"
+    # apply_rotation ครบ 4 ค่า + คืนขนาดถูก
+    assert apply_rotation(horiz, 0).shape == horiz.shape
+    assert apply_rotation(horiz, 90).shape == (400, 60, 3)
+    assert apply_rotation(horiz, 180).shape == horiz.shape
+    assert apply_rotation(horiz, 270).shape == (400, 60, 3)
+    assert ROTATE_VALUES == (0, 90, 180, 270)
+
+
+def test_resolve_rotation_matrix():
+    np = pytest.importorskip("numpy")
+    cv2 = pytest.importorskip("cv2")
+    from artwork_check.pdf_ingest import resolve_rotation
+    horiz = np.full((60, 400, 3), 255, np.uint8)
+    cv2.putText(horiz, "HELLO WORLD", (10, 40),
+                cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 0, 0), 3)
+    vert = cv2.rotate(horiz, cv2.ROTATE_90_CLOCKWISE)
+    assert resolve_rotation(90, False, horiz) == 90            # pinned
+    assert resolve_rotation("auto", False, vert) == 270        # vertical→CCW
+    assert resolve_rotation("auto", False, horiz) == 0         # horiz→none
+    assert resolve_rotation("default", False, vert) == 0       # page OFF = เดิม
+    assert resolve_rotation("default", True, vert) == 270      # page ON
+    assert resolve_rotation("default", True, horiz) == 0       # page ON แต่แนวนอน
+    assert resolve_rotation("bad", True, vert) == 0            # ค่าเพี้ยน = ไม่หมุน
+
+
+def test_sanitize_rotate_field():
+    from artwork_check.zones import sanitize_zones
+    def z(rot=None):
+        d = {"id": "z1", "type": "panel", "group": "",
+             "bbox": [0.1, 0.1, 0.2, 0.2]}
+        if rot is not None:
+            d["rotate"] = rot
+        return d
+    assert sanitize_zones([z()])[0]["rotate"] == "default"     # absent → default
+    assert sanitize_zones([z("auto")])[0]["rotate"] == "auto"
+    assert sanitize_zones([z(90)])[0]["rotate"] == 90
+    assert sanitize_zones([z("180")])[0]["rotate"] == 180      # numeric str
+    assert sanitize_zones([z(45)])[0]["rotate"] == "default"   # bad int
+    assert sanitize_zones([z("xyz")])[0]["rotate"] == "default"
+
+
+def test_read_zone_applies_rotation(tmp_path, monkeypatch):
+    np = pytest.importorskip("numpy")
+    cv2 = pytest.importorskip("cv2")
+    from artwork_check import ocr as ocr_mod
+    from artwork_check.pdf_ingest import ArtworkDocument
+
+    # doc ปลอมที่คืน crop แนวตั้ง; เก็บ crop ที่ถูกส่งเข้า OCR ไว้ตรวจ
+    horiz = np.full((60, 400, 3), 255, np.uint8)
+    cv2.putText(horiz, "HELLO WORLD", (10, 40),
+                cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 0, 0), 3)
+    vert = cv2.rotate(horiz, cv2.ROTATE_90_CLOCKWISE)
+
+    class FakeDoc:
+        def embedded_text(self, bbox=None): return ""
+        def render_zone(self, *a, **k): return vert
+
+    sent = {}
+    monkeypatch.setattr(ocr_mod.vertex_client, "is_enabled", lambda: True)
+    def fake_ocr(jpg):
+        sent["shape"] = cv2.imdecode(
+            np.frombuffer(jpg, np.uint8), cv2.IMREAD_COLOR).shape
+        return {"text": "HELLO WORLD", "engine": "stub", "blocks": []}
+    monkeypatch.setattr(ocr_mod.vertex_client, "ocr_image", fake_ocr)
+
+    # page auto ON → โซน default แนวตั้งถูกหมุนกลับเป็นแนวนอนก่อนส่ง OCR
+    r = ocr_mod.read_zone(FakeDoc(),
+                          {"id": "z1", "bbox": [0, 0, 1, 1], "type": "panel",
+                           "rotate": "default"}, page_auto=True)
+    assert r["rotate"] == 270
+    assert sent["shape"][:2] == horiz.shape[:2]      # กลับเป็นแนวนอน
+
+    # page OFF → ไม่หมุน (พฤติกรรมเดิม)
+    r2 = ocr_mod.read_zone(FakeDoc(),
+                           {"id": "z1", "bbox": [0, 0, 1, 1], "type": "panel",
+                            "rotate": "default"}, page_auto=False)
+    assert r2["rotate"] == 0
+    assert sent["shape"][:2] == vert.shape[:2]       # ยังตะแคง
+
+
+def test_run_inspection_writes_applied_rotation(tmp_path, monkeypatch):
+    np = pytest.importorskip("numpy")
+    cv2 = pytest.importorskip("cv2")
+    import os
+    from artwork_check import pipeline, report
+    monkeypatch.setattr(report.config, "INSPECTIONS_DIR", str(tmp_path))
+    d = report.inspection_dir("20260101-000000-aa11bb", create=True)
+    with open(os.path.join(d, "source.png"), "wb") as f:
+        f.write(b"x")
+    with open(os.path.join(d, "preview.png"), "wb") as f:
+        f.write(cv2.imencode(".png", np.full((50, 80, 3), 255, np.uint8))[1])
+    monkeypatch.setattr(pipeline, "ArtworkDocument", lambda *a, **k: object())
+    monkeypatch.setattr(
+        pipeline.ocr, "read_all_zones",
+        lambda doc, zones, page_auto=False: [
+            {"zone_id": z["id"], "text": "T", "engine": "stub",
+             "conf": None, "rotate": 270 if z["id"] == "z1" else 0}
+            for z in zones])
+    rep = pipeline.run_inspection(
+        "20260101-000000-aa11bb",
+        [{"id": "z1", "type": "panel", "group": "", "bbox": [0.1,0.1,0.2,0.2]},
+         {"id": "z2", "type": "panel", "group": "", "bbox": [0.3,0.1,0.2,0.2]}],
+        auto_rotate=True)
+    by = {z["id"]: z["rotate"] for z in rep["zones"]}
+    assert by["z1"] == 270 and by["z2"] == 0        # องศาที่ใช้จริงถูกบันทึก
+    assert next(o["rotate"] for o in rep["ocr"] if o["zone_id"] == "z1") == 270
+
+
+def test_ocr_cache_signature_includes_rotate_and_flag():
+    from artwork_check import pipeline
+    z0 = [{"id": "z1", "type": "panel", "group": "", "bbox": [0.1,0.1,0.2,0.2],
+           "doc": "a", "rotate": "default"}]
+    z90 = [dict(z0[0], rotate=90)]
+    assert pipeline._zones_signature(z0) != pipeline._zones_signature(z90)
+    # flag หน้าเปลี่ยน = cache key เปลี่ยน (default resolve ต่างกัน)
+    assert (pipeline._zones_signature(z0, auto_rotate=False)
+            != pipeline._zones_signature(z0, auto_rotate=True))

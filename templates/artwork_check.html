@@ -89,6 +89,23 @@
                border:2px solid #1976d2; border-radius:50%; cursor:nwse-resize; }
   .aw-zone.selected .aw-handle { border-color:#e53935; }
 
+  /* rotation chip (มุมบนขวาของโซน) — โผล่ชัดตอนเลือก/hover ไม่รกตอนปกติ */
+  .aw-rot-chip { position:absolute; top:-1px; right:-1px; min-width:16px; height:16px; padding:0 4px;
+                 background:rgba(255,255,255,.9); border:1px solid #90a4ae; border-radius:0 0 0 4px;
+                 font-size:9px; line-height:14px; color:#546e7a; cursor:pointer; white-space:nowrap;
+                 opacity:0; transition:opacity .12s; z-index:5; font-weight:700; }
+  .aw-zone:hover .aw-rot-chip, .aw-zone.selected .aw-rot-chip { opacity:1; }
+  .aw-rot-chip:hover { background:#fff; border-color:#1976d2; color:#1976d2; }
+  .aw-rot-chip.pinned { background:#e3f2fd; border-color:#1976d2; color:#0d47a1; opacity:1; }
+  .aw-rot-chip.autoed { background:#e8f5e9; border-color:#2e7d32; color:#1b5e20; }
+  .aw-rotate-mode { font-size:13px; color:#37474f; cursor:pointer; user-select:none; }
+
+  /* rotated-crop preview ในกล่อง properties */
+  .aw-rot-preview { margin-top:8px; }
+  .aw-rot-preview .aw-rot-thumb { max-width:100%; max-height:120px; border:1px solid #cfd8dc;
+                 border-radius:4px; background:#fafafa; display:block; }
+  .aw-rot-preview .aw-rot-cap { font-size:11px; color:#78909c; margin:4px 0 2px; }
+
   .aw-props  { background:#f8fafc; border:1px solid #e3e7ec; border-radius:6px; padding:10px 12px; margin-top:10px; font-size:13px; }
   .aw-props b{ color:#0d47a1; }
   .aw-props .aw-row { margin-top:6px; }
@@ -284,6 +301,14 @@
         <button id="awInspect" class="aw-btn aw-btn-primary" disabled>ส่งตรวจสอบ →</button>
       </div>
 
+      <div class="aw-row" style="margin-top:6px;">
+        <label class="aw-rotate-mode" title="เปิด = ระบบตรวจโซนแนวตั้งแล้วหมุนให้ก่อน OCR (คลิก ↻ ที่มุมโซนเพื่อแซงรายโซน)">
+          <input type="checkbox" id="awAutoRotate"> ↻ หมุนอัตโนมัติ (ตรวจโซนแนวตั้ง)
+        </label>
+        <span class="aw-rotate-hint" style="font-size:12px;color:#78909c;">
+          ปิด = ทุกโซนเหมือนเดิม (ไม่หมุน) · คลิก <b>↻</b> มุมบนขวาของโซนเพื่อตั้งเอง</span>
+      </div>
+
       <div id="awProps" class="aw-props" style="display:none;">
         <b>โซนที่เลือก: <span id="awPropId"></span></b>
         <span id="awPropDoc" class="aw-doc-badge doc-a" style="display:none;"></span>
@@ -300,6 +325,10 @@
         <div class="aw-row">
           <input id="awPropLabel" class="aw-input" placeholder="ป้ายกำกับ เช่น SIDE 1" maxlength="80">
           <button id="awPropDelete" class="aw-btn aw-btn-danger">ลบโซนนี้</button>
+        </div>
+        <div id="awRotPreview" class="aw-rot-preview" style="display:none;">
+          <div class="aw-rot-cap">🔎 ภาพที่ OCR จะเห็น (<span id="awRotState"></span>) — คลิก ↻ ที่มุมโซนเพื่อหมุน</div>
+          <img id="awRotThumb" class="aw-rot-thumb" alt="ตัวอย่างที่หมุนแล้ว">
         </div>
       </div>
 

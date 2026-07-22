@@ -222,6 +222,22 @@ def sanitize_zones(raw) -> List[dict]:
         doc = str(z.get("doc", "a") or "a").lower()
         if doc not in ("a", "b"):
             raise ValueError(f"zone {zid}: bad doc {doc!r}")
+        # rotate: OCR crop orientation. Absent (old payloads/templates) →
+        # "default" = follow the page-level auto-rotate toggle (itself
+        # OFF by default) → no rotation → identical to current behavior.
+        # "auto" = always auto-detect this zone; 0/90/180/270 = pinned
+        # clockwise angle. Numeric strings are accepted from JSON.
+        rot = z.get("rotate", "default")
+        if isinstance(rot, bool):
+            rot = "default"
+        elif isinstance(rot, str) and rot.strip().lstrip("-").isdigit():
+            rot = int(rot)
+        if rot in (0, 90, 180, 270):
+            rotate = int(rot)
+        elif rot in ("auto", "default"):
+            rotate = rot
+        else:
+            rotate = "default"
         out.append({
             "id": zid,
             "type": ztype,
@@ -229,6 +245,7 @@ def sanitize_zones(raw) -> List[dict]:
             "bbox": [round(x, 5), round(y, 5), round(w, 5), round(h, 5)],
             "label": str(z.get("label", ""))[:80],
             "doc": doc,
+            "rotate": rotate,
         })
     return out
 

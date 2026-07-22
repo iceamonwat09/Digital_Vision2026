@@ -104,9 +104,15 @@
         // field doc → เป็น "a" เหมือนเดิม
         const docOf = (zz) => (zz.doc === "b" ? "b" : "a");
         const docTag = (zz) => (hasRef ? (docOf(zz) === "b" ? "🅱 " : "🅰 ") : "");
+        // report ที่เซฟไว้เก็บองศาที่ใช้จริงเป็นเลข (0/90/180/270);
+        // report เก่าไม่มี field → 0 (crop เหมือนเดิม)
+        const rotOf = (zz) => {
+          const rr = zz.rotate;
+          return (rr === 90 || rr === 180 || rr === 270) ? "&rotate=" + rr : "";
+        };
         if (z && refZ) {
-          const qA = "x=" + z.bbox[0] + "&y=" + z.bbox[1] + "&w=" + z.bbox[2] + "&h=" + z.bbox[3] + "&doc=" + docOf(z);
-          const qB = "x=" + refZ.bbox[0] + "&y=" + refZ.bbox[1] + "&w=" + refZ.bbox[2] + "&h=" + refZ.bbox[3] + "&doc=" + docOf(refZ);
+          const qA = "x=" + z.bbox[0] + "&y=" + z.bbox[1] + "&w=" + z.bbox[2] + "&h=" + z.bbox[3] + "&doc=" + docOf(z) + rotOf(z);
+          const qB = "x=" + refZ.bbox[0] + "&y=" + refZ.bbox[1] + "&w=" + refZ.bbox[2] + "&h=" + refZ.bbox[3] + "&doc=" + docOf(refZ) + rotOf(refZ);
           const cropA = "/api/artwork/" + esc(rep.id) + "/crop?" + qA;
           const cropB = "/api/artwork/" + esc(rep.id) + "/crop?" + qB;
           const labelA = docTag(z) + d.zone_id + (z.label ? " · " + z.label : "");
@@ -125,7 +131,7 @@
           '</div>';
         } else if (z) {
           // fallback: แค่โซนเดียว (ไม่มี ref zone)
-          const q = "x=" + z.bbox[0] + "&y=" + z.bbox[1] + "&w=" + z.bbox[2] + "&h=" + z.bbox[3] + "&doc=" + docOf(z);
+          const q = "x=" + z.bbox[0] + "&y=" + z.bbox[1] + "&w=" + z.bbox[2] + "&h=" + z.bbox[3] + "&doc=" + docOf(z) + rotOf(z);
           const cropUrl = "/api/artwork/" + esc(rep.id) + "/crop?" + q;
           const caption = docTag(z) + d.zone_id + (z.label ? " · " + z.label : "");
           html += '<div style="margin-top:8px;">' +
@@ -143,8 +149,10 @@
 
     html += "<details><summary>📄 ข้อความ OCR ต่อโซน (ตรวจสอบเอง)</summary>";
     (rep.ocr || []).forEach((r) => {
+      const rot = (r.rotate === 90 || r.rotate === 180 || r.rotate === 270)
+        ? " · หมุน " + r.rotate + "°" : "";
       html += "<b style='font-size:12px;'>" + esc(r.zone_id) + " · engine=" + esc(r.engine) +
-        (r.conf != null ? " · conf=" + esc(r.conf) : "") + "</b>" +
+        (r.conf != null ? " · conf=" + esc(r.conf) : "") + esc(rot) + "</b>" +
         '<pre class="aw-pre">' + esc(r.text || "(ว่าง)") + "</pre>";
     });
     html += "</details>";
@@ -363,6 +371,10 @@
   let activeDoc = "a";
   let refAttached = false;
   const docMeta = { a: null, b: null };   // {w, h, url} ต่อ doc
+  // page-level auto-rotate toggle (default ปิด = ทุกโซนเหมือนเดิม)
+  let autoRotate = false;
+  // ลำดับการวนของชิป ↻ รายโซน
+  const ROT_CYCLE = ["default", "auto", 0, 90, 180, 270];
 
   // ── dom ────────────────────────────────────────────────────────────
   const fileInput = $("awFile"), brandInput = $("awBrand");
@@ -374,6 +386,24 @@
   const docTabs = $("awDocTabs");
 
   const docOfZone = (z) => (z.doc === "b" ? "b" : "a");
+  const rotOfZone = (z) => (z.rotate === undefined ? "default" : z.rotate);
+
+  // แปลง rotate ของโซน → ค่าที่ส่งให้ /crop (resolve "default" ตามหน้า
+  // ฝั่ง client เพื่อให้ preview ตรงกับที่ OCR จะทำ; "auto"/เลข ส่งตรงๆ)
+  function cropRotateParam(z) {
+    const r = rotOfZone(z);
+    if (r === "default") return autoRotate ? "auto" : "0";
+    return String(r);
+  }
+  // ป้ายชิป ↻ ตามสถานะ
+  function rotChipInfo(z) {
+    const r = rotOfZone(z);
+    if (r === "default")
+      return { txt: "↻", cls: autoRotate ? "autoed" : "" };   // ตามหน้า
+    if (r === "auto") return { txt: "↻A", cls: "autoed" };
+    if (r === 0) return { txt: "0°", cls: "pinned" };
+    return { txt: r + "°", cls: "pinned" };
+  }
 
   // ลำดับ group อัตโนมัติ — ชุดเดียวกับ zones.py (GROUP_LETTERS/seq_group
   // ฝั่ง server): A..Z ข้าม I/O แล้วต่อ A2..Z2, … ห้ามแก้ข้างเดียว.
@@ -559,6 +589,14 @@
     else { activeDoc = "a"; updateDocTabs(); renderZones(); }
   });
 
+  // page-level auto-rotate toggle — ไม่แตะโซน แค่เปลี่ยน default ของ
+  // โซนที่ตั้ง "ตามหน้า" (ชิป/preview อัปเดตตาม)
+  $("awAutoRotate").addEventListener("change", (ev) => {
+    autoRotate = !!ev.target.checked;
+    renderZones();
+    updateRotPreview();
+  });
+
   $("awDocTabA").addEventListener("click", () => { if (activeDoc !== "a") showDoc("a"); });
   $("awDocTabB").addEventListener("click", () => {
     if (activeDoc !== "b" && refAttached) showDoc("b");
@@ -642,8 +680,21 @@
       const handle = document.createElement("div");
       handle.className = "aw-handle";
       el.appendChild(handle);
+      // ชิปหมุน ↻ (มุมบนขวา) — คลิกวนสถานะการหมุนของโซนนี้
+      const chip = document.createElement("div");
+      const ci = rotChipInfo(z);
+      chip.className = "aw-rot-chip" + (ci.cls ? " " + ci.cls : "");
+      chip.textContent = ci.txt;
+      chip.title = "หมุนก่อน OCR (คลิกวน: ตามหน้า → auto → 0° → 90° → 180° → 270°)";
+      el.appendChild(chip);
+      chip.addEventListener("mousedown", (ev) => ev.stopPropagation());
+      chip.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        cycleZoneRotate(z);
+      });
       stage.appendChild(el);
-      el.addEventListener("mousedown", (ev) => startDrag(ev, z, el, ev.target === handle));
+      el.addEventListener("mousedown", (ev) =>
+        startDrag(ev, z, el, ev.target === handle));
       el.addEventListener("dblclick", (ev) => { ev.preventDefault(); snapZone(z); });
     });
     renderProps();
@@ -716,6 +767,42 @@
   function selectedZone() {
     return zones.find((z) => z.id === selectedId) || null;
   }
+
+  // วนสถานะการหมุนของโซน: ตามหน้า → auto → 0 → 90 → 180 → 270 → ตามหน้า
+  function cycleZoneRotate(z) {
+    const cur = rotOfZone(z);
+    let idx = ROT_CYCLE.findIndex((v) => v === cur);
+    if (idx < 0) idx = 0;
+    z.rotate = ROT_CYCLE[(idx + 1) % ROT_CYCLE.length];
+    selectedId = z.id;
+    renderZones();          // อัปเดตชิป + เลือกโซนนี้
+    updateRotPreview();     // อัปเดตภาพตัวอย่าง
+  }
+
+  // ภาพตัวอย่าง "ที่ OCR จะเห็น" ในกล่อง properties (อิงองศาที่ resolve แล้ว)
+  let rotPreviewSeq = 0;
+  function updateRotPreview() {
+    const box = $("awRotPreview");
+    const z = selectedZone();
+    if (!z || !inspectionId) { box.style.display = "none"; return; }
+    const r = rotOfZone(z);
+    const param = cropRotateParam(z);
+    const stateTxt = (r === "default")
+      ? (autoRotate ? "ตามหน้า: auto" : "ตามหน้า: ไม่หมุน")
+      : (r === "auto" ? "auto (ตรวจเอง)" : r + "°");
+    $("awRotState").textContent = stateTxt;
+    box.style.display = "";
+    const q = "x=" + z.bbox[0] + "&y=" + z.bbox[1] + "&w=" + z.bbox[2] +
+      "&h=" + z.bbox[3] + "&doc=" + docOfZone(z) + "&rotate=" + param;
+    const seq = ++rotPreviewSeq;
+    const url = "/api/artwork/" + inspectionId + "/crop?" + q + "&t=" + Date.now();
+    const img = $("awRotThumb");
+    // กันภาพเก่ามาทับภาพใหม่เมื่อคลิกวนเร็วๆ
+    const probe = new Image();
+    probe.onload = () => { if (seq === rotPreviewSeq) img.src = url; };
+    probe.onerror = () => { if (seq === rotPreviewSeq) box.style.display = "none"; };
+    probe.src = url;
+  }
   function renderProps() {
     const z = selectedZone();
     propsBox.style.display = z ? "" : "none";
@@ -741,6 +828,7 @@
       pd.style.display = "none";
       pp.textContent = "";
     }
+    updateRotPreview();
   }
   $("awPropType").addEventListener("change", () => {
     const z = selectedZone(); if (z) { z.type = $("awPropType").value; renderZones(); }
@@ -830,7 +918,7 @@
     while (zones.some((z) => z.id === prefix + n)) n++;
     const z = {
       id: prefix + n, type: "panel", group: nextGroupLetter(activeDoc),
-      doc: activeDoc,
+      doc: activeDoc, rotate: "default",
       bbox: [q.x / W, q.y / H, q.w / W, q.h / H]
         .map((v) => Math.round(v * 1e5) / 1e5),
       label: (activeDoc === "b" ? "อ้างอิง " : "โซน ") + n,
@@ -964,7 +1052,7 @@
       const rep = await api("/api/artwork/" + inspectionId + "/inspect", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ zones: zones, brand: brandInput.value.trim() }),
+        body: JSON.stringify({ zones: zones, brand: brandInput.value.trim(), auto_rotate: autoRotate }),
       });
       renderReport(rep, resultBox);
       showTabs(true);
@@ -1025,7 +1113,7 @@
       textResult = await api("/api/artwork/" + inspectionId + "/translate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ zones: zones, brand: brandInput.value.trim() }),
+        body: JSON.stringify({ zones: zones, brand: brandInput.value.trim(), auto_rotate: autoRotate }),
       });
       renderTextTable(textResult, textTableWrap, onlyIssuesCb.checked);
       setResultsWide(true);   // table now has data → widen the results panel

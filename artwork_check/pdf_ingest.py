@@ -117,6 +117,96 @@ class ArtworkDocument:
             return page.get_text("text", clip=clip).strip()
 
 
+# ── Text orientation (auto-rotate vertical zones before OCR) ──────────
+# Zones on side panels are often printed rotated 90°; OCR of tilted text
+# hallucinates (a real case read خالٍ من الزيوت المهدرجة as a different,
+# common phrase). ROTATE values are DEGREES CLOCKWISE applied to the crop
+# before OCR: 0 none, 90 CW, 180, 270 (= 90 CCW). Vertical side text on
+# these labels reads bottom-to-top → 270 (CCW) makes it upright (verified
+# on the real file for both the Arabic and English vertical zones).
+ROTATE_VALUES = (0, 90, 180, 270)
+
+
+def apply_rotation(img: np.ndarray, angle: int) -> np.ndarray:
+    """Rotate ``img`` by ``angle`` degrees clockwise (0/90/180/270)."""
+    if angle == 90:
+        return cv2.rotate(img, cv2.ROTATE_90_CLOCKWISE)
+    if angle == 180:
+        return cv2.rotate(img, cv2.ROTATE_180)
+    if angle == 270:
+        return cv2.rotate(img, cv2.ROTATE_90_COUNTERCLOCKWISE)
+    return img
+
+
+def detect_orientation(crop: np.ndarray) -> str:
+    """
+    Deterministic "horizontal" | "vertical" | "empty" from image
+    structure only (no OCR). Words glued by a small morphological close
+    are wider-than-tall when horizontal, taller-than-wide when the panel
+    is rotated 90°; a projection-profile ratio breaks ties. Measured 6/6
+    on the real label's zone mix (incl. single-line). Conservative:
+    returns "vertical" only on a clear signal so upright zones are never
+    rotated by accident.
+    """
+    if crop is None or crop.size == 0:
+        return "empty"
+    gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+    _, ink = cv2.threshold(gray, 0, 255,
+                           cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    if (ink > 0).mean() < 0.002:
+        return "empty"
+    H, W = ink.shape
+    k = cv2.getStructuringElement(cv2.MORPH_RECT,
+                                  (max(3, W // 60), max(3, H // 60)))
+    closed = cv2.morphologyEx(ink, cv2.MORPH_CLOSE, k)
+    cnts, _ = cv2.findContours(closed, cv2.RETR_EXTERNAL,
+                               cv2.CHAIN_APPROX_SIMPLE)
+    min_area = (H * W) * 0.001
+    ars = []
+    for c in cnts:
+        x, y, w, h = cv2.boundingRect(c)
+        if w * h < min_area:
+            continue
+        ars.append(w / max(1, h))
+    med_ar = float(np.median(ars)) if ars else 1.0
+
+    inkf = (ink > 0).astype(np.float32)
+
+    def _cv(p):
+        m = p.mean()
+        return (p.std() / m) if m > 1e-6 else 0.0
+
+    proj_ratio = (_cv(inkf.mean(axis=1)) /
+                  _cv(inkf.mean(axis=0))) if _cv(inkf.mean(axis=0)) > 1e-6 \
+        else 99.0
+    if med_ar >= 1.4:
+        return "horizontal"
+    if med_ar <= 0.7:
+        return "vertical"
+    return "horizontal" if proj_ratio >= 1.0 else "vertical"
+
+
+def resolve_rotation(rotate, page_auto: bool, crop: np.ndarray) -> int:
+    """
+    Turn a zone's ``rotate`` setting into a concrete clockwise angle.
+
+      int 0/90/180/270  → that angle (manual override, no detection)
+      "auto"            → detect; vertical → 270 (CCW upright), else 0
+      "default"         → follow the page: page_auto → detect, else 0
+
+    ``crop`` is used only when detection is needed. Unknown values fall
+    back to 0 (= no rotation = current behavior).
+    """
+    if isinstance(rotate, bool):        # guard: bool is a subclass of int
+        rotate = "default"
+    if isinstance(rotate, int) and rotate in ROTATE_VALUES:
+        return rotate
+    want_detect = (rotate == "auto") or (rotate == "default" and page_auto)
+    if not want_detect:
+        return 0
+    return 270 if detect_orientation(crop) == "vertical" else 0
+
+
 def encode_jpg(img: np.ndarray, quality: int = 92) -> bytes:
     ok, buf = cv2.imencode(".jpg", img,
                            [int(cv2.IMWRITE_JPEG_QUALITY), quality])

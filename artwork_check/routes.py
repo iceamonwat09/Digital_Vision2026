@@ -104,8 +104,10 @@ def api_inspect(rec_id):
     except ValueError as e:
         return jsonify({"error": f"โซนไม่ถูกต้อง: {e}"}), 400
     brand = str(body.get("brand", "")).strip()[:60]
+    auto_rotate = bool(body.get("auto_rotate"))
     try:
-        rep = pipeline.run_inspection(rec_id, zone_list, brand=brand)
+        rep = pipeline.run_inspection(rec_id, zone_list, brand=brand,
+                                      auto_rotate=auto_rotate)
     except (ValueError, FileNotFoundError) as e:
         return jsonify({"error": str(e)}), 404
     except Exception as e:
@@ -155,8 +157,11 @@ def api_crop(rec_id):
     doc = request.args.get("doc", "a").lower()
     if doc not in ("a", "b"):
         return jsonify({"error": "doc ต้องเป็น a หรือ b"}), 400
+    rotate = request.args.get("rotate", "0")
+    if rotate not in ("0", "90", "180", "270", "auto"):
+        return jsonify({"error": "rotate ต้องเป็น 0/90/180/270/auto"}), 400
     try:
-        jpg = pipeline.zone_crop_jpg(rec_id, bbox, doc=doc)
+        jpg = pipeline.zone_crop_jpg(rec_id, bbox, doc=doc, rotate=rotate)
     except (ValueError, FileNotFoundError) as e:
         return jsonify({"error": str(e)}), 404
     import io
@@ -235,8 +240,10 @@ def api_translate(rec_id):
                          "(กรุณาจัดโซนก่อน หรือกด ‘ส่งตรวจสอบ’)"
             }), 400
         brand = str(body.get("brand", "")).strip()[:60]
+        auto_rotate = bool(body.get("auto_rotate"))
         try:
-            zone_list, ocr_results = pipeline.run_ocr_only(rec_id, zone_list)
+            zone_list, ocr_results = pipeline.run_ocr_only(
+                rec_id, zone_list, auto_rotate=auto_rotate)
         except (ValueError, FileNotFoundError) as e:
             return jsonify({"error": str(e)}), 404
         except Exception as e:
