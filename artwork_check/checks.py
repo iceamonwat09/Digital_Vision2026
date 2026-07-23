@@ -177,6 +177,19 @@ def _composable_from(key: str, piece_keys: List[str],
     return reach0[n] or reach1[n]
 
 
+# A real Latin/Arabic/Cyrillic label line always carries >= 2
+# letters/digits after normalization; a shorter "line" is OCR noise (a
+# stray glyph off a logo/graphic). A single CJK ideograph is a whole
+# word, though (and OCR splits spaced CJK headers into one char per
+# line — see _composable_from), so it must be kept.
+_MIN_LINE_KEY_LEN = 2
+
+
+def _line_has_content(line: str) -> bool:
+    key = _norm_key(line)
+    return len(key) >= _MIN_LINE_KEY_LEN or _is_cjk_char(key)
+
+
 def _lines(text: str) -> List[str]:
     return [_norm_line(l) for l in text.splitlines() if _norm_line(l)]
 
@@ -236,10 +249,12 @@ def _vote_panels(gname: str, panels: List[dict],
     n = len(panels)
     majority = n // 2 + 1
     # Drop pure-symbol / non-text lines (arrows ↑, bullets, dimension
-    # ticks) — OCR picks these up when a zone is dragged a little wide,
-    # and they have no textual content to verify, so they must never
+    # ticks) AND single-character lines — OCR picks these up when a zone
+    # overlaps a logo/graphic (a stray glyph like "C" / "ﺫ" / "כ"), and
+    # a real label line is never a lone character, so they must never
     # enter the consensus vote or be flagged as a mismatch.
-    zone_lines = {z["id"]: [l for l in _lines(texts[z["id"]]) if _norm_key(l)]
+    zone_lines = {z["id"]: [l for l in _lines(texts[z["id"]])
+                            if _line_has_content(l)]
                   for z in panels}
     zone_flat = {z["id"]: _norm_flat(texts[z["id"]]) for z in panels}
     zone_key = {z["id"]: _norm_key(texts[z["id"]]) for z in panels}

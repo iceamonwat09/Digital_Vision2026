@@ -187,6 +187,17 @@ def api_snap(rec_id):
     doc = str(body.get("doc", "a")).lower()
     if doc not in ("a", "b"):
         return jsonify({"error": "doc ต้องเป็น a หรือ b"}), 400
+    # pad = how much to expand before tightening. Double-click uses the
+    # default (recovers content the user cut off); auto-snap-on-draw
+    # sends a small pad so the box barely grows past what was drawn.
+    pad = body.get("pad")
+    if pad is not None:
+        try:
+            pad = float(pad)
+        except (TypeError, ValueError):
+            return jsonify({"error": "pad ไม่ใช่ตัวเลข"}), 400
+        if not (0 <= pad <= 0.5):
+            return jsonify({"error": "pad นอกช่วง 0..0.5"}), 400
     try:
         d = report.inspection_dir(rec_id)
     except ValueError:
@@ -198,7 +209,8 @@ def api_snap(rec_id):
     img = cv2.imread(path)
     if img is None:
         return jsonify({"error": "อ่าน preview ไม่ได้"}), 500
-    return jsonify({"bbox": zones_mod.snap_bbox(img, bbox)})
+    kw = {} if pad is None else {"pad": pad}
+    return jsonify({"bbox": zones_mod.snap_bbox(img, bbox, **kw)})
 
 
 @artwork_bp.route("/api/artwork/<rec_id>/translate", methods=["POST"])

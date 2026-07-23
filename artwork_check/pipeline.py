@@ -188,6 +188,106 @@ def _read_all_docs(insp_dir: str, zones_a: List[dict], zones_b: List[dict],
     return results
 
 
+_MISMATCH_CLASSES = ("MISMATCH_PANELS", "MISMATCH_ZOOM")
+
+
+def _line_keys(text: str) -> set:
+    return {checks._norm_key(l) for l in checks._lines(text)
+            if checks._norm_key(l)}
+
+
+def _reverify_mismatch(insp_dir: str, zone_list: List[dict],
+                       zones_a: List[dict], zones_b: List[dict],
+                       ocr_results: List[dict], defects: List[dict],
+                       auto_rotate: bool, vocab_words: set,
+                       vocab_phrases: List[str]):
+    """
+    Verify-before-accuse. When pass-1 checks report a mismatch, re-OCR
+    the zones of the affected group(s) once more and re-decide the
+    verdict using only lines the two passes AGREE on.
+
+    A line is used for comparison only when it is (a) STABLE in its own
+    zone — read in both passes — and (b) not FLAKY in the group — no
+    zone read it in exactly one of its two passes. Graphics/logo noise
+    (STEEL/DRAIGHT/stray glyphs) that OCR reads inconsistently is thus
+    dropped from the VERDICT, while genuine differences both passes
+    agree on (e.g. Sodium 24% vs 20%) survive. The report keeps the
+    original pass-1 OCR text for display; only the defect set changes.
+
+    Returns (ocr_results_for_display, defects). Unchanged when the
+    feature is off, there is no mismatch, or the second pass fails.
+    """
+    if not config.STABILITY_REVERIFY:
+        return ocr_results, defects
+    if not any(d["class"] in _MISMATCH_CLASSES for d in defects):
+        return ocr_results, defects
+
+    grp = {z["id"]: z.get("group", "") for z in zone_list}
+    affected_ids = set()
+    for d in defects:
+        if d["class"] in _MISMATCH_CLASSES:
+            affected_ids.add(d["zone_id"])
+            affected_ids.update(d.get("ref_zone_ids", []))
+    affected_groups = {grp.get(i, "") for i in affected_ids if grp.get(i)}
+    if not affected_groups:
+        return ocr_results, defects
+
+    def _in_scope(z):
+        return (z.get("group") in affected_groups
+                and z.get("type") != "ignore")
+    redo_a = [z for z in zones_a if _in_scope(z)]
+    redo_b = [z for z in zones_b if _in_scope(z)]
+    if not (redo_a or redo_b):
+        return ocr_results, defects
+
+    try:
+        pass2 = _read_all_docs(insp_dir, redo_a, redo_b,
+                               auto_rotate=auto_rotate)
+    except Exception as e:                       # network/OCR hiccup
+        logger.warning("[artwork] re-verify pass failed, keeping pass 1: %s", e)
+        return ocr_results, defects
+
+    p1 = {r["zone_id"]: r.get("text", "") for r in ocr_results}
+    p2 = {r["zone_id"]: r.get("text", "") for r in pass2
+          if r.get("text", "").strip()}
+
+    # Per group: a line survives only if stable in its own zone AND not
+    # flaky (read in exactly one pass by SOME zone of the group).
+    stable_text: Dict[str, str] = {}
+    members: Dict[str, List[str]] = {}
+    for z in (redo_a + redo_b):
+        if z["id"] in p2:
+            members.setdefault(z.get("group", ""), []).append(z["id"])
+    for gname, zids in members.items():
+        if len(zids) < 2:
+            continue                    # nothing to cross-verify
+        own_stable = {zid: (_line_keys(p1[zid]) & _line_keys(p2[zid]))
+                      for zid in zids}
+        flaky: set = set()
+        for zid in zids:
+            flaky |= (_line_keys(p1[zid]) ^ _line_keys(p2[zid]))
+        for zid in zids:
+            keep = [l for l in checks._lines(p1[zid])
+                    if checks._norm_key(l) in own_stable[zid]
+                    and checks._norm_key(l) not in flaky]
+            stable_text[zid] = "\n".join(keep)
+
+    if not stable_text:
+        return ocr_results, defects
+
+    # Re-run checks with stabilized text for the verified zones only.
+    stabilized = [dict(r, text=stable_text[r["zone_id"]])
+                  if r["zone_id"] in stable_text else r
+                  for r in ocr_results]
+    new_defects = checks.run_all_checks(zone_list, stabilized,
+                                        vocab_words=vocab_words,
+                                        vocab_phrases=vocab_phrases)
+    logger.info("[artwork] re-verify groups=%s defects %d→%d",
+                sorted(members), len(defects), len(new_defects))
+    # keep pass-1 OCR text for display; only the verdict/defects change
+    return ocr_results, new_defects
+
+
 def run_inspection(rec_id: str, zone_list: List[dict],
                    brand: str = "", auto_rotate: bool = False) -> dict:
     d = report.inspection_dir(rec_id)
@@ -215,6 +315,13 @@ def run_inspection(rec_id: str, zone_list: List[dict],
     defects = checks.run_all_checks(zone_list, ocr_results,
                                     vocab_words=vocab_words,
                                     vocab_phrases=vocab_phrases)
+
+    # Verify-before-accuse: a mismatch might be OCR noise on a graphics
+    # region — re-OCR the affected zones and keep only what both passes
+    # agree on. No mismatch → this returns immediately (no extra OCR).
+    ocr_results, defects = _reverify_mismatch(
+        d, zone_list, zones_a, zones_b, ocr_results, defects,
+        auto_rotate, vocab_words, vocab_phrases)
 
     preview = cv2.imread(os.path.join(d, "preview.png"))
     if preview is None:

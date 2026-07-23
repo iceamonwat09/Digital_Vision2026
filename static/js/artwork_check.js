@@ -718,17 +718,22 @@
   }
 
   // ── snap-to-content: ดับเบิลคลิกโซน → server ขยับกรอบให้พอดีเนื้อหา ──
+  // pad = ระยะขยายก่อนหดเข้าหาเนื้อหา. ดับเบิลคลิก = default (กู้เนื้อหาที่
+  // ตัดขาด), auto-snap ตอนวาดเสร็จส่ง pad เล็ก (ขยับน้อยสุด ไม่เกินกรอบที่วาด)
+  const AUTO_SNAP_PAD = 0.02;
   let snapping = false;
-  async function snapZone(z) {
+  async function snapZone(z, pad) {
     if (busy || snapping || !inspectionId) return;
     snapping = true;
     const el = stage.querySelector('.aw-zone[data-zid="' + z.id + '"]');
     if (el) el.style.opacity = "0.45";
     try {
+      const body = { bbox: z.bbox, doc: docOfZone(z) };
+      if (pad !== undefined) body.pad = pad;
       const res = await api("/api/artwork/" + inspectionId + "/snap", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ bbox: z.bbox, doc: docOfZone(z) }),
+        body: JSON.stringify(body),
       });
       if (res.bbox && res.bbox.length === 4) {
         z.bbox = res.bbox;
@@ -943,6 +948,9 @@
     zones.push(z);
     selectedId = z.id;
     renderZones();
+    // auto-snap ทันทีหลังวาดเสร็จ (เหมือนดับเบิลคลิก แต่ pad เล็ก = ขยับ
+    // น้อยสุด ให้กรอบพอดีเนื้อหาโดยไม่ล้นเกินที่วาด) — ผลตรวจแม่นขึ้น
+    snapZone(z, AUTO_SNAP_PAD);
   });
 
   document.addEventListener("keydown", (ev) => {
