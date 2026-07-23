@@ -79,17 +79,6 @@ N8N_TRANSLATE_TIMEOUT_S = float(os.getenv("N8N_TRANSLATE_TIMEOUT_S", "60"))
 # ตั้ง 0 = ส่งก้อนเดียวทั้งหมดแบบเดิม (ปุ่ม rollback).
 TRANSLATE_CHUNK_LINES = int(os.getenv("ARTWORK_TRANSLATE_CHUNK_LINES", "30"))
 
-# ── Re-verify on mismatch (stability check) ──────────────────────────
-# OCR of graphics-heavy regions (logos, icons, stylized big numbers) is
-# non-deterministic: the SAME zone read twice can differ, producing
-# false MISMATCH/SPELL findings. When a full inspection turns up any
-# cross-panel/zoom mismatch, re-OCR the affected zones once more and
-# keep only lines both passes agree on (real content OCR reads
-# consistently) before deciding the verdict. Costs a second OCR pass
-# ONLY when a mismatch was seen — clean labels pay nothing. Set to "0"
-# to disable (falls back to single-pass, the pre-2026.07 behavior).
-STABILITY_REVERIFY = os.getenv("ARTWORK_STABILITY_REVERIFY", "1") != "0"
-
 # ── Defect classes (severity drives the verdict) ─────────────────────
 #   critical → FAIL, warning → REVIEW, info → shown only
 DEFECT_CLASSES = {
