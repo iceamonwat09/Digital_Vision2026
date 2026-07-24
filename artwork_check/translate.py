@@ -153,11 +153,15 @@ def build_table(zones: List[dict], ocr_results: List[dict],
 
         {"zone_id", "label", "src", "status", "flagged", "suggest"}
 
-    status: "ok"       — clean line
-            "spell"    — word(s) not in any dictionary / vocabulary
-            "mismatch" — this line was flagged by the verification verdict
-                         (cross-panel / zoom / number / phrase). NEVER ✓.
-    flagged: list of suspicious words (to highlight in the UI)
+    status: "ok"          — clean line
+            "spell"       — word(s) not in any dictionary / vocabulary
+            "unsupported" — only failure(s) are dict-unsupported-script
+                            words (Arabic); advisory-only, never a defect
+            "mismatch"    — this line was flagged by the verification
+                            verdict (cross-panel/zoom/number/phrase).
+    flagged: red-highlight words (real dict failures)
+    unsupported: blue-highlight words (dict can't judge — see AI)
+    unsupported_langs: script names present, for the status message
     suggest: {word: [candidate, ...]}  (deterministic, may be empty)
     """
     texts = {r["zone_id"]: r.get("text", "") for r in ocr_results}
@@ -178,6 +182,8 @@ def build_table(zones: List[dict], ocr_results: List[dict],
             if not line:
                 continue
             flagged: List[str] = []
+            unsupported: List[str] = []
+            unsupported_langs: set = set()
             suggest: Dict[str, List[str]] = {}
             if checkers:
                 for w in checks._RE_WORD.findall(line):
@@ -189,6 +195,15 @@ def build_table(zones: List[dict], ocr_results: List[dict],
                     if lw in vocab:
                         continue
                     if any(c.known([lw]) for c in checkers):
+                        continue
+                    # Dict-unsupported script (Arabic): not a typo signal —
+                    # blue advisory, no suggestion (never guess a wrong fix).
+                    script = checks.word_script(w)
+                    if script in checks.UNSUPPORTED_SCRIPT_NAMES:
+                        if w not in unsupported:
+                            unsupported.append(w)
+                            unsupported_langs.add(
+                                checks.UNSUPPORTED_SCRIPT_NAMES[script])
                         continue
                     if w not in flagged:
                         flagged.append(w)
@@ -207,6 +222,8 @@ def build_table(zones: List[dict], ocr_results: List[dict],
                 status = "spell"
             elif mismatch:
                 status = "mismatch"
+            elif unsupported:
+                status = "unsupported"
             else:
                 status = "ok"
 
@@ -216,6 +233,8 @@ def build_table(zones: List[dict], ocr_results: List[dict],
                 "src": line,
                 "status": status,
                 "flagged": flagged,
+                "unsupported": unsupported,
+                "unsupported_langs": sorted(unsupported_langs),
                 "mismatch": mismatch,
                 "suggest": suggest,
             })
@@ -232,9 +251,21 @@ def _clean_spell() -> dict:
     return {"flagged": False, "suggestion": None, "kind": None,
             "reason": None}
 
+
+def _missing_spell() -> dict:
+    """Advisory-spell entry for a line the AI did NOT actually check —
+    the model answered with a wrong-length array (alignment broken for
+    the whole batch) or the chunk's request failed. The UI must render
+    this as "AI ตรวจไม่ครบ", never as "✓ ไม่พบ": a silent False here is
+    a lie that hides typos the dict column already caught."""
+    return {"flagged": False, "suggestion": None, "kind": None,
+            "reason": None, "missing": True}
+
 def translate_lines(lines: List[str],
                     url: Optional[str] = None,
-                    timeout: Optional[float] = None) -> Dict[str, list]:
+                    timeout: Optional[float] = None,
+                    check_words: Optional[List[List[str]]] = None
+                    ) -> Dict[str, list]:
     """
     Translate ``lines`` to English and run the advisory AI spell-check in
     ONE request (same webhook, same Gemini call — see
@@ -266,8 +297,21 @@ def translate_lines(lines: List[str],
         return empty
     t = float(timeout if timeout is not None
               else config.N8N_TRANSLATE_TIMEOUT_S)
+    body: dict = {"lines": lines}
+    # check_words: per-line words the DETERMINISTIC dict layer already
+    # flagged. Sent so the model ADJUDICATES each named word letter-by-
+    # letter instead of having to find suspects itself — open-ended
+    # scanning misses transposition typos ("Phosphours") because LLMs
+    # read tokens, not characters. Workflows that predate the field
+    # simply ignore it (fully backward compatible).
+    if check_words:
+        cw = [[str(w) for w in (ws or []) if str(w).strip()]
+              for ws in check_words]
+        cw = (cw + [[] for _ in lines])[:len(lines)]
+        if any(cw):
+            body["check_words"] = cw
     try:
-        resp = requests.post(target, json={"lines": lines}, timeout=t)
+        resp = requests.post(target, json=body, timeout=t)
         resp.raise_for_status()
         payload = resp.json()
     except (requests.RequestException, ValueError) as e:
@@ -303,7 +347,14 @@ def translate_lines(lines: List[str],
     spell_raw = payload.get("spell")
     spell_available = isinstance(spell_raw, list)
     spell: List[dict] = []
-    if spell_available:
+    if spell_available and len(spell_raw) != len(lines):
+        # Wrong-length spell array = the model skipped/merged lines, so
+        # POSITIONS are untrustworthy for the whole batch (an entry that
+        # "looks aligned" early on may already belong to another line).
+        # Mark every line as not-checked instead of padding the tail
+        # with a fake "no issue".
+        spell = [_missing_spell() for _ in lines]
+    elif spell_available:
         for item in spell_raw:
             if isinstance(item, dict):
                 kind = item.get("kind")
@@ -325,6 +376,61 @@ def translate_lines(lines: List[str],
 
     return {"translations": out, "spell": spell,
             "spell_available": spell_available}
+
+
+def translate_lines_chunked(lines: List[str],
+                            chunk_size: Optional[int] = None,
+                            check_words: Optional[List[List[str]]] = None
+                            ) -> Dict:
+    """
+    Same contract as ``translate_lines`` plus ``chunks_total`` /
+    ``chunks_failed``, but the request is split into chunks of
+    ``TRANSLATE_CHUNK_LINES`` lines (default 30, env-tunable;
+    0 = single request = the pre-chunking behavior, kept as a rollback
+    knob). Long lists (two-file compare ≈ 140 lines) made Gemini return
+    misaligned/truncated arrays — the exact per-line accuracy problem
+    chunking solves. Chunks run sequentially against the same webhook.
+
+    Failure semantics per chunk: a chunk whose translations come back
+    empty contributes "" translations and ``missing`` spell entries for
+    its lines (never a fake "no issue"); the caller decides whether to
+    cache based on ``chunks_failed``.
+    """
+    size = (config.TRANSLATE_CHUNK_LINES if chunk_size is None
+            else int(chunk_size))
+    if size <= 0 or len(lines) <= size:
+        r = translate_lines(lines, check_words=check_words)
+        ok = any(t.strip() for t in r["translations"])
+        return {**r, "chunks_total": 1, "chunks_failed": 0 if ok else 1}
+
+    translations: List[str] = []
+    spell: List[dict] = []
+    avail_flags: List[bool] = []
+    total = failed = 0
+    for i in range(0, len(lines), size):
+        chunk = lines[i:i + size]
+        total += 1
+        r = translate_lines(
+            chunk,
+            check_words=(check_words[i:i + size] if check_words else None))
+        if not any(t.strip() for t in r["translations"]):
+            failed += 1
+            translations += [""] * len(chunk)
+            spell += [_missing_spell() for _ in chunk]
+            continue
+        translations += r["translations"]
+        spell += r["spell"]
+        avail_flags.append(r["spell_available"])
+    return {
+        "translations": translations,
+        "spell": spell,
+        # AI column is "available" only when every SUCCESSFUL chunk
+        # actually returned a spell array (failed chunks show per-row
+        # "ตรวจไม่ครบ" regardless).
+        "spell_available": bool(avail_flags) and all(avail_flags),
+        "chunks_total": total,
+        "chunks_failed": failed,
+    }
 
 
 # ── cache (per inspection, keyed by source-text hash) ─────────────────
@@ -394,7 +500,10 @@ def translate_table(insp_dir: str, rows: List[dict]) -> dict:
                 "note": "ยังไม่ได้ตั้งค่า N8N_TRANSLATE_WEBHOOK_URL — "
                         "แสดงข้อความและคำแนะนำการสะกดได้ แต่ยังไม่มีคำแปล"}
 
-    result = translate_lines([r["src"] for r in rows])
+    # ส่งคำที่ dict ฟ้อง (r["flagged"]) ให้โมเดลตัดสินรายคำแบบเทียบตัวอักษร
+    result = translate_lines_chunked(
+        [r["src"] for r in rows],
+        check_words=[r.get("flagged") or [] for r in rows])
     en = result["translations"]
     spell = result["spell"]
     spell_available = result["spell_available"]
@@ -411,10 +520,24 @@ def translate_table(insp_dir: str, rows: List[dict]) -> dict:
     for r, t, sp in zip(rows, en, spell):
         r["en"] = t
         r["ai_spell"] = sp
-    save_cache(insp_dir, rows, spell_available=spell_available)
-    note = (None if spell_available else
-            "N8N ยังไม่คืนข้อมูล spell-check — คอลัมน์ AI ยังไม่ทำงาน "
-            "(ต้องอัปเดต workflow artwork-translate ก่อน)")
+
+    failed = result["chunks_failed"]
+    total = result["chunks_total"]
+    has_missing = any((r.get("ai_spell") or {}).get("missing") for r in rows)
+    # Cache only a COMPLETE, fully-aligned result. A partial one (failed
+    # chunk / misaligned spell) must stay uncached so pressing แปล again
+    # re-fetches instead of freezing blanks/"ตรวจไม่ครบ" forever.
+    if failed == 0 and not has_missing:
+        save_cache(insp_dir, rows, spell_available=spell_available)
+
+    if failed > 0:
+        note = (f"แปลสำเร็จ {total - failed}/{total} ก้อน — "
+                "บรรทัดที่คำแปลยังว่างให้กดแปลอีกครั้งเพื่อเติมส่วนที่ขาด")
+    elif not spell_available:
+        note = ("N8N ยังไม่คืนข้อมูล spell-check — คอลัมน์ AI ยังไม่ทำงาน "
+                "(ต้องอัปเดต workflow artwork-translate ก่อน)")
+    else:
+        note = None
     out = {"rows": rows, "translated": True,
           "ai_spell_available": spell_available}
     if note:

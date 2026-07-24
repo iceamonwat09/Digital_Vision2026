@@ -52,7 +52,7 @@
 
 
 {% block extra_js %}
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="{{ url_for('static', filename='js/chart.umd.min.js') }}?v={{ config_version }}"></script>
 <script>
     // Dashboard JavaScript
     let distributionChart = null;

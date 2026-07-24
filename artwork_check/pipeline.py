@@ -30,7 +30,8 @@ from typing import List, Optional, Tuple
 import cv2
 
 from . import checks, config, ocr, report, vocab, zones as zones_mod
-from .pdf_ingest import ArtworkDocument, encode_jpg
+from .pdf_ingest import (ArtworkDocument, apply_rotation, encode_jpg,
+                         resolve_rotation)
 
 logger = logging.getLogger(__name__)
 
@@ -167,12 +168,14 @@ def _split_docs(zone_list: List[dict]) -> Tuple[List[dict], List[dict]]:
     return zones_a, zones_b
 
 
-def _read_all_docs(insp_dir: str, zones_a: List[dict],
-                   zones_b: List[dict]) -> List[dict]:
+def _read_all_docs(insp_dir: str, zones_a: List[dict], zones_b: List[dict],
+                   auto_rotate: bool = False) -> List[dict]:
     """OCR each zone against ITS OWN document (a → source, b → source_b).
-    With no doc-"b" zones this is exactly the original single-doc path."""
+    With no doc-"b" zones this is exactly the original single-doc path.
+    ``auto_rotate`` is the page-level toggle passed through to the OCR
+    layer (only affects zones with rotate == "default")."""
     doc = ArtworkDocument(_find_source(insp_dir))
-    results = ocr.read_all_zones(doc, zones_a)
+    results = ocr.read_all_zones(doc, zones_a, page_auto=auto_rotate)
     if zones_b:
         try:
             src_b = _find_source(insp_dir, "source_b")
@@ -180,19 +183,27 @@ def _read_all_docs(insp_dir: str, zones_a: List[dict],
             raise ValueError(
                 "มีโซนของไฟล์อ้างอิง (ชิ้นงาน) แต่ยังไม่ได้แนบไฟล์อ้างอิง — "
                 "แนบไฟล์อ้างอิง หรือลบโซนเหล่านั้นก่อนส่งตรวจ")
-        results += ocr.read_all_zones(ArtworkDocument(src_b), zones_b)
+        results += ocr.read_all_zones(ArtworkDocument(src_b), zones_b,
+                                      page_auto=auto_rotate)
     return results
 
 
 def run_inspection(rec_id: str, zone_list: List[dict],
-                   brand: str = "") -> dict:
+                   brand: str = "", auto_rotate: bool = False) -> dict:
     d = report.inspection_dir(rec_id)
     src = _find_source(d)
     zone_list = zones_mod.sanitize_zones(zone_list)
     zones_a, zones_b = _split_docs(zone_list)
 
     t0 = time.time()
-    ocr_results = _read_all_docs(d, zones_a, zones_b)
+    ocr_results = _read_all_docs(d, zones_a, zones_b, auto_rotate=auto_rotate)
+    # Record the concrete angle actually applied back onto each OCR'd zone
+    # so the saved report, overlay crops and OCR-review show what OCR read.
+    # (ignore-type zones are not OCR'd → left as the user set them.)
+    rot_by_id = {r["zone_id"]: r.get("rotate", 0) for r in ocr_results}
+    for z in zone_list:
+        if z["id"] in rot_by_id:
+            z["rotate"] = rot_by_id[z["id"]]
 
     vocab_words: set = set()
     vocab_phrases: List[str] = []
@@ -251,18 +262,21 @@ def run_inspection(rec_id: str, zone_list: List[dict],
 _OCR_ONLY_CACHE = "ocr_only.json"
 
 
-def _zones_signature(zone_list: List[dict]) -> str:
-    """Stable hash of the zone layout (id/type/group/bbox) so a repeated
-    translate request with unchanged zones reuses the cached OCR instead of
-    hitting the N8N webhook again."""
-    sig = [{k: z.get(k) for k in ("id", "type", "group", "bbox", "doc")}
+def _zones_signature(zone_list: List[dict], auto_rotate: bool = False) -> str:
+    """Stable hash of the zone layout (id/type/group/bbox/doc/rotate) plus
+    the page auto-rotate flag, so a repeated translate request reuses the
+    cached OCR only when nothing that changes the OCR input has changed."""
+    sig = [{k: z.get(k) for k in ("id", "type", "group", "bbox", "doc",
+                                  "rotate")}
            for z in zone_list]
     return hashlib.sha1(
-        json.dumps(sig, sort_keys=True, ensure_ascii=False).encode("utf-8")
+        json.dumps({"z": sig, "auto": bool(auto_rotate)},
+                   sort_keys=True, ensure_ascii=False).encode("utf-8")
     ).hexdigest()
 
 
-def _load_ocr_cache(insp_dir: str, zone_list: List[dict]) -> Optional[List[dict]]:
+def _load_ocr_cache(insp_dir: str, zone_list: List[dict],
+                    auto_rotate: bool = False) -> Optional[List[dict]]:
     p = os.path.join(insp_dir, _OCR_ONLY_CACHE)
     if not os.path.exists(p):
         return None
@@ -271,55 +285,65 @@ def _load_ocr_cache(insp_dir: str, zone_list: List[dict]) -> Optional[List[dict]
             data = json.load(f)
     except (ValueError, OSError):
         return None
-    if data.get("sig") != _zones_signature(zone_list):
-        return None          # zones changed → cache stale
+    if data.get("sig") != _zones_signature(zone_list, auto_rotate):
+        return None          # zones/flag changed → cache stale
     return data.get("ocr")
 
 
 def _save_ocr_cache(insp_dir: str, zone_list: List[dict],
-                    ocr_results: List[dict]) -> None:
+                    ocr_results: List[dict], auto_rotate: bool = False) -> None:
     try:
         with open(os.path.join(insp_dir, _OCR_ONLY_CACHE), "w",
                   encoding="utf-8") as f:
-            json.dump({"sig": _zones_signature(zone_list), "ocr": ocr_results},
+            json.dump({"sig": _zones_signature(zone_list, auto_rotate),
+                       "ocr": ocr_results},
                       f, ensure_ascii=False, indent=2)
     except OSError as e:
         logger.warning("[artwork] could not cache ocr-only result: %s", e)
 
 
-def run_ocr_only(rec_id: str,
-                 zone_list: List[dict]) -> Tuple[List[dict], List[dict]]:
+def run_ocr_only(rec_id: str, zone_list: List[dict],
+                 auto_rotate: bool = False) -> Tuple[List[dict], List[dict]]:
     """
     Acquire per-zone text only (PDF text layer or N8N OCR) for the advisory
     translate tab, WITHOUT running any check layer or touching report.json /
     overlay. Returns (sanitized_zones, ocr_results). Caches the OCR output by
     zone-layout hash so clicking translate repeatedly does not re-OCR.
+    ``auto_rotate`` is the page-level toggle (part of the cache key).
     """
     d = report.inspection_dir(rec_id)
     if not os.path.isdir(d):
         raise FileNotFoundError("ไม่พบรายการอัปโหลดนี้")
     zone_list = zones_mod.sanitize_zones(zone_list)
 
-    cached = _load_ocr_cache(d, zone_list)
+    cached = _load_ocr_cache(d, zone_list, auto_rotate)
     if cached is not None:
         return zone_list, cached
 
     zones_a, zones_b = _split_docs(zone_list)
-    ocr_results = _read_all_docs(d, zones_a, zones_b)
-    _save_ocr_cache(d, zone_list, ocr_results)
+    ocr_results = _read_all_docs(d, zones_a, zones_b, auto_rotate=auto_rotate)
+    _save_ocr_cache(d, zone_list, ocr_results, auto_rotate)
     logger.info("[artwork] ocr-only %s zones=%d", rec_id, len(zone_list))
     return zone_list, ocr_results
 
 
 def zone_crop_jpg(rec_id: str, zone_bbox: List[float],
-                  dpi: Optional[int] = None, doc: str = "a") -> bytes:
-    """High-DPI crop of one zone — used by the UI defect table.
-    ``doc="b"`` crops from the attached reference file instead."""
+                  dpi: Optional[int] = None, doc: str = "a",
+                  rotate="0") -> bytes:
+    """High-DPI crop of one zone — used by the UI defect table / preview.
+    ``doc="b"`` crops from the attached reference file. ``rotate`` is an
+    angle 0/90/180/270 or "auto" (detect + rotate vertical → upright), so
+    the preview matches what OCR will actually receive."""
     d = report.inspection_dir(rec_id)
     base = "source_b" if doc == "b" else "source"
     document = ArtworkDocument(_find_source(d, base))
     crop = document.render_zone(zone_bbox, dpi=dpi or config.OCR_DPI,
                                 max_side=1600)
+    angle = resolve_rotation(rotate, page_auto=False, crop=crop) \
+        if rotate == "auto" else (int(rotate) if str(rotate) in
+                                  ("0", "90", "180", "270") else 0)
+    if angle:
+        crop = apply_rotation(crop, angle)
     return encode_jpg(crop, quality=88)
 
 

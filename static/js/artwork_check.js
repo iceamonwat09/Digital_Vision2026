@@ -104,9 +104,15 @@
         // field doc → เป็น "a" เหมือนเดิม
         const docOf = (zz) => (zz.doc === "b" ? "b" : "a");
         const docTag = (zz) => (hasRef ? (docOf(zz) === "b" ? "🅱 " : "🅰 ") : "");
+        // report ที่เซฟไว้เก็บองศาที่ใช้จริงเป็นเลข (0/90/180/270);
+        // report เก่าไม่มี field → 0 (crop เหมือนเดิม)
+        const rotOf = (zz) => {
+          const rr = zz.rotate;
+          return (rr === 90 || rr === 180 || rr === 270) ? "&rotate=" + rr : "";
+        };
         if (z && refZ) {
-          const qA = "x=" + z.bbox[0] + "&y=" + z.bbox[1] + "&w=" + z.bbox[2] + "&h=" + z.bbox[3] + "&doc=" + docOf(z);
-          const qB = "x=" + refZ.bbox[0] + "&y=" + refZ.bbox[1] + "&w=" + refZ.bbox[2] + "&h=" + refZ.bbox[3] + "&doc=" + docOf(refZ);
+          const qA = "x=" + z.bbox[0] + "&y=" + z.bbox[1] + "&w=" + z.bbox[2] + "&h=" + z.bbox[3] + "&doc=" + docOf(z) + rotOf(z);
+          const qB = "x=" + refZ.bbox[0] + "&y=" + refZ.bbox[1] + "&w=" + refZ.bbox[2] + "&h=" + refZ.bbox[3] + "&doc=" + docOf(refZ) + rotOf(refZ);
           const cropA = "/api/artwork/" + esc(rep.id) + "/crop?" + qA;
           const cropB = "/api/artwork/" + esc(rep.id) + "/crop?" + qB;
           const labelA = docTag(z) + d.zone_id + (z.label ? " · " + z.label : "");
@@ -125,7 +131,7 @@
           '</div>';
         } else if (z) {
           // fallback: แค่โซนเดียว (ไม่มี ref zone)
-          const q = "x=" + z.bbox[0] + "&y=" + z.bbox[1] + "&w=" + z.bbox[2] + "&h=" + z.bbox[3] + "&doc=" + docOf(z);
+          const q = "x=" + z.bbox[0] + "&y=" + z.bbox[1] + "&w=" + z.bbox[2] + "&h=" + z.bbox[3] + "&doc=" + docOf(z) + rotOf(z);
           const cropUrl = "/api/artwork/" + esc(rep.id) + "/crop?" + q;
           const caption = docTag(z) + d.zone_id + (z.label ? " · " + z.label : "");
           html += '<div style="margin-top:8px;">' +
@@ -143,8 +149,10 @@
 
     html += "<details><summary>📄 ข้อความ OCR ต่อโซน (ตรวจสอบเอง)</summary>";
     (rep.ocr || []).forEach((r) => {
+      const rot = (r.rotate === 90 || r.rotate === 180 || r.rotate === 270)
+        ? " · หมุน " + r.rotate + "°" : "";
       html += "<b style='font-size:12px;'>" + esc(r.zone_id) + " · engine=" + esc(r.engine) +
-        (r.conf != null ? " · conf=" + esc(r.conf) : "") + "</b>" +
+        (r.conf != null ? " · conf=" + esc(r.conf) : "") + esc(rot) + "</b>" +
         '<pre class="aw-pre">' + esc(r.text || "(ว่าง)") + "</pre>";
     });
     html += "</details>";
@@ -228,13 +236,16 @@
   // ── text + translation table (shared with history page) ───────────
   function reEsc(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
 
-  function highlightFlagged(src, flagged) {
+  function highlightFlagged(src, flagged, unsupported) {
     let html = esc(src);
-    (flagged || []).forEach((w) => {
+    // แดง = คำที่ dict ฟ้องจริง / ฟ้า = คำที่ dict ไม่รองรับ (อาหรับ)
+    const wrap = (words, cls) => (words || []).forEach((w) => {
       const re = new RegExp("(^|[^A-Za-z])(" + reEsc(esc(w)) +
                             ")(?![A-Za-z])", "g");
-      html = html.replace(re, "$1<mark>$2</mark>");
+      html = html.replace(re, '$1<mark' + cls + '>$2</mark>');
     });
+    wrap(flagged, "");
+    wrap(unsupported, ' class="unsup"');
     return html;
   }
 
@@ -243,8 +254,11 @@
     let html = "";
     if (result && result.note)
       html += '<div class="aw-note">' + esc(result.note) + "</div>";
+    // "unsupported" (dict ไม่รองรับ) เป็น advisory ไม่ใช่ "น่าสงสัย" —
+    // เข้า filter เฉพาะบรรทัดน่าสงสัยก็ต่อเมื่อ AI ฟ้องด้วย
     const shown = onlyIssues
-      ? rows.filter((r) => r.status !== "ok" || (r.ai_spell && r.ai_spell.flagged))
+      ? rows.filter((r) => r.status === "spell" || r.status === "mismatch" ||
+                           (r.ai_spell && r.ai_spell.flagged))
       : rows;
     if (!shown.length) {
       box.innerHTML = html + '<div class="aw-empty">' +
@@ -258,26 +272,34 @@
       "<th>🤖 ตรวจสะกดโดย AI</th>" +
       "</tr></thead><tbody>";
     shown.forEach((r) => {
-      const issue = r.status !== "ok";
       const aiFlagged = !!(r.ai_spell && r.ai_spell.flagged);
-      html += '<tr class="' + (issue ? "has-issue" : (aiFlagged ? "has-ai-issue" : "")) + '">';
+      const isProblem = r.status === "spell" || r.status === "mismatch";
+      const isUnsup = r.status === "unsupported";
+      const rowCls = isProblem ? "has-issue"
+        : (isUnsup ? "has-unsup" : (aiFlagged ? "has-ai-issue" : ""));
+      html += '<tr class="' + rowCls + '">';
       html += '<td class="zone-cell">' + esc(r.zone_id) + "</td>";
-      html += '<td class="src-cell">' + highlightFlagged(r.src, r.flagged) + "</td>";
+      html += '<td class="src-cell">' +
+        highlightFlagged(r.src, r.flagged, r.unsupported) + "</td>";
       const en = r.en || "";
       html += '<td class="en-cell' + (en ? "" : " empty") + '">' +
         (en ? esc(en) : "—") + "</td>";
       let st = '<span class="aw-status-ok">✓</span>';
-      if (issue) {
-        if (r.status === "mismatch")
-          st = '<span class="aw-status-warn">❌ ไม่ตรงกับฉลากจริง</span>';
-        else
-          st = '<span class="aw-status-warn">⚠️ dict: สะกดน่าสงสัย</span>';
+      if (r.status === "mismatch") {
+        st = '<span class="aw-status-warn">❌ ไม่ตรงกับฉลากจริง</span>';
+      } else if (r.status === "spell") {
+        st = '<span class="aw-status-warn">⚠️ dict: สะกดน่าสงสัย</span>';
         const sug = r.suggest || {};
         Object.keys(sug).forEach((w) => {
           if (sug[w] && sug[w].length)
             st += '<span class="aw-suggest">“' + esc(w) + "” → " +
               sug[w].map((s) => "<code>" + esc(s) + "</code>").join(" ") + "</span>";
         });
+      } else if (r.status === "unsupported") {
+        // dict ตัดสินภาษานี้ไม่ได้ — ไม่ใช่ "สะกดผิด" แค่ dict ไม่ครอบคลุม
+        const langs = (r.unsupported_langs || []).join("/") || "ภาษานี้";
+        st = '<span class="aw-status-info">ℹ️ dict ไม่รองรับคำนี้ (' +
+          esc(langs) + ") — พิจารณาผล AI</span>";
       }
       html += "<td>" + st + "</td>";
       // Advisory AI spell-check (Gemini, via the translate webhook).
@@ -291,6 +313,10 @@
       let ai;
       if (!result || !result.ai_spell_available) {
         ai = '<span class="aw-status-unavail">ยังไม่รองรับ</span>';
+      } else if (aiSpell.missing) {
+        // AI ไม่ได้ตรวจบรรทัดนี้จริง (โมเดลตอบ array ไม่ตรงจำนวน หรือก้อน
+        // นั้นแปลไม่สำเร็จ) — ห้ามแสดง "✓ ไม่พบ" เพราะจะหลอกว่าปลอดภัย
+        ai = '<span class="aw-status-warn">⚠️ AI ตรวจไม่ครบ — ดูคอลัมน์สถานะแทน</span>';
       } else if (aiSpell.flagged) {
         // Label by the AI's own kind. variant = correct regional spelling
         // (blue info). typo / truncated get clearer wording than the old
@@ -311,11 +337,17 @@
           ai += '<span class="aw-ai-reason">' + esc(aiSpell.reason) + "</span>";
       } else {
         ai = '<span class="aw-status-ok">✓ ไม่พบ</span>';
-        // dict flagged the line but the AI thinks it's fine — most often a
-        // loanword / brand / proper noun missing from the dictionary.
-        if (r.status === "spell")
-          ai += '<span class="aw-ai-reason">dict ไม่รู้จักแต่ AI ว่าถูก — ' +
-            "มักเป็นคำทับศัพท์/ชื่อเฉพาะ</span>";
+        if (r.status === "spell") {
+          // dict ฟ้องแต่ AI ว่าถูก — ความหมายต่างกันมากตามความมั่นใจของ dict:
+          // ถ้า dict มีคำแนะนำแก้ (candidate ชัด เช่น Phosphours→phosphorus)
+          // = สองระบบขัดแย้งกันจริง ต้องให้คนชี้ขาด ห้ามกล่อมว่าเป็นคำทับศัพท์
+          const hasDictFix = r.suggest &&
+            Object.keys(r.suggest).some((w) => (r.suggest[w] || []).length);
+          ai += '<span class="aw-ai-reason">' + (hasDictFix
+            ? "⚠️ ขัดแย้งกัน: dict มีคำแนะนำแก้ (ดูคอลัมน์สถานะ) แต่ AI ไม่ฟ้อง — ยืนยันด้วยตา"
+            : "dict ไม่รู้จักแต่ AI ว่าถูก — มักเป็นคำทับศัพท์/ชื่อเฉพาะ") +
+            "</span>";
+        }
       }
       html += "<td>" + ai + "</td></tr>";
     });
@@ -323,13 +355,19 @@
     html += '<div class="aw-tlegend"><b>หมายเหตุ:</b><ul>' +
       '<li>คอลัมน์ <b>สถานะ</b> มาจากการตรวจแบบ deterministic (dictionary + เทียบข้าม panel) ' +
         'ส่วนคอลัมน์ <b>🤖</b> เป็นความเห็นของ AI ใช้ประกอบการพิจารณาเท่านั้น ไม่มีผลต่อ PASS/FAIL</li>' +
-      '<li><b>⚠️ dict: สะกดน่าสงสัย</b> แต่ AI <b>✓ ไม่พบ</b> — มักเป็นคำทับศัพท์ ชื่อแบรนด์ ' +
-        'หรือชื่อเฉพาะที่ไม่มีใน dictionary ไม่ใช่คำผิดเสมอไป ยืนยันด้วยตาแล้วเพิ่มเข้าคลังคำแบรนด์ได้' +
-        'เพื่อไม่ให้แจ้งซ้ำ</li>' +
+      '<li><span style="background:#ffcdd2;color:#b71c1c;padding:0 3px;border-radius:2px;">คำไฮไลต์แดง</span>' +
+        ' = dict ไม่รู้จัก (<b>⚠️ dict: สะกดน่าสงสัย</b>) แต่ถ้า AI <b>✓ ไม่พบ</b> ' +
+        'มักเป็นคำทับศัพท์ ชื่อแบรนด์ หรือชื่อเฉพาะ ยืนยันด้วยตาแล้วเพิ่มเข้าคลังคำแบรนด์ได้เพื่อไม่ให้แจ้งซ้ำ</li>' +
+      '<li><span style="background:#e3f2fd;color:#0d47a1;padding:0 3px;border-radius:2px;">คำไฮไลต์ฟ้า</span>' +
+        ' = <b>ℹ️ dict ไม่รองรับคำนี้</b> (ภาษาที่คลัง dict เชื่อถือไม่ได้ เช่นอาหรับ) — ' +
+        'ไม่ใช่คำผิด และไม่มีผลต่อ PASS/FAIL ให้ยึดคอลัมน์ 🤖 AI และการเทียบ panel เป็นหลัก</li>' +
       '<li><b>🤖 สะกดผิด</b> / <b>🤖 คำไม่ครบ (ถูกตัด)</b> — AI คาดว่าคำนั้นสะกดผิด ' +
         'หรือถูกตัดปลาย (มีเหตุผลกำกับ) ต้องยืนยันด้วยตา</li>' +
       '<li><b>🤖 ทางเลือกการสะกด (ไม่ใช่คำผิด)</b> — คำถูกต้องแต่เป็นการสะกดตามภูมิภาค ' +
         'เช่น fibre (อังกฤษ) / fiber (อเมริกัน) ให้ยืนยันว่าตรงกับตลาดเป้าหมายของฉลาก</li>' +
+      '<li><b>⚠️ AI ตรวจไม่ครบ</b> — AI ไม่ได้ตรวจบรรทัดนี้จริง (โมเดลตอบไม่ตรงจำนวนบรรทัด ' +
+        'หรือก้อนนั้นแปลไม่สำเร็จ) อย่าตีความว่าไม่มีปัญหา — ยึดคอลัมน์สถานะ ' +
+        'แล้วกดแปลอีกครั้งเพื่อให้ AI ตรวจซ้ำได้</li>' +
       "</ul></div>";
     box.innerHTML = html;
   }
@@ -350,6 +388,10 @@
   let activeDoc = "a";
   let refAttached = false;
   const docMeta = { a: null, b: null };   // {w, h, url} ต่อ doc
+  // page-level auto-rotate toggle (default ปิด = ทุกโซนเหมือนเดิม)
+  let autoRotate = false;
+  // ลำดับการวนของชิป ↻ รายโซน
+  const ROT_CYCLE = ["default", "auto", 0, 90, 180, 270];
 
   // ── dom ────────────────────────────────────────────────────────────
   const fileInput = $("awFile"), brandInput = $("awBrand");
@@ -361,6 +403,24 @@
   const docTabs = $("awDocTabs");
 
   const docOfZone = (z) => (z.doc === "b" ? "b" : "a");
+  const rotOfZone = (z) => (z.rotate === undefined ? "default" : z.rotate);
+
+  // แปลง rotate ของโซน → ค่าที่ส่งให้ /crop (resolve "default" ตามหน้า
+  // ฝั่ง client เพื่อให้ preview ตรงกับที่ OCR จะทำ; "auto"/เลข ส่งตรงๆ)
+  function cropRotateParam(z) {
+    const r = rotOfZone(z);
+    if (r === "default") return autoRotate ? "auto" : "0";
+    return String(r);
+  }
+  // ป้ายชิป ↻ ตามสถานะ
+  function rotChipInfo(z) {
+    const r = rotOfZone(z);
+    if (r === "default")
+      return { txt: "↻", cls: autoRotate ? "autoed" : "" };   // ตามหน้า
+    if (r === "auto") return { txt: "↻A", cls: "autoed" };
+    if (r === 0) return { txt: "0°", cls: "pinned" };
+    return { txt: r + "°", cls: "pinned" };
+  }
 
   // ลำดับ group อัตโนมัติ — ชุดเดียวกับ zones.py (GROUP_LETTERS/seq_group
   // ฝั่ง server): A..Z ข้าม I/O แล้วต่อ A2..Z2, … ห้ามแก้ข้างเดียว.
@@ -409,7 +469,7 @@
   }
   function setBusy(b) {
     busy = b;
-    ["awInspect", "awAddZone", "awClearZones", "awRedetect",
+    ["awInspect", "awAddZone", "awClearZones", "awRedetect", "awPairAuto",
      "awTemplateLoad", "awTemplateSave", "awRefToggle"].forEach((id) => {
       $(id).disabled = b || !inspectionId;
     });
@@ -546,6 +606,14 @@
     else { activeDoc = "a"; updateDocTabs(); renderZones(); }
   });
 
+  // page-level auto-rotate toggle — ไม่แตะโซน แค่เปลี่ยน default ของ
+  // โซนที่ตั้ง "ตามหน้า" (ชิป/preview อัปเดตตาม)
+  $("awAutoRotate").addEventListener("change", (ev) => {
+    autoRotate = !!ev.target.checked;
+    renderZones();
+    updateRotPreview();
+  });
+
   $("awDocTabA").addEventListener("click", () => { if (activeDoc !== "a") showDoc("a"); });
   $("awDocTabB").addEventListener("click", () => {
     if (activeDoc !== "b" && refAttached) showDoc("b");
@@ -629,8 +697,21 @@
       const handle = document.createElement("div");
       handle.className = "aw-handle";
       el.appendChild(handle);
+      // ชิปหมุน ↻ (มุมบนขวา) — คลิกวนสถานะการหมุนของโซนนี้
+      const chip = document.createElement("div");
+      const ci = rotChipInfo(z);
+      chip.className = "aw-rot-chip" + (ci.cls ? " " + ci.cls : "");
+      chip.textContent = ci.txt;
+      chip.title = "หมุนก่อน OCR (คลิกวน: ตามหน้า → auto → 0° → 90° → 180° → 270°)";
+      el.appendChild(chip);
+      chip.addEventListener("mousedown", (ev) => ev.stopPropagation());
+      chip.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        cycleZoneRotate(z);
+      });
       stage.appendChild(el);
-      el.addEventListener("mousedown", (ev) => startDrag(ev, z, el, ev.target === handle));
+      el.addEventListener("mousedown", (ev) =>
+        startDrag(ev, z, el, ev.target === handle));
       el.addEventListener("dblclick", (ev) => { ev.preventDefault(); snapZone(z); });
     });
     renderProps();
@@ -703,6 +784,42 @@
   function selectedZone() {
     return zones.find((z) => z.id === selectedId) || null;
   }
+
+  // วนสถานะการหมุนของโซน: ตามหน้า → auto → 0 → 90 → 180 → 270 → ตามหน้า
+  function cycleZoneRotate(z) {
+    const cur = rotOfZone(z);
+    let idx = ROT_CYCLE.findIndex((v) => v === cur);
+    if (idx < 0) idx = 0;
+    z.rotate = ROT_CYCLE[(idx + 1) % ROT_CYCLE.length];
+    selectedId = z.id;
+    renderZones();          // อัปเดตชิป + เลือกโซนนี้
+    updateRotPreview();     // อัปเดตภาพตัวอย่าง
+  }
+
+  // ภาพตัวอย่าง "ที่ OCR จะเห็น" ในกล่อง properties (อิงองศาที่ resolve แล้ว)
+  let rotPreviewSeq = 0;
+  function updateRotPreview() {
+    const box = $("awRotPreview");
+    const z = selectedZone();
+    if (!z || !inspectionId) { box.style.display = "none"; return; }
+    const r = rotOfZone(z);
+    const param = cropRotateParam(z);
+    const stateTxt = (r === "default")
+      ? (autoRotate ? "ตามหน้า: auto" : "ตามหน้า: ไม่หมุน")
+      : (r === "auto" ? "auto (ตรวจเอง)" : r + "°");
+    $("awRotState").textContent = stateTxt;
+    box.style.display = "";
+    const q = "x=" + z.bbox[0] + "&y=" + z.bbox[1] + "&w=" + z.bbox[2] +
+      "&h=" + z.bbox[3] + "&doc=" + docOfZone(z) + "&rotate=" + param;
+    const seq = ++rotPreviewSeq;
+    const url = "/api/artwork/" + inspectionId + "/crop?" + q + "&t=" + Date.now();
+    const img = $("awRotThumb");
+    // กันภาพเก่ามาทับภาพใหม่เมื่อคลิกวนเร็วๆ
+    const probe = new Image();
+    probe.onload = () => { if (seq === rotPreviewSeq) img.src = url; };
+    probe.onerror = () => { if (seq === rotPreviewSeq) box.style.display = "none"; };
+    probe.src = url;
+  }
   function renderProps() {
     const z = selectedZone();
     propsBox.style.display = z ? "" : "none";
@@ -728,6 +845,7 @@
       pd.style.display = "none";
       pp.textContent = "";
     }
+    updateRotPreview();
   }
   $("awPropType").addEventListener("change", () => {
     const z = selectedZone(); if (z) { z.type = $("awPropType").value; renderZones(); }
@@ -817,7 +935,7 @@
     while (zones.some((z) => z.id === prefix + n)) n++;
     const z = {
       id: prefix + n, type: "panel", group: nextGroupLetter(activeDoc),
-      doc: activeDoc,
+      doc: activeDoc, rotate: "default",
       bbox: [q.x / W, q.y / H, q.w / W, q.h / H]
         .map((v) => Math.round(v * 1e5) / 1e5),
       label: (activeDoc === "b" ? "อ้างอิง " : "โซน ") + n,
@@ -891,6 +1009,72 @@
     }
   });
 
+  // ── หากรอบคู่อัตโนมัติ (cross-file) ────────────────────────────────
+  // วาดกรอบครบบนไฟล์หลัก (🅰) แล้วกดปุ่มนี้ → ระบบใช้ matchTemplate หา
+  // บล็อกเดียวกันบนไฟล์อ้างอิง (🅱) แล้วสร้างกรอบคู่ (group เดียวกัน) ให้
+  // อัตโนมัติ. ทำเฉพาะโซน 🅰 ที่ยัง "ไม่มีคู่" บน 🅱 — non-destructive
+  // (เพิ่มกรอบ 🅱 เท่านั้น ไม่แก้/ลบกรอบเดิม). conf ต่ำกว่าเกณฑ์ = ไม่สร้าง
+  // + เตือนให้วาดเอง (ไม่แอบสร้างกรอบผิด).
+  $("awPairAuto").addEventListener("click", async () => {
+    if (busy || !inspectionId) return;
+    if (!refAttached) {
+      alert("แนบไฟล์อ้างอิง (🅱) ก่อน จึงจะหากรอบคู่อัตโนมัติได้");
+      return;
+    }
+    // โซน 🅰 ที่มี group และยังไม่มีคู่ฝั่ง 🅱
+    const bGroups = new Set(
+      zones.filter((z) => docOfZone(z) === "b" && z.group).map((z) => z.group));
+    const todo = zones.filter((z) => docOfZone(z) === "a" && z.group &&
+                                     !bGroups.has(z.group));
+    const noGroup = zones.filter((z) => docOfZone(z) === "a" && !z.group).length;
+    if (!todo.length) {
+      alert("ไม่มีโซนของไฟล์หลักที่ยังไม่มีคู่บนไฟล์อ้างอิง" +
+            (noGroup ? "\n(มี " + noGroup + " โซนที่ยังไม่มี group — ตั้ง group ก่อนจึงจับคู่ได้)" : ""));
+      return;
+    }
+    setBusy(true);
+    try {
+      const res = await api("/api/artwork/" + inspectionId + "/autopair", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          zones: todo.map((z) => ({ group: z.group, bbox: z.bbox })),
+        }),
+      });
+      const results = res.results || [];
+      let made = 0;
+      const failed = [];
+      results.forEach((r, i) => {
+        const src = todo[i];
+        if (r.matched && r.bbox) {
+          let n = zones.length + 1;
+          while (zones.some((z) => z.id === "b" + n)) n++;
+          zones.push({
+            id: "b" + n, type: src.type || "panel", group: src.group,
+            doc: "b", rotate: "default", bbox: r.bbox,
+            label: "อ้างอิง " + (src.label || src.group),
+          });
+          made++;
+        } else {
+          failed.push(src.group + " (conf " + (r.conf || 0).toFixed(2) + ")");
+        }
+      });
+      selectedId = null;
+      cancelDraw();
+      renderZones();
+      warnRefCountMismatch();
+      let msg = "สร้างกรอบคู่บนไฟล์อ้างอิง " + made + " โซน";
+      if (failed.length)
+        msg += "\n\nหาไม่เจอ " + failed.length + " กลุ่ม (conf ต่ำ) — วาดเอง:\n" +
+               failed.join(", ");
+      alert(msg);
+    } catch (e) {
+      alert("หากรอบคู่ไม่สำเร็จ: " + e.message);
+    } finally {
+      setBusy(false);
+    }
+  });
+
   // ── templates ──────────────────────────────────────────────────────
   async function refreshTemplates() {
     try {
@@ -951,7 +1135,7 @@
       const rep = await api("/api/artwork/" + inspectionId + "/inspect", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ zones: zones, brand: brandInput.value.trim() }),
+        body: JSON.stringify({ zones: zones, brand: brandInput.value.trim(), auto_rotate: autoRotate }),
       });
       renderReport(rep, resultBox);
       showTabs(true);
@@ -1012,7 +1196,7 @@
       textResult = await api("/api/artwork/" + inspectionId + "/translate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ zones: zones, brand: brandInput.value.trim() }),
+        body: JSON.stringify({ zones: zones, brand: brandInput.value.trim(), auto_rotate: autoRotate }),
       });
       renderTextTable(textResult, textTableWrap, onlyIssuesCb.checked);
       setResultsWide(true);   // table now has data → widen the results panel

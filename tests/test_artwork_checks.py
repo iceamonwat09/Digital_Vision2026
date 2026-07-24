@@ -345,6 +345,87 @@ def test_snap_no_content_returns_original():
     assert snap_bbox(img, b) == [round(v, 5) for v in b]
 
 
+# ── autopair_bbox (หากรอบคู่ข้ามไฟล์ด้วย matchTemplate) ───────────────
+
+_ING = ["Ingredients: Tuna,", "Sunflower Oil, Salt.",
+        "Produced in Thailand", "Storage: Cool, dry."]
+_NUTR = ["Nutrition Facts", "Calories 170 kcal",
+         "Total Fat 7g 10%", "Sodium 470mg 20%"]
+
+
+def _graphic_page(seed, blocks):
+    """หน้า 1241×1754 พื้น gradient เขียว + noise (จำลองฉลากพื้นกราฟิก).
+    blocks = [(x, y, w, h, lines), ...] วาดกล่องขาว + ข้อความหลายบรรทัด
+    (เนื้อหาแน่นเหมือนฉลากจริง — สัญญาณการจับคู่มาจากตัวอักษร ไม่ใช่กล่อง)."""
+    import cv2
+    rng = np.random.default_rng(seed)
+    img = np.zeros((1241, 1754, 3), np.uint8)
+    for i in range(1241):
+        img[i, :] = (30, 90 + i * 80 // 1241, 40)
+    img = (img.astype(np.int16)
+           + rng.integers(0, 18, img.shape, dtype=np.int16)
+           ).clip(0, 255).astype(np.uint8)
+    for (x, y, w, h, lines) in blocks:
+        cv2.rectangle(img, (x, y), (x + w, y + h), (245, 245, 240), -1)
+        sc = h / 150.0
+        for k, t in enumerate(lines):
+            cv2.putText(img, t, (x + 8, y + int((26 + k * 30) * sc)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.62 * sc, (20, 20, 20),
+                        2, cv2.LINE_AA)
+    return img
+
+
+def test_autopair_finds_same_block_shifted():
+    """บล็อกเดียวกันย้ายตำแหน่งบนไฟล์ B → เจอ + ตำแหน่งตรง + conf สูง"""
+    from artwork_check.zones import autopair_bbox
+    from artwork_check import config
+    a = _graphic_page(1, [(500, 300, 360, 150, _ING)])
+    b = _graphic_page(2, [(760, 540, 360, 150, _ING)])
+    bbox_a = [500 / 1754, 300 / 1241, 360 / 1754, 150 / 1241]
+    bbox_b, conf = autopair_bbox(a, b, bbox_a)
+    assert conf >= config.AUTOPAIR_MIN_CONF
+    assert abs(bbox_b[0] - 760 / 1754) < 0.01    # ตำแหน่ง x ตรง
+    assert abs(bbox_b[1] - 540 / 1241) < 0.01    # ตำแหน่ง y ตรง
+
+
+def test_autopair_low_conf_when_block_absent():
+    """ไฟล์ B ไม่มีบล็อกนั้นเลย (พื้นกราฟิกล้วน) → conf ต่ำกว่าเกณฑ์
+    → ระบบจะไม่สร้างกรอบ (กันสร้างกรอบผิดเงียบๆ)."""
+    from artwork_check.zones import autopair_bbox
+    from artwork_check import config
+    a = _graphic_page(1, [(500, 300, 360, 150, _ING)])
+    b = _graphic_page(2, [])                      # ไม่มีบล็อกเลย
+    bbox_a = [500 / 1754, 300 / 1241, 360 / 1754, 150 / 1241]
+    _, conf = autopair_bbox(a, b, bbox_a)
+    assert conf < config.AUTOPAIR_MIN_CONF
+
+
+def test_autopair_prefers_matching_over_decoy():
+    """บล็อกที่เนื้อหาตรงต้องได้ conf สูงกว่าบล็อกเนื้อหาต่าง (decoy)
+    อย่างมีนัย — คุณสมบัติแยกแยะที่ทำให้เกณฑ์ทำงานได้จริง."""
+    from artwork_check.zones import autopair_bbox
+    a = _graphic_page(1, [(500, 300, 360, 150, _ING)])
+    bbox_a = [500 / 1754, 300 / 1241, 360 / 1754, 150 / 1241]
+    _, conf_match = autopair_bbox(
+        a, _graphic_page(2, [(760, 540, 360, 150, _ING)]), bbox_a)
+    _, conf_decoy = autopair_bbox(
+        a, _graphic_page(2, [(760, 540, 360, 150, _NUTR)]), bbox_a)
+    assert conf_match > conf_decoy + 0.2
+
+
+def test_autopair_tolerates_scale_difference():
+    """ไฟล์ B วาดบล็อกใหญ่กว่า (คนละสเกล) → multi-scale ยังจับได้"""
+    from artwork_check.zones import autopair_bbox
+    from artwork_check import config
+    a = _graphic_page(1, [(500, 300, 340, 154, _ING)])
+    b = _graphic_page(4, [(600, 400, 374, 169, _ING)])   # ~1.1x
+    bbox_a = [500 / 1754, 300 / 1241, 340 / 1754, 154 / 1241]
+    bbox_b, conf = autopair_bbox(a, b, bbox_a)
+    assert conf >= config.AUTOPAIR_MIN_CONF
+    assert abs(bbox_b[0] - 600 / 1754) < 0.02
+    assert abs(bbox_b[1] - 400 / 1241) < 0.02
+
+
 # ── translate table (advisory tab — must not touch the verdict) ───────
 
 def test_build_table_skips_ignore_and_blank_lines():
@@ -418,11 +499,12 @@ def test_translate_lines_alignment(monkeypatch):
     out = translate.translate_lines(["1", "2", "3"])
     assert out["translations"] == ["a", "b", ""]          # padded to len 3
     assert out["spell_available"] is True
-    assert out["spell"] == [
-        {"flagged": True, "suggestion": "A", "kind": None, "reason": None},
-        {"flagged": False, "suggestion": None, "kind": None, "reason": None},
-        {"flagged": False, "suggestion": None, "kind": None, "reason": None},
-    ]
+    # spell array ที่ยาวไม่ตรงจำนวนบรรทัด = ตำแหน่งเชื่อไม่ได้ทั้งก้อน
+    # (โมเดลอาจข้ามบรรทัดกลางลิสต์) → ทุกบรรทัดต้องถูกตีตรา "ตรวจไม่ครบ"
+    # ห้ามเติมท้ายด้วย flagged:False ปลอมๆ ที่จะโชว์เป็น "✓ ไม่พบ"
+    assert all(sp.get("missing") is True and sp["flagged"] is False
+               for sp in out["spell"])
+    assert len(out["spell"]) == 3
 
 
 def test_translate_lines_no_spell_field_marks_unavailable(monkeypatch):
@@ -551,7 +633,7 @@ def test_run_ocr_only_caches_and_stays_isolated(tmp_path, monkeypatch):
     monkeypatch.setattr(pipeline, "ArtworkDocument", lambda *a, **k: object())
     calls = {"n": 0}
 
-    def fake_read(doc, zones):
+    def fake_read(doc, zones, page_auto=False):
         calls["n"] += 1
         return [{"zone_id": z["id"], "text": "Hello", "engine": "stub",
                  "conf": None} for z in zones]
@@ -645,7 +727,7 @@ def test_read_all_docs_routes_each_zone_to_its_own_file(tmp_path, monkeypatch):
                             os.path.basename(path)) or object())
     monkeypatch.setattr(
         pipeline.ocr, "read_all_zones",
-        lambda doc, zones: [{"zone_id": z["id"], "text": "T",
+        lambda doc, zones, page_auto=False: [{"zone_id": z["id"], "text": "T",
                              "engine": "stub", "conf": None} for z in zones])
 
     za = [{"id": "z1", "type": "panel", "group": "G",
@@ -672,7 +754,8 @@ def test_read_all_docs_missing_ref_file_raises(tmp_path, monkeypatch):
     with open(os.path.join(d, "source.png"), "wb") as f:
         f.write(b"x")
     monkeypatch.setattr(pipeline, "ArtworkDocument", lambda *a, **k: object())
-    monkeypatch.setattr(pipeline.ocr, "read_all_zones", lambda doc, zones: [])
+    monkeypatch.setattr(pipeline.ocr, "read_all_zones",
+                        lambda doc, zones, page_auto=False: [])
 
     zb = [{"id": "b1", "type": "panel", "group": "G",
            "bbox": [0.1, 0.1, 0.2, 0.2], "doc": "b"}]
@@ -1087,3 +1170,409 @@ def test_propose_for_both_docs(tmp_path, monkeypatch):
 
     with pytest.raises(ValueError):
         pipeline.propose_for(res_a["id"], "x")
+
+
+# ── Chunked translation (แบ่งก้อนละ 30 บรรทัด — แก้ AI เพี้ยนตอนโซนเยอะ) ─
+
+def _fake_ok_chunk(lines):
+    """คำตอบสมบูรณ์ 1 ก้อน: แปล = "EN:"+src, spell align ครบ."""
+    return {"translations": ["EN:" + l for l in lines],
+            "spell": [{"flagged": False, "suggestion": None,
+                       "kind": None, "reason": None} for _ in lines],
+            "spell_available": True}
+
+
+def test_chunked_splits_and_merges_in_order(monkeypatch):
+    from artwork_check import translate
+    calls = []
+    monkeypatch.setattr(translate, "translate_lines",
+                        lambda lines, check_words=None:
+                        calls.append(len(lines)) or _fake_ok_chunk(lines))
+    lines = [f"L{i}" for i in range(70)]
+    out = translate.translate_lines_chunked(lines, chunk_size=30)
+    assert calls == [30, 30, 10]
+    assert out["translations"] == ["EN:" + l for l in lines]   # ลำดับคงเดิม
+    assert out["chunks_total"] == 3 and out["chunks_failed"] == 0
+    assert out["spell_available"] is True
+
+
+def test_chunked_zero_is_single_request_rollback(monkeypatch):
+    """ARTWORK_TRANSLATE_CHUNK_LINES=0 = ส่งก้อนเดียวแบบเดิม (ปุ่มถอยกลับ)."""
+    from artwork_check import translate
+    calls = []
+    monkeypatch.setattr(translate, "translate_lines",
+                        lambda lines, check_words=None:
+                        calls.append(len(lines)) or _fake_ok_chunk(lines))
+    translate.translate_lines_chunked([f"L{i}" for i in range(70)],
+                                      chunk_size=0)
+    assert calls == [70]
+
+
+def test_chunked_failed_chunk_marks_missing_not_clean(monkeypatch):
+    """ก้อนที่ล้ม: แปลว่าง + spell = missing (ห้ามเป็น "ไม่พบ" ปลอม)
+    ก้อนอื่นต้องไม่ติดเชื้อ."""
+    from artwork_check import translate
+    n = {"i": 0}
+
+    def fake(lines, check_words=None):
+        n["i"] += 1
+        if n["i"] == 2:      # ก้อนกลางล้ม
+            return {"translations": [], "spell": [],
+                    "spell_available": False}
+        return _fake_ok_chunk(lines)
+
+    monkeypatch.setattr(translate, "translate_lines", fake)
+    lines = [f"L{i}" for i in range(70)]
+    out = translate.translate_lines_chunked(lines, chunk_size=30)
+    assert out["chunks_failed"] == 1 and out["chunks_total"] == 3
+    assert out["translations"][0] == "EN:L0"
+    assert out["translations"][30] == "" and out["translations"][59] == ""
+    assert out["translations"][60] == "EN:L60"
+    assert out["spell"][30].get("missing") is True
+    assert out["spell"][0].get("missing") is None
+    assert out["spell_available"] is True   # ก้อนที่สำเร็จมี spell ครบ
+
+
+def test_translate_table_partial_failure_not_cached(tmp_path, monkeypatch):
+    """ล้มบางก้อน → แสดงส่วนที่ได้ + note บอกตรง + ห้ามเขียนแคช
+    (กันบรรทัดว่างค้างถาวร — กดแปลซ้ำแล้วเติมได้)."""
+    import os
+    from artwork_check import translate
+    monkeypatch.setattr(translate.config, "N8N_TRANSLATE_WEBHOOK_URL",
+                        "http://x/webhook/artwork-translate")
+    monkeypatch.setattr(
+        translate, "translate_lines_chunked",
+        lambda lines, check_words=None: {
+            "translations": ["EN:" + l for l in lines[:1]] +
+                            [""] * (len(lines) - 1),
+            "spell": [translate._clean_spell()] +
+                     [translate._missing_spell()] * (len(lines) - 1),
+            "spell_available": True,
+            "chunks_total": 2, "chunks_failed": 1,
+        })
+    rows = [{"src": f"S{i}", "status": "ok", "flagged": [], "suggest": {}}
+            for i in range(3)]
+    res = translate.translate_table(str(tmp_path), rows)
+    assert res["translated"] is True
+    assert "1/2" in res["note"] or "แปลสำเร็จ 1/2" in res["note"]
+    assert not os.path.exists(os.path.join(str(tmp_path),
+                                           "translation.json"))
+    assert res["rows"][1]["ai_spell"].get("missing") is True
+
+
+def test_translate_table_complete_result_cached(tmp_path, monkeypatch):
+    """ครบทุกก้อน + align ครบ → เขียนแคชตามเดิม."""
+    import os
+    from artwork_check import translate
+    monkeypatch.setattr(translate.config, "N8N_TRANSLATE_WEBHOOK_URL",
+                        "http://x/webhook/artwork-translate")
+    monkeypatch.setattr(
+        translate, "translate_lines_chunked",
+        lambda lines, check_words=None: {
+            "translations": ["EN:" + l for l in lines],
+            "spell": [translate._clean_spell() for _ in lines],
+            "spell_available": True,
+            "chunks_total": 1, "chunks_failed": 0,
+        })
+    rows = [{"src": "S1", "status": "ok", "flagged": [], "suggest": {}}]
+    res = translate.translate_table(str(tmp_path), rows)
+    assert res["translated"] is True and "note" not in res
+    assert os.path.exists(os.path.join(str(tmp_path), "translation.json"))
+
+
+def test_translate_table_misaligned_spell_not_cached(tmp_path, monkeypatch):
+    """spell เหลื่อม (missing ทั้งก้อน) แม้แปลสำเร็จ → ไม่เขียนแคช
+    เพื่อให้กดแปลซ้ำแล้ว AI ได้ตรวจใหม่."""
+    import os
+    from artwork_check import translate
+    monkeypatch.setattr(translate.config, "N8N_TRANSLATE_WEBHOOK_URL",
+                        "http://x/webhook/artwork-translate")
+    monkeypatch.setattr(
+        translate, "translate_lines_chunked",
+        lambda lines, check_words=None: {
+            "translations": ["EN:" + l for l in lines],
+            "spell": [translate._missing_spell() for _ in lines],
+            "spell_available": True,
+            "chunks_total": 1, "chunks_failed": 0,
+        })
+    rows = [{"src": "S1", "status": "ok", "flagged": [], "suggest": {}}]
+    res = translate.translate_table(str(tmp_path), rows)
+    assert res["translated"] is True
+    assert not os.path.exists(os.path.join(str(tmp_path),
+                                           "translation.json"))
+
+
+# ── check_words: ส่งคำที่ dict ฟ้องให้ AI ตัดสินรายคำ (แก้ Phosphours หลุด) ─
+
+def test_translate_lines_sends_check_words(monkeypatch):
+    from artwork_check import translate
+    captured = {}
+
+    class FakeResp:
+        status_code = 200
+        def raise_for_status(self): pass
+        def json(self): return {"translations": ["a", "b"], "spell": []}
+
+    def fake_post(url, json=None, timeout=None):
+        captured["body"] = json
+        return FakeResp()
+
+    monkeypatch.setattr(translate.requests, "post", fake_post)
+    monkeypatch.setattr(translate.config, "N8N_TRANSLATE_WEBHOOK_URL",
+                        "http://x/webhook/artwork-translate")
+    translate.translate_lines(["磷 Phosphours", "OK line"],
+                              check_words=[["Phosphours"], []])
+    assert captured["body"]["lines"] == ["磷 Phosphours", "OK line"]
+    assert captured["body"]["check_words"] == [["Phosphours"], []]
+
+    # ไม่มีคำต้องสงสัยเลย → ไม่แนบ field (payload เหมือนก่อนฟีเจอร์นี้ 100%)
+    translate.translate_lines(["a"], check_words=[[]])
+    assert "check_words" not in captured["body"]
+    translate.translate_lines(["a"])
+    assert "check_words" not in captured["body"]
+
+
+def test_chunked_slices_check_words_per_chunk(monkeypatch):
+    from artwork_check import translate
+    got = []
+    monkeypatch.setattr(
+        translate, "translate_lines",
+        lambda lines, check_words=None: got.append(check_words)
+        or _fake_ok_chunk(lines))
+    lines = [f"L{i}" for i in range(70)]
+    cw = [[f"W{i}"] if i in (0, 35, 69) else [] for i in range(70)]
+    translate.translate_lines_chunked(lines, chunk_size=30, check_words=cw)
+    assert len(got) == 3
+    assert got[0][0] == ["W0"] and got[1][5] == ["W35"] and got[2][9] == ["W69"]
+    assert all(len(c) in (30, 10) for c in got)
+
+
+def test_translate_table_passes_dict_flags_as_check_words(tmp_path,
+                                                          monkeypatch):
+    from artwork_check import translate
+    seen = {}
+    monkeypatch.setattr(translate.config, "N8N_TRANSLATE_WEBHOOK_URL",
+                        "http://x/webhook/artwork-translate")
+    monkeypatch.setattr(
+        translate, "translate_lines_chunked",
+        lambda lines, check_words=None: seen.update(cw=check_words) or {
+            "translations": ["EN"] * len(lines),
+            "spell": [translate._clean_spell() for _ in lines],
+            "spell_available": True, "chunks_total": 1, "chunks_failed": 0,
+        })
+    rows = [
+        {"src": "磷 Phosphours", "status": "spell",
+         "flagged": ["Phosphours"], "suggest": {}},
+        {"src": "clean", "status": "ok", "flagged": [], "suggest": {}},
+    ]
+    translate.translate_table(str(tmp_path), rows)
+    assert seen["cw"] == [["Phosphours"], []]
+
+
+def test_workflow_json_has_adjudication_wiring():
+    """workflow ที่ให้ import ต้องมีทั้งการรับ check_words และ prompt
+    ตัดสินรายคำ — กัน regression ตอนแก้ workflow ครั้งหน้า."""
+    import json as _json
+    wf = _json.load(open("artwork_check/n8n_artwork_translate.workflow.json"))
+    node = next(n for n in wf["nodes"] if n["name"] == "Code in JavaScript2")
+    code = node["parameters"]["jsCode"]
+    assert "check_words" in code
+    assert "MANDATORY ADJUDICATION LIST" in code
+    assert "PROMPT + SUSPECTS" in code
+
+
+# ── Auto-rotate vertical zones before OCR (แก้ OCR hallucinate แนวตั้ง) ─
+
+def test_detect_orientation_and_apply():
+    np = pytest.importorskip("numpy")
+    cv2 = pytest.importorskip("cv2")
+    from artwork_check.pdf_ingest import (detect_orientation, apply_rotation,
+                                          ROTATE_VALUES)
+    # ข้อความแนวนอน = แถบกว้างกว่าสูง / แนวตั้ง = สูงกว่ากว้าง
+    horiz = np.full((60, 400, 3), 255, np.uint8)
+    cv2.putText(horiz, "HELLO WORLD", (10, 40),
+                cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 0, 0), 3)
+    vert = cv2.rotate(horiz, cv2.ROTATE_90_CLOCKWISE)
+    assert detect_orientation(horiz) == "horizontal"
+    assert detect_orientation(vert) == "vertical"
+    assert detect_orientation(np.full((20, 20, 3), 255, np.uint8)) == "empty"
+    # apply_rotation ครบ 4 ค่า + คืนขนาดถูก
+    assert apply_rotation(horiz, 0).shape == horiz.shape
+    assert apply_rotation(horiz, 90).shape == (400, 60, 3)
+    assert apply_rotation(horiz, 180).shape == horiz.shape
+    assert apply_rotation(horiz, 270).shape == (400, 60, 3)
+    assert ROTATE_VALUES == (0, 90, 180, 270)
+
+
+def test_resolve_rotation_matrix():
+    np = pytest.importorskip("numpy")
+    cv2 = pytest.importorskip("cv2")
+    from artwork_check.pdf_ingest import resolve_rotation
+    horiz = np.full((60, 400, 3), 255, np.uint8)
+    cv2.putText(horiz, "HELLO WORLD", (10, 40),
+                cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 0, 0), 3)
+    vert = cv2.rotate(horiz, cv2.ROTATE_90_CLOCKWISE)
+    assert resolve_rotation(90, False, horiz) == 90            # pinned
+    assert resolve_rotation("auto", False, vert) == 270        # vertical→CCW
+    assert resolve_rotation("auto", False, horiz) == 0         # horiz→none
+    assert resolve_rotation("default", False, vert) == 0       # page OFF = เดิม
+    assert resolve_rotation("default", True, vert) == 270      # page ON
+    assert resolve_rotation("default", True, horiz) == 0       # page ON แต่แนวนอน
+    assert resolve_rotation("bad", True, vert) == 0            # ค่าเพี้ยน = ไม่หมุน
+
+
+def test_sanitize_rotate_field():
+    from artwork_check.zones import sanitize_zones
+    def z(rot=None):
+        d = {"id": "z1", "type": "panel", "group": "",
+             "bbox": [0.1, 0.1, 0.2, 0.2]}
+        if rot is not None:
+            d["rotate"] = rot
+        return d
+    assert sanitize_zones([z()])[0]["rotate"] == "default"     # absent → default
+    assert sanitize_zones([z("auto")])[0]["rotate"] == "auto"
+    assert sanitize_zones([z(90)])[0]["rotate"] == 90
+    assert sanitize_zones([z("180")])[0]["rotate"] == 180      # numeric str
+    assert sanitize_zones([z(45)])[0]["rotate"] == "default"   # bad int
+    assert sanitize_zones([z("xyz")])[0]["rotate"] == "default"
+
+
+def test_read_zone_applies_rotation(tmp_path, monkeypatch):
+    np = pytest.importorskip("numpy")
+    cv2 = pytest.importorskip("cv2")
+    from artwork_check import ocr as ocr_mod
+    from artwork_check.pdf_ingest import ArtworkDocument
+
+    # doc ปลอมที่คืน crop แนวตั้ง; เก็บ crop ที่ถูกส่งเข้า OCR ไว้ตรวจ
+    horiz = np.full((60, 400, 3), 255, np.uint8)
+    cv2.putText(horiz, "HELLO WORLD", (10, 40),
+                cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 0, 0), 3)
+    vert = cv2.rotate(horiz, cv2.ROTATE_90_CLOCKWISE)
+
+    class FakeDoc:
+        def embedded_text(self, bbox=None): return ""
+        def render_zone(self, *a, **k): return vert
+
+    sent = {}
+    monkeypatch.setattr(ocr_mod.vertex_client, "is_enabled", lambda: True)
+    def fake_ocr(jpg):
+        sent["shape"] = cv2.imdecode(
+            np.frombuffer(jpg, np.uint8), cv2.IMREAD_COLOR).shape
+        return {"text": "HELLO WORLD", "engine": "stub", "blocks": []}
+    monkeypatch.setattr(ocr_mod.vertex_client, "ocr_image", fake_ocr)
+
+    # page auto ON → โซน default แนวตั้งถูกหมุนกลับเป็นแนวนอนก่อนส่ง OCR
+    r = ocr_mod.read_zone(FakeDoc(),
+                          {"id": "z1", "bbox": [0, 0, 1, 1], "type": "panel",
+                           "rotate": "default"}, page_auto=True)
+    assert r["rotate"] == 270
+    assert sent["shape"][:2] == horiz.shape[:2]      # กลับเป็นแนวนอน
+
+    # page OFF → ไม่หมุน (พฤติกรรมเดิม)
+    r2 = ocr_mod.read_zone(FakeDoc(),
+                           {"id": "z1", "bbox": [0, 0, 1, 1], "type": "panel",
+                            "rotate": "default"}, page_auto=False)
+    assert r2["rotate"] == 0
+    assert sent["shape"][:2] == vert.shape[:2]       # ยังตะแคง
+
+
+def test_run_inspection_writes_applied_rotation(tmp_path, monkeypatch):
+    np = pytest.importorskip("numpy")
+    cv2 = pytest.importorskip("cv2")
+    import os
+    from artwork_check import pipeline, report
+    monkeypatch.setattr(report.config, "INSPECTIONS_DIR", str(tmp_path))
+    d = report.inspection_dir("20260101-000000-aa11bb", create=True)
+    with open(os.path.join(d, "source.png"), "wb") as f:
+        f.write(b"x")
+    with open(os.path.join(d, "preview.png"), "wb") as f:
+        f.write(cv2.imencode(".png", np.full((50, 80, 3), 255, np.uint8))[1])
+    monkeypatch.setattr(pipeline, "ArtworkDocument", lambda *a, **k: object())
+    monkeypatch.setattr(
+        pipeline.ocr, "read_all_zones",
+        lambda doc, zones, page_auto=False: [
+            {"zone_id": z["id"], "text": "T", "engine": "stub",
+             "conf": None, "rotate": 270 if z["id"] == "z1" else 0}
+            for z in zones])
+    rep = pipeline.run_inspection(
+        "20260101-000000-aa11bb",
+        [{"id": "z1", "type": "panel", "group": "", "bbox": [0.1,0.1,0.2,0.2]},
+         {"id": "z2", "type": "panel", "group": "", "bbox": [0.3,0.1,0.2,0.2]}],
+        auto_rotate=True)
+    by = {z["id"]: z["rotate"] for z in rep["zones"]}
+    assert by["z1"] == 270 and by["z2"] == 0        # องศาที่ใช้จริงถูกบันทึก
+    assert next(o["rotate"] for o in rep["ocr"] if o["zone_id"] == "z1") == 270
+
+
+def test_ocr_cache_signature_includes_rotate_and_flag():
+    from artwork_check import pipeline
+    z0 = [{"id": "z1", "type": "panel", "group": "", "bbox": [0.1,0.1,0.2,0.2],
+           "doc": "a", "rotate": "default"}]
+    z90 = [dict(z0[0], rotate=90)]
+    assert pipeline._zones_signature(z0) != pipeline._zones_signature(z90)
+    # flag หน้าเปลี่ยน = cache key เปลี่ยน (default resolve ต่างกัน)
+    assert (pipeline._zones_signature(z0, auto_rotate=False)
+            != pipeline._zones_signature(z0, auto_rotate=True))
+
+
+# ── Dict-unsupported script (Arabic): no red, no false REVIEW ──────────
+
+def test_word_script_arabic_detection():
+    from artwork_check import checks
+    assert checks.word_script("المهدرجة") == "arabic"
+    assert checks.word_script("الزيوت") == "arabic"
+    assert checks.word_script("hydrogenated") is None
+    assert checks.word_script("Phosphours") is None      # latin typo, not unsupported
+    assert checks.is_dict_unsupported("المصفى") is True
+    assert checks.is_dict_unsupported("Cude") is False
+
+
+@pytest.mark.skipif(not checks.spell_layer_available(),
+                    reason="pyspellchecker not installed")
+def test_check_spelling_skips_arabic_no_false_review():
+    """อาหรับที่ dict ไม่รู้จัก ต้องไม่สร้าง SPELL_FAIL (หยุด REVIEW ปลอม)
+    แต่คำอังกฤษผิดในบรรทัดเดียวกันยังฟ้อง."""
+    z = [_zone("z1", group="")]
+    d = checks.check_spelling(
+        z, {"z1": "خال من الزيوت المهدرجة المصفى"})
+    assert d == []                                       # ไม่มี defect เลย
+    d2 = checks.check_spelling(z, {"z1": "المهدرجة Analysiss"})
+    found = [x["found"] for x in d2]
+    assert "Analysiss" in found                          # อังกฤษผิด → ฟ้อง
+    assert all("المهدرجة" not in f for f in found)       # อาหรับ → ข้าม
+
+
+@pytest.mark.skipif(not checks.spell_layer_available(),
+                    reason="pyspellchecker not installed")
+def test_build_table_reclassifies_arabic_as_unsupported():
+    from artwork_check import translate
+    zones = [_zone("z1", group="")]
+    ocr = [{"zone_id": "z1",
+            "text": "خال من الزيوت المهدرجة\nGuaranteed Analysiss\n"
+                    "المهدرجة Phosphours"}]
+    rows = translate.build_table(zones, ocr)
+    ar, en, mix = rows[0], rows[1], rows[2]
+    # อาหรับล้วน → unsupported (ฟ้า), ไม่มี suggest, ไม่ใช่ spell
+    assert ar["status"] == "unsupported"
+    assert "المهدرجة" in ar["unsupported"]
+    assert ar["unsupported_langs"] == ["อาหรับ"]
+    assert ar["suggest"] == {} and ar["flagged"] == []
+    # อังกฤษผิด → spell (แดง) เหมือนเดิม
+    assert en["status"] == "spell" and "Analysiss" in en["flagged"]
+    # ปนกัน → spell ชนะ แต่คำอาหรับยังอยู่ใน unsupported (ไฮไลต์ฟ้าคู่)
+    assert mix["status"] == "spell"
+    assert "Phosphours" in mix["flagged"] and "المهدرجة" in mix["unsupported"]
+
+
+@pytest.mark.skipif(not checks.spell_layer_available(),
+                    reason="pyspellchecker not installed")
+def test_run_all_checks_arabic_specialized_word_not_review():
+    """ระดับ verdict: ฉลากที่มีศัพท์อาหรับเฉพาะทาง (المهدرجة) ต้องไม่ถูก
+    ดันเป็น REVIEW จาก SPELL_FAIL ปลอม."""
+    from artwork_check import report
+    zones = [_zone("z1", group="")]
+    ocr = [{"zone_id": "z1", "text": "خال من الزيوت المهدرجة", "engine": "x",
+            "conf": 0.9}]
+    defects = checks.run_all_checks(zones, ocr)
+    assert not any(d["class"] == "SPELL_FAIL" for d in defects)
+    assert report.compute_verdict(defects) == "PASS"

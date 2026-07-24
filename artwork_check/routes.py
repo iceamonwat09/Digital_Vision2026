@@ -14,7 +14,7 @@ import os
 from flask import (Blueprint, jsonify, render_template, request,
                    send_file, send_from_directory)
 
-from . import pipeline, report, translate, vocab, zones as zones_mod
+from . import config, pipeline, report, translate, vocab, zones as zones_mod
 
 logger = logging.getLogger(__name__)
 
@@ -104,8 +104,10 @@ def api_inspect(rec_id):
     except ValueError as e:
         return jsonify({"error": f"โซนไม่ถูกต้อง: {e}"}), 400
     brand = str(body.get("brand", "")).strip()[:60]
+    auto_rotate = bool(body.get("auto_rotate"))
     try:
-        rep = pipeline.run_inspection(rec_id, zone_list, brand=brand)
+        rep = pipeline.run_inspection(rec_id, zone_list, brand=brand,
+                                      auto_rotate=auto_rotate)
     except (ValueError, FileNotFoundError) as e:
         return jsonify({"error": str(e)}), 404
     except Exception as e:
@@ -155,8 +157,11 @@ def api_crop(rec_id):
     doc = request.args.get("doc", "a").lower()
     if doc not in ("a", "b"):
         return jsonify({"error": "doc ต้องเป็น a หรือ b"}), 400
+    rotate = request.args.get("rotate", "0")
+    if rotate not in ("0", "90", "180", "270", "auto"):
+        return jsonify({"error": "rotate ต้องเป็น 0/90/180/270/auto"}), 400
     try:
-        jpg = pipeline.zone_crop_jpg(rec_id, bbox, doc=doc)
+        jpg = pipeline.zone_crop_jpg(rec_id, bbox, doc=doc, rotate=rotate)
     except (ValueError, FileNotFoundError) as e:
         return jsonify({"error": str(e)}), 404
     import io
@@ -194,6 +199,61 @@ def api_snap(rec_id):
     if img is None:
         return jsonify({"error": "อ่าน preview ไม่ได้"}), 500
     return jsonify({"bbox": zones_mod.snap_bbox(img, bbox)})
+
+
+@artwork_bp.route("/api/artwork/<rec_id>/autopair", methods=["POST"])
+def api_autopair(rec_id):
+    """Cross-file auto-pair: for each doc-A zone, locate the same content
+    block on the attached doc-B (ฉบับ/ชิ้นงาน) via matchTemplate.
+
+    Body: {"zones": [{"group": "A", "bbox": [x,y,w,h]}, ...]} — the doc-A
+    zones that still need a partner on B. Returns
+    {"results": [{"group","bbox","conf","matched"}, ...]} keeping input
+    order. ``matched`` is ``conf >= AUTOPAIR_MIN_CONF``; a low-confidence
+    result is returned (so the UI can warn) but ``matched`` is false so the
+    caller does NOT create a box. Never mutates any stored zone — this only
+    computes suggested boxes."""
+    body = request.get_json(silent=True) or {}
+    items = body.get("zones")
+    if not isinstance(items, list) or not items:
+        return jsonify({"error": "ต้องส่ง zones [{group,bbox}]"}), 400
+    try:
+        d = report.inspection_dir(rec_id)
+    except ValueError:
+        return jsonify({"error": "bad id"}), 400
+    pa = os.path.join(d, "preview.png")
+    pb = os.path.join(d, "preview_b.png")
+    if not os.path.exists(pa) or not os.path.exists(pb):
+        return jsonify({"error": "ต้องมีทั้งไฟล์หลักและไฟล์อ้างอิงก่อน"}), 404
+    import cv2
+    img_a = cv2.imread(pa)
+    img_b = cv2.imread(pb)
+    if img_a is None or img_b is None:
+        return jsonify({"error": "อ่าน preview ไม่ได้"}), 500
+
+    results = []
+    for it in items:
+        raw = (it or {}).get("bbox")
+        group = (it or {}).get("group", "")
+        if not isinstance(raw, (list, tuple)) or len(raw) != 4:
+            results.append({"group": group, "bbox": None, "conf": 0.0,
+                            "matched": False})
+            continue
+        try:
+            bbox = [float(v) for v in raw]
+        except (TypeError, ValueError):
+            results.append({"group": group, "bbox": None, "conf": 0.0,
+                            "matched": False})
+            continue
+        bbox_b, conf = zones_mod.autopair_bbox(img_a, img_b, bbox)
+        results.append({
+            "group": group,
+            "bbox": bbox_b,
+            "conf": conf,
+            "matched": bool(bbox_b is not None
+                            and conf >= config.AUTOPAIR_MIN_CONF),
+        })
+    return jsonify({"results": results})
 
 
 @artwork_bp.route("/api/artwork/<rec_id>/translate", methods=["POST"])
@@ -235,8 +295,10 @@ def api_translate(rec_id):
                          "(กรุณาจัดโซนก่อน หรือกด ‘ส่งตรวจสอบ’)"
             }), 400
         brand = str(body.get("brand", "")).strip()[:60]
+        auto_rotate = bool(body.get("auto_rotate"))
         try:
-            zone_list, ocr_results = pipeline.run_ocr_only(rec_id, zone_list)
+            zone_list, ocr_results = pipeline.run_ocr_only(
+                rec_id, zone_list, auto_rotate=auto_rotate)
         except (ValueError, FileNotFoundError) as e:
             return jsonify({"error": str(e)}), 404
         except Exception as e:

@@ -62,6 +62,26 @@ WEIGHT_REL_TOLERANCE = float(os.getenv("ARTWORK_WEIGHT_TOL", "0.006"))
 # character edits (but not zero).
 PHRASE_MAX_EDITS = int(os.getenv("ARTWORK_PHRASE_MAX_EDITS", "3"))
 
+# ── Cross-file auto-pair (opt-in UI helper — never runs unless clicked) ─
+# "วาดกรอบครั้งเดียวบนไฟล์ A → หา + สร้างกรอบคู่บนไฟล์ B อัตโนมัติ".
+# ใช้ cv2.matchTemplate หา content block เดียวกันของโซน A บนไฟล์ B เพื่อ
+# การันตีว่ากรอบคู่ครอบเนื้อหาเดียวกันเป๊ะ (ตัดต้นตอ false-mismatch ของ
+# cross-file). เป็น helper ตอนจัดโซนเท่านั้น — ไม่แตะ OCR/ผลตรวจ/การนับ.
+#
+# ผลจับคู่ที่ conf ต่ำกว่าเกณฑ์นี้ = "หาไม่เจอ" → ไม่สร้างกรอบ (เตือนให้
+# วาดเอง). กันการแอบสร้างกรอบผิดเงียบๆ. ไฟล์จริงที่ทดสอบ = 0.93–0.99;
+# เคสจับคู่ผิด/ไม่มีบล็อกนั้น = ~0.39. 0.5 = ขอบเขตที่แยกได้สะอาด.
+AUTOPAIR_MIN_CONF = float(os.getenv("ARTWORK_AUTOPAIR_MIN_CONF", "0.5"))
+# ช่วงสเกลที่ลอง (matchTemplate ไม่ทน scale เอง) เผื่อไฟล์ A/B render
+# คนละสเกลเล็กน้อย. list ว่าง = ลองสเกล 1.0 อย่างเดียว (เร็วสุด).
+AUTOPAIR_SCALES = [
+    float(s) for s in os.getenv(
+        "ARTWORK_AUTOPAIR_SCALES",
+        "0.85,0.90,0.95,1.0,1.05,1.10,1.18",
+    ).split(",")
+    if s.strip()
+]
+
 # ── Translation (advisory tab — separate from OCR & checks) ──────────
 # Optional N8N webhook that translates the already-OCR'd text to English
 # for the read-only "ข้อความ + คำแปล" tab. It is NEVER used by the check
@@ -73,6 +93,11 @@ N8N_TRANSLATE_WEBHOOK_URL = os.getenv(
     "http://172.32.201.106:5678/webhook/artwork-translate",
 ).strip()
 N8N_TRANSLATE_TIMEOUT_S = float(os.getenv("N8N_TRANSLATE_TIMEOUT_S", "60"))
+# จำนวนบรรทัดสูงสุดต่อ 1 request แปล/AI-spell. ลิสต์ยาว (เทียบ 2 ไฟล์ =
+# ~140 บรรทัด) ทำให้ Gemini ตอบ array เหลื่อม/ไม่ครบ → คอลัมน์ AI เพี้ยน.
+# 30 = ขนาดที่พิสูจน์จากการใช้งานจริงว่านิ่ง (ยุคตรวจ 1-2 โซน).
+# ตั้ง 0 = ส่งก้อนเดียวทั้งหมดแบบเดิม (ปุ่ม rollback).
+TRANSLATE_CHUNK_LINES = int(os.getenv("ARTWORK_TRANSLATE_CHUNK_LINES", "30"))
 
 # ── Defect classes (severity drives the verdict) ─────────────────────
 #   critical → FAIL, warning → REVIEW, info → shown only
