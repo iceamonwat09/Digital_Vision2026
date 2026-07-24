@@ -285,3 +285,29 @@ def test_tesseract_missing_word_returns_none():
     _tess_or_skip()
     crop, _ = _pil_text_crop()
     assert hl._tess_box(crop, "Zzzqqq") is None
+
+
+# ── tesseract executable auto-detect ──────────────────────────────────
+
+def test_find_tesseract_env_override_wins(tmp_path, monkeypatch):
+    fake = tmp_path / "tesseract.exe"
+    fake.write_text("")
+    monkeypatch.setenv("ARTWORK_TESSERACT_CMD", str(fake))
+    assert hl._find_tesseract_cmd() == str(fake)
+
+
+def test_find_tesseract_bogus_override_ignored(monkeypatch):
+    # a non-existent override path must be ignored, not returned
+    monkeypatch.setenv("ARTWORK_TESSERACT_CMD",
+                       "/no/such/tesseract-binary-xyz")
+    got = hl._find_tesseract_cmd()
+    assert got != "/no/such/tesseract-binary-xyz"
+
+
+def test_find_tesseract_uses_path_when_present(monkeypatch):
+    import shutil as _sh
+    monkeypatch.delenv("ARTWORK_TESSERACT_CMD", raising=False)
+    which = _sh.which("tesseract")
+    if not which:
+        pytest.skip("tesseract not on PATH in this environment")
+    assert hl._find_tesseract_cmd() == which

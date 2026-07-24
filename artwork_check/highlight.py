@@ -34,7 +34,10 @@ import numpy lazily and are guarded by the caller.
 
 from __future__ import annotations
 
+import os
 import re
+import shutil
+import sys
 from typing import List, Optional, Tuple
 
 # A located region inside the crop, in PIXELS: (x0, y0, x1, y1).
@@ -381,11 +384,50 @@ def _cv_box(crop, loc: dict) -> Optional[Box]:
 _tess_state: Optional[bool] = None
 
 
+def _find_tesseract_cmd() -> Optional[str]:
+    """Locate the tesseract executable so the station does not have to add
+    it to PATH by hand. Order:
+      1. ``ARTWORK_TESSERACT_CMD`` env — an explicit full path (wins).
+      2. already on PATH (``shutil.which``) — Linux/mac installs, or a
+         Windows box where the installer added it to PATH.
+      3. the usual Windows install locations of the UB-Mannheim build
+         (``C:\\Program Files\\Tesseract-OCR\\tesseract.exe`` and the
+         per-user ``%LOCALAPPDATA%\\Programs\\...`` variant).
+    Returns a path (or the bare name found on PATH), or None if nothing
+    is found — in which case the caller simply draws no box."""
+    cmd = os.getenv("ARTWORK_TESSERACT_CMD", "").strip().strip('"')
+    if cmd and os.path.isfile(cmd):
+        return cmd
+
+    on_path = shutil.which("tesseract")
+    if on_path:
+        return on_path
+
+    if sys.platform.startswith("win"):
+        roots = [
+            os.environ.get("PROGRAMFILES", r"C:\Program Files"),
+            os.environ.get("PROGRAMFILES(X86)", r"C:\Program Files (x86)"),
+            os.path.join(os.environ.get("LOCALAPPDATA", ""), "Programs"),
+            os.environ.get("LOCALAPPDATA", ""),
+        ]
+        for root in roots:
+            if not root:
+                continue
+            p = os.path.join(root, "Tesseract-OCR", "tesseract.exe")
+            if os.path.isfile(p):
+                return p
+    return None
+
+
 def _tesseract_available() -> bool:
     global _tess_state
     if _tess_state is None:
+        _tess_state = False
         try:
             import pytesseract
+            cmd = _find_tesseract_cmd()
+            if cmd:
+                pytesseract.pytesseract.tesseract_cmd = cmd
             pytesseract.get_tesseract_version()
             _tess_state = True
         except Exception:

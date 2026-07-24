@@ -70,10 +70,16 @@ pyspellchecker>=0.8.0
 # the no-dependency projection profile). Optional: without it the mode uses
 # the OCR backend's own bbox when present, else draws no box.
 # To enable on the Windows station:
-#   1) install the tesseract BINARY (UB-Mannheim build) and put it on PATH
-#      (or set pytesseract.pytesseract.tesseract_cmd to tesseract.exe)
+#   1) install the tesseract BINARY (UB-Mannheim build) — during setup tick
+#      the extra language data you need (Arabic/Thai) besides English.
+#      highlight._find_tesseract_cmd() AUTO-DETECTS the exe at the usual
+#      install paths (C:\Program Files\Tesseract-OCR\tesseract.exe and the
+#      per-user %LOCALAPPDATA%\Programs\Tesseract-OCR\ variant), so PATH is
+#      optional. Override with env ARTWORK_TESSERACT_CMD=<full path> if you
+#      installed it somewhere else.
 #   2) `py -3.9 -m pip install pytesseract`
-#   3) restart; check "N bbox" / a red box appears on defect cards
+#   3) restart; a red box appears on defect cards (English words). For
+#      Arabic/Thai words set ARTWORK_HIGHLIGHT_TESS_LANG=eng+ara+tha.
 # Turn off with ARTWORK_HIGHLIGHT_TESSERACT=0.
 # pytesseract>=0.3.10
 
