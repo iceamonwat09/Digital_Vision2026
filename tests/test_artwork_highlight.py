@@ -311,3 +311,36 @@ def test_find_tesseract_uses_path_when_present(monkeypatch):
     if not which:
         pytest.skip("tesseract not on PATH in this environment")
     assert hl._find_tesseract_cmd() == which
+
+
+# ── language string resolution (the eng+ara+tha safety net) ───────────
+
+def _installed_langs():
+    _tess_or_skip()
+    import pytesseract
+    return set(pytesseract.get_languages(config="") or [])
+
+
+def test_resolve_langs_drops_uninstalled():
+    avail = _installed_langs()
+    # a bogus language must never survive → can't make tesseract raise
+    got = hl._resolve_langs("eng+zzznotalang").split("+")
+    assert "zzznotalang" not in got
+    assert got and all(g in avail for g in got)
+    if "eng" in avail:
+        assert "eng" in got
+
+
+def test_resolve_langs_all_unknown_falls_back_to_installed():
+    avail = _installed_langs()
+    got = hl._resolve_langs("zzz111+qqq222").split("+")
+    # never empty, never a bogus code → always something tesseract can load
+    assert got and all(g in avail for g in got)
+
+
+def test_resolve_langs_keeps_installed_combo():
+    avail = _installed_langs()
+    if not {"eng", "ara"} <= avail:
+        pytest.skip("needs eng+ara installed")
+    got = set(hl._resolve_langs("eng+ara").split("+"))
+    assert got == {"eng", "ara"}

@@ -435,6 +435,42 @@ def _tesseract_available() -> bool:
     return _tess_state
 
 
+_lang_cache: dict = {}
+
+
+def _resolve_langs(requested: str) -> str:
+    """Filter a '+'-joined tesseract language string down to the languages
+    actually installed. This is the safety net for the config value
+    ``ARTWORK_HIGHLIGHT_TESS_LANG``: if it names a language whose
+    traineddata is NOT installed (e.g. ``eng+ara+tha`` on a box with only
+    ``eng``), passing it to tesseract raises "Failed loading language ..."
+    for the WHOLE call — which would wipe out every red box, English
+    included. Filtering keeps only installed languages so English (or
+    whatever IS present) still works; the missing one just doesn't get
+    localized. Falls back to ``eng``. Cached per requested string."""
+    req = (requested or "eng").strip() or "eng"
+    if req in _lang_cache:
+        return _lang_cache[req]
+    avail = set()
+    try:
+        import pytesseract
+        avail = set(pytesseract.get_languages(config="") or [])
+    except Exception:
+        avail = set()
+    if avail:
+        keep = [ln for ln in req.split("+") if ln and ln in avail]
+        if not keep:
+            keep = ["eng"] if "eng" in avail else \
+                (sorted(avail - {"osd"})[:1] or ["eng"])
+        resolved = "+".join(keep)
+    else:
+        # couldn't enumerate installed langs → best-effort: try as-is
+        # (still guarded by the try/except around image_to_data below)
+        resolved = req
+    _lang_cache[req] = resolved
+    return resolved
+
+
 def _tess_box(crop, found: str, lang: str = "eng") -> Optional[Box]:
     if not _tesseract_available():
         return None
@@ -443,7 +479,7 @@ def _tess_box(crop, found: str, lang: str = "eng") -> Optional[Box]:
         import pytesseract
         from pytesseract import Output
         rgb = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
-        data = pytesseract.image_to_data(rgb, lang=lang,
+        data = pytesseract.image_to_data(rgb, lang=_resolve_langs(lang),
                                          output_type=Output.DICT)
     except Exception:
         return None
