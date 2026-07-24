@@ -469,7 +469,7 @@
   }
   function setBusy(b) {
     busy = b;
-    ["awInspect", "awAddZone", "awClearZones", "awRedetect",
+    ["awInspect", "awAddZone", "awClearZones", "awRedetect", "awPairAuto",
      "awTemplateLoad", "awTemplateSave", "awRefToggle"].forEach((id) => {
       $(id).disabled = b || !inspectionId;
     });
@@ -1004,6 +1004,72 @@
       warnRefCountMismatch();
     } catch (e) {
       alert("เสนอโซนไม่สำเร็จ: " + e.message);
+    } finally {
+      setBusy(false);
+    }
+  });
+
+  // ── หากรอบคู่อัตโนมัติ (cross-file) ────────────────────────────────
+  // วาดกรอบครบบนไฟล์หลัก (🅰) แล้วกดปุ่มนี้ → ระบบใช้ matchTemplate หา
+  // บล็อกเดียวกันบนไฟล์อ้างอิง (🅱) แล้วสร้างกรอบคู่ (group เดียวกัน) ให้
+  // อัตโนมัติ. ทำเฉพาะโซน 🅰 ที่ยัง "ไม่มีคู่" บน 🅱 — non-destructive
+  // (เพิ่มกรอบ 🅱 เท่านั้น ไม่แก้/ลบกรอบเดิม). conf ต่ำกว่าเกณฑ์ = ไม่สร้าง
+  // + เตือนให้วาดเอง (ไม่แอบสร้างกรอบผิด).
+  $("awPairAuto").addEventListener("click", async () => {
+    if (busy || !inspectionId) return;
+    if (!refAttached) {
+      alert("แนบไฟล์อ้างอิง (🅱) ก่อน จึงจะหากรอบคู่อัตโนมัติได้");
+      return;
+    }
+    // โซน 🅰 ที่มี group และยังไม่มีคู่ฝั่ง 🅱
+    const bGroups = new Set(
+      zones.filter((z) => docOfZone(z) === "b" && z.group).map((z) => z.group));
+    const todo = zones.filter((z) => docOfZone(z) === "a" && z.group &&
+                                     !bGroups.has(z.group));
+    const noGroup = zones.filter((z) => docOfZone(z) === "a" && !z.group).length;
+    if (!todo.length) {
+      alert("ไม่มีโซนของไฟล์หลักที่ยังไม่มีคู่บนไฟล์อ้างอิง" +
+            (noGroup ? "\n(มี " + noGroup + " โซนที่ยังไม่มี group — ตั้ง group ก่อนจึงจับคู่ได้)" : ""));
+      return;
+    }
+    setBusy(true);
+    try {
+      const res = await api("/api/artwork/" + inspectionId + "/autopair", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          zones: todo.map((z) => ({ group: z.group, bbox: z.bbox })),
+        }),
+      });
+      const results = res.results || [];
+      let made = 0;
+      const failed = [];
+      results.forEach((r, i) => {
+        const src = todo[i];
+        if (r.matched && r.bbox) {
+          let n = zones.length + 1;
+          while (zones.some((z) => z.id === "b" + n)) n++;
+          zones.push({
+            id: "b" + n, type: src.type || "panel", group: src.group,
+            doc: "b", rotate: "default", bbox: r.bbox,
+            label: "อ้างอิง " + (src.label || src.group),
+          });
+          made++;
+        } else {
+          failed.push(src.group + " (conf " + (r.conf || 0).toFixed(2) + ")");
+        }
+      });
+      selectedId = null;
+      cancelDraw();
+      renderZones();
+      warnRefCountMismatch();
+      let msg = "สร้างกรอบคู่บนไฟล์อ้างอิง " + made + " โซน";
+      if (failed.length)
+        msg += "\n\nหาไม่เจอ " + failed.length + " กลุ่ม (conf ต่ำ) — วาดเอง:\n" +
+               failed.join(", ");
+      alert(msg);
+    } catch (e) {
+      alert("หากรอบคู่ไม่สำเร็จ: " + e.message);
     } finally {
       setBusy(false);
     }

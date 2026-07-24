@@ -345,6 +345,87 @@ def test_snap_no_content_returns_original():
     assert snap_bbox(img, b) == [round(v, 5) for v in b]
 
 
+# ── autopair_bbox (หากรอบคู่ข้ามไฟล์ด้วย matchTemplate) ───────────────
+
+_ING = ["Ingredients: Tuna,", "Sunflower Oil, Salt.",
+        "Produced in Thailand", "Storage: Cool, dry."]
+_NUTR = ["Nutrition Facts", "Calories 170 kcal",
+         "Total Fat 7g 10%", "Sodium 470mg 20%"]
+
+
+def _graphic_page(seed, blocks):
+    """หน้า 1241×1754 พื้น gradient เขียว + noise (จำลองฉลากพื้นกราฟิก).
+    blocks = [(x, y, w, h, lines), ...] วาดกล่องขาว + ข้อความหลายบรรทัด
+    (เนื้อหาแน่นเหมือนฉลากจริง — สัญญาณการจับคู่มาจากตัวอักษร ไม่ใช่กล่อง)."""
+    import cv2
+    rng = np.random.default_rng(seed)
+    img = np.zeros((1241, 1754, 3), np.uint8)
+    for i in range(1241):
+        img[i, :] = (30, 90 + i * 80 // 1241, 40)
+    img = (img.astype(np.int16)
+           + rng.integers(0, 18, img.shape, dtype=np.int16)
+           ).clip(0, 255).astype(np.uint8)
+    for (x, y, w, h, lines) in blocks:
+        cv2.rectangle(img, (x, y), (x + w, y + h), (245, 245, 240), -1)
+        sc = h / 150.0
+        for k, t in enumerate(lines):
+            cv2.putText(img, t, (x + 8, y + int((26 + k * 30) * sc)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.62 * sc, (20, 20, 20),
+                        2, cv2.LINE_AA)
+    return img
+
+
+def test_autopair_finds_same_block_shifted():
+    """บล็อกเดียวกันย้ายตำแหน่งบนไฟล์ B → เจอ + ตำแหน่งตรง + conf สูง"""
+    from artwork_check.zones import autopair_bbox
+    from artwork_check import config
+    a = _graphic_page(1, [(500, 300, 360, 150, _ING)])
+    b = _graphic_page(2, [(760, 540, 360, 150, _ING)])
+    bbox_a = [500 / 1754, 300 / 1241, 360 / 1754, 150 / 1241]
+    bbox_b, conf = autopair_bbox(a, b, bbox_a)
+    assert conf >= config.AUTOPAIR_MIN_CONF
+    assert abs(bbox_b[0] - 760 / 1754) < 0.01    # ตำแหน่ง x ตรง
+    assert abs(bbox_b[1] - 540 / 1241) < 0.01    # ตำแหน่ง y ตรง
+
+
+def test_autopair_low_conf_when_block_absent():
+    """ไฟล์ B ไม่มีบล็อกนั้นเลย (พื้นกราฟิกล้วน) → conf ต่ำกว่าเกณฑ์
+    → ระบบจะไม่สร้างกรอบ (กันสร้างกรอบผิดเงียบๆ)."""
+    from artwork_check.zones import autopair_bbox
+    from artwork_check import config
+    a = _graphic_page(1, [(500, 300, 360, 150, _ING)])
+    b = _graphic_page(2, [])                      # ไม่มีบล็อกเลย
+    bbox_a = [500 / 1754, 300 / 1241, 360 / 1754, 150 / 1241]
+    _, conf = autopair_bbox(a, b, bbox_a)
+    assert conf < config.AUTOPAIR_MIN_CONF
+
+
+def test_autopair_prefers_matching_over_decoy():
+    """บล็อกที่เนื้อหาตรงต้องได้ conf สูงกว่าบล็อกเนื้อหาต่าง (decoy)
+    อย่างมีนัย — คุณสมบัติแยกแยะที่ทำให้เกณฑ์ทำงานได้จริง."""
+    from artwork_check.zones import autopair_bbox
+    a = _graphic_page(1, [(500, 300, 360, 150, _ING)])
+    bbox_a = [500 / 1754, 300 / 1241, 360 / 1754, 150 / 1241]
+    _, conf_match = autopair_bbox(
+        a, _graphic_page(2, [(760, 540, 360, 150, _ING)]), bbox_a)
+    _, conf_decoy = autopair_bbox(
+        a, _graphic_page(2, [(760, 540, 360, 150, _NUTR)]), bbox_a)
+    assert conf_match > conf_decoy + 0.2
+
+
+def test_autopair_tolerates_scale_difference():
+    """ไฟล์ B วาดบล็อกใหญ่กว่า (คนละสเกล) → multi-scale ยังจับได้"""
+    from artwork_check.zones import autopair_bbox
+    from artwork_check import config
+    a = _graphic_page(1, [(500, 300, 340, 154, _ING)])
+    b = _graphic_page(4, [(600, 400, 374, 169, _ING)])   # ~1.1x
+    bbox_a = [500 / 1754, 300 / 1241, 340 / 1754, 154 / 1241]
+    bbox_b, conf = autopair_bbox(a, b, bbox_a)
+    assert conf >= config.AUTOPAIR_MIN_CONF
+    assert abs(bbox_b[0] - 600 / 1754) < 0.02
+    assert abs(bbox_b[1] - 400 / 1241) < 0.02
+
+
 # ── translate table (advisory tab — must not touch the verdict) ───────
 
 def test_build_table_skips_ignore_and_blank_lines():

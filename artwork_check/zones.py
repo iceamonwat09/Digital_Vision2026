@@ -192,6 +192,61 @@ def snap_bbox(preview_bgr: np.ndarray, bbox: List[float],
             round((nx1 - nx0) / W, 5), round((ny1 - ny0) / H, 5)]
 
 
+def autopair_bbox(preview_a: np.ndarray, preview_b: np.ndarray,
+                  bbox: List[float], scales: List[float] = None,
+                  ) -> tuple:
+    """
+    Locate the content block of a doc-A zone on doc-B (cross-file pairing).
+
+    Crops the patch under ``bbox`` from ``preview_a`` and searches for the
+    same block on ``preview_b`` with ``cv2.matchTemplate`` (TM_CCOEFF_NORMED
+    on grayscale). Returns ``(bbox_b, conf)`` where ``bbox_b`` is the matched
+    box on B (normalized 0..1, same block size) and ``conf`` is the match
+    score 0..1. The caller decides whether ``conf`` is high enough to trust
+    (``config.AUTOPAIR_MIN_CONF``) — this function never fabricates a box, it
+    only reports the best location and how confident it is.
+
+    ``matchTemplate`` is not scale-invariant, so the patch is tried at a few
+    scales (``scales``, default ``config.AUTOPAIR_SCALES``) to tolerate A/B
+    rendered at slightly different scales; the highest-scoring scale wins.
+    Returns ``(None, 0.0)`` when the patch can't be placed at any scale.
+    """
+    if scales is None:
+        scales = config.AUTOPAIR_SCALES or [1.0]
+    Ha, Wa = preview_a.shape[:2]
+    Hb, Wb = preview_b.shape[:2]
+    x, y, w, h = bbox
+    ax0 = max(0, min(Wa - 1, int(round(x * Wa))))
+    ay0 = max(0, min(Ha - 1, int(round(y * Ha))))
+    ax1 = max(ax0 + 1, min(Wa, int(round((x + w) * Wa))))
+    ay1 = max(ay0 + 1, min(Ha, int(round((y + h) * Ha))))
+    patch = cv2.cvtColor(preview_a[ay0:ay1, ax0:ax1], cv2.COLOR_BGR2GRAY)
+    bg = cv2.cvtColor(preview_b, cv2.COLOR_BGR2GRAY)
+    ph, pw = patch.shape[:2]
+    if ph < 4 or pw < 4:
+        return None, 0.0
+
+    best = None       # (conf, x0, y0, tw, th)
+    for s in scales:
+        tw, th = int(round(pw * s)), int(round(ph * s))
+        if tw < 8 or th < 8 or tw > Wb or th > Hb:
+            continue
+        interp = cv2.INTER_AREA if s < 1.0 else cv2.INTER_CUBIC
+        tmpl = patch if s == 1.0 else cv2.resize(patch, (tw, th),
+                                                 interpolation=interp)
+        res = cv2.matchTemplate(bg, tmpl, cv2.TM_CCOEFF_NORMED)
+        _, mx, _, loc = cv2.minMaxLoc(res)
+        if best is None or mx > best[0]:
+            best = (float(mx), loc[0], loc[1], tw, th)
+    if best is None:
+        return None, 0.0
+
+    conf, bx0, by0, bw, bh = best
+    bbox_b = [round(bx0 / Wb, 5), round(by0 / Hb, 5),
+              round(bw / Wb, 5), round(bh / Hb, 5)]
+    return bbox_b, round(conf, 4)
+
+
 def sanitize_zones(raw) -> List[dict]:
     """Validate zones arriving from the browser. Raises ValueError."""
     if not isinstance(raw, list) or not raw:
