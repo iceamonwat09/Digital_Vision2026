@@ -75,12 +75,19 @@ def read_zone(doc: ArtworkDocument, zone: dict,
         crop = apply_rotation(crop, angle)
 
     result = vertex_client.ocr_image(encode_jpg(crop))
+    blocks = result.get("blocks") or []
     out = {
         "zone_id": zone["id"],
         "text": (result.get("text") or "").strip(),
         "engine": result.get("engine", "n8n"),
-        "conf": _mean_conf(result.get("blocks") or []),
+        "conf": _mean_conf(blocks),
         "rotate": angle,
+        # Per-element boxes (text/bbox/conf) when the backend returned
+        # them — kept ONLY so the defect-card red-box highlighter
+        # (artwork_check.highlight) can point at a word. Never used by any
+        # check layer or the verdict. Empty for the PDF-text path.
+        "blocks": [b for b in blocks
+                   if isinstance(b, dict) and b.get("bbox")],
     }
     if result.get("error"):
         out["error"] = str(result["error"])

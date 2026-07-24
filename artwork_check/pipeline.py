@@ -329,11 +329,18 @@ def run_ocr_only(rec_id: str, zone_list: List[dict],
 
 def zone_crop_jpg(rec_id: str, zone_bbox: List[float],
                   dpi: Optional[int] = None, doc: str = "a",
-                  rotate="0") -> bytes:
+                  rotate="0", highlight: str = "",
+                  zone_id: str = "") -> bytes:
     """High-DPI crop of one zone — used by the UI defect table / preview.
     ``doc="b"`` crops from the attached reference file. ``rotate`` is an
     angle 0/90/180/270 or "auto" (detect + rotate vertical → upright), so
-    the preview matches what OCR will actually receive."""
+    the preview matches what OCR will actually receive.
+
+    When ``highlight`` (a defect's problem word) and ``zone_id`` are given
+    AND a saved report exists, the word is located in the crop and boxed
+    in red. This is display-only: locating uses the saved OCR text/blocks
+    of that zone, never re-runs a check, and any failure just returns the
+    plain crop (identical to omitting ``highlight``)."""
     d = report.inspection_dir(rec_id)
     base = "source_b" if doc == "b" else "source"
     document = ArtworkDocument(_find_source(d, base))
@@ -344,7 +351,32 @@ def zone_crop_jpg(rec_id: str, zone_bbox: List[float],
                                   ("0", "90", "180", "270") else 0)
     if angle:
         crop = apply_rotation(crop, angle)
+
+    if highlight and zone_id and config.HIGHLIGHT_DEFECT_WORD:
+        crop = _highlight_crop(rec_id, crop, highlight, zone_id)
     return encode_jpg(crop, quality=88)
+
+
+def _highlight_crop(rec_id: str, crop, found: str, zone_id: str):
+    """Draw the red word-box on ``crop`` using the saved OCR of ``zone_id``.
+    Isolated + fully guarded: any problem (no report, no OCR, locate
+    failure) returns the crop untouched so the defect card still shows the
+    plain image."""
+    try:
+        from . import highlight as hl
+        rep = report.load_report(rec_id)
+        if not rep:
+            return crop
+        entry = next((r for r in rep.get("ocr", [])
+                      if r.get("zone_id") == zone_id), None)
+        if entry is None:
+            return crop
+        return hl.annotate(crop, found, entry.get("text", ""),
+                           entry.get("blocks"))
+    except Exception:
+        logger.debug("[artwork] highlight skipped for %s/%s",
+                     rec_id, zone_id, exc_info=True)
+        return crop
 
 
 def _find_source(insp_dir: str, base: str = "source") -> str:

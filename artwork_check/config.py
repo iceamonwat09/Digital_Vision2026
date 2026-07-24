@@ -82,6 +82,15 @@ AUTOPAIR_SCALES = [
     if s.strip()
 ]
 
+# ── Defect-card word highlight (display-only) ────────────────────────
+# วาดกรอบแดงที่ "คำที่มีปัญหา" บนรูป crop ของการ์ด "รายการที่พบ".
+# แสดงผลอย่างเดียว 100% — ไม่แตะ OCR/ผลตรวจ/verdict/การนับ. หาตำแหน่งคำ
+# จาก OCR blocks bbox (ถ้ามี) → ไม่มีก็ใช้ projection profile (deterministic).
+# หาไม่เจอ/ไม่มั่นใจ = ไม่วาด (ครอปเดิม). ตั้ง False = ปิดฟีเจอร์ทันที
+# (rollback) ครอปกลับเป็นภาพเปล่าเหมือนเดิม.
+HIGHLIGHT_DEFECT_WORD = os.getenv(
+    "ARTWORK_HIGHLIGHT_DEFECT", "1").strip().lower() not in ("0", "false", "")
+
 # ── Translation (advisory tab — separate from OCR & checks) ──────────
 # Optional N8N webhook that translates the already-OCR'd text to English
 # for the read-only "ข้อความ + คำแปล" tab. It is NEVER used by the check

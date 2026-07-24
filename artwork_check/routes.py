@@ -149,7 +149,9 @@ def _send_artifact(rec_id, name):
 @artwork_bp.route("/api/artwork/<rec_id>/crop")
 def api_crop(rec_id):
     """High-DPI crop for the defect table. Query: x,y,w,h (normalized)
-    + optional doc=a|b (b = crop from the attached reference file)."""
+    + optional doc=a|b (b = crop from the attached reference file).
+    Optional hl=<problem word> + zid=<zone id> draw a red box on that
+    word (display-only; ignored if the word can't be located)."""
     try:
         bbox = [float(request.args.get(k, "")) for k in ("x", "y", "w", "h")]
     except ValueError:
@@ -160,8 +162,11 @@ def api_crop(rec_id):
     rotate = request.args.get("rotate", "0")
     if rotate not in ("0", "90", "180", "270", "auto"):
         return jsonify({"error": "rotate ต้องเป็น 0/90/180/270/auto"}), 400
+    highlight = (request.args.get("hl", "") or "")[:120]
+    zone_id = (request.args.get("zid", "") or "")[:40]
     try:
-        jpg = pipeline.zone_crop_jpg(rec_id, bbox, doc=doc, rotate=rotate)
+        jpg = pipeline.zone_crop_jpg(rec_id, bbox, doc=doc, rotate=rotate,
+                                     highlight=highlight, zone_id=zone_id)
     except (ValueError, FileNotFoundError) as e:
         return jsonify({"error": str(e)}), 404
     import io

@@ -110,10 +110,16 @@
           const rr = zz.rotate;
           return (rr === 90 || rr === 180 || rr === 270) ? "&rotate=" + rr : "";
         };
+        // กรอบแดงที่ "คำที่มีปัญหา" — เฉพาะรูปฝั่ง subject (โซนของ defect
+        // นี้). ถ้าไม่มีคำ (เช่น defect แบบ "ข้อความหายไป") ก็ไม่ส่ง →
+        // ครอปธรรมดา. เซิร์ฟเวอร์หาไม่เจอก็คืนครอปเดิม (แสดงผลอย่างเดียว)
+        const hlParam = d.found
+          ? "&hl=" + encodeURIComponent(d.found) + "&zid=" + encodeURIComponent(d.zone_id)
+          : "";
         if (z && refZ) {
           const qA = "x=" + z.bbox[0] + "&y=" + z.bbox[1] + "&w=" + z.bbox[2] + "&h=" + z.bbox[3] + "&doc=" + docOf(z) + rotOf(z);
           const qB = "x=" + refZ.bbox[0] + "&y=" + refZ.bbox[1] + "&w=" + refZ.bbox[2] + "&h=" + refZ.bbox[3] + "&doc=" + docOf(refZ) + rotOf(refZ);
-          const cropA = "/api/artwork/" + esc(rep.id) + "/crop?" + qA;
+          const cropA = "/api/artwork/" + esc(rep.id) + "/crop?" + qA + hlParam;
           const cropB = "/api/artwork/" + esc(rep.id) + "/crop?" + qB;
           const labelA = docTag(z) + d.zone_id + (z.label ? " · " + z.label : "");
           const labelB = docTag(refZ) + refZ.id + (refZ.label ? " · " + refZ.label : "") + " (อ้างอิง)";
@@ -132,7 +138,7 @@
         } else if (z) {
           // fallback: แค่โซนเดียว (ไม่มี ref zone)
           const q = "x=" + z.bbox[0] + "&y=" + z.bbox[1] + "&w=" + z.bbox[2] + "&h=" + z.bbox[3] + "&doc=" + docOf(z) + rotOf(z);
-          const cropUrl = "/api/artwork/" + esc(rep.id) + "/crop?" + q;
+          const cropUrl = "/api/artwork/" + esc(rep.id) + "/crop?" + q + hlParam;
           const caption = docTag(z) + d.zone_id + (z.label ? " · " + z.label : "");
           html += '<div style="margin-top:8px;">' +
             '<img src="' + esc(cropUrl) + '" alt="crop"' +
