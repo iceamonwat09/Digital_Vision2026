@@ -119,20 +119,23 @@ def locate_token(found: str, ocr_text: str) -> Optional[dict]:
 
 def _infer_scale(blocks: list, ocr_wh) -> Optional[Tuple[float, float]]:
     """Infer ONE (sx, sy) for a whole zone that turns its raw block bboxes
-    into 0..1 fractions. The convention is decided per-zone (all blocks
-    share it) from the LARGEST coordinate across every block, so a single
-    small box near the origin can't be misread:
+    into 0..1 fractions. Three conventions are possible:
 
-      * ``0..1``   — fractions (overall max ≤ ~1)                → (1, 1)
-      * ``0..1000``— Gemini's normalized convention              → (1000, 1000)
-      * pixels     — of the OCR crop ``ocr_wh``                  → (ow, oh)
+      * ``0..1``   — already fractions                → (1, 1)
+      * ``0..1000``— Gemini's normalized convention   → (1000, 1000)
+      * pixels     — of the OCR crop ``ocr_wh``       → (ow, oh)
 
-    0..1000 and pixels are told apart by magnitude: a real OCR crop is
-    hundreds–thousands of px on its long side (here ≥ ~1400), so pixel
-    coords reach that while 0..1000 coords never pass ~1000. Returns None
-    when the convention cannot be inferred (coords not 0..1 and no usable
-    ``ocr_wh``) → caller falls back to the CV strategy."""
-    m = 0.0
+    Magnitude alone can't separate 0..1000 from pixels (600 could be
+    either), so instead every candidate scale is TESTED against all the
+    zone's boxes: a scale is valid only if every box lands inside the
+    frame (0..1 ± slack), and among valid scales the winner is the one
+    whose boxes best FILL the crop (largest reached fraction). A zone is
+    drawn tightly around its content, so the correct convention makes the
+    text span ~the whole crop, while a wrong one leaves everything
+    bunched in a corner (low coverage) or pushed out of frame (invalid).
+    Decided once per zone from all boxes, so a single corner box can't
+    flip it. Returns None when no candidate fits (→ CV fallback)."""
+    boxes = []
     for b in blocks:
         if not isinstance(b, dict):
             continue
@@ -143,22 +146,34 @@ def _infer_scale(blocks: list, ocr_wh) -> Optional[Tuple[float, float]]:
             x, y, w, h = (float(v) for v in bb)
         except (TypeError, ValueError):
             continue
-        m = max(m, x, y, x + w, y + h)
-    if m <= 0:
+        if w > 0 and h > 0:
+            boxes.append((x, y, x + w, y + h))
+    if not boxes:
         return None
-    if m <= 1.02:
-        return (1.0, 1.0)
-    if not ocr_wh or len(ocr_wh) != 2:
-        return None
-    try:
-        ow, oh = float(ocr_wh[0]), float(ocr_wh[1])
-    except (TypeError, ValueError):
-        return None
-    if ow <= 0 or oh <= 0:
-        return None
-    if max(ow, oh) >= 1400 and m <= 1050:
-        return (1000.0, 1000.0)
-    return (ow, oh)
+
+    candidates = [(1.0, 1.0)]
+    if ocr_wh and len(ocr_wh) == 2:
+        try:
+            ow, oh = float(ocr_wh[0]), float(ocr_wh[1])
+        except (TypeError, ValueError):
+            ow = oh = 0.0
+        if ow > 0 and oh > 0:
+            candidates.append((1000.0, 1000.0))
+            candidates.append((ow, oh))
+
+    best = None            # (coverage, scale)
+    for sx, sy in candidates:
+        cover = 0.0
+        ok = True
+        for x0, y0, x1, y1 in boxes:
+            fx0, fy0, fx1, fy1 = x0 / sx, y0 / sy, x1 / sx, y1 / sy
+            if fx0 < -0.05 or fy0 < -0.05 or fx1 > 1.05 or fy1 > 1.05:
+                ok = False
+                break
+            cover = max(cover, fx1, fy1)
+        if ok and (best is None or cover > best[0]):
+            best = (cover, (sx, sy))
+    return best[1] if best else None
 
 
 def _norm_block_bbox(bbox, W: int, H: int,
@@ -240,7 +255,7 @@ def _ink_mask(crop):
         gray = arr
     gray = gray.astype("uint8")
     thr = _otsu(gray)
-    dark = gray < thr
+    dark = gray <= thr
     frac = float(dark.mean())
     # text is the sparse class; if "dark" covers most of the crop the
     # label is light-on-dark → ink is the light side instead.
@@ -352,27 +367,114 @@ def _cv_box(crop, loc: dict) -> Optional[Box]:
     return (0, max(0, ry0 - pad), W, min(H, ry1 + pad))
 
 
+# ── local Tesseract word localization (optional, most accurate) ───────
+# We already KNOW the target word (the defect's ``found``); Tesseract is
+# used ONLY to find WHERE that word sits — its transcription accuracy is
+# irrelevant to the QC verdict, which is computed elsewhere from the OCR
+# backend. In a synthetic benchmark of label crops (see
+# scratchpad/bench_highlight.py) this located the right word ~89% of the
+# time (IoU 0.95) vs ~54% for the projection profile, and — critically —
+# far fewer wrong boxes. Import + binary are optional: if pytesseract or
+# the tesseract binary is missing, this returns None and the caller falls
+# back (never an error).
+
+_tess_state: Optional[bool] = None
+
+
+def _tesseract_available() -> bool:
+    global _tess_state
+    if _tess_state is None:
+        try:
+            import pytesseract
+            pytesseract.get_tesseract_version()
+            _tess_state = True
+        except Exception:
+            _tess_state = False
+    return _tess_state
+
+
+def _tess_box(crop, found: str, lang: str = "eng") -> Optional[Box]:
+    if not _tesseract_available():
+        return None
+    try:
+        import cv2
+        import pytesseract
+        from pytesseract import Output
+        rgb = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
+        data = pytesseract.image_to_data(rgb, lang=lang,
+                                         output_type=Output.DICT)
+    except Exception:
+        return None
+    fkey = _norm(found)
+    if not fkey:
+        return None
+    words = []
+    best = None
+    n = len(data.get("text", []))
+    for i in range(n):
+        k = _norm(data["text"][i])
+        if not k:
+            continue
+        box = (int(data["left"][i]), int(data["top"][i]),
+               int(data["left"][i] + data["width"][i]),
+               int(data["top"][i] + data["height"][i]))
+        words.append((k, box))
+        if k == fkey or fkey in k or (k in fkey and len(k) >= 3):
+            score = abs(len(k) - len(fkey))
+            if best is None or score < best[0]:
+                best = (score, box)
+    if best is not None:
+        return best[1]
+    # fuzzy fallback: the closest word within a small edit budget (catches
+    # OCR reading the printed word slightly differently than the backend)
+    try:
+        from .checks import levenshtein
+    except Exception:
+        return None
+    fb = None
+    for k, box in words:
+        d = levenshtein(k, fkey)
+        if d <= max(1, len(fkey) // 3) and (fb is None or d < fb[0]):
+            fb = (d, box)
+    return fb[1] if fb else None
+
+
 # ── public entry point ────────────────────────────────────────────────
 
 def locate(crop, found: str, ocr_text: str,
-           blocks: Optional[list] = None,
-           ocr_wh=None) -> Optional[Box]:
-    """Best pixel box for ``found`` inside ``crop`` (BGR numpy). Tries the
-    OCR-blocks bbox first, then the deterministic profile. Returns None
-    when nothing is confident (caller draws no box)."""
+           blocks: Optional[list] = None, ocr_wh=None,
+           use_tesseract: bool = True, use_profile: bool = False,
+           tess_lang: str = "eng") -> Optional[Box]:
+    """Best pixel box for ``found`` inside ``crop`` (BGR numpy), most
+    reliable strategy first:
+
+      1. OCR-blocks bbox — when the backend returned per-word boxes.
+      2. Tesseract — local word localization (``use_tesseract``, default
+         on; auto-skips when the binary/lib is absent). Benchmarked most
+         accurate.
+      3. Projection profile — deterministic but error-prone (draws a wrong
+         box ~40% of the time on dense tables), so OFF by default
+         (``use_profile``); kept for a no-dependency last resort.
+
+    Returns None when nothing is confident → the caller draws no box."""
     if crop is None or getattr(crop, "size", 0) == 0 or not found:
         return None
     H, W = crop.shape[:2]
     box = _block_box(found, blocks or [], W, H, ocr_wh)
     if box is not None:
         return box
-    loc = locate_token(found, ocr_text or "")
-    if loc is None:
-        return None
-    try:
-        return _cv_box(crop, loc)
-    except Exception:
-        return None
+    if use_tesseract:
+        box = _tess_box(crop, found, tess_lang)
+        if box is not None:
+            return box
+    if use_profile:
+        loc = locate_token(found, ocr_text or "")
+        if loc is not None:
+            try:
+                return _cv_box(crop, loc)
+            except Exception:
+                return None
+    return None
 
 
 def draw(crop, box: Box):
@@ -392,11 +494,15 @@ def draw(crop, box: Box):
 
 
 def annotate(crop, found: str, ocr_text: str,
-             blocks: Optional[list] = None, ocr_wh=None):
+             blocks: Optional[list] = None, ocr_wh=None,
+             use_tesseract: bool = True, use_profile: bool = False,
+             tess_lang: str = "eng"):
     """Convenience: locate + draw. Returns the annotated crop, or the
     original crop unchanged when the word cannot be located."""
     try:
-        box = locate(crop, found, ocr_text, blocks, ocr_wh)
+        box = locate(crop, found, ocr_text, blocks, ocr_wh,
+                     use_tesseract=use_tesseract, use_profile=use_profile,
+                     tess_lang=tess_lang)
     except Exception:
         box = None
     if box is None:

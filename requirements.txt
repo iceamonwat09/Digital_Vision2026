@@ -64,6 +64,19 @@ requests>=2.31.0
 # Optional: the mode still runs without it, skipping only SPELL_FAIL.
 pyspellchecker>=0.8.0
 
+# Artwork Proof Check — red-box highlighter for the problem word on defect
+# crops (display-only; never affects the verdict). Locates the KNOWN word
+# with local Tesseract — benchmarked most accurate (~89% hit vs ~54% for
+# the no-dependency projection profile). Optional: without it the mode uses
+# the OCR backend's own bbox when present, else draws no box.
+# To enable on the Windows station:
+#   1) install the tesseract BINARY (UB-Mannheim build) and put it on PATH
+#      (or set pytesseract.pytesseract.tesseract_cmd to tesseract.exe)
+#   2) `py -3.9 -m pip install pytesseract`
+#   3) restart; check "N bbox" / a red box appears on defect cards
+# Turn off with ARTWORK_HIGHLIGHT_TESSERACT=0.
+# pytesseract>=0.3.10
+
 # Barcode decoding (EAN-13 etc.) — authoritative for the barcode field and
 # proves the symbol is machine-scannable. Optional: the code falls back to
 # cv2.barcode.BarcodeDetector (bundled with opencv) and then to OCR if neither

@@ -90,6 +90,19 @@ AUTOPAIR_SCALES = [
 # (rollback) ครอปกลับเป็นภาพเปล่าเหมือนเดิม.
 HIGHLIGHT_DEFECT_WORD = os.getenv(
     "ARTWORK_HIGHLIGHT_DEFECT", "1").strip().lower() not in ("0", "false", "")
+# วิธีหาตำแหน่งคำ (เรียงตามความแม่นจาก benchmark: bbox → tesseract → profile):
+#  - ชั้น OCR blocks bbox: ใช้เสมอเมื่อ backend คืน bbox (ไม่ต้องตั้งค่า)
+#  - Tesseract (local): แม่นสุด (~89% hit/IoU 0.95 ใน benchmark) แต่ต้องติดตั้ง
+#    tesseract binary + `pip install pytesseract` บนสถานี. default เปิด แต่ถ้า
+#    ไม่มี binary/lib จะข้ามเงียบ → ไม่มีกรอบ (ไม่ error).
+#  - Projection profile: ไม่ต้องพึ่งอะไร แต่วาดผิดคำ ~40% (อันตรายกับ QC) →
+#    default ปิด เปิดเป็น last-resort เท่านั้นถ้ายอมรับความเสี่ยง.
+HIGHLIGHT_USE_TESSERACT = os.getenv(
+    "ARTWORK_HIGHLIGHT_TESSERACT", "1").strip().lower() not in ("0", "false", "")
+HIGHLIGHT_USE_PROFILE = os.getenv(
+    "ARTWORK_HIGHLIGHT_PROFILE", "0").strip().lower() not in ("0", "false", "")
+HIGHLIGHT_TESSERACT_LANG = os.getenv("ARTWORK_HIGHLIGHT_TESS_LANG",
+                                     "eng").strip() or "eng"
 
 # ── Translation (advisory tab — separate from OCR & checks) ──────────
 # Optional N8N webhook that translates the already-OCR'd text to English

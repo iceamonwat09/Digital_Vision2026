@@ -372,7 +372,10 @@ def _highlight_crop(rec_id: str, crop, found: str, zone_id: str):
         if entry is None:
             return crop
         return hl.annotate(crop, found, entry.get("text", ""),
-                           entry.get("blocks"), entry.get("ocr_wh"))
+                           entry.get("blocks"), entry.get("ocr_wh"),
+                           use_tesseract=config.HIGHLIGHT_USE_TESSERACT,
+                           use_profile=config.HIGHLIGHT_USE_PROFILE,
+                           tess_lang=config.HIGHLIGHT_TESSERACT_LANG)
     except Exception:
         logger.debug("[artwork] highlight skipped for %s/%s",
                      rec_id, zone_id, exc_info=True)

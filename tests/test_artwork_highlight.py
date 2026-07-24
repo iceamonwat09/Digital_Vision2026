@@ -218,8 +218,70 @@ def test_cv_multi_boxes_full_row_width():
 
 def test_annotate_returns_same_shape_and_never_raises():
     crop = _text_row_crop()
-    out = hl.annotate(crop, "WORDB", "WORDA WORDB\n")
+    # profile path explicitly (tesseract off) so the test is deterministic
+    out = hl.annotate(crop, "WORDB", "WORDA WORDB\n",
+                      use_tesseract=False, use_profile=True)
     assert out.shape == crop.shape
     # unlocatable word → unchanged original (identity), never an exception
-    out2 = hl.annotate(crop, "NOPE", "WORDA WORDB\n")
+    out2 = hl.annotate(crop, "NOPE", "WORDA WORDB\n",
+                       use_tesseract=False, use_profile=True)
     assert out2 is crop
+
+
+def test_locate_profile_off_by_default_needs_no_box():
+    # with tesseract off and profile off (defaults), the profile path is
+    # not used → no box from the CV strategy even if the word is in text
+    crop = _text_row_crop()
+    box = hl.locate(crop, "WORDB", "WORDA WORDB\n",
+                    use_tesseract=False, use_profile=False)
+    assert box is None
+
+
+# ── Tesseract path (needs the binary) ─────────────────────────────────
+
+def _tess_or_skip():
+    if not hl._tesseract_available():
+        pytest.skip("tesseract binary/pytesseract not installed")
+
+
+def _pil_text_crop():
+    """Render real anti-aliased text so tesseract can read it."""
+    from PIL import Image, ImageDraw, ImageFont
+    import cv2
+    for fp in ("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+               "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"):
+        try:
+            font = ImageFont.truetype(fp, 34)
+            break
+        except OSError:
+            font = None
+    if font is None:
+        pytest.skip("no truetype font available")
+    img = Image.new("RGB", (520, 90), (255, 255, 255))
+    dr = ImageDraw.Draw(img)
+    dr.text((20, 25), "Protein", font=font, fill=(0, 0, 0))
+    x2 = 20 + dr.textlength("Protein ", font=font)
+    lt, tt, rt, bt = font.getbbox("Phosphours")
+    true_box = (int(x2 + lt), int(25 + tt), int(x2 + rt), int(25 + bt))
+    dr.text((x2, 25), "Phosphours", font=font, fill=(0, 0, 0))
+    return cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR), true_box
+
+
+def test_tesseract_locates_word():
+    _tess_or_skip()
+    crop, tb = _pil_text_crop()
+    box = hl._tess_box(crop, "Phosphours")
+    assert box is not None
+    # overlaps the true word box (IoU > 0.3)
+    ix0, iy0 = max(box[0], tb[0]), max(box[1], tb[1])
+    ix1, iy1 = min(box[2], tb[2]), min(box[3], tb[3])
+    inter = max(0, ix1 - ix0) * max(0, iy1 - iy0)
+    ua = ((box[2]-box[0])*(box[3]-box[1]) + (tb[2]-tb[0])*(tb[3]-tb[1])
+          - inter)
+    assert inter / ua > 0.3
+
+
+def test_tesseract_missing_word_returns_none():
+    _tess_or_skip()
+    crop, _ = _pil_text_crop()
+    assert hl._tess_box(crop, "Zzzqqq") is None
