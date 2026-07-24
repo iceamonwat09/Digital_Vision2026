@@ -157,8 +157,12 @@
     (rep.ocr || []).forEach((r) => {
       const rot = (r.rotate === 90 || r.rotate === 180 || r.rotate === 270)
         ? " · หมุน " + r.rotate + "°" : "";
+      // diagnostic: ถ้า OCR คืน bbox รายคำ กรอบแดงจะใช้ bbox นั้น (แม่นสุด);
+      // ถ้า "0 bbox" แปลว่า backend ไม่คืนพิกัด → ใช้ชั้น projection profile
+      const nbb = (r.blocks && r.blocks.length) || 0;
+      const bbTag = " · " + (nbb ? nbb + " bbox ✓" : "0 bbox (ใช้ profile)");
       html += "<b style='font-size:12px;'>" + esc(r.zone_id) + " · engine=" + esc(r.engine) +
-        (r.conf != null ? " · conf=" + esc(r.conf) : "") + esc(rot) + "</b>" +
+        (r.conf != null ? " · conf=" + esc(r.conf) : "") + esc(rot) + esc(bbTag) + "</b>" +
         '<pre class="aw-pre">' + esc(r.text || "(ว่าง)") + "</pre>";
     });
     html += "</details>";

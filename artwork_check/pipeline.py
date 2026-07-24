@@ -372,7 +372,7 @@ def _highlight_crop(rec_id: str, crop, found: str, zone_id: str):
         if entry is None:
             return crop
         return hl.annotate(crop, found, entry.get("text", ""),
-                           entry.get("blocks"))
+                           entry.get("blocks"), entry.get("ocr_wh"))
     except Exception:
         logger.debug("[artwork] highlight skipped for %s/%s",
                      rec_id, zone_id, exc_info=True)

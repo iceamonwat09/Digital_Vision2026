@@ -69,43 +69,82 @@ def test_locate_is_punctuation_tolerant():
     assert loc2["line"] == 1
 
 
-# ── _norm_block_bbox: coordinate-convention handling ──────────────────
+# ── _infer_scale: per-zone coordinate-convention detection ────────────
+
+def test_infer_scale_0_1():
+    blocks = [{"text": "A", "bbox": [0.1, 0.2, 0.3, 0.1]},
+              {"text": "B", "bbox": [0.5, 0.6, 0.2, 0.1]}]
+    assert hl._infer_scale(blocks, ocr_wh=[3000, 2000]) == (1.0, 1.0)
+
+
+def test_infer_scale_0_1000():
+    # some block reaches ~900 (≤1050) and the OCR crop is big → 0..1000
+    blocks = [{"text": "A", "bbox": [10, 20, 30, 10]},
+              {"text": "B", "bbox": [800, 850, 100, 40]}]
+    assert hl._infer_scale(blocks, ocr_wh=[3000, 2000]) == (1000.0, 1000.0)
+
+
+def test_infer_scale_pixels():
+    # a block coordinate exceeds 1050 → must be raw pixels of the crop
+    blocks = [{"text": "A", "bbox": [100, 100, 50, 30]},
+              {"text": "B", "bbox": [1800, 900, 120, 40]}]
+    assert hl._infer_scale(blocks, ocr_wh=[2000, 1000]) == (2000.0, 1000.0)
+
+
+def test_infer_scale_none_without_ocr_wh():
+    blocks = [{"text": "B", "bbox": [800, 850, 100, 40]}]
+    assert hl._infer_scale(blocks, ocr_wh=None) is None
+
+
+# ── _norm_block_bbox: fraction → display pixels via a given scale ──────
 
 def test_bbox_normalized_0_1():
-    box = hl._norm_block_bbox([0.1, 0.2, 0.3, 0.4], 1000, 500)
+    box = hl._norm_block_bbox([0.1, 0.2, 0.3, 0.4], 1000, 500, (1.0, 1.0))
     assert box == (100, 100, 400, 300)
 
 
-def test_bbox_0_1000_rejected_as_ambiguous():
-    # 0..1000 vs pixel can't be told apart without the OCR image size, so
-    # anything outside 0..1 is rejected (→ CV fallback), never guessed.
-    assert hl._norm_block_bbox([100, 200, 300, 400], 800, 800) is None
+def test_bbox_0_1000_scale():
+    box = hl._norm_block_bbox([100, 200, 300, 400], 800, 800,
+                              (1000.0, 1000.0))
+    assert box == (80, 160, 320, 480)
 
 
-def test_bbox_pixel_rejected_as_ambiguous():
-    assert hl._norm_block_bbox([50, 60, 100, 40], 1200, 1200) is None
+def test_bbox_pixel_scale():
+    # pixels of a 2000×1000 OCR crop → onto a 1000×500 display crop
+    # x: 500..900 /2000 → 0.25..0.45 → 250..450 ; y: 250..450 /1000 →
+    # 0.25..0.45 → 125..225
+    box = hl._norm_block_bbox([500, 250, 400, 200], 1000, 500,
+                              (2000.0, 1000.0))
+    assert box == (250, 125, 450, 225)
+
+
+def test_bbox_none_scale_rejected():
+    assert hl._norm_block_bbox([0.1, 0.2, 0.3, 0.4], 1000, 500, None) is None
 
 
 def test_bbox_rejects_whole_crop():
     # a box covering essentially the entire crop carries no localization
-    assert hl._norm_block_bbox([0.0, 0.0, 1.0, 1.0], 500, 500) is None
+    assert hl._norm_block_bbox([0.0, 0.0, 1.0, 1.0], 500, 500,
+                               (1.0, 1.0)) is None
 
 
 def test_bbox_rejects_degenerate():
-    assert hl._norm_block_bbox([0.1, 0.1, 0, 0.2], 500, 500) is None
-    assert hl._norm_block_bbox([1, 2, 3], 500, 500) is None
-    assert hl._norm_block_bbox(None, 500, 500) is None
+    assert hl._norm_block_bbox([0.1, 0.1, 0, 0.2], 500, 500,
+                               (1.0, 1.0)) is None
+    assert hl._norm_block_bbox([1, 2, 3], 500, 500, (1.0, 1.0)) is None
+    assert hl._norm_block_bbox(None, 500, 500, (1.0, 1.0)) is None
 
 
 def test_bbox_clamps_rounding_overflow():
     # a hair past 1.0 (rounding) is accepted and clamped to the edge
-    box = hl._norm_block_bbox([0.9, 0.9, 0.11, 0.11], 100, 100)
+    box = hl._norm_block_bbox([0.9, 0.9, 0.11, 0.11], 100, 100, (1.0, 1.0))
     assert box is not None and box[2] == 100 and box[3] == 100
 
 
-def test_bbox_rejects_out_of_0_1_range():
-    # clearly outside 0..1 (e.g. 0..1000 or pixels) → None, not guessed
-    assert hl._norm_block_bbox([0.9, 0.9, 0.5, 0.5], 100, 100) is None
+def test_bbox_rejects_far_out_of_frame():
+    # fractions well past 1.0 (wrong convention guess) → None
+    assert hl._norm_block_bbox([0.9, 0.9, 0.5, 0.5], 100, 100,
+                               (1.0, 1.0)) is None
 
 
 # ── _block_box: match a block by text then use its bbox ────────────────
@@ -115,7 +154,7 @@ def test_block_box_matches_word():
         {"text": "Guaranteed Analysis", "bbox": [0.0, 0.0, 0.5, 0.1]},
         {"text": "Cude", "bbox": [0.1, 0.2, 0.1, 0.05]},
     ]
-    box = hl._block_box("Cude", blocks, 1000, 1000)
+    box = hl._block_box("Cude", blocks, 1000, 1000, ocr_wh=[3000, 2000])
     assert box == (100, 200, 200, 250)
 
 
@@ -124,14 +163,21 @@ def test_block_box_prefers_tightest_match():
         {"text": "Cude Protein Line", "bbox": [0.0, 0.2, 0.9, 0.05]},
         {"text": "Cude", "bbox": [0.1, 0.2, 0.08, 0.05]},
     ]
-    box = hl._block_box("Cude", blocks, 1000, 1000)
+    box = hl._block_box("Cude", blocks, 1000, 1000, ocr_wh=[3000, 2000])
     assert box[0] == 100          # picked the tight "Cude" block
+
+
+def test_block_box_pixels_via_ocr_wh():
+    blocks = [{"text": "Cude", "bbox": [200, 400, 100, 60]},
+              {"text": "Edge", "bbox": [1900, 950, 40, 20]}]  # forces pixels
+    box = hl._block_box("Cude", blocks, 1000, 500, ocr_wh=[2000, 1000])
+    assert box == (100, 200, 150, 230)
 
 
 def test_block_box_none_when_no_bbox():
     blocks = [{"text": "Cude", "bbox": None}]
-    assert hl._block_box("Cude", blocks, 1000, 1000) is None
-    assert hl._block_box("Cude", [], 1000, 1000) is None
+    assert hl._block_box("Cude", blocks, 1000, 1000, ocr_wh=[3000, 2000]) is None
+    assert hl._block_box("Cude", [], 1000, 1000, ocr_wh=[3000, 2000]) is None
 
 
 # ── CV path (needs numpy) ─────────────────────────────────────────────

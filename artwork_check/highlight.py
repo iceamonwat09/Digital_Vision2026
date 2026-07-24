@@ -117,19 +117,59 @@ def locate_token(found: str, ocr_text: str) -> Optional[dict]:
 
 # ── OCR-blocks strategy (used when the backend returned bbox) ──────────
 
-def _norm_block_bbox(bbox, W: int, H: int) -> Optional[Box]:
-    """Turn an OCR block ``bbox`` [x, y, w, h] into pixel (x0,y0,x1,y1)
-    inside a W×H crop.
+def _infer_scale(blocks: list, ocr_wh) -> Optional[Tuple[float, float]]:
+    """Infer ONE (sx, sy) for a whole zone that turns its raw block bboxes
+    into 0..1 fractions. The convention is decided per-zone (all blocks
+    share it) from the LARGEST coordinate across every block, so a single
+    small box near the origin can't be misread:
 
-    ONLY unambiguous 0..1 normalized coordinates are trusted. Other
-    conventions (0..1000 or raw pixels) cannot be told apart without the
-    dimensions of the image the OCR engine actually saw — which this mode
-    does not store — so a value like 600 could be either. In a QC tool a
-    confidently-wrong box is worse than none, so anything outside 0..1 is
-    rejected here (→ the caller falls back to the deterministic CV
-    strategy, which needs no coordinate convention at all). Returns None
-    when the box is unusable."""
-    if not bbox or len(bbox) != 4:
+      * ``0..1``   — fractions (overall max ≤ ~1)                → (1, 1)
+      * ``0..1000``— Gemini's normalized convention              → (1000, 1000)
+      * pixels     — of the OCR crop ``ocr_wh``                  → (ow, oh)
+
+    0..1000 and pixels are told apart by magnitude: a real OCR crop is
+    hundreds–thousands of px on its long side (here ≥ ~1400), so pixel
+    coords reach that while 0..1000 coords never pass ~1000. Returns None
+    when the convention cannot be inferred (coords not 0..1 and no usable
+    ``ocr_wh``) → caller falls back to the CV strategy."""
+    m = 0.0
+    for b in blocks:
+        if not isinstance(b, dict):
+            continue
+        bb = b.get("bbox")
+        if not bb or len(bb) != 4:
+            continue
+        try:
+            x, y, w, h = (float(v) for v in bb)
+        except (TypeError, ValueError):
+            continue
+        m = max(m, x, y, x + w, y + h)
+    if m <= 0:
+        return None
+    if m <= 1.02:
+        return (1.0, 1.0)
+    if not ocr_wh or len(ocr_wh) != 2:
+        return None
+    try:
+        ow, oh = float(ocr_wh[0]), float(ocr_wh[1])
+    except (TypeError, ValueError):
+        return None
+    if ow <= 0 or oh <= 0:
+        return None
+    if max(ow, oh) >= 1400 and m <= 1050:
+        return (1000.0, 1000.0)
+    return (ow, oh)
+
+
+def _norm_block_bbox(bbox, W: int, H: int,
+                     scale: Optional[Tuple[float, float]]) -> Optional[Box]:
+    """Turn one raw block ``bbox`` [x, y, w, h] into display-crop pixels
+    (x0,y0,x1,y1) using the zone's ``scale`` (from ``_infer_scale``).
+    Because the display crop and the OCR crop are the SAME zone content
+    (same aspect + rotation, different size only), a box expressed as
+    0..1 fractions maps straight onto the display crop. Returns None when
+    the box is unusable or ``scale`` is None."""
+    if not bbox or len(bbox) != 4 or not scale:
         return None
     try:
         x, y, w, h = (float(v) for v in bbox)
@@ -137,10 +177,12 @@ def _norm_block_bbox(bbox, W: int, H: int) -> Optional[Box]:
         return None
     if w <= 0 or h <= 0:
         return None
-    # Must be normalized 0..1 (allow a hair over for rounding).
-    if max(x, y, x + w, y + h) > 1.02 or min(x, y) < -0.02:
+    sx, sy = scale
+    fx0, fy0, fx1, fy1 = x / sx, y / sy, (x + w) / sx, (y + h) / sy
+    # reject clearly out-of-frame fractions (bad convention guess)
+    if max(fx0, fy0, fx1, fy1) > 1.05 or min(fx0, fy0) < -0.05:
         return None
-    x0, y0, x1, y1 = x * W, y * H, (x + w) * W, (y + h) * H
+    x0, y0, x1, y1 = fx0 * W, fy0 * H, fx1 * W, fy1 * H
     x0, x1 = sorted((max(0, min(W, x0)), max(0, min(W, x1))))
     y0, y1 = sorted((max(0, min(H, y0)), max(0, min(H, y1))))
     if x1 - x0 < 2 or y1 - y0 < 2:
@@ -152,11 +194,15 @@ def _norm_block_bbox(bbox, W: int, H: int) -> Optional[Box]:
     return (int(x0), int(y0), int(x1), int(y1))
 
 
-def _block_box(found: str, blocks: list, W: int, H: int) -> Optional[Box]:
+def _block_box(found: str, blocks: list, W: int, H: int,
+               ocr_wh=None) -> Optional[Box]:
     if not blocks:
         return None
     fkey = _norm(found)
     if not fkey:
+        return None
+    scale = _infer_scale(blocks, ocr_wh)   # one convention for the zone
+    if scale is None:
         return None
     best = None
     for b in blocks:
@@ -167,7 +213,7 @@ def _block_box(found: str, blocks: list, W: int, H: int) -> Optional[Box]:
             continue
         # exact word, or the word sits inside a longer element key
         if bkey == fkey or fkey in bkey:
-            px = _norm_block_bbox(b.get("bbox"), W, H)
+            px = _norm_block_bbox(b.get("bbox"), W, H, scale)
             if px is None:
                 continue
             # prefer the tightest matching block (closest length to word)
@@ -309,14 +355,15 @@ def _cv_box(crop, loc: dict) -> Optional[Box]:
 # ── public entry point ────────────────────────────────────────────────
 
 def locate(crop, found: str, ocr_text: str,
-           blocks: Optional[list] = None) -> Optional[Box]:
+           blocks: Optional[list] = None,
+           ocr_wh=None) -> Optional[Box]:
     """Best pixel box for ``found`` inside ``crop`` (BGR numpy). Tries the
     OCR-blocks bbox first, then the deterministic profile. Returns None
     when nothing is confident (caller draws no box)."""
     if crop is None or getattr(crop, "size", 0) == 0 or not found:
         return None
     H, W = crop.shape[:2]
-    box = _block_box(found, blocks or [], W, H)
+    box = _block_box(found, blocks or [], W, H, ocr_wh)
     if box is not None:
         return box
     loc = locate_token(found, ocr_text or "")
@@ -345,11 +392,11 @@ def draw(crop, box: Box):
 
 
 def annotate(crop, found: str, ocr_text: str,
-             blocks: Optional[list] = None):
+             blocks: Optional[list] = None, ocr_wh=None):
     """Convenience: locate + draw. Returns the annotated crop, or the
     original crop unchanged when the word cannot be located."""
     try:
-        box = locate(crop, found, ocr_text, blocks)
+        box = locate(crop, found, ocr_text, blocks, ocr_wh)
     except Exception:
         box = None
     if box is None:
