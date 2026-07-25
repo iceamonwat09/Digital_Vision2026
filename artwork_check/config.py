@@ -109,6 +109,11 @@ HIGHLIGHT_USE_PROFILE = os.getenv(
     "ARTWORK_HIGHLIGHT_PROFILE", "0").strip().lower() not in ("0", "false", "")
 HIGHLIGHT_TESSERACT_LANG = os.getenv("ARTWORK_HIGHLIGHT_TESS_LANG",
                                      "eng").strip() or "eng"
+# จำนวนกรอบสูงสุดต่อ 1 defect: คำผิดมักพิมพ์ซ้ำหลายแถวในตารางเดียวกัน
+# (เช่น "Cude" ใน Cude Protein / Cude Fat / Cude Fiber) — วาดจุดเดียวทำให้
+# ผู้ตรวจแก้ไม่ครบ. 6 = เห็นครบทุกจุดในตารางปกติ แต่ไม่ท่วมรูปถ้าคำนั้น
+# ปรากฏเยอะผิดปกติ. ตั้ง 1 = พฤติกรรมเดิม (กรอบเดียว), 0 = ไม่จำกัด.
+HIGHLIGHT_MAX_BOXES = int(os.getenv("ARTWORK_HIGHLIGHT_MAX_BOXES", "6"))
 
 # ── Translation (advisory tab — separate from OCR & checks) ──────────
 # Optional N8N webhook that translates the already-OCR'd text to English

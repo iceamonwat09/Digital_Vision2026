@@ -377,48 +377,54 @@ def _highlight_crop(rec_id: str, crop, found: str, zone_id: str,
             return crop
 
         if config.HIGHLIGHT_USE_PDF_TEXT and entry.get("engine") == "pdf-text":
-            box = _pdf_text_box(rec_id, rep, zone_id, found, crop, angle)
-            if box is not None:
-                return hl.draw(crop, box)
+            boxes = _pdf_text_boxes(rec_id, rep, zone_id, found, crop, angle)
+            if boxes:
+                return hl.draw_boxes(crop, boxes)
 
         return hl.annotate(crop, found, entry.get("text", ""),
                            entry.get("blocks"), entry.get("ocr_wh"),
                            use_tesseract=config.HIGHLIGHT_USE_TESSERACT,
                            use_profile=config.HIGHLIGHT_USE_PROFILE,
-                           tess_lang=config.HIGHLIGHT_TESSERACT_LANG)
+                           tess_lang=config.HIGHLIGHT_TESSERACT_LANG,
+                           max_boxes=config.HIGHLIGHT_MAX_BOXES)
     except Exception:
         logger.debug("[artwork] highlight skipped for %s/%s",
                      rec_id, zone_id, exc_info=True)
         return crop
 
 
-def _pdf_text_box(rec_id: str, rep: dict, zone_id: str, found: str,
-                  crop, angle: int):
-    """Exact pixel box for ``found`` from the PDF text layer of ``zone_id``
-    (layer ②). Returns None when the source is not a text-layer PDF, the
-    word isn't present, or anything is off → caller falls back to OCR."""
+def _pdf_text_boxes(rec_id: str, rep: dict, zone_id: str, found: str,
+                    crop, angle: int) -> list:
+    """Exact pixel boxes for EVERY occurrence of ``found`` in the PDF text
+    layer of ``zone_id`` (layer ②), capped by HIGHLIGHT_MAX_BOXES. Returns
+    [] when the source is not a text-layer PDF, the word isn't present, or
+    anything is off → caller falls back to OCR."""
     from . import highlight as hl
     zone = next((z for z in rep.get("zones", [])
                  if z.get("id") == zone_id), None)
     if not zone or not isinstance(zone.get("bbox"), (list, tuple)):
-        return None
+        return []
     d = report.inspection_dir(rec_id)
     base = "source_b" if zone.get("doc") == "b" else "source"
     try:
         document = ArtworkDocument(_find_source(d, base))
     except FileNotFoundError:
-        return None
+        return []
     if not document.is_pdf:
-        return None
+        return []
     words = document.zone_words(list(zone["bbox"]))
     if not words:
-        return None
-    fb = hl.match_word_box(words, found)
-    if fb is None:
-        return None
-    fb = hl.rotate_frac_box(fb, angle or 0)
+        return []
     H, W = crop.shape[:2]
-    return hl.frac_to_px(fb, W, H)
+    out = []
+    for fb in hl.match_word_boxes(words, found):
+        px = hl.frac_to_px(hl.rotate_frac_box(fb, angle or 0), W, H)
+        if px is not None:
+            out.append(px)
+    cap = config.HIGHLIGHT_MAX_BOXES
+    if cap and cap > 0:
+        out = out[:cap]
+    return out
 
 
 def _find_source(insp_dir: str, base: str = "source") -> str:

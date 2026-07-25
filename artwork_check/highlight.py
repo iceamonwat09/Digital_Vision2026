@@ -212,17 +212,18 @@ def _norm_block_bbox(bbox, W: int, H: int,
     return (int(x0), int(y0), int(x1), int(y1))
 
 
-def _block_box(found: str, blocks: list, W: int, H: int,
-               ocr_wh=None) -> Optional[Box]:
+def _block_boxes(found: str, blocks: list, W: int, H: int,
+                 ocr_wh=None) -> List[Box]:
+    """Every OCR-backend block box matching ``found`` (tightest first)."""
     if not blocks:
-        return None
+        return []
     fkey = _norm(found)
     if not fkey:
-        return None
+        return []
     scale = _infer_scale(blocks, ocr_wh)   # one convention for the zone
     if scale is None:
-        return None
-    best = None
+        return []
+    hits = []
     for b in blocks:
         if not isinstance(b, dict):
             continue
@@ -235,10 +236,15 @@ def _block_box(found: str, blocks: list, W: int, H: int,
             if px is None:
                 continue
             # prefer the tightest matching block (closest length to word)
-            score = abs(len(bkey) - len(fkey))
-            if best is None or score < best[0]:
-                best = (score, px)
-    return best[1] if best else None
+            hits.append((abs(len(bkey) - len(fkey)), px))
+    hits.sort(key=lambda p: p[0])
+    return [px for _, px in hits]
+
+
+def _block_box(found: str, blocks: list, W: int, H: int,
+               ocr_wh=None) -> Optional[Box]:
+    hits = _block_boxes(found, blocks, W, H, ocr_wh)
+    return hits[0] if hits else None
 
 
 # ── deterministic CV strategy (numpy only) ────────────────────────────
@@ -471,9 +477,10 @@ def _resolve_langs(requested: str) -> str:
     return resolved
 
 
-def _tess_box(crop, found: str, lang: str = "eng") -> Optional[Box]:
+def _tess_boxes(crop, found: str, lang: str = "eng") -> List[Box]:
+    """Every Tesseract word box matching ``found`` (best tier first)."""
     if not _tesseract_available():
-        return None
+        return []
     try:
         import cv2
         import pytesseract
@@ -482,10 +489,10 @@ def _tess_box(crop, found: str, lang: str = "eng") -> Optional[Box]:
         data = pytesseract.image_to_data(rgb, lang=_resolve_langs(lang),
                                          output_type=Output.DICT)
     except Exception:
-        return None
+        return []
     fkey = _norm(found)
     if not fkey:
-        return None
+        return []
     words = []
     n = len(data.get("text", []))
     for i in range(n):
@@ -496,13 +503,24 @@ def _tess_box(crop, found: str, lang: str = "eng") -> Optional[Box]:
                int(data["left"][i] + data["width"][i]),
                int(data["top"][i] + data["height"][i]))
         words.append((k, box))
-    return _best_word_match(words, fkey)
+    return _all_word_matches(words, fkey)
 
 
-def _best_word_match(words, fkey: str):
-    """``words``: list of (normalized_key, payload). Return the payload of
-    the best match for ``fkey`` (exact → substring → tightened fuzzy), or
-    None.
+def _tess_box(crop, found: str, lang: str = "eng") -> Optional[Box]:
+    hits = _tess_boxes(crop, found, lang)
+    return hits[0] if hits else None
+
+
+def _all_word_matches(words, fkey: str) -> list:
+    """``words``: list of (normalized_key, payload). Return the payloads of
+    EVERY occurrence of ``fkey``, best-tier first, or [].
+
+    Tiering matters for correctness: only ONE tier is ever returned. If any
+    literal match (exact / substring) exists, fuzzy candidates are dropped
+    entirely — mixing them would add boxes on merely-similar words next to
+    the real ones. Within the literal tier all hits are kept (a misspelling
+    like "Cude" is typically printed on several rows of the same table, and
+    the reviewer must see all of them to fix them in one pass).
 
     The fuzzy fallback runs ONLY for ASCII-Latin words of length >= 5. A
     1–2 character edit on a short or non-Latin word is a DIFFERENT word —
@@ -511,31 +529,39 @@ def _best_word_match(words, fkey: str):
     QC tool is worse than drawing none. Latin typos the mode exists to
     catch ("SHREDDED"→"REDDED") are long and ASCII, so they still fuzzy."""
     if not fkey:
-        return None
-    best = None
+        return []
+    literal = []
     for k, payload in words:
         if not k:
             continue
         if k == fkey or fkey in k or (k in fkey and len(k) >= 3):
-            score = abs(len(k) - len(fkey))
-            if best is None or score < best[0]:
-                best = (score, payload)
-    if best is not None:
-        return best[1]
+            literal.append((abs(len(k) - len(fkey)), payload))
+    if literal:
+        # tightest keys first (exact word before a long line that contains it)
+        literal.sort(key=lambda p: p[0])
+        return [payload for _, payload in literal]
     if not (fkey.isascii() and len(fkey) >= 5):
-        return None
+        return []
     try:
         from .checks import levenshtein
     except Exception:
-        return None
-    fb = None
+        return []
+    fuzzy = []
     for k, payload in words:
         if not k:
             continue
         d = levenshtein(k, fkey)
-        if d <= len(fkey) // 3 and (fb is None or d < fb[0]):
-            fb = (d, payload)
-    return fb[1] if fb else None
+        if d <= len(fkey) // 3:
+            fuzzy.append((d, payload))
+    fuzzy.sort(key=lambda p: p[0])
+    return [payload for _, payload in fuzzy]
+
+
+def _best_word_match(words, fkey: str):
+    """Single best payload for ``fkey`` (see ``_all_word_matches``), or
+    None. Kept as the single-box entry point."""
+    hits = _all_word_matches(words, fkey)
+    return hits[0] if hits else None
 
 
 # ── PDF text-layer word boxes (exact, any script, no OCR) ─────────────
@@ -545,14 +571,21 @@ def _best_word_match(words, fkey: str):
 # for every script the PDF carries (Hebrew, Arabic, CJK, …). Highest
 # accuracy of all strategies, so it runs first when available.
 
+def match_word_boxes(words, found: str) -> List[Tuple[float, float,
+                                                      float, float]]:
+    """EVERY zone-fraction box for ``found`` among PDF ``words`` — a list of
+    (text, (fx0, fy0, fx1, fy1)) with fractions relative to the zone. Same
+    matching rules as OCR, incl. the CJK/short-word fuzzy guard."""
+    keyed = [(_norm(t), fb) for t, fb in (words or [])]
+    return _all_word_matches(keyed, _norm(found))
+
+
 def match_word_box(words, found: str) -> Optional[Tuple[float, float,
                                                         float, float]]:
-    """Best zone-fraction box for ``found`` among PDF ``words`` — a list of
-    (text, (fx0, fy0, fx1, fy1)) with fractions relative to the zone.
-    Returns the fraction box or None (same matching rules as OCR, incl. the
-    CJK/short-word fuzzy guard)."""
-    keyed = [(_norm(t), fb) for t, fb in (words or [])]
-    return _best_word_match(keyed, _norm(found))
+    """Best single zone-fraction box for ``found`` (see
+    ``match_word_boxes``), or None."""
+    hits = match_word_boxes(words, found)
+    return hits[0] if hits else None
 
 
 def rotate_frac_box(box: Tuple[float, float, float, float],
@@ -593,12 +626,12 @@ def frac_to_px(fbox: Tuple[float, float, float, float], W: int,
 
 # ── public entry point ────────────────────────────────────────────────
 
-def locate(crop, found: str, ocr_text: str,
-           blocks: Optional[list] = None, ocr_wh=None,
-           use_tesseract: bool = True, use_profile: bool = False,
-           tess_lang: str = "eng") -> Optional[Box]:
-    """Best pixel box for ``found`` inside ``crop`` (BGR numpy), most
-    reliable strategy first:
+def locate_all(crop, found: str, ocr_text: str,
+               blocks: Optional[list] = None, ocr_wh=None,
+               use_tesseract: bool = True, use_profile: bool = False,
+               tess_lang: str = "eng", max_boxes: int = 0) -> List[Box]:
+    """EVERY pixel box of ``found`` inside ``crop`` (BGR numpy), using the
+    most reliable strategy that produces a hit:
 
       1. OCR-blocks bbox — when the backend returned per-word boxes.
       2. Tesseract — local word localization (``use_tesseract``, default
@@ -606,27 +639,67 @@ def locate(crop, found: str, ocr_text: str,
          accurate.
       3. Projection profile — deterministic but error-prone (draws a wrong
          box ~40% of the time on dense tables), so OFF by default
-         (``use_profile``); kept for a no-dependency last resort.
+         (``use_profile``); kept for a no-dependency last resort. Always
+         a single box.
 
-    Returns None when nothing is confident → the caller draws no box."""
+    A misspelling is usually printed on several rows of the same table
+    ("Cude Protein" / "Cude Fat" / "Cude Fiber"), and a reviewer who sees
+    only one box may fix only one of them — so all occurrences of the SAME
+    strategy are returned, ordered best-first. ``max_boxes`` > 0 caps the
+    list (keeping the best ones) so a very common word cannot bury the
+    crop in rectangles. [] when nothing is confident → draw nothing."""
     if crop is None or getattr(crop, "size", 0) == 0 or not found:
-        return None
+        return []
     H, W = crop.shape[:2]
-    box = _block_box(found, blocks or [], W, H, ocr_wh)
-    if box is not None:
-        return box
-    if use_tesseract:
-        box = _tess_box(crop, found, tess_lang)
-        if box is not None:
-            return box
-    if use_profile:
+    hits = _block_boxes(found, blocks or [], W, H, ocr_wh)
+    if not hits and use_tesseract:
+        hits = _tess_boxes(crop, found, tess_lang)
+    if not hits and use_profile:
         loc = locate_token(found, ocr_text or "")
         if loc is not None:
             try:
-                return _cv_box(crop, loc)
+                box = _cv_box(crop, loc)
             except Exception:
-                return None
-    return None
+                box = None
+            if box is not None:
+                hits = [box]
+    hits = _dedupe_boxes(hits)
+    if max_boxes and max_boxes > 0:
+        hits = hits[:max_boxes]
+    return hits
+
+
+def _dedupe_boxes(boxes: List[Box], iou_thr: float = 0.5) -> List[Box]:
+    """Drop boxes that overlap an already-kept one (same word matched by
+    both a tight key and the line that contains it). Keeps input order, so
+    best-first survives."""
+    kept: List[Box] = []
+    for b in boxes:
+        if not any(_iou(b, k) >= iou_thr for k in kept):
+            kept.append(b)
+    return kept
+
+
+def _iou(a: Box, b: Box) -> float:
+    ax0, ay0, ax1, ay1 = a
+    bx0, by0, bx1, by1 = b
+    ix0, iy0 = max(ax0, bx0), max(ay0, by0)
+    ix1, iy1 = min(ax1, bx1), min(ay1, by1)
+    iw, ih = max(0, ix1 - ix0), max(0, iy1 - iy0)
+    inter = iw * ih
+    ua = (ax1-ax0)*(ay1-ay0) + (bx1-bx0)*(by1-by0) - inter
+    return inter / ua if ua > 0 else 0.0
+
+
+def locate(crop, found: str, ocr_text: str,
+           blocks: Optional[list] = None, ocr_wh=None,
+           use_tesseract: bool = True, use_profile: bool = False,
+           tess_lang: str = "eng") -> Optional[Box]:
+    """Best single pixel box for ``found`` (see ``locate_all``), or None."""
+    hits = locate_all(crop, found, ocr_text, blocks, ocr_wh,
+                      use_tesseract=use_tesseract, use_profile=use_profile,
+                      tess_lang=tess_lang, max_boxes=1)
+    return hits[0] if hits else None
 
 
 def draw(crop, box: Box):
@@ -645,21 +718,32 @@ def draw(crop, box: Box):
     return out
 
 
+def draw_boxes(crop, boxes):
+    """Draw every box in ``boxes`` on one copy of the crop."""
+    out = crop
+    for i, b in enumerate(boxes or []):
+        out = draw(out if i else crop, b)
+    return out
+
+
 def annotate(crop, found: str, ocr_text: str,
              blocks: Optional[list] = None, ocr_wh=None,
              use_tesseract: bool = True, use_profile: bool = False,
-             tess_lang: str = "eng"):
-    """Convenience: locate + draw. Returns the annotated crop, or the
+             tess_lang: str = "eng", max_boxes: int = 1):
+    """Convenience: locate + draw. ``max_boxes`` = 1 boxes only the best
+    occurrence (previous behavior); > 1 boxes up to that many occurrences
+    of the same word; 0 = unlimited. Returns the annotated crop, or the
     original crop unchanged when the word cannot be located."""
     try:
-        box = locate(crop, found, ocr_text, blocks, ocr_wh,
-                     use_tesseract=use_tesseract, use_profile=use_profile,
-                     tess_lang=tess_lang)
+        boxes = locate_all(crop, found, ocr_text, blocks, ocr_wh,
+                           use_tesseract=use_tesseract,
+                           use_profile=use_profile,
+                           tess_lang=tess_lang, max_boxes=max_boxes)
     except Exception:
-        box = None
-    if box is None:
+        boxes = []
+    if not boxes:
         return crop
     try:
-        return draw(crop, box)
+        return draw_boxes(crop, boxes)
     except Exception:
         return crop

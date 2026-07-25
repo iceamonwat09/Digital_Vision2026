@@ -395,6 +395,83 @@ def test_match_word_box_uses_fraction_payload():
     assert hl.match_word_box(words, "Salmon") is None
 
 
+# ── all-occurrences matching (a typo repeats across table rows) ───────
+
+def test_all_matches_returns_every_occurrence():
+    words = [("CUDE", "a"), ("PROTEIN", "p"), ("CUDE", "b"), ("CUDE", "c")]
+    assert hl._all_word_matches(words, "CUDE") == ["a", "b", "c"]
+    assert hl._best_word_match(words, "CUDE") == "a"   # single-box API
+
+
+def test_all_matches_one_tier_only():
+    # a literal hit exists → merely-similar words must NOT be added
+    words = [("SHREDDED", "exact"), ("SHREDED", "typo")]
+    assert hl._all_word_matches(words, "SHREDDED") == ["exact"]
+
+
+def test_all_matches_fuzzy_tier_when_no_literal():
+    words = [("SHREDED", "typo"), ("WATER", "w")]
+    assert hl._all_word_matches(words, "SHREDDED") == ["typo"]
+
+
+def test_match_word_boxes_all_fractions():
+    words = [("Cude", (0.1, 0.1, 0.2, 0.14)), ("Fat", (0.3, 0.1, 0.4, 0.14)),
+             ("Cude", (0.1, 0.2, 0.2, 0.24))]
+    got = hl.match_word_boxes(words, "Cude")
+    assert got == [(0.1, 0.1, 0.2, 0.14), (0.1, 0.2, 0.2, 0.24)]
+
+
+def test_dedupe_overlapping_boxes():
+    a = (10, 10, 50, 30)
+    near = (11, 11, 51, 31)        # same word, tight key + containing line
+    far = (10, 100, 50, 120)
+    assert hl._dedupe_boxes([a, near, far]) == [a, far]
+
+
+def test_locate_all_respects_max_boxes():
+    blocks = [{"text": "Cude", "bbox": [0.1, 0.1, 0.1, 0.05]},
+              {"text": "Cude", "bbox": [0.1, 0.3, 0.1, 0.05]},
+              {"text": "Cude", "bbox": [0.1, 0.5, 0.1, 0.05]}]
+    crop = np.full((400, 400, 3), 255, np.uint8)
+    allb = hl.locate_all(crop, "Cude", "", blocks=blocks, ocr_wh=[400, 400],
+                         use_tesseract=False)
+    assert len(allb) == 3
+    capped = hl.locate_all(crop, "Cude", "", blocks=blocks,
+                           ocr_wh=[400, 400], use_tesseract=False,
+                           max_boxes=2)
+    assert len(capped) == 2
+    # single-box API still returns exactly one
+    assert hl.locate(crop, "Cude", "", blocks=blocks, ocr_wh=[400, 400],
+                     use_tesseract=False) == allb[0]
+
+
+def test_draw_boxes_marks_all_and_keeps_shape():
+    crop = np.full((200, 300, 3), 255, np.uint8)
+    boxes = [(10, 10, 60, 40), (10, 100, 60, 130)]
+    out = hl.draw_boxes(crop, boxes)
+    assert out.shape == crop.shape
+    # both regions changed (red drawn), a third untouched region did not
+    assert not np.array_equal(out[10:40, 10:60], crop[10:40, 10:60])
+    assert not np.array_equal(out[100:130, 10:60], crop[100:130, 10:60])
+    assert np.array_equal(out[160:190, 200:290], crop[160:190, 200:290])
+
+
+def test_annotate_default_is_single_box():
+    # default max_boxes=1 keeps the previous one-box behavior
+    blocks = [{"text": "Cude", "bbox": [0.1, 0.1, 0.1, 0.05]},
+              {"text": "Cude", "bbox": [0.1, 0.5, 0.1, 0.05]}]
+    crop = np.full((400, 400, 3), 255, np.uint8)
+    one = hl.annotate(crop, "Cude", "", blocks=blocks, ocr_wh=[400, 400],
+                      use_tesseract=False)
+    many = hl.annotate(crop, "Cude", "", blocks=blocks, ocr_wh=[400, 400],
+                       use_tesseract=False, max_boxes=6)
+    assert one.shape == crop.shape and many.shape == crop.shape
+    # the second occurrence is only marked when several boxes are allowed
+    y0, y1, x0, x1 = 200, 220, 40, 80
+    assert np.array_equal(one[y0:y1, x0:x1], crop[y0:y1, x0:x1])
+    assert not np.array_equal(many[y0:y1, x0:x1], crop[y0:y1, x0:x1])
+
+
 # ── zone_words: real PDF text-layer extraction ────────────────────────
 
 def test_zone_words_on_synthetic_pdf(tmp_path):
