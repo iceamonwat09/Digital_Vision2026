@@ -12,6 +12,8 @@
    scope เฉพาะโหมดที่ตั้งใจ. โหมดหลัก: **Live USB / RTSP / STREAM / Snapshot / Label / Artwork**.
 2. **ความแม่นของการตรวจ (QC) สำคัญที่สุด** — ห้ามแลกความแม่นเพื่อความเร็ว. การเร่งความเร็ว
    ต้องคงผลตรวจให้เท่าเดิม (พิสูจน์ด้วย `verify_onnx.py` ก่อนเปิดใช้).
+   - **ผลที่ผิดแบบมั่นใจ แย่กว่าไม่แสดงผล** — ใช้กับทุกชั้นที่ "ชี้จุด" ให้คนดู (เช่นกรอบแดงชี้คำผิด):
+     ถ้าไม่มั่นใจให้**ไม่แสดง** ดีกว่าเดา เพราะคนจะเชื่อสิ่งที่ระบบชี้แล้วมองข้ามของจริง.
 3. **วางแผน + ให้ผู้ใช้ยืนยันก่อนลงมือ** งานที่มีผลต่อโครงสร้าง/พฤติกรรม.
 4. **ตรวจสอบความถูกต้องหลังทำ อย่างเป็นกลาง** (ไม่เข้าข้างตัวเอง) — ไล่ edge case + fallback.
 5. Deploy: ผู้ใช้ `git pull` แล้ว **`py -3.9 app.py`** บนสถานี. ยืนยันโค้ดใหม่รันจริงด้วย
@@ -156,6 +158,65 @@ verify_openvino.py ต้อง PASS ทุก device×imgsz (4) เช็คต
 
 ---
 
+## 🖍️ Artwork — กรอบแดงชี้ "คำที่มีปัญหา" (display-only)
+
+การ์ด "รายการที่พบ" วาด **กรอบแดงบนคำที่ผิดจริง** ในรูป crop. **แสดงผลอย่างเดียว 100%** —
+ไม่แตะ OCR/ผลตรวจ/verdict/การนับ. โค้ดอยู่ใน `artwork_check/highlight.py` (โมดูลใหม่),
+เรียกจาก `pipeline.zone_crop_jpg()` เมื่อ `/api/artwork/<id>/crop?...&hl=<คำ>&zid=<โซน>`.
+
+**สถาปัตยกรรม 4 ชั้น** (`highlight.locate_all()` — ไล่จากแม่นสุด ชั้นแรกที่เจอชนะ):
+
+| ชั้น | วิธี | ใช้เมื่อ | ความแม่น (ไฟล์จริง) |
+|---|---|---|---|
+| ① | `blocks[].bbox` จาก OCR backend | Gemini คืน bbox มา | ขึ้นกับ backend |
+| ② | **PDF text-layer word box** (`pdf_ingest.zone_words()`) | โซน `engine == "pdf-text"` | **เป๊ะระดับ vector, ทุกภาษา** |
+| ③ | **Tesseract** (`_tess_boxes`) | ไฟล์ outline / ภาพถ่าย | 89% (benchmark), 9/9 บนภาพถ่ายจริง |
+| ④ | ไม่วาด | ไม่มั่นใจ | — |
+
+- **ชั้น ② ดีที่สุดและฟรี** — ไม่ต้อง OCR/traineddata, รองรับฮีบรู/อาหรับ/จีน/ไทยทันที.
+  ตรวจด้วย `ArtworkDocument.zone_words(bbox)` → `[(text, (fx0,fy0,fx1,fy1))]` เป็น**สัดส่วนในโซน**
+  → `rotate_frac_box()` (ตามการหมุนโซน) → `frac_to_px()`.
+- **`_cv_box` (projection profile) = ชั้นสำรองสุดท้าย ปิดไว้ (`HIGHLIGHT_USE_PROFILE=False`)** —
+  benchmark พบว่า **วาดผิดคำ ~40%** บนตารางหนาแน่น. ห้ามเปิดเป็น default.
+- **วาดทุกจุดที่คำปรากฏ** (`HIGHLIGHT_MAX_BOXES=6`) — คำผิดมักพิมพ์ซ้ำหลายแถว
+  (จริง: `Cude` โผล่ 3 จุดในตารางเดียว) วาดจุดเดียว = ผู้ตรวจแก้ไม่ครบ.
+
+**⚠️ กับดักที่เจอมาแล้ว (อย่าทำซ้ำ):**
+1. **fuzzy match กับคำสั้น/CJK = กรอบผิดคำ** — จีน `灰分`(เถ้า) เคยจับกรอบเดียวกับ `水分`(ความชื้น)
+   เพราะต่างกัน 1 ตัวอักษร. `_all_word_matches()` จึง **fuzzy เฉพาะคำ ascii ยาว ≥5** เท่านั้น
+   (พอสำหรับ typo อังกฤษที่ตั้งใจจับ) — คำสั้น/CJK/RTL ต้อง exact/substring. **กรอบผิดแย่กว่าไม่มีกรอบ**.
+2. **คืน "tier เดียว"** — ถ้ามี literal match แล้ว ห้ามเอา fuzzy มาปน (ไม่งั้นคำที่แค่คล้ายจะติดกรอบมาด้วย).
+3. **ตั้ง `TESS_LANG` เป็นภาษาที่ไม่ได้ติดตั้ง = Tesseract error ทั้ง call → กรอบหายหมดแม้แต่อังกฤษ**.
+   `_resolve_langs()` จึงกรองเหลือเฉพาะภาษาที่ `get_languages()` ยืนยัน (fallback → `eng`).
+4. **bbox ของ Gemini มีหลาย convention** (0..1 / 0..1000 / pixel) แยกไม่ออกถ้าไม่รู้ขนาดภาพ →
+   `ocr.read_zone()` เก็บ **`ocr_wh`** (ขนาด crop ที่ OCR เห็นจริง) ให้ `_infer_scale()` ตัดสิน **ต่อโซน**
+   จากพิกัดใหญ่สุดของทุก block (block เดียวใกล้มุมตัดสินไม่ได้).
+5. **`_otsu()` คืน threshold 0 ได้** บนภาพ bimodal สะอาด → ต้องใช้ `gray <= thr` (ถ้าใช้ `<` ชั้น CV ตาย
+   เงียบ คืน None ตลอด).
+
+**Tesseract (ชั้น ③) — optional dependency:**
+- `_find_tesseract_cmd()` **auto-detect ให้** ตามลำดับ: env `ARTWORK_TESSERACT_CMD` → PATH →
+  `C:\Program Files\Tesseract-OCR\tesseract.exe` → `%LOCALAPPDATA%\Programs\Tesseract-OCR\`.
+  **ไม่ต้องตั้ง PATH เอง**.
+- ติดตั้ง: UB-Mannheim installer (ติ๊ก Additional language data: Arabic/Hebrew/Chinese/Thai) +
+  `py -3.9 -m pip install pytesseract`. **ไม่ติดตั้ง = ไม่มีกรอบ แต่ระบบทำงานปกติ** (ไม่ error).
+- หลายภาษา: `ARTWORK_HIGHLIGHT_TESS_LANG=eng+ara+heb+chi_tra+tha`.
+- **ติดตั้งที่ server เท่านั้น** — วาดกรอบฝั่ง server ส่ง JPEG ให้ client (เครื่อง client ไม่ต้องลงอะไร).
+
+**Config (ทุกตัว opt-out ได้ — `artwork_check/config.py`):**
+`HIGHLIGHT_DEFECT_WORD` (ปิดทั้งฟีเจอร์) · `HIGHLIGHT_USE_PDF_TEXT` · `HIGHLIGHT_USE_TESSERACT` ·
+`HIGHLIGHT_USE_PROFILE` (default False) · `HIGHLIGHT_TESSERACT_LANG` · `HIGHLIGHT_MAX_BOXES`
+
+**ผลทดสอบ end-to-end (production path, 5 artwork จริง + 1 ภาพถ่าย):**
+- Cosma/GimCat (มี text layer) → ชั้น ② **8/8** เป๊ะ · StarKist/TerraMadre/JohnWest (outline) → ชั้น ③
+- รวม **25/25** เมื่อตั้ง `eng+ara` (23/25 ด้วย `eng` ล้วน — อาหรับ MISS = ไม่วาด ไม่ error)
+- ภาพถ่ายกล้องจริง (Puffy Nee Nee): **9/9** รวม `Cude`/`Phosphours` ที่เป็นคำผิดจริง
+- **ไม่มีกรอบวางผิดแม้แต่จุดเดียวในทุกไฟล์**
+- ⚠️ อ่อนกับ **โลโก้/badge สไตล์ไลซ์บนกราฟิก** (SHINYCAT/GLUTEN FREE) — ปกติ ไม่ค่อยถูกฟ้องเป็น defect
+- ⚠️ **ทุกครั้งที่ "ดูเหมือนพัง" ตอนทดสอบ = พิกัดโซนผิด ไม่ใช่เมธอด** — verify โซนด้วยการ render ดูก่อนเสมอ
+
+---
+
 ## 🖥️ Entrypoints & HTTPS
 
 - **`app.py`** = entrypoint หลัก (ผู้ใช้รัน `py -3.9 app.py`). `threaded=True`. รองรับ HTTPS.
@@ -177,6 +238,10 @@ verify_openvino.py ต้อง PASS ทุก device×imgsz (4) เช็คต
   — **`git pull`/`checkout` ไม่ลบ** (คนละที่กับโฟลเดอร์ repo). เช็ค: `py -3.9 -c "from spellchecker import SpellChecker"`.
   หมายเหตุ: คำขาดที่ "ยังเป็นคำจริง" (เช่น `Sunflower Oil`→`Sunflower`) ไม่มี checker ตัวไหนจับได้ →
   ต้องพึ่งการลากโซนให้ครบ + เทียบ panel. ส่วนคอลัมน์ AI (🤖) เป็น advisory เท่านั้น เชื่อเป็น QC ไม่ได้.
+- **`pytesseract` + tesseract binary = ชั้นวาดกรอบแดง (display-only)** — รูปแบบ "หายเงียบ" เดียวกับ
+  `pyspellchecker` แต่**ไม่อันตรายเท่า**: ไม่มี = ไม่มีกรอบแดงบนไฟล์ outline/ภาพถ่าย แต่ผลตรวจ QC
+  เท่าเดิมทุกอย่าง (ไม่ใช่จุดบอด QC). เช็ค: `py -3.9 -c "import pytesseract; print(pytesseract.get_tesseract_version())"`.
+  ต่างจาก pyspellchecker ตรงที่ **ต้องลง binary แยกจาก pip** (ดูหัวข้อ Artwork กรอบแดง).
 - **⚠️ Deploy IIS ในอนาคต (ยังไม่ทำ — บันทึกไว้ก่อน):** package ที่ลง user-site ของ dev
   **IIS Application Pool identity เข้าไม่ถึง** → ชั้น dict หายเงียบใน production. วิธีแก้ตอน deploy คือทำ
   **venv ในโฟลเดอร์โปรเจกต์** (`py -3.9 -m venv .venv` + `pip install -r requirements.txt`) แล้วชี้ IIS
@@ -193,9 +258,12 @@ verify_openvino.py ต้อง PASS ทุก device×imgsz (4) เช็คต
 - HW สถานี: **i7-1165G7** (4C/8T, 15W, AVX-512), 16GB DDR4 (single-channel), Iris Xe, Win10 Pro, Python 3.9.13.
 - inference bestX (seg): **iGPU (OpenVINO) ≈ 45-50ms/เฟรม (~20-22 FPS)** = ตัวจริงปัจจุบัน;
   ONNX CPU ≈ 280ms (~2.7-3 FPS) = ชั้น fallback; PyTorch ≈ 315ms = fallback สุดท้าย.
-- Repo: `iceamonwat09/digital_vision2026`. Dev branch: `claude/dent-detection-camera-access-ub11gy`.
+- Repo: `iceamonwat09/digital_vision2026`. Dev branch ปัจจุบัน: `claude/artwork-red-box-drawing-lpqhpo`
+  (ก่อนหน้า: `claude/dent-detection-camera-access-ub11gy`). **ห้าม push ไป main**.
 - SQL Server: 172.32.0.50/VisionIQ. Defect log ผ่าน `sp_log_defect` (เก็บภาพ base64).
 - Tests: `pytest tests/` (artwork/label/barcode — ไม่ครอบคลุม camera/live loop).
+  ⚠️ `tests/test_inspection_golden.py` **fail 5 ตัวอยู่แล้ว** (pre-existing, `NameError: FieldResult`
+  ในโมดูล Label Paper) — ไม่เกี่ยวกับ artwork. ยืนยันด้วย `git stash` ก่อนโทษการแก้ของตัวเอง.
 
 ---
 
@@ -206,4 +274,6 @@ verify_openvino.py ต้อง PASS ทุก device×imgsz (4) เช็คต
 - [ ] การนับ/DB logging เดิมไม่ถูกแตะ? (ถ้าแตะ inference_loop ให้ไล่ดู)
 - [ ] `python -c "import ast; ast.parse(open('app.py').read())"` ผ่าน?
 - [ ] bump `CONFIG_VERSION` ถ้าผู้ใช้ต้อง verify?
+- [ ] ถ้าแตะชั้นที่ "ชี้จุดให้คนดู" — เคสไม่มั่นใจ **ไม่แสดง** แทนที่จะเดา? (กฎเหล็ก 2)
+- [ ] dependency ใหม่เป็น optional + auto-fallback? (ไม่มี = ฟีเจอร์หาย ไม่ใช่ระบบพัง)
 - [ ] commit message ชัด + push ไป dev branch (ไม่ใช่ main)?

@@ -7,7 +7,7 @@
 |---|---|---|
 | **ตรวจจับสด** (Live Detection) | ตำหนิกระป๋อง/บรรจุภัณฑ์แบบเรียลไทม์จากกล้อง | YOLOv8 (Ultralytics) |
 | **ตรวจฉลากกระดาษ** (Label Paper) | เทียบฉลากที่พิมพ์จริงกับ master PDF (สี ΔE2000 + ข้อความ) | PyMuPDF + scikit-image + OCR |
-| **ตรวจ Artwork** (Artwork Proof Check) | สะกดคำ / ตัวเลข / ความตรงกันของ panel บนไฟล์ artwork ก่อนพิมพ์ | OCR (N8N→Gemini) + 4 ชั้นตรวจ + คำแปล |
+| **ตรวจ Artwork** (Artwork Proof Check) | สะกดคำ / ตัวเลข / ความตรงกันของ panel บนไฟล์ artwork ก่อนพิมพ์ | OCR (N8N→Gemini) + 4 ชั้นตรวจ + คำแปล + กรอบแดงชี้คำผิดในรูป |
 
 > เดิมโปรเจกต์นี้เริ่มจากระบบตรวจขวดน้ำด้วย YOLO และถูกพัฒนาต่อเป็นระบบตรวจ
 > บรรจุภัณฑ์หลายโหมดของ Thai Union ฐานข้อมูลย้ายจาก MongoDB → **SQL Server (VisionIQ)**
@@ -39,8 +39,8 @@
 
 - **Backend**: Python 3.8+, Flask, OpenCV
 - **Detection**: Ultralytics YOLOv8 (โหมดตรวจจับสด)
-- **Label/Artwork**: PyMuPDF (render PDF + text layer), scikit-image (ΔE CIEDE2000),
-  python-Levenshtein, pyspellchecker
+- **Label/Artwork**: PyMuPDF (render PDF + text layer + พิกัดคำ), scikit-image (ΔE CIEDE2000),
+  python-Levenshtein, pyspellchecker, Tesseract (ทางเลือก — หาตำแหน่งคำเพื่อวาดกรอบแดง)
 - **OCR / แปลภาษา**: N8N webhook ที่หน้า Gemini 2.5 Flash (Vertex AI หรือ AI Studio)
 - **Database**: SQL Server 2014 (`pyodbc`) — เก็บประวัติการตรวจ
 - **Frontend**: HTML5 / CSS3 / JavaScript (Jinja2 templates), Chart.js
@@ -53,6 +53,9 @@
 - **ข้อมูลแต่ละโหมดแยกโฟลเดอร์** — `data/artwork_check/` ลบทิ้งทั้งก้อนได้โดยไม่กระทบฟีเจอร์อื่น
 - **กฎเหล็กของโหมด Artwork**: ระบบ **ห้ามเดา/เสนอคำเองในส่วนที่ตัดสิน PASS/FAIL**
   — การตรวจบอกได้แค่ "คำนี้ไม่อยู่ในพจนานุกรม" ส่วนคำแปล/คำแนะนำเป็น advisory แยกแท็บ
+- **ไม่มั่นใจ = ไม่แสดง** — ทุกชั้นที่ "ชี้จุดให้คนดู" (เช่นกรอบแดงชี้คำผิด) ถ้าไม่มั่นใจจะ
+  ไม่วาดเลย ดีกว่าเดา เพราะคนจะเชื่อสิ่งที่ระบบชี้แล้วมองข้ามของจริง
+- **dependency เสริมต้อง fallback ได้** — ไม่ติดตั้ง = ฟีเจอร์นั้นหายไปเงียบๆ แต่ระบบไม่พัง
 
 ---
 
@@ -77,7 +80,12 @@ pip install -r requirements.txt
 ```bash
 pip install pyspellchecker      # โหมด Artwork: ชั้นตรวจ dictionary (SPELL_FAIL)
 apt-get install libzbar0 && pip install pyzbar   # ถอดบาร์โค้ด EAN-13 แม่นขึ้น
+pip install pytesseract         # โหมด Artwork: กรอบแดงชี้คำผิดบนไฟล์ outline/ภาพถ่าย
+                                # (ต้องติดตั้ง tesseract binary แยกด้วย — ดูหัวข้อกรอบแดง)
 ```
+
+> ⚠️ **`pyspellchecker` หายไป = จุดบอด QC** (ชั้น dictionary ถูกข้ามเงียบๆ คำผิดขึ้น ✓
+> เหมือนไม่มีปัญหา) ต่างจาก `pytesseract` ที่หายแล้วแค่ไม่มีกรอบแดง ผลตรวจยังเท่าเดิม
 
 ---
 
@@ -155,6 +163,18 @@ FRAME_CAPTURE_EDGE_MARGIN = 0.02   # กระป๋องต้องห่า�
 | `ARTWORK_OCR_DPI` | `450` | ความละเอียดที่ render โซนส่ง OCR |
 | `ARTWORK_PREVIEW_DPI` | `150` | ความละเอียด preview ในเบราว์เซอร์ |
 | `ARTWORK_SPELL_LANGS` | `en,es,fr,de,pt,it,ru,ar` | ภาษาที่ชั้น dictionary ตรวจ (มีผลต่อ verdict) |
+
+**กรอบแดงชี้คำที่มีปัญหา** (display-only — ไม่มีตัวไหนกระทบ PASS/FAIL):
+
+| ตัวแปร | ค่า default | หน้าที่ |
+|---|---|---|
+| `ARTWORK_HIGHLIGHT_DEFECT` | `1` | เปิด/ปิดฟีเจอร์ทั้งหมด (`0` = กลับไปเป็นภาพ crop เปล่า) |
+| `ARTWORK_HIGHLIGHT_MAX_BOXES` | `6` | จำนวนกรอบสูงสุดต่อ 1 defect (`1` = จุดเดียว, `0` = ไม่จำกัด) |
+| `ARTWORK_HIGHLIGHT_TESS_LANG` | `eng` | ภาษาที่ Tesseract ใช้หาคำ เช่น `eng+ara+heb+chi_tra+tha` (ภาษาที่ไม่ได้ติดตั้งถูกตัดออกอัตโนมัติ) |
+| `ARTWORK_TESSERACT_CMD` | (ว่าง) | path เต็มของ `tesseract.exe` — ปกติไม่ต้องตั้ง ระบบ auto-detect ให้ |
+| `ARTWORK_HIGHLIGHT_PDF_TEXT` | `1` | ชั้น ② ใช้พิกัดคำจาก PDF text layer |
+| `ARTWORK_HIGHLIGHT_TESSERACT` | `1` | ชั้น ③ ใช้ Tesseract |
+| `ARTWORK_HIGHLIGHT_PROFILE` | `0` | ชั้นสำรอง (projection profile) — **ปิดไว้: วาดผิดคำ ~40% บนตารางหนาแน่น** |
 
 ---
 
@@ -344,7 +364,8 @@ master PDF ต่อ SKU เก็บใน `data/label_paper/skus/` (ดู REA
    แล้วรันทุกชั้นตรวจ
 4. **อ่านผล** ในแผงขวา มี 2 แท็บ:
    - **🔍 ผลตรวจ** — verdict (PASS/REVIEW/FAIL), สรุปต่อชนิด, overlay ไฮไลต์โซนผิด,
-     รายการ defect พร้อมภาพ crop ความละเอียดสูง
+     รายการ defect พร้อมภาพ crop ความละเอียดสูง **+ กรอบแดงชี้คำที่มีปัญหาในรูป**
+     (ดูหัวข้อถัดไป)
    - **📖 ข้อความ + คำแปล** — ตารางต่อบรรทัด: ข้อความบนฉลาก | คำแปล EN | สถานะ
      (ไฮไลต์คำที่สะกดน่าสงสัย + คำแนะนำ) — กดปุ่ม "แปล/อธิบาย" เพื่อแปล
 
@@ -361,6 +382,43 @@ master PDF ต่อ SKU เก็บใน `data/label_paper/skus/` (ดู REA
 **ทนต่อ noise ของ OCR**: ชั้นเทียบจะให้อภัยความต่างของ *เครื่องหมาย/ช่องว่าง/
 เลขอารบิก↔อารบิก* (เช่น `EL - OBOUR` vs `ELOBOUR`, `٧٠٪` vs `%70%`) แต่ยังจับ
 ความต่างระดับ *ตัวอักษร/ตัวเลขจริง* (`16785` vs `16786`, `CALIDAD` vs `CALIDDD`)
+
+### 🖍️ กรอบแดงชี้ "คำที่มีปัญหา" ในรูป
+
+ในการ์ด "รายการที่พบ" ระบบ **วาดกรอบแดงทับคำที่ผิดจริง** บนภาพ crop — ไม่ต้องไล่หาเอง
+ว่าคำไหนในรูปคือคำที่ถูกฟ้อง **แสดงผลอย่างเดียว ไม่กระทบผลตรวจ PASS/FAIL**
+
+**หาตำแหน่งคำแบบ 4 ชั้น** (ไล่จากแม่นสุด ชั้นแรกที่เจอชนะ):
+
+| ชั้น | วิธี | ใช้เมื่อ |
+|---|---|---|
+| ① | `bbox` ที่ OCR backend (Gemini) คืนมา | backend คืน bbox |
+| ② | **พิกัดคำจาก PDF text layer** | ไฟล์ PDF ที่ยังมี text layer — เป๊ะระดับ vector, **รองรับทุกภาษาโดยไม่ต้องลง OCR เพิ่ม** |
+| ③ | **Tesseract** (local) | ไฟล์ outline (artwork ทั่วไป) / ภาพถ่าย |
+| ④ | ไม่วาดกรอบ | หาไม่เจอ/ไม่มั่นใจ |
+
+- **วาดครบทุกจุดที่คำนั้นปรากฏ** — คำผิดมักพิมพ์ซ้ำหลายแถว (เช่น `Cude` โผล่ 3 จุดใน
+  ตารางเดียว) ถ้าวาดจุดเดียวผู้ตรวจอาจแก้ไม่ครบ (จำกัดที่ `ARTWORK_HIGHLIGHT_MAX_BOXES`)
+- **หลักการ: ไม่มั่นใจ = ไม่วาด** — กรอบที่ชี้ผิดคำอันตรายกว่าไม่มีกรอบ
+
+**ติดตั้ง Tesseract (ทางเลือก — ทำเฉพาะถ้าต้องการกรอบบนไฟล์ outline/ภาพถ่าย):**
+
+1. ติดตั้ง binary จาก [UB-Mannheim](https://github.com/UB-Mannheim/tesseract/wiki) —
+   ตอนติดตั้งกาง **"Additional language data"** แล้วติ๊กภาษาที่ใช้ (Arabic / Hebrew /
+   Chinese / Thai) **ไม่ต้องติ๊ก Add to PATH** (ระบบหา `tesseract.exe` เองอัตโนมัติ)
+2. `py -3.9 -m pip install pytesseract`
+3. หลายภาษา: ตั้ง env `ARTWORK_HIGHLIGHT_TESS_LANG=eng+ara+heb+chi_tra+tha`
+   (ภาษาที่ไม่ได้ติดตั้งจะถูกตัดออกอัตโนมัติ — อังกฤษไม่มีวันหาย)
+4. รีสตาร์ต `app.py` แล้ว **อัปโหลด + ส่งตรวจใหม่** (รายงานเก่าไม่มีข้อมูลที่เก็บเพิ่ม)
+
+> **ติดตั้งที่เครื่อง server เท่านั้น** — กรอบถูกวาดฝั่ง server แล้วส่งเป็นรูปให้เบราว์เซอร์
+> เครื่อง client (PC/มือถือที่เปิดดู) **ไม่ต้องติดตั้งอะไรเลย**
+> **ไม่ติดตั้ง Tesseract ก็ใช้งานได้ปกติ** — แค่ไม่มีกรอบแดงบนไฟล์ outline (ชั้น ② ยังทำงาน)
+
+**ผลทดสอบกับ artwork จริง** (John West / StarKist / TERRA MADRE / GimCat / Cosma +
+ภาพถ่ายจากกล้อง): **25/25** เมื่อเปิด `eng+ara`, ภาพถ่ายจริง **9/9** (รวมคำผิดจริง
+`Cude`, `Phosphours`) และ**ไม่มีกรอบวางผิดตำแหน่งเลยแม้แต่จุดเดียว**
+จุดที่ยังอ่อน: โลโก้/badge ที่เป็นตัวอักษรสไตล์ไลซ์บนกราฟิก (มักไม่ใช่สิ่งที่ถูกฟ้องอยู่แล้ว)
 
 ### กฎเรื่องการเสนอคำ (สำคัญ)
 
@@ -427,7 +485,9 @@ approve** (ถ้าบน artwork สะกดเพี้ยนจะถูก
 - `POST /api/artwork/<id>/inspect` — ตรวจทุกชั้น
 - `POST /api/artwork/<id>/snap` — ขยับกรอบโซนให้พอดีเนื้อหา
 - `POST /api/artwork/<id>/translate` — สร้างตารางข้อความ + แปล EN
-- `GET /api/artwork/<id>/preview.png` · `.../overlay.png` · `.../crop` · `.../report`
+- `GET /api/artwork/<id>/preview.png` · `.../overlay.png` · `.../report`
+- `GET /api/artwork/<id>/crop?x&y&w&h` — ภาพ crop ของโซน (`&doc=a|b`, `&rotate=0|90|180|270|auto`)
+  - `&hl=<คำ>&zid=<zone id>` — **วาดกรอบแดงทับคำนั้นในรูป** (ข้ามเงียบถ้าหาไม่เจอ)
 - `GET/POST /api/artwork/templates` · `GET /api/artwork/templates/<name>`
 - `GET /api/artwork/vocab` · `GET/POST /api/artwork/vocab/<brand>`
 - `GET /api/artwork/history` · `DELETE /api/artwork/<id>`
@@ -457,6 +517,7 @@ approve** (ถ้าบน artwork สะกดเพี้ยนจะถูก
 │   ├── zones.py                 #   เสนอโซน / snap / template
 │   ├── ocr.py                   #   อ่านข้อความต่อโซน (PDF text / N8N)
 │   ├── checks.py                #   4 ชั้นตรวจ
+│   ├── highlight.py             #   หาตำแหน่งคำที่ผิด + วาดกรอบแดง (display-only)
 │   ├── translate.py             #   ตารางข้อความ + แปล EN + คำแนะนำ
 │   ├── vocab.py · report.py · pdf_ingest.py · config.py
 │   ├── n8n_artwork_ocr.workflow.json        # import เข้า N8N
@@ -507,6 +568,32 @@ python diagnose_snapshot.py
 ---
 
 ## สรุปการปรับปรุงล่าสุด (Changelog)
+
+### 🖍️ Artwork: กรอบแดงชี้ "คำที่มีปัญหา" ในรูป (24 ก.ค. 2026)
+
+ตอบโจทย์ "เห็นรายการ defect แล้ว แต่ไม่รู้ว่าคำไหนในรูปคือคำที่ถูกฟ้อง"
+
+- **วาดกรอบแดงทับคำที่ผิดจริง** บนภาพ crop ในการ์ด "รายการที่พบ" —
+  **display-only 100%** ไม่แตะ OCR / ผลตรวจ / verdict / การนับ และ scope เฉพาะโหมด Artwork
+- **หาตำแหน่งแบบ 4 ชั้น** (ชั้นแรกที่เจอชนะ):
+  ① `bbox` จาก OCR backend → ② **พิกัดคำจาก PDF text layer** (เป๊ะระดับ vector,
+  ทุกภาษา, ไม่ต้อง OCR) → ③ **Tesseract** (ไฟล์ outline / ภาพถ่าย) → ④ ไม่วาด
+- **วาดครบทุกจุดที่คำปรากฏ** (default สูงสุด 6) — คำผิดมักพิมพ์ซ้ำหลายแถว
+  (จริง: `Cude` โผล่ 3 จุดในตารางเดียว) วาดจุดเดียวทำให้ผู้ตรวจแก้ไม่ครบ
+- 🛡️ **หลักการ "ไม่มั่นใจ = ไม่วาด"** — กรอบที่ชี้ผิดคำอันตรายกว่าไม่มีกรอบ
+  ทุก fallback จบที่ "คืนภาพ crop เดิม" เหมือนก่อนมีฟีเจอร์นี้
+- 🛡️ **fuzzy match รัดกุม** — จับคู่แบบ edit-distance เฉพาะคำอังกฤษยาว ≥5 ตัว
+  (พอสำหรับ typo ที่ตั้งใจจับ) ส่วนคำสั้น/จีน/อาหรับต้องตรงเป๊ะ **กันเคสจริงที่
+  `灰分`(เถ้า) เคยจับกรอบเดียวกับ `水分`(ความชื้น) เพราะต่างกันตัวเดียว**
+- 🛡️ **ภาษาที่ไม่ได้ติดตั้งถูกตัดออกอัตโนมัติ** — กันเคสตั้ง `eng+ara+tha` บนเครื่องที่มีแค่
+  `eng` แล้ว Tesseract error ทั้ง call จนกรอบหายหมดแม้แต่อังกฤษ
+- 🔍 **auto-detect `tesseract.exe`** (PATH → `C:\Program Files\Tesseract-OCR\` →
+  `%LOCALAPPDATA%\Programs\`) — ไม่ต้องตั้ง PATH เอง; ไม่ติดตั้ง = ไม่มีกรอบ ระบบไม่พัง
+- 🧪 **ทดสอบกับ artwork จริง 5 ไฟล์ + ภาพถ่ายจากกล้อง** (John West EN+AR, StarKist EN+HE,
+  TERRA MADRE, GimCat EU จิ๋วหลายภาษา, Cosma text-layer):
+  **25/25** ผ่าน production path จริงเมื่อเปิด `eng+ara`; ภาพถ่าย **9/9**
+  (รวมคำผิดจริง `Cude`, `Phosphours`); **ไม่มีกรอบวางผิดตำแหน่งเลยแม้แต่จุดเดียว**
+- ปิดได้ทันที: `ARTWORK_HIGHLIGHT_DEFECT=0` (หรือปรับรายชั้น/จำนวนกรอบผ่าน env)
 
 ### 🎮 OpenVINO iGPU (Iris Xe) — ✅ VERIFIED & ENABLED บนสถานี (2 ก.ค. 2026)
 - **ผลจริงบนสถานี**: `bestX.pt` (YOLOv8m-seg, production) live 480 →
@@ -654,16 +741,20 @@ python diagnose_snapshot.py
 python -m pytest tests/ -q
 ```
 
-ชุดเทสต์ครอบคลุมทั้งโหมดฉลากกระดาษและ Artwork (~146 ฟังก์ชันทดสอบใน 6 ไฟล์):
+ชุดเทสต์ครอบคลุมทั้งโหมดฉลากกระดาษและ Artwork (266 ฟังก์ชันทดสอบใน 7 ไฟล์):
 
 | ไฟล์ | ครอบคลุม |
 |---|---|
 | `test_artwork_checks.py` | 4 ชั้นตรวจ Artwork, ความทนต่อ OCR noise, snap-to-content, ตารางคำแปล + คำแนะนำ + cache |
+| `test_artwork_highlight.py` | กรอบแดงชี้คำผิด: หาตำแหน่งคำ, แปลงพิกัด bbox 3 convention, พิกัดคำจาก PDF text layer, การหมุนกรอบ, วาดทุกจุด + cap, auto-detect tesseract, กรองภาษา, กันกรอบผิดคำสั้น/CJK |
 | `test_barcode.py` | ถอดบาร์โค้ด + ตรวจ check digit (GS1) |
 | `test_perspective.py` | perspective warp / parse corners ของโหมดฉลากกระดาษ |
 | `test_pixel_masks.py` | edge/glare ignore mask ก่อนคิด ΔE |
 | `test_white_balance.py` | auto white-balance เทียบ master |
 | `test_inspection_golden.py` | golden test ของ pipeline ตรวจฉลากแบบ end-to-end |
+
+> ⚠️ `test_inspection_golden.py` มี **5 เทสต์ที่ fail อยู่เดิม** (`NameError: FieldResult`
+> — ปัญหา import ในโมดูล Label Paper) ไม่เกี่ยวกับโหมด Artwork เทสต์ที่เหลือผ่านทั้งหมด
 
 ---
 
