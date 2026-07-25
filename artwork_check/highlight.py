@@ -487,7 +487,6 @@ def _tess_box(crop, found: str, lang: str = "eng") -> Optional[Box]:
     if not fkey:
         return None
     words = []
-    best = None
     n = len(data.get("text", []))
     for i in range(n):
         k = _norm(data["text"][i])
@@ -497,24 +496,99 @@ def _tess_box(crop, found: str, lang: str = "eng") -> Optional[Box]:
                int(data["left"][i] + data["width"][i]),
                int(data["top"][i] + data["height"][i]))
         words.append((k, box))
+    return _best_word_match(words, fkey)
+
+
+def _best_word_match(words, fkey: str):
+    """``words``: list of (normalized_key, payload). Return the payload of
+    the best match for ``fkey`` (exact → substring → tightened fuzzy), or
+    None.
+
+    The fuzzy fallback runs ONLY for ASCII-Latin words of length >= 5. A
+    1–2 character edit on a short or non-Latin word is a DIFFERENT word —
+    e.g. the Chinese 灰分 (ash) vs 水分 (moisture) differ by one glyph — so
+    an edit-distance match there draws a confidently-WRONG box, which in a
+    QC tool is worse than drawing none. Latin typos the mode exists to
+    catch ("SHREDDED"→"REDDED") are long and ASCII, so they still fuzzy."""
+    if not fkey:
+        return None
+    best = None
+    for k, payload in words:
+        if not k:
+            continue
         if k == fkey or fkey in k or (k in fkey and len(k) >= 3):
             score = abs(len(k) - len(fkey))
             if best is None or score < best[0]:
-                best = (score, box)
+                best = (score, payload)
     if best is not None:
         return best[1]
-    # fuzzy fallback: the closest word within a small edit budget (catches
-    # OCR reading the printed word slightly differently than the backend)
+    if not (fkey.isascii() and len(fkey) >= 5):
+        return None
     try:
         from .checks import levenshtein
     except Exception:
         return None
     fb = None
-    for k, box in words:
+    for k, payload in words:
+        if not k:
+            continue
         d = levenshtein(k, fkey)
-        if d <= max(1, len(fkey) // 3) and (fb is None or d < fb[0]):
-            fb = (d, box)
+        if d <= len(fkey) // 3 and (fb is None or d < fb[0]):
+            fb = (d, payload)
     return fb[1] if fb else None
+
+
+# ── PDF text-layer word boxes (exact, any script, no OCR) ─────────────
+# When a zone was read from a PDF text layer (engine == "pdf-text"), the
+# exact word rectangles are already in the PDF — pdf_ingest hands them
+# here as (text, fraction-box-within-zone). No OCR, no traineddata, works
+# for every script the PDF carries (Hebrew, Arabic, CJK, …). Highest
+# accuracy of all strategies, so it runs first when available.
+
+def match_word_box(words, found: str) -> Optional[Tuple[float, float,
+                                                        float, float]]:
+    """Best zone-fraction box for ``found`` among PDF ``words`` — a list of
+    (text, (fx0, fy0, fx1, fy1)) with fractions relative to the zone.
+    Returns the fraction box or None (same matching rules as OCR, incl. the
+    CJK/short-word fuzzy guard)."""
+    keyed = [(_norm(t), fb) for t, fb in (words or [])]
+    return _best_word_match(keyed, _norm(found))
+
+
+def rotate_frac_box(box: Tuple[float, float, float, float],
+                    angle: int) -> Tuple[float, float, float, float]:
+    """Rotate a fraction box within the unit square to match a crop that
+    was rotated ``angle`` degrees CLOCKWISE (0/90/180/270). PDF word boxes
+    live in the un-rotated page; the displayed crop may be rotated, so the
+    box must follow."""
+    a = angle % 360
+    if a == 0:
+        return box
+    x0, y0, x1, y1 = box
+    pts = [(x0, y0), (x1, y1)]
+    if a == 90:      # (x,y) -> (1-y, x)
+        pts = [(1 - y, x) for x, y in pts]
+    elif a == 180:   # (x,y) -> (1-x, 1-y)
+        pts = [(1 - x, 1 - y) for x, y in pts]
+    elif a == 270:   # (x,y) -> (y, 1-x)
+        pts = [(y, 1 - x) for x, y in pts]
+    xs = [p[0] for p in pts]
+    ys = [p[1] for p in pts]
+    return (min(xs), min(ys), max(xs), max(ys))
+
+
+def frac_to_px(fbox: Tuple[float, float, float, float], W: int,
+               H: int) -> Optional[Box]:
+    """Scale a fraction box to pixel (x0,y0,x1,y1) inside a W×H crop, with
+    the same guards as the OCR path (min size, not the whole crop)."""
+    fx0, fy0, fx1, fy1 = fbox
+    x0, x1 = sorted((max(0, min(W, fx0 * W)), max(0, min(W, fx1 * W))))
+    y0, y1 = sorted((max(0, min(H, fy0 * H)), max(0, min(H, fy1 * H))))
+    if x1 - x0 < 2 or y1 - y0 < 2:
+        return None
+    if (x1 - x0) >= 0.98 * W and (y1 - y0) >= 0.98 * H:
+        return None
+    return (int(x0), int(y0), int(x1), int(y1))
 
 
 # ── public entry point ────────────────────────────────────────────────

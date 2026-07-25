@@ -116,6 +116,39 @@ class ArtworkDocument:
                              rect.y0 + (y + h) * rect.height)
             return page.get_text("text", clip=clip).strip()
 
+    def zone_words(self, bbox_norm: List[float]) -> List[tuple]:
+        """PDF text-layer words inside ``bbox_norm``, each as
+        ``(text, (fx0, fy0, fx1, fy1))`` with the box as FRACTIONS relative
+        to the zone. Returns [] for plain images and for outlined PDFs (no
+        text layer) — used by the defect-card highlighter to draw an exact,
+        any-script box without OCR. Never raises: on any error it yields the
+        words it could read (possibly [])."""
+        if not self.is_pdf:
+            return []
+        x, y, w, h = bbox_norm
+        out: List[tuple] = []
+        try:
+            with fitz.open(self.path) as doc:
+                page = doc[self.page_index]
+                rect = page.rect
+                zx0 = rect.x0 + x * rect.width
+                zy0 = rect.y0 + y * rect.height
+                zw = w * rect.width
+                zh = h * rect.height
+                if zw <= 0 or zh <= 0:
+                    return []
+                clip = fitz.Rect(zx0, zy0, zx0 + zw, zy0 + zh)
+                for wx0, wy0, wx1, wy1, txt, *_ in \
+                        page.get_text("words", clip=clip):
+                    t = (txt or "").strip()
+                    if not t:
+                        continue
+                    out.append((t, ((wx0 - zx0) / zw, (wy0 - zy0) / zh,
+                                    (wx1 - zx0) / zw, (wy1 - zy0) / zh)))
+        except Exception:
+            return out
+        return out
+
 
 # ── Text orientation (auto-rotate vertical zones before OCR) ──────────
 # Zones on side panels are often printed rotated 90°; OCR of tilted text

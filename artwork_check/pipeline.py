@@ -353,15 +353,19 @@ def zone_crop_jpg(rec_id: str, zone_bbox: List[float],
         crop = apply_rotation(crop, angle)
 
     if highlight and zone_id and config.HIGHLIGHT_DEFECT_WORD:
-        crop = _highlight_crop(rec_id, crop, highlight, zone_id)
+        crop = _highlight_crop(rec_id, crop, highlight, zone_id, angle)
     return encode_jpg(crop, quality=88)
 
 
-def _highlight_crop(rec_id: str, crop, found: str, zone_id: str):
-    """Draw the red word-box on ``crop`` using the saved OCR of ``zone_id``.
-    Isolated + fully guarded: any problem (no report, no OCR, locate
-    failure) returns the crop untouched so the defect card still shows the
-    plain image."""
+def _highlight_crop(rec_id: str, crop, found: str, zone_id: str,
+                    angle: int = 0):
+    """Draw the red word-box on ``crop`` using the saved data of
+    ``zone_id``. Strategy, most reliable first:
+      ② exact PDF text-layer word box (when the zone was read from a live
+         text layer — any script, no OCR);
+      ①③ then hl.annotate (OCR-backend bbox → Tesseract).
+    Isolated + fully guarded: any problem returns the crop untouched so the
+    defect card still shows the plain image."""
     try:
         from . import highlight as hl
         rep = report.load_report(rec_id)
@@ -371,6 +375,12 @@ def _highlight_crop(rec_id: str, crop, found: str, zone_id: str):
                       if r.get("zone_id") == zone_id), None)
         if entry is None:
             return crop
+
+        if config.HIGHLIGHT_USE_PDF_TEXT and entry.get("engine") == "pdf-text":
+            box = _pdf_text_box(rec_id, rep, zone_id, found, crop, angle)
+            if box is not None:
+                return hl.draw(crop, box)
+
         return hl.annotate(crop, found, entry.get("text", ""),
                            entry.get("blocks"), entry.get("ocr_wh"),
                            use_tesseract=config.HIGHLIGHT_USE_TESSERACT,
@@ -380,6 +390,35 @@ def _highlight_crop(rec_id: str, crop, found: str, zone_id: str):
         logger.debug("[artwork] highlight skipped for %s/%s",
                      rec_id, zone_id, exc_info=True)
         return crop
+
+
+def _pdf_text_box(rec_id: str, rep: dict, zone_id: str, found: str,
+                  crop, angle: int):
+    """Exact pixel box for ``found`` from the PDF text layer of ``zone_id``
+    (layer ②). Returns None when the source is not a text-layer PDF, the
+    word isn't present, or anything is off → caller falls back to OCR."""
+    from . import highlight as hl
+    zone = next((z for z in rep.get("zones", [])
+                 if z.get("id") == zone_id), None)
+    if not zone or not isinstance(zone.get("bbox"), (list, tuple)):
+        return None
+    d = report.inspection_dir(rec_id)
+    base = "source_b" if zone.get("doc") == "b" else "source"
+    try:
+        document = ArtworkDocument(_find_source(d, base))
+    except FileNotFoundError:
+        return None
+    if not document.is_pdf:
+        return None
+    words = document.zone_words(list(zone["bbox"]))
+    if not words:
+        return None
+    fb = hl.match_word_box(words, found)
+    if fb is None:
+        return None
+    fb = hl.rotate_frac_box(fb, angle or 0)
+    H, W = crop.shape[:2]
+    return hl.frac_to_px(fb, W, H)
 
 
 def _find_source(insp_dir: str, base: str = "source") -> str:

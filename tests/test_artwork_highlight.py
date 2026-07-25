@@ -344,3 +344,84 @@ def test_resolve_langs_keeps_installed_combo():
         pytest.skip("needs eng+ara installed")
     got = set(hl._resolve_langs("eng+ara").split("+"))
     assert got == {"eng", "ara"}
+
+
+# ── matching guard: no wrong box on short / CJK words ─────────────────
+
+def test_match_exact_and_substring():
+    words = [("WATER", "W"), ("SALT", "S"), ("SUNFLOWEROIL", "O")]
+    assert hl._best_word_match(words, "WATER") == "W"
+    assert hl._best_word_match(words, "SUNFLOWER") == "O"   # substring
+
+
+def test_match_fuzzy_only_long_ascii():
+    # a long ascii typo still fuzzy-matches (the defect we want to catch)
+    assert hl._best_word_match([("SHREDDED", "x")], "SHREDED") == "x"
+    # a SHORT ascii word does NOT fuzzy (len < 5) → no wrong box
+    assert hl._best_word_match([("FISH", "x")], "DISH") is None
+
+
+def test_match_no_fuzzy_for_cjk():
+    # 灰分 vs 水分 differ by one glyph but are DIFFERENT words → must NOT
+    # match (this is the real 'wrong box' bug the guard prevents)
+    assert hl._best_word_match([("水分", "moist")], "灰分") is None
+    # exact CJK still matches
+    assert hl._best_word_match([("水分", "moist")], "水分") == "moist"
+
+
+# ── PDF-text layer: fraction-box helpers ──────────────────────────────
+
+def test_rotate_frac_box_all_angles():
+    b = (0.1, 0.2, 0.3, 0.4)
+    assert hl.rotate_frac_box(b, 0) == b
+    assert hl.rotate_frac_box(b, 90) == pytest.approx((0.6, 0.1, 0.8, 0.3))
+    assert hl.rotate_frac_box(b, 180) == pytest.approx((0.7, 0.6, 0.9, 0.8))
+    assert hl.rotate_frac_box(b, 270) == pytest.approx((0.2, 0.7, 0.4, 0.9))
+
+
+def test_frac_to_px_scales_and_guards():
+    assert hl.frac_to_px((0.1, 0.2, 0.3, 0.5), 1000, 400) == (100, 80, 300, 200)
+    # basically the whole crop → rejected (no localization value)
+    assert hl.frac_to_px((0.0, 0.0, 1.0, 1.0), 500, 500) is None
+    # degenerate → rejected
+    assert hl.frac_to_px((0.5, 0.5, 0.5005, 0.5005), 500, 500) is None
+
+
+def test_match_word_box_uses_fraction_payload():
+    words = [("COMPOSITION:", (0.1, 0.2, 0.3, 0.24)),
+             ("Chicken", (0.1, 0.3, 0.2, 0.34))]
+    fb = hl.match_word_box(words, "Chicken")
+    assert fb == (0.1, 0.3, 0.2, 0.34)
+    assert hl.match_word_box(words, "Salmon") is None
+
+
+# ── zone_words: real PDF text-layer extraction ────────────────────────
+
+def test_zone_words_on_synthetic_pdf(tmp_path):
+    fitz = pytest.importorskip("fitz")
+    from artwork_check.pdf_ingest import ArtworkDocument
+    p = tmp_path / "mini.pdf"
+    doc = fitz.open()
+    page = doc.new_page(width=400, height=300)
+    page.insert_text((40, 60), "Cholesterol Sodium", fontsize=18)
+    doc.save(str(p)); doc.close()
+
+    art = ArtworkDocument(str(p))
+    assert art.is_pdf
+    words = art.zone_words([0.0, 0.0, 1.0, 1.0])   # whole page
+    texts = [t for t, _ in words]
+    assert "Cholesterol" in texts and "Sodium" in texts
+    # a word box must be a 0..1 fraction inside the zone
+    for _, (fx0, fy0, fx1, fy1) in words:
+        assert 0.0 <= fx0 < fx1 <= 1.05 and 0.0 <= fy0 < fy1 <= 1.05
+
+
+def test_zone_words_empty_for_image(tmp_path):
+    import numpy as np
+    import cv2
+    from artwork_check.pdf_ingest import ArtworkDocument
+    ip = tmp_path / "img.png"
+    cv2.imwrite(str(ip), np.full((80, 200, 3), 255, np.uint8))
+    art = ArtworkDocument(str(ip))
+    assert art.is_pdf is False
+    assert art.zone_words([0.0, 0.0, 1.0, 1.0]) == []

@@ -97,6 +97,12 @@ HIGHLIGHT_DEFECT_WORD = os.getenv(
 #    ไม่มี binary/lib จะข้ามเงียบ → ไม่มีกรอบ (ไม่ error).
 #  - Projection profile: ไม่ต้องพึ่งอะไร แต่วาดผิดคำ ~40% (อันตรายกับ QC) →
 #    default ปิด เปิดเป็น last-resort เท่านั้นถ้ายอมรับความเสี่ยง.
+# ชั้น ② PDF text-layer word box: ถ้าโซนอ่านจาก text layer ของ PDF
+# (engine=pdf-text) ดึงกรอบคำจาก PDF ตรงๆ — เป๊ะระดับ vector, ไม่ต้อง OCR,
+# รองรับทุกภาษา (ฮีบรู/อาหรับ/จีน/ไทย) โดยไม่ต้องลง traineddata. รันก่อน
+# Tesseract. default เปิด; ตั้ง 0 = ข้ามชั้นนี้ (กลับไปใช้ OCR/Tesseract).
+HIGHLIGHT_USE_PDF_TEXT = os.getenv(
+    "ARTWORK_HIGHLIGHT_PDF_TEXT", "1").strip().lower() not in ("0", "false", "")
 HIGHLIGHT_USE_TESSERACT = os.getenv(
     "ARTWORK_HIGHLIGHT_TESSERACT", "1").strip().lower() not in ("0", "false", "")
 HIGHLIGHT_USE_PROFILE = os.getenv(

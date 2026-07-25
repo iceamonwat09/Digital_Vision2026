@@ -78,9 +78,15 @@ pyspellchecker>=0.8.0
 #      optional. Override with env ARTWORK_TESSERACT_CMD=<full path> if you
 #      installed it somewhere else.
 #   2) `py -3.9 -m pip install pytesseract`
+#      also tick Arabic / Hebrew / Chinese / Thai if those labels appear.
 #   3) restart; a red box appears on defect cards (English words). For
-#      Arabic/Thai words set ARTWORK_HIGHLIGHT_TESS_LANG=eng+ara+tha.
+#      other scripts set e.g. ARTWORK_HIGHLIGHT_TESS_LANG=eng+ara+heb+chi_tra+tha
+#      (only installed languages are used; missing ones are dropped safely).
 # Turn off with ARTWORK_HIGHLIGHT_TESSERACT=0.
+# NOTE: for PDFs that carry a live text layer, the highlighter uses the
+# EXACT PDF word boxes (layer ②, ARTWORK_HIGHLIGHT_PDF_TEXT=1 default) — any
+# script, no OCR/traineddata needed; Tesseract is only the fallback for
+# outlined PDFs and camera photos.
 # pytesseract>=0.3.10
 
 # Barcode decoding (EAN-13 etc.) — authoritative for the barcode field and
