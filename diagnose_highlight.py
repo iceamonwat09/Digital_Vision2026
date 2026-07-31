@@ -139,7 +139,10 @@ def main() -> int:
             diff = cv2.absdiff(a, b).max(axis=2)
             mask = (diff > 25).astype(np.uint8) * 255
             if mask.sum():
-                k = cv2.getStructuringElement(cv2.MORPH_RECT, (9, 9))
+                # ปิดรูเล็กจาก noise ของ JPEG เท่านั้น — ห้ามใหญ่จนกรอบ
+                # ที่อยู่คนละแถวถูกรวมเป็นอันเดียว (เคยใช้ 9x9 แล้วนับ
+                # 3 กรอบเป็น 2 เพราะสองแถวห่างกันแค่ ~25px)
+                k = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
                 mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, k)
                 nlab, _, stats, _ = cv2.connectedComponentsWithStats(mask, 8)
                 boxes = sum(1 for j in range(1, nlab)
@@ -154,16 +157,28 @@ def main() -> int:
             n_ok += 1
             # อ่านซ้ำเฉพาะในกรอบ เพื่อดูว่าตรงคำจริงไหม
             if hl._tesseract_available():
+                # อ่านซ้ำ "ทีละกรอบ" (ไม่ใช่ช่วงรวม) เพื่อดูว่าแต่ละกรอบ
+                # ครอบคำที่ถูกต้องจริงหรือไม่
                 try:
                     import pytesseract
-                    ys, xs = np.where(mask > 0)
-                    x0, x1 = int(xs.min()), int(xs.max())
-                    y0, y1 = int(ys.min()), int(ys.max())
-                    sub = a[max(0, y0 - 3):y1 + 3, max(0, x0 - 3):x1 + 3]
-                    txt = pytesseract.image_to_string(
-                        cv2.cvtColor(sub, cv2.COLOR_BGR2RGB),
-                        lang=used).strip().replace("\n", " ")
-                    print(f"       ในบริเวณที่วาดอ่านได้ = {_fmt(txt, 60)!r}")
+                    nlab, lab, stats, _ = \
+                        cv2.connectedComponentsWithStats(mask, 8)
+                    regions = [(stats[j, cv2.CC_STAT_LEFT],
+                                stats[j, cv2.CC_STAT_TOP],
+                                stats[j, cv2.CC_STAT_WIDTH],
+                                stats[j, cv2.CC_STAT_HEIGHT])
+                               for j in range(1, nlab)
+                               if stats[j, cv2.CC_STAT_AREA] > 60]
+                    regions.sort(key=lambda rg: (rg[1], rg[0]))
+                    for bi, (rx, ry, rw, rh) in enumerate(regions, 1):
+                        sub = a[max(0, ry - 3):ry + rh + 3,
+                                max(0, rx - 3):rx + rw + 3]
+                        up, _s = hl._upscale_for_ocr(sub)
+                        txt = pytesseract.image_to_string(
+                            cv2.cvtColor(up, cv2.COLOR_BGR2RGB),
+                            lang=used).strip().replace("\n", " ")
+                        print(f"         กรอบ {bi} @({rx},{ry}) {rw}x{rh}"
+                              f" อ่านได้ = {_fmt(txt, 45)!r}")
                 except Exception:
                     pass
         if save:
