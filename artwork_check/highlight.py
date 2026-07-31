@@ -471,10 +471,22 @@ def _resolve_langs(requested: str) -> str:
     return resolved
 
 
-def _tess_boxes(crop, found: str, lang: str = "eng") -> List[Box]:
-    """Every Tesseract word box matching ``found`` (best tier first)."""
-    if not _tesseract_available():
-        return []
+# Page-segmentation modes tried, in order.
+#   11 = "sparse text, no particular order" — a label/nutrition table is
+#        exactly that: short strings scattered across cells. Tesseract's
+#        DEFAULT (3, full auto layout) tries to find columns/paragraphs and
+#        silently drops the numeric columns: on a real strip table it read
+#        every row LABEL ("Sodium", "Cholesterol", …) but not one number,
+#        so "24%" could never be located.
+#    3 = the default; still better for dense running text (measured
+#        slightly better on the Arabic block), so it is the fallback.
+# Measured over 7 real artwork zones: psm 3 alone 38/44 targets, psm 11
+# alone 42/44, trying 11 then 3 gets the union.
+_PSM_ORDER = (11, 3)
+
+
+def _tess_words(crop, lang: str, psm: int):
+    """[(key, box)] read from ``crop`` at one page-segmentation mode."""
     try:
         import cv2
         import pytesseract
@@ -482,20 +494,31 @@ def _tess_boxes(crop, found: str, lang: str = "eng") -> List[Box]:
         img, scale = _upscale_for_ocr(crop)
         rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         data = pytesseract.image_to_data(rgb, lang=_resolve_langs(lang),
+                                         config=f"--psm {psm}",
                                          output_type=Output.DICT)
     except Exception:
         return []
     words = []
-    n = len(data.get("text", []))
-    for i in range(n):
+    for i in range(len(data.get("text", []))):
         k = _norm(data["text"][i])
         if not k:
             continue
-        box = (int(data["left"][i] / scale), int(data["top"][i] / scale),
-               int((data["left"][i] + data["width"][i]) / scale),
-               int((data["top"][i] + data["height"][i]) / scale))
-        words.append((k, box))
-    return _verify_boxes(crop, _match_boxes(words, found), found, lang)
+        words.append((k, (
+            int(data["left"][i] / scale), int(data["top"][i] / scale),
+            int((data["left"][i] + data["width"][i]) / scale),
+            int((data["top"][i] + data["height"][i]) / scale))))
+    return words
+
+
+def _tess_boxes(crop, found: str, lang: str = "eng") -> List[Box]:
+    """Every Tesseract word box matching ``found`` (best tier first)."""
+    if not _tesseract_available():
+        return []
+    for psm in _PSM_ORDER:
+        hits = _match_boxes(_tess_words(crop, lang, psm), found)
+        if hits:
+            return _verify_boxes(crop, hits, found, lang)
+    return []
 
 
 # Tesseract needs roughly 20-30 px of x-height. Small zone crops fall well

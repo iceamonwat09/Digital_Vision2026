@@ -204,6 +204,14 @@ verify_openvino.py ต้อง PASS ทุก device×imgsz (4) เช็คต
    จากพิกัดใหญ่สุดของทุก block (block เดียวใกล้มุมตัดสินไม่ได้).
 5. **`_otsu()` คืน threshold 0 ได้** บนภาพ bimodal สะอาด → ต้องใช้ `gray <= thr` (ถ้าใช้ `<` ชั้น CV ตาย
    เงียบ คืน None ตลอด).
+6. **ขนาด crop เป็นตัวชี้เป็นชี้ตายของ Tesseract** — โซนเล็กเรนเดอร์ที่ OCR_DPI ได้ ~490px แล้ว
+   Tesseract อ่านมั่ว (0/8 คำ, อ่าน "NUTRITIONAL INFORMATION" เป็น "ANO/V/OLES") → ตกไปใช้ bbox
+   ของ backend ที่คลาดเคลื่อน = กรอบผิดแถว. แก้ด้วย `CROP_MIN_SIDE=1200` (PDF เรนเดอร์ใหม่ DPI สูงขึ้น
+   = ได้รายละเอียดจริง) + `_upscale_for_ocr()` (ภาพถ่าย ขยายในหน่วยความจำก่อน OCR แล้วหารพิกัดกลับ).
+7. **PSM ของ Tesseract สำคัญมากกับ "ตาราง"** — default (psm 3, auto layout) อ่าน *ชื่อรายการ*
+   ได้หมดแต่ **ทิ้งคอลัมน์ตัวเลขทั้งคอลัมน์** (หา `24%`/`170`/`475` ไม่เจอเลย). `_PSM_ORDER=(11,3)`
+   ลอง **psm 11 (sparse text)** ก่อน แล้วค่อยถอยไป psm 3 (ดีกว่ากับข้อความยาวต่อเนื่อง เช่นบล็อกอาหรับ).
+   วัดจาก 7 โซนจริง: psm3=38/44, psm11=42/44, ลองทั้งคู่=43/44.
 
 **Tesseract (ชั้น ③) — optional dependency:**
 - `_find_tesseract_cmd()` **auto-detect ให้** ตามลำดับ: env `ARTWORK_TESSERACT_CMD` → PATH →
