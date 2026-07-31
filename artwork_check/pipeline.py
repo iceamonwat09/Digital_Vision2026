@@ -344,8 +344,20 @@ def zone_crop_jpg(rec_id: str, zone_bbox: List[float],
     d = report.inspection_dir(rec_id)
     base = "source_b" if doc == "b" else "source"
     document = ArtworkDocument(_find_source(d, base))
-    crop = document.render_zone(zone_bbox, dpi=dpi or config.OCR_DPI,
-                                max_side=1600)
+    base_dpi = dpi or config.OCR_DPI
+    crop = document.render_zone(zone_bbox, dpi=base_dpi, max_side=1600)
+    # A SMALL zone renders small even at OCR_DPI (a 78 pt wide zone is only
+    # ~490 px at 450 dpi). Tesseract goes blind at that size — measured on a
+    # real station crop it read 0/8 target words at 488 px but 6/8 at 976 px
+    # — and the human reviewer cannot read the crop either. For PDFs we can
+    # get REAL extra detail by rendering the same zone at a higher dpi, so
+    # do that instead of shipping a tiny image.
+    if document.is_pdf and crop.size:
+        longest = max(crop.shape[:2])
+        if longest < config.CROP_MIN_SIDE:
+            factor = min(4.0, config.CROP_MIN_SIDE / float(longest))
+            crop = document.render_zone(zone_bbox, dpi=int(base_dpi * factor),
+                                        max_side=1600)
     angle = resolve_rotation(rotate, page_auto=False, crop=crop) \
         if rotate == "auto" else (int(rotate) if str(rotate) in
                                   ("0", "90", "180", "270") else 0)

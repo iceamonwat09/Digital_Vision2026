@@ -479,7 +479,8 @@ def _tess_boxes(crop, found: str, lang: str = "eng") -> List[Box]:
         import cv2
         import pytesseract
         from pytesseract import Output
-        rgb = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
+        img, scale = _upscale_for_ocr(crop)
+        rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         data = pytesseract.image_to_data(rgb, lang=_resolve_langs(lang),
                                          output_type=Output.DICT)
     except Exception:
@@ -490,11 +491,34 @@ def _tess_boxes(crop, found: str, lang: str = "eng") -> List[Box]:
         k = _norm(data["text"][i])
         if not k:
             continue
-        box = (int(data["left"][i]), int(data["top"][i]),
-               int(data["left"][i] + data["width"][i]),
-               int(data["top"][i] + data["height"][i]))
+        box = (int(data["left"][i] / scale), int(data["top"][i] / scale),
+               int((data["left"][i] + data["width"][i]) / scale),
+               int((data["top"][i] + data["height"][i]) / scale))
         words.append((k, box))
     return _verify_boxes(crop, _match_boxes(words, found), found, lang)
+
+
+# Tesseract needs roughly 20-30 px of x-height. Small zone crops fall well
+# under that and it returns nonsense — a real station crop at 488 px read
+# "ANO / V / OLES" where the label says "NUTRITIONAL INFORMATION", and
+# located 0/8 target words; the same crop upscaled 2x located 6/8. Boxes
+# are divided by the scale afterwards so they map back onto the original.
+_OCR_MIN_SIDE = 1000
+_OCR_MAX_SCALE = 4.0
+
+
+def _upscale_for_ocr(crop):
+    """Return (image_for_ocr, scale). scale == 1.0 when no resize needed."""
+    import cv2
+    if crop is None or getattr(crop, "size", 0) == 0:
+        return crop, 1.0
+    longest = max(crop.shape[:2])
+    if longest <= 0 or longest >= _OCR_MIN_SIDE:
+        return crop, 1.0
+    scale = min(_OCR_MAX_SCALE, _OCR_MIN_SIDE / float(longest))
+    up = cv2.resize(crop, None, fx=scale, fy=scale,
+                    interpolation=cv2.INTER_CUBIC)
+    return up, scale
 
 
 def _verify_boxes(crop, boxes: List[Box], found: str, lang: str) -> List[Box]:
@@ -531,8 +555,9 @@ def _verify_boxes(crop, boxes: List[Box], found: str, lang: str) -> List[Box]:
         if sub.size == 0:
             continue
         try:
+            sub_up, _ = _upscale_for_ocr(sub)
             txt = pytesseract.image_to_string(
-                cv2.cvtColor(sub, cv2.COLOR_BGR2RGB),
+                cv2.cvtColor(sub_up, cv2.COLOR_BGR2RGB),
                 lang=_resolve_langs(lang))
         except Exception:
             kept.append(b)          # cannot verify → keep

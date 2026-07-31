@@ -114,6 +114,12 @@ HIGHLIGHT_TESSERACT_LANG = os.getenv("ARTWORK_HIGHLIGHT_TESS_LANG",
 # ผู้ตรวจแก้ไม่ครบ. 6 = เห็นครบทุกจุดในตารางปกติ แต่ไม่ท่วมรูปถ้าคำนั้น
 # ปรากฏเยอะผิดปกติ. ตั้ง 1 = พฤติกรรมเดิม (กรอบเดียว), 0 = ไม่จำกัด.
 HIGHLIGHT_MAX_BOXES = int(os.getenv("ARTWORK_HIGHLIGHT_MAX_BOXES", "6"))
+# ขนาดด้านยาวขั้นต่ำของภาพ crop ในการ์ด defect. โซนเล็กเรนเดอร์ที่ OCR_DPI แล้ว
+# ได้ภาพเล็กมาก (โซนกว้าง 78pt ที่ 450dpi = ~490px) ซึ่ง (ก) คนอ่านไม่ออก และ
+# (ข) Tesseract ตาบอด — วัดจาก crop จริงของสถานี: 488px หาคำเจอ 0/8 แต่ 976px
+# เจอ 6/8. ถ้าเป็น PDF จะเรนเดอร์ใหม่ที่ DPI สูงขึ้น (ได้รายละเอียดจริง ไม่ใช่
+# การขยายภาพ); ถ้าเป็นรูปถ่ายจะขยายในหน่วยความจำเฉพาะตอน OCR เท่านั้น.
+CROP_MIN_SIDE = int(os.getenv("ARTWORK_CROP_MIN_SIDE", "1200"))
 
 # ── Translation (advisory tab — separate from OCR & checks) ──────────
 # Optional N8N webhook that translates the already-OCR'd text to English
