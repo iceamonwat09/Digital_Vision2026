@@ -217,28 +217,22 @@ def _block_boxes(found: str, blocks: list, W: int, H: int,
     """Every OCR-backend block box matching ``found`` (tightest first)."""
     if not blocks:
         return []
-    fkey = _norm(found)
-    if not fkey:
+    if not _norm(found):
         return []
     scale = _infer_scale(blocks, ocr_wh)   # one convention for the zone
     if scale is None:
         return []
-    hits = []
+    words = []
     for b in blocks:
         if not isinstance(b, dict):
             continue
         bkey = _norm(b.get("text", ""))
         if not bkey:
             continue
-        # exact word, or the word sits inside a longer element key
-        if bkey == fkey or fkey in bkey:
-            px = _norm_block_bbox(b.get("bbox"), W, H, scale)
-            if px is None:
-                continue
-            # prefer the tightest matching block (closest length to word)
-            hits.append((abs(len(bkey) - len(fkey)), px))
-    hits.sort(key=lambda p: p[0])
-    return [px for _, px in hits]
+        px = _norm_block_bbox(b.get("bbox"), W, H, scale)
+        if px is not None:
+            words.append((bkey, px))
+    return _match_boxes(words, found)
 
 
 def _block_box(found: str, blocks: list, W: int, H: int,
@@ -490,9 +484,6 @@ def _tess_boxes(crop, found: str, lang: str = "eng") -> List[Box]:
                                          output_type=Output.DICT)
     except Exception:
         return []
-    fkey = _norm(found)
-    if not fkey:
-        return []
     words = []
     n = len(data.get("text", []))
     for i in range(n):
@@ -503,7 +494,7 @@ def _tess_boxes(crop, found: str, lang: str = "eng") -> List[Box]:
                int(data["left"][i] + data["width"][i]),
                int(data["top"][i] + data["height"][i]))
         words.append((k, box))
-    return _all_word_matches(words, fkey)
+    return _match_boxes(words, found)
 
 
 def _tess_box(crop, found: str, lang: str = "eng") -> Optional[Box]:
@@ -534,7 +525,14 @@ def _all_word_matches(words, fkey: str) -> list:
     for k, payload in words:
         if not k:
             continue
-        if k == fkey or fkey in k or (k in fkey and len(k) >= 3):
+        # A word SHORTER than the target may only stand in for it when the
+        # target is a single word too (OCR splitting one word). For a
+        # multi-word target the per-word branch is handled by
+        # _match_boxes(); allowing it here would scatter boxes over every
+        # row that happens to repeat one of the words.
+        if k == fkey or fkey in k:
+            literal.append((abs(len(k) - len(fkey)), payload))
+        elif k in fkey and len(k) >= 3 and len(k) >= 0.6 * len(fkey):
             literal.append((abs(len(k) - len(fkey)), payload))
     if literal:
         # tightest keys first (exact word before a long line that contains it)
@@ -564,6 +562,99 @@ def _best_word_match(words, fkey: str):
     return hits[0] if hits else None
 
 
+# ── phrase matching (a defect's ``found`` is often a whole LINE) ───────
+# MISMATCH_PANELS/ZOOM defects report an entire line as ``found`` (e.g.
+# "دهون كلية", "Cude Protein 8.0% Min"). Matching each word on its own
+# would box every row that merely repeats one of those words — on a real
+# nutrition table "دهون كلية" (total fat) lit up 5 rows because "دهون"
+# also appears in "دهون مشبعة"/"دهون مهدرجة" and "كلية" in "كربوهيدرات
+# كلية". Those extra boxes point the reviewer at the WRONG line, which is
+# exactly what the mode must never do. So a multi-word target is matched
+# as a CONSECUTIVE run of words ON THE SAME LINE, and the drawn box is
+# the union of that run.
+
+def _same_line(a, b) -> bool:
+    """True when two boxes overlap vertically by most of their height."""
+    ay0, ay1, by0, by1 = a[1], a[3], b[1], b[3]
+    ov = min(ay1, by1) - max(ay0, by0)
+    hmin = min(ay1 - ay0, by1 - by0)
+    return hmin > 0 and ov >= 0.5 * hmin
+
+
+def _union(boxes):
+    return (min(b[0] for b in boxes), min(b[1] for b in boxes),
+            max(b[2] for b in boxes), max(b[3] for b in boxes))
+
+
+def _phrase_matches(words, ftokens: List[str]) -> list:
+    """``words``: [(key, box)] in reading order. Return the union box of
+    every consecutive same-line run of words whose keys concatenate to the
+    phrase. Window sizes n-1..n+1 absorb OCR splitting/merging a word.
+    RTL scripts may come back in the opposite order, so the reversed
+    concatenation counts as a match too."""
+    fkey = "".join(ftokens)
+    if not fkey:
+        return []
+    n = len(ftokens)
+    cands = []          # (window_key, union_box) for every same-line run
+    for size in (n, n + 1, n - 1):
+        if size < 1 or size > len(words):
+            continue
+        for i in range(len(words) - size + 1):
+            win = words[i:i + size]
+            if any(not k for k, _ in win):
+                continue
+            boxes = [b for _, b in win]
+            if not all(_same_line(boxes[0], b) for b in boxes[1:]):
+                continue
+            joined = "".join(k for k, _ in win)
+            rev = "".join(k for k, _ in reversed(win))
+            cands.append((joined, rev, _union(boxes)))
+
+    exact = [(abs(len(j) - len(fkey)), box) for j, rv, box in cands
+             if fkey in (j, rv) or fkey in j or fkey in rv]
+    if exact:
+        exact.sort(key=lambda p: p[0])
+        return _dedupe_boxes([b for _, b in exact])
+
+    # OCR routinely drops or adds ONE letter inside a long word (real case:
+    # Arabic كربوهيدرات read as كربوهيدات). A tight relative edit budget
+    # recovers that. Unlike the single-word fuzzy path this is safe for any
+    # script, because a candidate here is already an ADJACENT SAME-LINE run
+    # — a different table row is many edits away, not one.
+    try:
+        from .checks import levenshtein
+    except Exception:
+        return []
+    budget = max(1, int(len(fkey) * 0.15))
+    near = []
+    for j, rv, box in cands:
+        d = min(levenshtein(j, fkey), levenshtein(rv, fkey))
+        if d <= budget:
+            near.append((d, box))
+    near.sort(key=lambda p: p[0])
+    return _dedupe_boxes([b for _, b in near])
+
+
+def _match_boxes(words, found: str) -> list:
+    """Boxes for ``found`` among ``words`` = [(key, box)] in reading order.
+    Single-word target → every occurrence of that word. Multi-word target
+    → only consecutive same-line runs (never scattered single words)."""
+    ftokens = [_norm(t) for t in re.split(r"\s+", (found or "").strip())]
+    ftokens = [t for t in ftokens if t]
+    if not ftokens:
+        return []
+    if len(ftokens) == 1:
+        return _dedupe_boxes(_all_word_matches(words, ftokens[0]))
+    hits = _phrase_matches(words, ftokens)
+    if hits:
+        return hits
+    # Last resort for a phrase: a SINGLE word/element that already contains
+    # the whole phrase (some OCR backends return a full line as one block).
+    return _dedupe_boxes([b for k, b in words
+                          if k and "".join(ftokens) in k])
+
+
 # ── PDF text-layer word boxes (exact, any script, no OCR) ─────────────
 # When a zone was read from a PDF text layer (engine == "pdf-text"), the
 # exact word rectangles are already in the PDF — pdf_ingest hands them
@@ -575,9 +666,10 @@ def match_word_boxes(words, found: str) -> List[Tuple[float, float,
                                                       float, float]]:
     """EVERY zone-fraction box for ``found`` among PDF ``words`` — a list of
     (text, (fx0, fy0, fx1, fy1)) with fractions relative to the zone. Same
-    matching rules as OCR, incl. the CJK/short-word fuzzy guard."""
+    matching rules as OCR, incl. the CJK/short-word fuzzy guard and the
+    same-line adjacency rule for multi-word targets."""
     keyed = [(_norm(t), fb) for t, fb in (words or [])]
-    return _all_word_matches(keyed, _norm(found))
+    return _match_boxes(keyed, found)
 
 
 def match_word_box(words, found: str) -> Optional[Tuple[float, float,
@@ -669,15 +761,28 @@ def locate_all(crop, found: str, ocr_text: str,
     return hits
 
 
-def _dedupe_boxes(boxes: List[Box], iou_thr: float = 0.5) -> List[Box]:
-    """Drop boxes that overlap an already-kept one (same word matched by
-    both a tight key and the line that contains it). Keeps input order, so
-    best-first survives."""
+def _dedupe_boxes(boxes: List[Box], thr: float = 0.5) -> List[Box]:
+    """Drop a box that mostly overlaps an already-kept one — the same hit
+    found twice (a tight key and the longer run/line containing it, or two
+    phrase windows of different size). Measured against the SMALLER box so
+    a nested box is dropped too, which plain IoU would miss. Keeps input
+    order, so the best/tightest candidate survives."""
     kept: List[Box] = []
     for b in boxes:
-        if not any(_iou(b, k) >= iou_thr for k in kept):
+        if not any(_overlap_frac(b, k) >= thr for k in kept):
             kept.append(b)
     return kept
+
+
+def _overlap_frac(a: Box, b: Box) -> float:
+    """Intersection area as a fraction of the SMALLER box's area."""
+    ix0, iy0 = max(a[0], b[0]), max(a[1], b[1])
+    ix1, iy1 = min(a[2], b[2]), min(a[3], b[3])
+    iw, ih = max(0, ix1 - ix0), max(0, iy1 - iy0)
+    inter = iw * ih
+    smaller = min((a[2] - a[0]) * (a[3] - a[1]),
+                  (b[2] - b[0]) * (b[3] - b[1]))
+    return inter / smaller if smaller > 0 else 0.0
 
 
 def _iou(a: Box, b: Box) -> float:

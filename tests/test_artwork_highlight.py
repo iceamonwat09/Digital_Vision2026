@@ -428,6 +428,68 @@ def test_dedupe_overlapping_boxes():
     assert hl._dedupe_boxes([a, near, far]) == [a, far]
 
 
+def test_dedupe_drops_nested_box():
+    tight = (10, 10, 50, 30)
+    wrapping = (5, 8, 90, 34)      # phrase window that contains the tight one
+    assert hl._dedupe_boxes([tight, wrapping]) == [tight]
+
+
+# ── multi-word target must stay on ONE line (no scattered boxes) ──────
+# A MISMATCH defect reports a whole LINE as `found`. Matching its words
+# independently used to box every row repeating any of them.
+
+def _row(words, y, x0=0, wdt=40, hgt=20):
+    """[(key, box)] for one text row at height y."""
+    return [(w, (x0 + i * (wdt + 5), y, x0 + i * (wdt + 5) + wdt, y + hgt))
+            for i, w in enumerate(words)]
+
+
+def test_phrase_matches_only_same_line_run():
+    words = (_row(["TOTAL", "FAT"], 10)
+             + _row(["SATURATED", "FAT"], 60)
+             + _row(["TOTAL", "CARBOHYDRATE"], 110))
+    got = hl._match_boxes(words, "Total fat")
+    assert len(got) == 1
+    assert got[0][1] == 10          # the y of the first row only
+
+
+def test_phrase_does_not_box_rows_sharing_one_word():
+    # "FAT" appears on 2 rows and "TOTAL" on 2 rows — a word-by-word match
+    # would light up 4 boxes; the phrase must yield exactly its own row.
+    words = (_row(["TOTAL", "FAT"], 10)
+             + _row(["SATURATED", "FAT"], 60)
+             + _row(["TOTAL", "CARBOHYDRATE"], 110))
+    assert len(hl._match_boxes(words, "Total carbohydrate")) == 1
+    assert hl._match_boxes(words, "Total carbohydrate")[0][1] == 110
+
+
+def test_phrase_box_spans_all_its_words():
+    words = _row(["TOTAL", "FAT"], 10)      # boxes 0-40 and 45-85
+    got = hl._match_boxes(words, "Total fat")
+    assert got[0][0] == 0 and got[0][2] == 85
+
+
+def test_phrase_tolerates_one_dropped_letter():
+    # real case: Arabic كربوهيدرات was OCR'd as كربوهيدات (one letter lost)
+    words = _row(["كربوهيدات", "كلية"], 10) + _row(["دهون", "كلية"], 60)
+    got = hl._match_boxes(words, "كربوهيدرات كلية")
+    assert len(got) == 1 and got[0][1] == 10
+
+
+def test_phrase_rejects_a_different_line():
+    words = _row(["SUNFLOWER", "OIL"], 10)
+    assert hl._match_boxes(words, "OLIVE OIL EXTRA VIRGIN") == []
+
+
+def test_single_word_still_matches_every_row():
+    words = (_row(["CUDE", "PROTEIN"], 10)
+             + _row(["CUDE", "FAT"], 60)
+             + _row(["ASH"], 110))
+    got = hl._match_boxes(words, "Cude")
+    assert len(got) == 2
+    assert [b[1] for b in got] == [10, 60]
+
+
 def test_locate_all_respects_max_boxes():
     blocks = [{"text": "Cude", "bbox": [0.1, 0.1, 0.1, 0.05]},
               {"text": "Cude", "bbox": [0.1, 0.3, 0.1, 0.05]},
