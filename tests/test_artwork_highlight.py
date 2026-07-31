@@ -481,6 +481,22 @@ def test_phrase_rejects_a_different_line():
     assert hl._match_boxes(words, "OLIVE OIL EXTRA VIRGIN") == []
 
 
+def test_short_and_numeric_targets_need_exact_match():
+    # "17" must NOT match the Calories value "170" (different row!) and
+    # "24" must not match "240" — substring matching on short/numeric
+    # targets points the reviewer at the wrong cell.
+    words = _row(["170"], 10) + _row(["17"], 60) + _row(["240"], 110)
+    got = hl._match_boxes(words, "17%")
+    assert len(got) == 1 and got[0][1] == 60
+    assert hl._match_boxes(words, "24%") == []
+
+
+def test_long_word_keeps_substring_match():
+    words = _row(["CUDE"], 10) + _row(["SUNFLOWEROIL"], 60)
+    assert len(hl._match_boxes(words, "Cude:")) == 1
+    assert len(hl._match_boxes(words, "Sunflower")) == 1
+
+
 def test_single_word_still_matches_every_row():
     words = (_row(["CUDE", "PROTEIN"], 10)
              + _row(["CUDE", "FAT"], 60)

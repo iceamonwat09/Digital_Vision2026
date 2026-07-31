@@ -494,7 +494,72 @@ def _tess_boxes(crop, found: str, lang: str = "eng") -> List[Box]:
                int(data["left"][i] + data["width"][i]),
                int(data["top"][i] + data["height"][i]))
         words.append((k, box))
-    return _match_boxes(words, found)
+    return _verify_boxes(crop, _match_boxes(words, found), found, lang)
+
+
+def _verify_boxes(crop, boxes: List[Box], found: str, lang: str) -> List[Box]:
+    """Self-check: re-OCR each candidate box and DROP it when what is
+    actually inside clearly is not the target.
+
+    The locate step reasons about word keys and geometry; this reads the
+    pixels the user will see. It is deliberately a DISPROOF, not a proof:
+    a box is dropped only when the re-read produced text that does not
+    contain / resemble the target. An empty or unreadable re-read keeps
+    the box (a tight crop of small print often OCRs to nothing, and
+    dropping those would lose many correct boxes).
+
+    This is the last line of defence for rule "a confidently wrong box is
+    worse than none" — it catches a wrong cell/row that survived matching."""
+    if not boxes:
+        return boxes
+    fkey = _norm(found)
+    if not fkey:
+        return boxes
+    try:
+        import cv2
+        import pytesseract
+        from .checks import levenshtein
+    except Exception:
+        return boxes
+    H, W = crop.shape[:2]
+    kept = []
+    for b in boxes:
+        pad = max(3, (b[3] - b[1]) // 4)
+        x0, y0 = max(0, b[0] - pad), max(0, b[1] - pad)
+        x1, y1 = min(W, b[2] + pad), min(H, b[3] + pad)
+        sub = crop[y0:y1, x0:x1]
+        if sub.size == 0:
+            continue
+        try:
+            txt = pytesseract.image_to_string(
+                cv2.cvtColor(sub, cv2.COLOR_BGR2RGB),
+                lang=_resolve_langs(lang))
+        except Exception:
+            kept.append(b)          # cannot verify → keep
+            continue
+        rkey = _norm(txt)
+        if not rkey:
+            kept.append(b)          # nothing readable → cannot disprove
+            continue
+        if fkey in rkey or rkey in fkey:
+            kept.append(b)
+            continue
+        # Partial evidence is enough to keep. Re-reading a TIGHT crop is
+        # much less reliable than reading the whole zone — a correct
+        # Arabic box came back as "Yoda كلية" (half of it mangled into
+        # Latin). Requiring the full phrase here would throw away correct
+        # boxes on exactly the scripts that need them most, so one token
+        # of the target showing up counts as corroboration.
+        toks = [t for t in (_norm(w) for w in re.split(r"\s+", found))
+                if len(t) >= 2]
+        if any(t in rkey for t in toks):
+            kept.append(b)
+            continue
+        # allow the same small OCR drift the matcher allows
+        budget = max(1, int(len(fkey) * 0.25))
+        if levenshtein(rkey[:len(fkey) + budget], fkey) <= budget:
+            kept.append(b)
+    return kept
 
 
 def _tess_box(crop, found: str, lang: str = "eng") -> Optional[Box]:
@@ -521,6 +586,13 @@ def _all_word_matches(words, fkey: str) -> list:
     catch ("SHREDDED"→"REDDED") are long and ASCII, so they still fuzzy."""
     if not fkey:
         return []
+    # A SHORT or all-digit target must match a word exactly. Substring
+    # matching there boxes the wrong cell: "17%" (key "17") is a substring
+    # of the Calories value "170", and "24%" of "240" — on a nutrition
+    # table those sit rows apart, so the reviewer is pointed at the wrong
+    # number. Longer words keep substring matching (it is what lets "Cude"
+    # match "Cude:" and "Sunflower" match "Sunflower-Oil").
+    strict = len(fkey) <= 3 or fkey.isdigit()
     literal = []
     for k, payload in words:
         if not k:
@@ -530,9 +602,10 @@ def _all_word_matches(words, fkey: str) -> list:
         # multi-word target the per-word branch is handled by
         # _match_boxes(); allowing it here would scatter boxes over every
         # row that happens to repeat one of the words.
-        if k == fkey or fkey in k:
+        if k == fkey or (not strict and fkey in k):
             literal.append((abs(len(k) - len(fkey)), payload))
-        elif k in fkey and len(k) >= 3 and len(k) >= 0.6 * len(fkey):
+        elif (not strict and k in fkey and len(k) >= 3
+                and len(k) >= 0.6 * len(fkey)):
             literal.append((abs(len(k) - len(fkey)), payload))
     if literal:
         # tightest keys first (exact word before a long line that contains it)
