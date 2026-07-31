@@ -525,6 +525,51 @@ def test_backend_bbox_is_not_trusted_over_tesseract():
     assert tb[0] - 20 <= cx <= tb[2] + 20
 
 
+def test_merge_words_dedupes_same_hit():
+    a = [("SODIUM", (10, 10, 60, 30))]
+    b = [("SODIUM", (11, 11, 61, 31)), ("PROTEIN", (10, 90, 70, 110))]
+    got = hl._merge_words(a, b)
+    assert len(got) == 2                      # the duplicate SODIUM dropped
+    assert ("PROTEIN", (10, 90, 70, 110)) in got
+
+
+def test_row_refine_needs_ocr_text_and_anchor():
+    crop = np.full((200, 300, 3), 255, np.uint8)
+    # no ocr_text → cannot know which row the word is on
+    assert hl._row_refine(crop, "24%", "", "eng", [("SODIUM", (5, 5, 50, 20))]) == []
+    # ocr_text without the target → nothing to anchor on
+    assert hl._row_refine(crop, "24%", "Protein 26 g", "eng",
+                          [("SODIUM", (5, 5, 50, 20))]) == []
+
+
+def test_row_refine_rejects_ambiguous_anchor():
+    # the anchor word appears twice → it cannot pin a single row, so the
+    # refine must decline rather than guess
+    crop = np.full((200, 300, 3), 255, np.uint8)
+    words = [("TOTAL", (5, 5, 50, 20)), ("TOTAL", (5, 100, 50, 115))]
+    assert hl._row_refine(crop, "24%", "Total fat 24%", "eng", words) == []
+
+
+def test_backend_bbox_box_on_blank_area_is_dropped():
+    """An LLM-estimated box that lands on empty space must never be drawn:
+    nothing there can prove it holds the word."""
+    _tess_or_skip()
+    crop = np.full((120, 300, 3), 255, np.uint8)
+    box = [(20, 20, 90, 50)]
+    assert hl._verify_boxes(crop, box, "Sodium", "eng",
+                            require_positive=True) == []
+
+
+def test_measured_box_kept_for_non_latin_target():
+    """The re-read of a tight non-Latin crop is not trustworthy enough to
+    overrule a measured box (a correct Arabic box once re-read as
+    'Yoda كلية'), so such boxes are kept."""
+    _tess_or_skip()
+    crop = np.full((120, 300, 3), 255, np.uint8)
+    box = [(20, 20, 90, 50)]
+    assert hl._verify_boxes(crop, box, "صوديوم", "eng+ara") == box
+
+
 def test_backend_bbox_used_when_tesseract_unavailable():
     # without tesseract the backend box is all we have — it must still work
     crop = np.full((400, 400, 3), 255, np.uint8)

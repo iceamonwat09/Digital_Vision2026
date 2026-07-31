@@ -485,8 +485,37 @@ def _resolve_langs(requested: str) -> str:
 _PSM_ORDER = (11, 3)
 
 
+# Reading a zone costs one Tesseract pass per segmentation mode, and a
+# defect card asks for the SAME zone crop once per defect. Cache the word
+# list per (crop content, lang, psm) so the 2nd..Nth defect of a zone is
+# nearly free. Small bound — these lists are a few KB each.
+_WORDS_CACHE: dict = {}
+_WORDS_CACHE_MAX = 12
+
+
+def _crop_key(crop):
+    import hashlib
+    return (crop.shape,
+            hashlib.blake2b(crop.tobytes(), digest_size=8).hexdigest())
+
+
 def _tess_words(crop, lang: str, psm: int):
     """[(key, box)] read from ``crop`` at one page-segmentation mode."""
+    try:
+        ck = (_crop_key(crop), lang, psm)
+    except Exception:
+        ck = None
+    if ck is not None and ck in _WORDS_CACHE:
+        return _WORDS_CACHE[ck]
+    words = _tess_words_uncached(crop, lang, psm)
+    if ck is not None:
+        if len(_WORDS_CACHE) >= _WORDS_CACHE_MAX:
+            _WORDS_CACHE.pop(next(iter(_WORDS_CACHE)), None)
+        _WORDS_CACHE[ck] = words
+    return words
+
+
+def _tess_words_uncached(crop, lang: str, psm: int):
     try:
         import cv2
         import pytesseract
@@ -510,14 +539,92 @@ def _tess_words(crop, lang: str, psm: int):
     return words
 
 
-def _tess_boxes(crop, found: str, lang: str = "eng") -> List[Box]:
+def _tess_boxes(crop, found: str, lang: str = "eng",
+                ocr_text: str = "") -> List[Box]:
     """Every Tesseract word box matching ``found`` (best tier first)."""
     if not _tesseract_available():
         return []
+    all_words: list = []
     for psm in _PSM_ORDER:
-        hits = _match_boxes(_tess_words(crop, lang, psm), found)
-        if hits:
-            return _verify_boxes(crop, hits, found, lang)
+        w = _tess_words(crop, lang, psm)
+        all_words = w if not all_words else _merge_words(all_words, w)
+        hits = _match_boxes(w, found)
+        if not hits:
+            continue
+        verified = _verify_boxes(crop, hits, found, lang)
+        if verified:
+            return verified
+        # every candidate of this mode failed the pixel check — that is a
+        # reason to try the NEXT segmentation mode, not to give up (the
+        # modes read the page differently and often disagree on tables).
+
+    # Whole-image OCR missed it. Small cells in a table are read WRONG at
+    # page level but correctly when read alone — the "24%" cell of a real
+    # nutrition table came back as "72" from the full crop and as "24%"
+    # from a 75x38 crop of just that cell, and which of the two happens
+    # flips on a ±1 px change of the render size. So: find the ROW the
+    # word belongs to via a neighbour word from the same OCR line, then
+    # re-read only that row band.
+    return _row_refine(crop, found, ocr_text, lang, all_words)
+
+
+def _merge_words(a: list, b: list) -> list:
+    """Union of two (key, box) lists, dropping entries of ``b`` that
+    duplicate one already in ``a`` (same key, overlapping box)."""
+    out = list(a)
+    for k, box in b:
+        if not any(k == k2 and _overlap_frac(box, b2) >= 0.5 for k2, b2 in a):
+            out.append((k, box))
+    return out
+
+
+def _row_refine(crop, found: str, ocr_text: str, lang: str,
+                words: list) -> List[Box]:
+    """Locate ``found`` by re-reading only the row it sits on.
+
+    ``ocr_text`` is the zone text from the OCR BACKEND — the same text the
+    defect was raised from, so the line holding ``found`` also holds its
+    neighbours ("Sodium 475 mg 24% …"). Those neighbours are ordinary
+    words that whole-image OCR reads reliably; one of them fixes the row's
+    y band. Cropping that band and reading it alone gives the small
+    numeric cell the resolution it needs. Both the anchor and the final
+    box are pixel-verified, so this cannot invent a box on another row."""
+    if not (ocr_text and words and found):
+        return []
+    fkey = _norm(found)
+    if not fkey:
+        return []
+    line = next((ln for ln in ocr_text.splitlines()
+                 if fkey and fkey in _norm(ln)), None)
+    if line is None:
+        return []
+    # neighbours on that line, longest first (most distinctive)
+    anchors = sorted({_norm(t) for t in re.split(r"\s+", line)}
+                     - {fkey}, key=len, reverse=True)
+    anchors = [a for a in anchors if len(a) >= 4 and not a.isdigit()][:3]
+    if not anchors:
+        return []
+    H, W = crop.shape[:2]
+    for a in anchors:
+        boxes = [b for k, b in words if k == a or a in k]
+        if len(boxes) != 1:          # ambiguous anchor → cannot fix a row
+            continue
+        ax0, ay0, ax1, ay1 = boxes[0]
+        h = max(8, ay1 - ay0)
+        y0, y1 = max(0, ay0 - h // 2), min(H, ay1 + h // 2)
+        band = crop[y0:y1, 0:W]
+        if band.size == 0:
+            continue
+        for psm in (11, 7, 6):
+            bw = _tess_words(band, lang, psm)
+            hits = _match_boxes(bw, found)
+            if not hits:
+                continue
+            shifted = [(b[0], b[1] + y0, b[2], b[3] + y0) for b in hits]
+            verified = _verify_boxes(crop, shifted, found, lang,
+                                     require_positive=True)
+            if verified:
+                return verified
     return []
 
 
@@ -544,19 +651,26 @@ def _upscale_for_ocr(crop):
     return up, scale
 
 
-def _verify_boxes(crop, boxes: List[Box], found: str, lang: str) -> List[Box]:
-    """Self-check: re-OCR each candidate box and DROP it when what is
-    actually inside clearly is not the target.
+def _verify_boxes(crop, boxes: List[Box], found: str, lang: str,
+                  require_positive: bool = False) -> List[Box]:
+    """Self-check: re-OCR each candidate box and drop the ones whose pixels
+    do not back up the claim.
 
-    The locate step reasons about word keys and geometry; this reads the
-    pixels the user will see. It is deliberately a DISPROOF, not a proof:
-    a box is dropped only when the re-read produced text that does not
-    contain / resemble the target. An empty or unreadable re-read keeps
-    the box (a tight crop of small print often OCRs to nothing, and
-    dropping those would lose many correct boxes).
+    Two strictness levels, matching how much the source can be trusted:
 
-    This is the last line of defence for rule "a confidently wrong box is
-    worse than none" — it catches a wrong cell/row that survived matching."""
+    * ``require_positive=False`` (Tesseract boxes) — DISPROOF only. The box
+      came from measuring THIS crop, so it is dropped only when the re-read
+      produced text that clearly is not the target. An empty/unreadable
+      re-read keeps it: a tight crop of small print often OCRs to nothing,
+      and a correct Arabic box once re-read as "Yoda كلية", so demanding
+      proof here would throw away correct boxes.
+
+    * ``require_positive=True`` (OCR-backend bbox) — PROOF required. Those
+      coordinates are a vision-LLM's ESTIMATE of where the word is, and a
+      wrong estimate lands on a neighbouring table row. If the pixels
+      inside cannot be confirmed to contain the target, the box is
+      dropped and nothing is drawn — per the rule that a confidently wrong
+      box is worse than none."""
     if not boxes:
         return boxes
     fkey = _norm(found)
@@ -567,7 +681,7 @@ def _verify_boxes(crop, boxes: List[Box], found: str, lang: str) -> List[Box]:
         import pytesseract
         from .checks import levenshtein
     except Exception:
-        return boxes
+        return [] if require_positive else boxes
     H, W = crop.shape[:2]
     kept = []
     for b in boxes:
@@ -579,15 +693,36 @@ def _verify_boxes(crop, boxes: List[Box], found: str, lang: str) -> List[Box]:
             continue
         try:
             sub_up, _ = _upscale_for_ocr(sub)
-            txt = pytesseract.image_to_string(
-                cv2.cvtColor(sub_up, cv2.COLOR_BGR2RGB),
-                lang=_resolve_langs(lang))
+            rgb_sub = cv2.cvtColor(sub_up, cv2.COLOR_BGR2RGB)
+            # A box crop is ONE word / one line. Reading it with the
+            # default page-analysis mode (3) returns nothing or noise —
+            # that alone was rejecting correct boxes (a verified "24" cell
+            # re-read as empty). psm 7/8 are the modes meant for this.
+            txt = ""
+            for vpsm in (7, 8, 6):
+                txt = pytesseract.image_to_string(
+                    rgb_sub, lang=_resolve_langs(lang),
+                    config=f"--psm {vpsm}")
+                if _norm(txt):
+                    break
         except Exception:
-            kept.append(b)          # cannot verify → keep
+            if not require_positive:
+                kept.append(b)      # cannot verify → keep (measured box)
             continue
         rkey = _norm(txt)
         if not rkey:
-            kept.append(b)          # nothing readable → cannot disprove
+            if not require_positive:
+                kept.append(b)      # nothing readable → cannot disprove
+            continue
+        # A DISPROOF is only worth acting on when the re-read itself is
+        # trustworthy. Re-reading a tight crop of non-Latin script is not:
+        # a correct Arabic box came back as "Yoda كلية", and with a
+        # single-line psm the same box reads as pure noise. So for a
+        # measured (Tesseract) box on a non-ASCII target, keep it — the
+        # matching layer already holds non-Latin to exact/adjacent rules.
+        # Backend-bbox boxes still need positive proof and fall through.
+        if not require_positive and not fkey.isascii():
+            kept.append(b)
             continue
         if fkey in rkey or rkey in fkey:
             kept.append(b)
@@ -872,11 +1007,14 @@ def locate_all(crop, found: str, ocr_text: str,
     if crop is None or getattr(crop, "size", 0) == 0 or not found:
         return []
     H, W = crop.shape[:2]
-    hits = _tess_boxes(crop, found, tess_lang) if use_tesseract else []
+    hits = (_tess_boxes(crop, found, tess_lang, ocr_text or "")
+            if use_tesseract else [])
     if not hits:
         blk = _block_boxes(found, blocks or [], W, H, ocr_wh)
         if blk and use_tesseract:
-            blk = _verify_boxes(crop, blk, found, tess_lang)
+            # LLM coordinates: only draw what the pixels can confirm.
+            blk = _verify_boxes(crop, blk, found, tess_lang,
+                                require_positive=True)
         hits = blk
     if not hits and use_profile:
         loc = locate_token(found, ocr_text or "")
