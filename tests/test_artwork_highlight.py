@@ -506,6 +506,34 @@ def test_single_word_still_matches_every_row():
     assert [b[1] for b in got] == [10, 60]
 
 
+def test_backend_bbox_is_not_trusted_over_tesseract():
+    """A vision-LLM bbox is an estimate. When it points at the wrong place
+    the local measurement must win — this is the bug that made real boxes
+    land a row off on the station while every test (which passed
+    blocks=[]) looked fine."""
+    _tess_or_skip()
+    crop, tb = _pil_text_crop()          # "Protein Phosphours" rendered
+    H, W = crop.shape[:2]
+    # backend claims the word is in the far bottom-left corner
+    wrong = [{"text": "Phosphours", "bbox": [0.02, 0.80, 0.10, 0.15],
+              "conf": 0.9}]
+    got = hl.locate_all(crop, "Phosphours", "", blocks=wrong,
+                        ocr_wh=[W, H], use_tesseract=True)
+    assert got, "should still produce a box (via tesseract)"
+    # the box must sit on the real word, not where the backend claimed
+    cx = (got[0][0] + got[0][2]) / 2
+    assert tb[0] - 20 <= cx <= tb[2] + 20
+
+
+def test_backend_bbox_used_when_tesseract_unavailable():
+    # without tesseract the backend box is all we have — it must still work
+    crop = np.full((400, 400, 3), 255, np.uint8)
+    blocks = [{"text": "Phosphours", "bbox": [0.1, 0.1, 0.2, 0.05]}]
+    got = hl.locate_all(crop, "Phosphours", "", blocks=blocks,
+                        ocr_wh=[400, 400], use_tesseract=False)
+    assert len(got) == 1
+
+
 def test_locate_all_respects_max_boxes():
     blocks = [{"text": "Cude", "bbox": [0.1, 0.1, 0.1, 0.05]},
               {"text": "Cude", "bbox": [0.1, 0.3, 0.1, 0.05]},

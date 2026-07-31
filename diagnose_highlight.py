@@ -93,11 +93,16 @@ def main() -> int:
               f" engine={_fmt(e.get('engine','-'),18):18}"
               f" blocks_bbox={nblocks:3} ocr_wh={e.get('ocr_wh')}")
         if e.get("engine") == "pdf-text":
-            print("         → ใช้ชั้น ② (พิกัดคำจาก PDF โดยตรง)")
+            print("         → ชั้นที่ใช้: PDF text layer (พิกัดคำจาก PDF โดยตรง — แม่นสุด)")
+        elif hl._tesseract_available():
+            extra = (f" ; ถ้า Tesseract หาไม่เจอจะลอง bbox ของ backend "
+                     f"({nblocks} กล่อง) แบบตรวจสอบก่อน" if nblocks else "")
+            print(f"         → ชั้นที่ใช้: Tesseract (วัดจากพิกเซลจริง){extra}")
         elif nblocks:
-            print("         → ใช้ชั้น ① (bbox จาก OCR backend)")
+            print("         → ชั้นที่ใช้: bbox จาก OCR backend "
+                  "(ไม่มี Tesseract ให้ตรวจทาน — พิกัดจาก LLM อาจคลาดเคลื่อน)")
         else:
-            print("         → ใช้ชั้น ③ (Tesseract)")
+            print("         → ไม่มีแหล่งพิกัดเลย → จะไม่วาดกรอบ")
 
     defects = rep.get("defects", [])
     print(f"\ndefect ทั้งหมด {len(defects)} รายการ "

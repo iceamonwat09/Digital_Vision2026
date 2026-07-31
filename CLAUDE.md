@@ -168,10 +168,15 @@ verify_openvino.py ต้อง PASS ทุก device×imgsz (4) เช็คต
 
 | ชั้น | วิธี | ใช้เมื่อ | ความแม่น (ไฟล์จริง) |
 |---|---|---|---|
-| ① | `blocks[].bbox` จาก OCR backend | Gemini คืน bbox มา | ขึ้นกับ backend |
-| ② | **PDF text-layer word box** (`pdf_ingest.zone_words()`) | โซน `engine == "pdf-text"` | **เป๊ะระดับ vector, ทุกภาษา** |
-| ③ | **Tesseract** (`_tess_boxes`) | ไฟล์ outline / ภาพถ่าย | 89% (benchmark), 9/9 บนภาพถ่ายจริง |
-| ④ | ไม่วาด | ไม่มั่นใจ | — |
+| 1 | **PDF text-layer word box** (`pdf_ingest.zone_words()`) | โซน `engine == "pdf-text"` | **เป๊ะระดับ vector, ทุกภาษา** |
+| 2 | **Tesseract** (`_tess_boxes`) | ไฟล์ outline / ภาพถ่าย | 89% (benchmark), วัดจากพิกเซลจริง + self-verify |
+| 3 | `blocks[].bbox` จาก OCR backend (`_block_boxes`) | Tesseract หาไม่เจอ/ไม่มี | **พิกัดจาก LLM = การประมาณ ต้องผ่าน `_verify_boxes` ก่อน** |
+| 4 | ไม่วาด | ไม่มั่นใจ | — |
+
+⚠️ **ลำดับนี้เคยสลับกันแล้วพัง:** เดิมให้ `blocks[].bbox` มาก่อน Tesseract และ **ไม่ตรวจสอบเลย** →
+บนสถานีจริงที่ Gemini คืน bbox มา กรอบไปโผล่คนละแถวในตารางโภชนาการ (LLM ให้พิกัดแบบ
+*ประมาณ* ไม่ใช่ *วัด*). เทสต์ตอนนั้นตั้ง `blocks=[]` ตลอดจึงไม่เคยเจอ — **ถ้าจะเพิ่ม/สลับชั้น
+ต้องมีเทสต์ที่ป้อน bbox ที่ "เพี้ยนไปคนละแถว" ด้วยเสมอ**.
 
 - **ชั้น ② ดีที่สุดและฟรี** — ไม่ต้อง OCR/traineddata, รองรับฮีบรู/อาหรับ/จีน/ไทยทันที.
   ตรวจด้วย `ArtworkDocument.zone_words(bbox)` → `[(text, (fx0,fy0,fx1,fy1))]` เป็น**สัดส่วนในโซน**

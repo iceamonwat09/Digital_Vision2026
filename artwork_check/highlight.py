@@ -798,14 +798,22 @@ def locate_all(crop, found: str, ocr_text: str,
     """EVERY pixel box of ``found`` inside ``crop`` (BGR numpy), using the
     most reliable strategy that produces a hit:
 
-      1. OCR-blocks bbox — when the backend returned per-word boxes.
-      2. Tesseract — local word localization (``use_tesseract``, default
-         on; auto-skips when the binary/lib is absent). Benchmarked most
-         accurate.
+      1. Tesseract — local word localization (``use_tesseract``, default
+         on; auto-skips when the binary/lib is absent). It MEASURES the
+         pixels of this exact crop and self-verifies, so it is tried first.
+      2. OCR-backend block bbox — coordinates the OCR backend reported.
+         A vision LLM's box is an ESTIMATE, not a measurement: on a dense
+         nutrition table it lands a row or two off, which points the
+         reviewer at the wrong number. So it is used only when Tesseract
+         found nothing, and it is passed through the same re-OCR check
+         first.
       3. Projection profile — deterministic but error-prone (draws a wrong
          box ~40% of the time on dense tables), so OFF by default
          (``use_profile``); kept for a no-dependency last resort. Always
          a single box.
+
+    (The exact PDF text-layer boxes are a separate, even better source —
+    the pipeline uses them before calling this at all.)
 
     A misspelling is usually printed on several rows of the same table
     ("Cude Protein" / "Cude Fat" / "Cude Fiber"), and a reviewer who sees
@@ -816,9 +824,12 @@ def locate_all(crop, found: str, ocr_text: str,
     if crop is None or getattr(crop, "size", 0) == 0 or not found:
         return []
     H, W = crop.shape[:2]
-    hits = _block_boxes(found, blocks or [], W, H, ocr_wh)
-    if not hits and use_tesseract:
-        hits = _tess_boxes(crop, found, tess_lang)
+    hits = _tess_boxes(crop, found, tess_lang) if use_tesseract else []
+    if not hits:
+        blk = _block_boxes(found, blocks or [], W, H, ocr_wh)
+        if blk and use_tesseract:
+            blk = _verify_boxes(crop, blk, found, tess_lang)
+        hits = blk
     if not hits and use_profile:
         loc = locate_token(found, ocr_text or "")
         if loc is not None:
