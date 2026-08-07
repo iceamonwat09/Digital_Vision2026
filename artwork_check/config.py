@@ -82,6 +82,45 @@ AUTOPAIR_SCALES = [
     if s.strip()
 ]
 
+# ── Defect-card word highlight (display-only) ────────────────────────
+# วาดกรอบแดงที่ "คำที่มีปัญหา" บนรูป crop ของการ์ด "รายการที่พบ".
+# แสดงผลอย่างเดียว 100% — ไม่แตะ OCR/ผลตรวจ/verdict/การนับ. หาตำแหน่งคำ
+# จาก OCR blocks bbox (ถ้ามี) → ไม่มีก็ใช้ projection profile (deterministic).
+# หาไม่เจอ/ไม่มั่นใจ = ไม่วาด (ครอปเดิม). ตั้ง False = ปิดฟีเจอร์ทันที
+# (rollback) ครอปกลับเป็นภาพเปล่าเหมือนเดิม.
+HIGHLIGHT_DEFECT_WORD = os.getenv(
+    "ARTWORK_HIGHLIGHT_DEFECT", "1").strip().lower() not in ("0", "false", "")
+# วิธีหาตำแหน่งคำ (เรียงตามความแม่นจาก benchmark: bbox → tesseract → profile):
+#  - ชั้น OCR blocks bbox: ใช้เสมอเมื่อ backend คืน bbox (ไม่ต้องตั้งค่า)
+#  - Tesseract (local): แม่นสุด (~89% hit/IoU 0.95 ใน benchmark) แต่ต้องติดตั้ง
+#    tesseract binary + `pip install pytesseract` บนสถานี. default เปิด แต่ถ้า
+#    ไม่มี binary/lib จะข้ามเงียบ → ไม่มีกรอบ (ไม่ error).
+#  - Projection profile: ไม่ต้องพึ่งอะไร แต่วาดผิดคำ ~40% (อันตรายกับ QC) →
+#    default ปิด เปิดเป็น last-resort เท่านั้นถ้ายอมรับความเสี่ยง.
+# ชั้น ② PDF text-layer word box: ถ้าโซนอ่านจาก text layer ของ PDF
+# (engine=pdf-text) ดึงกรอบคำจาก PDF ตรงๆ — เป๊ะระดับ vector, ไม่ต้อง OCR,
+# รองรับทุกภาษา (ฮีบรู/อาหรับ/จีน/ไทย) โดยไม่ต้องลง traineddata. รันก่อน
+# Tesseract. default เปิด; ตั้ง 0 = ข้ามชั้นนี้ (กลับไปใช้ OCR/Tesseract).
+HIGHLIGHT_USE_PDF_TEXT = os.getenv(
+    "ARTWORK_HIGHLIGHT_PDF_TEXT", "1").strip().lower() not in ("0", "false", "")
+HIGHLIGHT_USE_TESSERACT = os.getenv(
+    "ARTWORK_HIGHLIGHT_TESSERACT", "1").strip().lower() not in ("0", "false", "")
+HIGHLIGHT_USE_PROFILE = os.getenv(
+    "ARTWORK_HIGHLIGHT_PROFILE", "0").strip().lower() not in ("0", "false", "")
+HIGHLIGHT_TESSERACT_LANG = os.getenv("ARTWORK_HIGHLIGHT_TESS_LANG",
+                                     "eng").strip() or "eng"
+# จำนวนกรอบสูงสุดต่อ 1 defect: คำผิดมักพิมพ์ซ้ำหลายแถวในตารางเดียวกัน
+# (เช่น "Cude" ใน Cude Protein / Cude Fat / Cude Fiber) — วาดจุดเดียวทำให้
+# ผู้ตรวจแก้ไม่ครบ. 6 = เห็นครบทุกจุดในตารางปกติ แต่ไม่ท่วมรูปถ้าคำนั้น
+# ปรากฏเยอะผิดปกติ. ตั้ง 1 = พฤติกรรมเดิม (กรอบเดียว), 0 = ไม่จำกัด.
+HIGHLIGHT_MAX_BOXES = int(os.getenv("ARTWORK_HIGHLIGHT_MAX_BOXES", "6"))
+# ขนาดด้านยาวขั้นต่ำของภาพ crop ในการ์ด defect. โซนเล็กเรนเดอร์ที่ OCR_DPI แล้ว
+# ได้ภาพเล็กมาก (โซนกว้าง 78pt ที่ 450dpi = ~490px) ซึ่ง (ก) คนอ่านไม่ออก และ
+# (ข) Tesseract ตาบอด — วัดจาก crop จริงของสถานี: 488px หาคำเจอ 0/8 แต่ 976px
+# เจอ 6/8. ถ้าเป็น PDF จะเรนเดอร์ใหม่ที่ DPI สูงขึ้น (ได้รายละเอียดจริง ไม่ใช่
+# การขยายภาพ); ถ้าเป็นรูปถ่ายจะขยายในหน่วยความจำเฉพาะตอน OCR เท่านั้น.
+CROP_MIN_SIDE = int(os.getenv("ARTWORK_CROP_MIN_SIDE", "1200"))
+
 # ── Translation (advisory tab — separate from OCR & checks) ──────────
 # Optional N8N webhook that translates the already-OCR'd text to English
 # for the read-only "ข้อความ + คำแปล" tab. It is NEVER used by the check

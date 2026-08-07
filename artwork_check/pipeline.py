@@ -216,6 +216,8 @@ def run_inspection(rec_id: str, zone_list: List[dict],
                                     vocab_words=vocab_words,
                                     vocab_phrases=vocab_phrases)
 
+    _tag_highlight_risk(d, zone_list)
+
     preview = cv2.imread(os.path.join(d, "preview.png"))
     if preview is None:
         preview = ArtworkDocument(src).render(config.PREVIEW_DPI)
@@ -329,22 +331,139 @@ def run_ocr_only(rec_id: str, zone_list: List[dict],
 
 def zone_crop_jpg(rec_id: str, zone_bbox: List[float],
                   dpi: Optional[int] = None, doc: str = "a",
-                  rotate="0") -> bytes:
+                  rotate="0", highlight: str = "",
+                  zone_id: str = "") -> bytes:
     """High-DPI crop of one zone — used by the UI defect table / preview.
     ``doc="b"`` crops from the attached reference file. ``rotate`` is an
     angle 0/90/180/270 or "auto" (detect + rotate vertical → upright), so
-    the preview matches what OCR will actually receive."""
+    the preview matches what OCR will actually receive.
+
+    When ``highlight`` (a defect's problem word) and ``zone_id`` are given
+    AND a saved report exists, the word is located in the crop and boxed
+    in red. This is display-only: locating uses the saved OCR text/blocks
+    of that zone, never re-runs a check, and any failure just returns the
+    plain crop (identical to omitting ``highlight``)."""
     d = report.inspection_dir(rec_id)
     base = "source_b" if doc == "b" else "source"
     document = ArtworkDocument(_find_source(d, base))
-    crop = document.render_zone(zone_bbox, dpi=dpi or config.OCR_DPI,
-                                max_side=1600)
+    base_dpi = dpi or config.OCR_DPI
+    crop = document.render_zone(zone_bbox, dpi=base_dpi, max_side=1600)
+    # A SMALL zone renders small even at OCR_DPI (a 78 pt wide zone is only
+    # ~490 px at 450 dpi). Tesseract goes blind at that size — measured on a
+    # real station crop it read 0/8 target words at 488 px but 6/8 at 976 px
+    # — and the human reviewer cannot read the crop either. For PDFs we can
+    # get REAL extra detail by rendering the same zone at a higher dpi, so
+    # do that instead of shipping a tiny image.
+    if document.is_pdf and crop.size:
+        longest = max(crop.shape[:2])
+        if longest < config.CROP_MIN_SIDE:
+            factor = min(4.0, config.CROP_MIN_SIDE / float(longest))
+            crop = document.render_zone(zone_bbox, dpi=int(base_dpi * factor),
+                                        max_side=1600)
     angle = resolve_rotation(rotate, page_auto=False, crop=crop) \
         if rotate == "auto" else (int(rotate) if str(rotate) in
                                   ("0", "90", "180", "270") else 0)
     if angle:
         crop = apply_rotation(crop, angle)
+
+    if highlight and zone_id and config.HIGHLIGHT_DEFECT_WORD:
+        crop = _highlight_crop(rec_id, crop, highlight, zone_id, angle)
     return encode_jpg(crop, quality=88)
+
+
+def _highlight_crop(rec_id: str, crop, found: str, zone_id: str,
+                    angle: int = 0):
+    """Draw the red word-box on ``crop`` using the saved data of
+    ``zone_id``. Strategy, most reliable first:
+      ② exact PDF text-layer word box (when the zone was read from a live
+         text layer — any script, no OCR);
+      ①③ then hl.annotate (OCR-backend bbox → Tesseract).
+    Isolated + fully guarded: any problem returns the crop untouched so the
+    defect card still shows the plain image."""
+    try:
+        from . import highlight as hl
+        rep = report.load_report(rec_id)
+        if not rep:
+            return crop
+        entry = next((r for r in rep.get("ocr", [])
+                      if r.get("zone_id") == zone_id), None)
+        if entry is None:
+            return crop
+
+        if config.HIGHLIGHT_USE_PDF_TEXT and entry.get("engine") == "pdf-text":
+            boxes = _pdf_text_boxes(rec_id, rep, zone_id, found, crop, angle)
+            if boxes:
+                return hl.draw_boxes(crop, boxes)
+
+        return hl.annotate(crop, found, entry.get("text", ""),
+                           entry.get("blocks"), entry.get("ocr_wh"),
+                           use_tesseract=config.HIGHLIGHT_USE_TESSERACT,
+                           use_profile=config.HIGHLIGHT_USE_PROFILE,
+                           tess_lang=config.HIGHLIGHT_TESSERACT_LANG,
+                           max_boxes=config.HIGHLIGHT_MAX_BOXES)
+    except Exception:
+        logger.debug("[artwork] highlight skipped for %s/%s",
+                     rec_id, zone_id, exc_info=True)
+        return crop
+
+
+def _tag_highlight_risk(insp_dir: str, zone_list: List[dict]) -> None:
+    """Mark zones whose crop will be too small/too wide for the red word
+    box to work (``hl_risk`` = "wide" | "small"), so the report can tell
+    the reviewer to redraw instead of leaving them wondering why a defect
+    has no box. Advisory only — never touches text, checks or verdict.
+    Silently does nothing if the page size cannot be read."""
+    try:
+        sizes = {}
+        for z in zone_list:
+            base = "source_b" if z.get("doc") == "b" else "source"
+            if base not in sizes:
+                doc = ArtworkDocument(_find_source(insp_dir, base))
+                page = doc.render(36)          # tiny render just for aspect
+                h, w = page.shape[:2]
+                sizes[base] = (w / 36.0 * 72.0, h / 36.0 * 72.0)
+            pw, ph = sizes[base]
+            risk = zones_mod.highlight_risk(z["bbox"], pw, ph, config.OCR_DPI)
+            if risk:
+                z["hl_risk"] = risk
+            else:
+                z.pop("hl_risk", None)
+    except Exception:
+        logger.debug("[artwork] highlight-risk tagging skipped", exc_info=True)
+
+
+def _pdf_text_boxes(rec_id: str, rep: dict, zone_id: str, found: str,
+                    crop, angle: int) -> list:
+    """Exact pixel boxes for EVERY occurrence of ``found`` in the PDF text
+    layer of ``zone_id`` (layer ②), capped by HIGHLIGHT_MAX_BOXES. Returns
+    [] when the source is not a text-layer PDF, the word isn't present, or
+    anything is off → caller falls back to OCR."""
+    from . import highlight as hl
+    zone = next((z for z in rep.get("zones", [])
+                 if z.get("id") == zone_id), None)
+    if not zone or not isinstance(zone.get("bbox"), (list, tuple)):
+        return []
+    d = report.inspection_dir(rec_id)
+    base = "source_b" if zone.get("doc") == "b" else "source"
+    try:
+        document = ArtworkDocument(_find_source(d, base))
+    except FileNotFoundError:
+        return []
+    if not document.is_pdf:
+        return []
+    words = document.zone_words(list(zone["bbox"]))
+    if not words:
+        return []
+    H, W = crop.shape[:2]
+    out = []
+    for fb in hl.match_word_boxes(words, found):
+        px = hl.frac_to_px(hl.rotate_frac_box(fb, angle or 0), W, H)
+        if px is not None:
+            out.append(px)
+    cap = config.HIGHLIGHT_MAX_BOXES
+    if cap and cap > 0:
+        out = out[:cap]
+    return out
 
 
 def _find_source(insp_dir: str, base: str = "source") -> str:

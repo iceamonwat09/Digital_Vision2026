@@ -12,6 +12,8 @@
    scope เฉพาะโหมดที่ตั้งใจ. โหมดหลัก: **Live USB / RTSP / STREAM / Snapshot / Label / Artwork**.
 2. **ความแม่นของการตรวจ (QC) สำคัญที่สุด** — ห้ามแลกความแม่นเพื่อความเร็ว. การเร่งความเร็ว
    ต้องคงผลตรวจให้เท่าเดิม (พิสูจน์ด้วย `verify_onnx.py` ก่อนเปิดใช้).
+   - **ผลที่ผิดแบบมั่นใจ แย่กว่าไม่แสดงผล** — ใช้กับทุกชั้นที่ "ชี้จุด" ให้คนดู (เช่นกรอบแดงชี้คำผิด):
+     ถ้าไม่มั่นใจให้**ไม่แสดง** ดีกว่าเดา เพราะคนจะเชื่อสิ่งที่ระบบชี้แล้วมองข้ามของจริง.
 3. **วางแผน + ให้ผู้ใช้ยืนยันก่อนลงมือ** งานที่มีผลต่อโครงสร้าง/พฤติกรรม.
 4. **ตรวจสอบความถูกต้องหลังทำ อย่างเป็นกลาง** (ไม่เข้าข้างตัวเอง) — ไล่ edge case + fallback.
 5. Deploy: ผู้ใช้ `git pull` แล้ว **`py -3.9 app.py`** บนสถานี. ยืนยันโค้ดใหม่รันจริงด้วย
@@ -156,6 +158,134 @@ verify_openvino.py ต้อง PASS ทุก device×imgsz (4) เช็คต
 
 ---
 
+## 🖍️ Artwork — กรอบแดงชี้ "คำที่มีปัญหา" (display-only)
+
+การ์ด "รายการที่พบ" วาด **กรอบแดงบนคำที่ผิดจริง** ในรูป crop. **แสดงผลอย่างเดียว 100%** —
+ไม่แตะ OCR/ผลตรวจ/verdict/การนับ. โค้ดอยู่ใน `artwork_check/highlight.py` (โมดูลใหม่),
+เรียกจาก `pipeline.zone_crop_jpg()` เมื่อ `/api/artwork/<id>/crop?...&hl=<คำ>&zid=<โซน>`.
+
+**สถาปัตยกรรม 4 ชั้น** (`highlight.locate_all()` — ไล่จากแม่นสุด ชั้นแรกที่เจอชนะ):
+
+| ชั้น | วิธี | ใช้เมื่อ | ความแม่น (ไฟล์จริง) |
+|---|---|---|---|
+| 1 | **PDF text-layer word box** (`pdf_ingest.zone_words()`) | โซน `engine == "pdf-text"` | **เป๊ะระดับ vector, ทุกภาษา** |
+| 2 | **Tesseract** (`_tess_boxes`) | ไฟล์ outline / ภาพถ่าย | 89% (benchmark), วัดจากพิกเซลจริง + self-verify |
+| 3 | `blocks[].bbox` จาก OCR backend (`_block_boxes`) | Tesseract หาไม่เจอ/ไม่มี | **พิกัดจาก LLM = การประมาณ ต้องผ่าน `_verify_boxes` ก่อน** |
+| 4 | ไม่วาด | ไม่มั่นใจ | — |
+
+⚠️ **ลำดับนี้เคยสลับกันแล้วพัง:** เดิมให้ `blocks[].bbox` มาก่อน Tesseract และ **ไม่ตรวจสอบเลย** →
+บนสถานีจริงที่ Gemini คืน bbox มา กรอบไปโผล่คนละแถวในตารางโภชนาการ (LLM ให้พิกัดแบบ
+*ประมาณ* ไม่ใช่ *วัด*). เทสต์ตอนนั้นตั้ง `blocks=[]` ตลอดจึงไม่เคยเจอ — **ถ้าจะเพิ่ม/สลับชั้น
+ต้องมีเทสต์ที่ป้อน bbox ที่ "เพี้ยนไปคนละแถว" ด้วยเสมอ**.
+
+- **ชั้น ① ดีที่สุดและฟรี** — ไม่ต้อง OCR/traineddata, รองรับฮีบรู/อาหรับ/จีน/ไทยทันที.
+  ตรวจด้วย `ArtworkDocument.zone_words(bbox)` → `[(text, (fx0,fy0,fx1,fy1))]` เป็น**สัดส่วนในโซน**
+  → `rotate_frac_box()` (ตามการหมุนโซน) → `frac_to_px()`.
+- **`_cv_box` (projection profile) = ชั้นสำรองสุดท้าย ปิดไว้ (`HIGHLIGHT_USE_PROFILE=False`)** —
+  benchmark พบว่า **วาดผิดคำ ~40%** บนตารางหนาแน่น. ห้ามเปิดเป็น default.
+- **วาดทุกจุดที่คำปรากฏ** (`HIGHLIGHT_MAX_BOXES=6`) — คำผิดมักพิมพ์ซ้ำหลายแถว
+  (จริง: `Cude` โผล่ 3 จุดในตารางเดียว) วาดจุดเดียว = ผู้ตรวจแก้ไม่ครบ.
+
+**⚠️ กับดักที่เจอมาแล้ว (อย่าทำซ้ำ):**
+1. **fuzzy match กับคำสั้น/CJK = กรอบผิดคำ** — จีน `灰分`(เถ้า) เคยจับกรอบเดียวกับ `水分`(ความชื้น)
+   เพราะต่างกัน 1 ตัวอักษร. `_all_word_matches()` จึง **fuzzy เฉพาะคำ ascii ยาว ≥5** เท่านั้น
+   (พอสำหรับ typo อังกฤษที่ตั้งใจจับ) — คำสั้น/CJK/RTL ต้อง exact/substring. **กรอบผิดแย่กว่าไม่มีกรอบ**.
+2. **คืน "tier เดียว"** — ถ้ามี literal match แล้ว ห้ามเอา fuzzy มาปน (ไม่งั้นคำที่แค่คล้ายจะติดกรอบมาด้วย).
+2b. **`found` ของ MISMATCH_* เป็น "ทั้งบรรทัด" ไม่ใช่คำเดียว** — จับคู่ทีละคำแล้วกระจายกรอบ
+   ผิดแถวทันที (เคสจริง: `دهون كلية` ได้ 5 กรอบ เพราะ `دهون`/`كلية` ไปโผล่แถวอื่น).
+   `_match_boxes()` จึงแยกทาง: คำเดียว → ทุก occurrence; **หลายคำ → ต้องเป็น run ที่
+   ติดกันและอยู่บรรทัดเดียวกัน** (`_phrase_matches` + `_same_line`) แล้ว union เป็นกรอบเดียว.
+   วลีเปิด fuzzy ได้ (budget 15% ของความยาว) เพราะถูกล็อกด้วย adjacency แล้ว — จำเป็นจริง:
+   Tesseract อ่าน `كربوهيدرات` ตกเป็น `كربوهيدات` (หาย 1 ตัว) บ่อย.
+3. **ตั้ง `TESS_LANG` เป็นภาษาที่ไม่ได้ติดตั้ง = Tesseract error ทั้ง call → กรอบหายหมดแม้แต่อังกฤษ**.
+   `_resolve_langs()` จึงกรองเหลือเฉพาะภาษาที่ `get_languages()` ยืนยัน (fallback → `eng`).
+4. **bbox ของ Gemini มีหลาย convention** (0..1 / 0..1000 / pixel) แยกไม่ออกถ้าไม่รู้ขนาดภาพ →
+   `ocr.read_zone()` เก็บ **`ocr_wh`** (ขนาด crop ที่ OCR เห็นจริง) ให้ `_infer_scale()` ตัดสิน **ต่อโซน**
+   จากพิกัดใหญ่สุดของทุก block (block เดียวใกล้มุมตัดสินไม่ได้).
+5. **`_otsu()` คืน threshold 0 ได้** บนภาพ bimodal สะอาด → ต้องใช้ `gray <= thr` (ถ้าใช้ `<` ชั้น CV ตาย
+   เงียบ คืน None ตลอด).
+6. **ขนาด crop เป็นตัวชี้เป็นชี้ตายของ Tesseract** — โซนเล็กเรนเดอร์ที่ OCR_DPI ได้ ~490px แล้ว
+   Tesseract อ่านมั่ว (0/8 คำ, อ่าน "NUTRITIONAL INFORMATION" เป็น "ANO/V/OLES") → ตกไปใช้ bbox
+   ของ backend ที่คลาดเคลื่อน = กรอบผิดแถว. แก้ด้วย `CROP_MIN_SIDE=1200` (PDF เรนเดอร์ใหม่ DPI สูงขึ้น
+   = ได้รายละเอียดจริง) + `_upscale_for_ocr()` (ภาพถ่าย ขยายในหน่วยความจำก่อน OCR แล้วหารพิกัดกลับ).
+7. **PSM ของ Tesseract สำคัญมากกับ "ตาราง"** — default (psm 3, auto layout) อ่าน *ชื่อรายการ*
+   ได้หมดแต่ **ทิ้งคอลัมน์ตัวเลขทั้งคอลัมน์** (หา `24%`/`170`/`475` ไม่เจอเลย). `_PSM_ORDER=(11,3)`
+   ลอง **psm 11 (sparse text)** ก่อน แล้วค่อยถอยไป psm 3 (ดีกว่ากับข้อความยาวต่อเนื่อง เช่นบล็อกอาหรับ).
+   วัดจาก 7 โซนจริง: psm3=38/44, psm11=42/44, ลองทั้งคู่=43/44.
+8. **การอ่านทั้งภาพไม่เสถียรระดับ ±1 พิกเซล** — crop 1455px อ่าน `24%` เป็น `72`, crop 1456px
+   อ่านถูก. แต่ **ครอปเฉพาะเซลล์ (75x38) อ่านถูกทุก psm**. จึงมี `_row_refine()`: เมื่อหาไม่เจอ
+   ทั้งภาพ ให้ใช้คำข้างเคียงในบรรทัดเดียวกัน (จากข้อความ OCR ของ backend) หา**แถบแถว** แล้ว
+   อ่านซ้ำเฉพาะแถบนั้น. anchor ต้องเจอ **ครั้งเดียว** ในภาพ (ไม่งั้นชี้แถวไม่ได้) และผลต้องผ่าน
+   `_verify_boxes(require_positive=True)` → เป็นไปไม่ได้ที่จะไปโผล่คนละแถว.
+9. **`_verify_boxes` ต้องใช้ psm 7/8 ไม่ใช่ default** — ครอปขนาดเท่าคำเดียวถ้าอ่านด้วย psm 3
+   จะได้ค่าว่าง/ขยะ แล้วไป**ตัดกรอบที่ถูกต้องทิ้ง** (เคสจริง: กรอบ `24` ที่ถูกต้องถูกตัดทุกครั้ง).
+10. **การ "พิสูจน์ว่าผิด" ต้องเชื่อถือได้ก่อนถึงจะใช้ตัดสิน** — อ่านซ้ำครอปแคบของอาหรับ/CJK
+   ไม่น่าเชื่อถือ (กรอบอาหรับที่ถูกอ่านซ้ำได้ `Yoda كلية`) → กรอบที่ "วัดมา" (Tesseract) ของคำ
+   non-ASCII จึง**เก็บไว้เสมอ** ส่วน bbox ของ LLM ต้องพิสูจน์ว่าถูกเท่านั้นถึงวาด (asymmetric).
+11. **cache ผล OCR ต่อรูป** (`_WORDS_CACHE` key = hash เนื้อภาพ+lang+psm) — การ์ด defect
+   หลายใบในโซนเดียวกันจะไม่ OCR ซ้ำ (วัดจริง เร็วขึ้น ~2.5 เท่า). **เป็น `OrderedDict` +
+   `threading.Lock`** — Flask `threaded=True` ทำให้ 2 request ชนกันได้จริง (dict ธรรมดา
+   จะ evict มั่ว/`RuntimeError` ตอน iterate); ตัด LRU ที่ `_WORDS_CACHE_MAX=12`.
+12. **ตัวเลขอาหรับ-อินดิก (`٤٧٥`) ไม่ใช่ `475`** — Tesseract โหมด `ara` คืนตัวเลขเป็น
+   `٠-٩` ส่วน defect ที่ฟ้องมาเป็นเลขอารบิกปกติ → จับคู่ไม่ติด **เงียบ ๆ** (ไม่มีกรอบ ไม่มี error).
+   `_norm()` จึงพับ `٠-٩`+`۰-۹` (เปอร์เซีย) เป็น `0-9` ก่อนเทียบทุกครั้ง.
+13. **เลือก "แถว" ด้วย substring = ชี้ผิดแถว** — `_row_refine()` เดิมหาบรรทัดด้วย
+   `key in line`: คำเป้าหมาย `0` (จาก `0 g`) ไปเจอใน `10%` ของอีกบรรทัดทันที.
+   ตอนนี้เทียบ **ทั้ง token** (คำสั้น) และถ้าเจอ **มากกว่า 1 บรรทัด = กำกวม → ไม่วาด**
+   (กฎเหล็ก 2: ไม่มั่นใจ ไม่แสดง).
+14. **คำที่ขอบโซนตัดผ่าน** — PDF text-layer คืนกรอบ **เต็มคำบนหน้ากระดาษ** แม้คำนั้นโผล่ในโซน
+   แค่เสี้ยวเดียว → clamp แล้วได้แถบบางติดขอบโซน = ดูเหมือนวาดผิดที่. `frac_to_px()` จึงทิ้ง
+   กรอบที่หลุดออกนอกโซน > `_MAX_CLIP_FRAC` (25%).
+
+**⚠️ ข้อจำกัดเชิงกายภาพ (แก้ด้วยโค้ดไม่ได้ — ต้องบอกผู้ใช้):** วัดจากไฟล์จริง กรอบแดงต้องการ
+ตัวอักษรในภาพ crop สูงราว **9-20 px**. โซนที่ลากเป็น **แถบกว้างทั้งแผ่น** (เช่น 1600x339)
+ตัวหนังสือเล็กเหลือ ~8px → หาคำไม่เจอเลย (0/14) และ **เร่ง resolution ก็ตันที่ 6/14**
+(เพราะแถบกว้างมีทั้งกราฟิก/ภาพถ่าย/หลายภาษาปนกัน). โซนเดียวกันที่ลากกระชับรอบตาราง
+(1455x990) ได้ **14/14**. ที่วัดได้ชัดคือ **ด้านสั้นของ crop** (พัง: 339/487 · ผ่าน: 895/906/988/1186)
+→ เกณฑ์เตือน `zones.HL_MIN_SHORT_SIDE=700` + `HL_MAX_ASPECT=4.0`.
+ข้อค้นพบสวนสามัญสำนึก: **ใหญ่ขึ้นไม่ได้ดีขึ้นเสมอ** (คำสูง 32px ได้ 11/14 แพ้ 9-20px ที่ได้ 14/14)
+และ **ย่อภาพ raster ลงคือหายนะ** (1/14). วัดแล้วยัง **ปฏิเสธ** 3 ไอเดียของตัวเอง: ปิด dictionary
+(ไม่มีผล), Sauvola (แย่ลง), โหลดหลายภาษา (ความแม่นเท่าเดิม แค่ช้าลง ~3.5 เท่า).
+
+**เตือนผู้ใช้ 2 จุด (advisory ล้วน — ไม่แตะ verdict/การนับ/ข้อความ OCR):**
+- **ตอนจัดโซน** (ก่อนส่งตรวจ): `renderHlHint()` ใน `artwork_check.js` คำนวณขนาด crop
+  ที่จะได้จาก **เรขาคณิตอย่างเดียว** (ไม่เรนเดอร์ ไม่ OCR = ฟรี) แล้วขึ้นบรรทัดเตือนใน
+  แผง properties ทันทีที่เลือกโซน — ผู้ใช้แก้ได้เลยก่อนเสียเวลาตรวจ.
+- **ในการ์ด "รายการที่พบ"**: `pipeline._tag_highlight_risk()` ตั้ง `z["hl_risk"]`
+  (`"wide"`/`"small"`) ลง `report.json` ตอนตรวจ → JS แสดงเหตุผลว่าทำไมไม่มีกรอบแดง
+  + วิธีแก้ (ลากโซนให้กระชับแล้วส่งใหม่).
+- **ค่าคงที่ต้องตรงกันสองฝั่ง** (`zones.HL_*` ↔ `HL_*` ใน `artwork_check.js`) — แก้ข้างเดียวแล้ว
+  คำเตือนตอนจัดโซนกับตอนดูผลจะไม่ตรงกัน.
+
+**Tesseract (ชั้น ②) — optional dependency:**
+- `_find_tesseract_cmd()` **auto-detect ให้** ตามลำดับ: env `ARTWORK_TESSERACT_CMD` → PATH →
+  `C:\Program Files\Tesseract-OCR\tesseract.exe` → `%LOCALAPPDATA%\Programs\Tesseract-OCR\`.
+  **ไม่ต้องตั้ง PATH เอง**.
+- ติดตั้ง: UB-Mannheim installer (ติ๊ก Additional language data: Arabic/Hebrew/Chinese/Thai) +
+  `py -3.9 -m pip install pytesseract`. **ไม่ติดตั้ง = ไม่มีกรอบ แต่ระบบทำงานปกติ** (ไม่ error).
+- หลายภาษา: `ARTWORK_HIGHLIGHT_TESS_LANG=eng+ara+heb+chi_tra+tha`.
+- **ติดตั้งที่ server เท่านั้น** — วาดกรอบฝั่ง server ส่ง JPEG ให้ client (เครื่อง client ไม่ต้องลงอะไร).
+
+**Config (ทุกตัว opt-out ได้ — `artwork_check/config.py`):**
+`HIGHLIGHT_DEFECT_WORD` (ปิดทั้งฟีเจอร์) · `HIGHLIGHT_USE_PDF_TEXT` · `HIGHLIGHT_USE_TESSERACT` ·
+`HIGHLIGHT_USE_PROFILE` (default False) · `HIGHLIGHT_TESSERACT_LANG` · `HIGHLIGHT_MAX_BOXES` ·
+`CROP_MIN_SIDE` (=1200 ด้านยาวขั้นต่ำของ crop ในการ์ด — ตัวชี้เป็นชี้ตายของ Tesseract, ดูกับดักข้อ 6)
+
+**เครื่องมือ diagnose บนสถานี:** `py -3.9 diagnose_highlight.py <inspection-id>` — พิมพ์ config,
+path/ภาษาของ tesseract, ชั้นที่ใช้ต่อโซน, จำนวนกรอบต่อ defect และ**อ่านซ้ำทีละกรอบ**ว่าในกรอบ
+คือคำอะไร (`--save` เขียนไฟล์ `diag_<id>_<n>_<zone>.jpg` ออกมาดูด้วยตา). ใช้ตอบคำถาม
+"ทำไมกรอบไม่ขึ้น/ขึ้นผิดที่" ได้โดยไม่ต้องเดา.
+
+**ผลทดสอบ end-to-end (production path, 5 artwork จริง + 1 ภาพถ่าย):**
+- Cosma/GimCat (มี text layer) → ชั้น ① **8/8** เป๊ะ · StarKist/TerraMadre/JohnWest (outline) → ชั้น ②
+- รวม **25/25** เมื่อตั้ง `eng+ara` (23/25 ด้วย `eng` ล้วน — อาหรับ MISS = ไม่วาด ไม่ error)
+- ภาพถ่ายกล้องจริง (Puffy Nee Nee): **9/9** รวม `Cude`/`Phosphours` ที่เป็นคำผิดจริง
+- **ไม่มีกรอบวางผิดแม้แต่จุดเดียวในทุกไฟล์**
+- ⚠️ อ่อนกับ **โลโก้/badge สไตล์ไลซ์บนกราฟิก** (SHINYCAT/GLUTEN FREE) — ปกติ ไม่ค่อยถูกฟ้องเป็น defect
+- ⚠️ **ทุกครั้งที่ "ดูเหมือนพัง" ตอนทดสอบ = พิกัดโซนผิด ไม่ใช่เมธอด** — verify โซนด้วยการ render ดูก่อนเสมอ
+
+---
+
 ## 🖥️ Entrypoints & HTTPS
 
 - **`app.py`** = entrypoint หลัก (ผู้ใช้รัน `py -3.9 app.py`). `threaded=True`. รองรับ HTTPS.
@@ -177,6 +307,10 @@ verify_openvino.py ต้อง PASS ทุก device×imgsz (4) เช็คต
   — **`git pull`/`checkout` ไม่ลบ** (คนละที่กับโฟลเดอร์ repo). เช็ค: `py -3.9 -c "from spellchecker import SpellChecker"`.
   หมายเหตุ: คำขาดที่ "ยังเป็นคำจริง" (เช่น `Sunflower Oil`→`Sunflower`) ไม่มี checker ตัวไหนจับได้ →
   ต้องพึ่งการลากโซนให้ครบ + เทียบ panel. ส่วนคอลัมน์ AI (🤖) เป็น advisory เท่านั้น เชื่อเป็น QC ไม่ได้.
+- **`pytesseract` + tesseract binary = ชั้นวาดกรอบแดง (display-only)** — รูปแบบ "หายเงียบ" เดียวกับ
+  `pyspellchecker` แต่**ไม่อันตรายเท่า**: ไม่มี = ไม่มีกรอบแดงบนไฟล์ outline/ภาพถ่าย แต่ผลตรวจ QC
+  เท่าเดิมทุกอย่าง (ไม่ใช่จุดบอด QC). เช็ค: `py -3.9 -c "import pytesseract; print(pytesseract.get_tesseract_version())"`.
+  ต่างจาก pyspellchecker ตรงที่ **ต้องลง binary แยกจาก pip** (ดูหัวข้อ Artwork กรอบแดง).
 - **⚠️ Deploy IIS ในอนาคต (ยังไม่ทำ — บันทึกไว้ก่อน):** package ที่ลง user-site ของ dev
   **IIS Application Pool identity เข้าไม่ถึง** → ชั้น dict หายเงียบใน production. วิธีแก้ตอน deploy คือทำ
   **venv ในโฟลเดอร์โปรเจกต์** (`py -3.9 -m venv .venv` + `pip install -r requirements.txt`) แล้วชี้ IIS
@@ -193,9 +327,14 @@ verify_openvino.py ต้อง PASS ทุก device×imgsz (4) เช็คต
 - HW สถานี: **i7-1165G7** (4C/8T, 15W, AVX-512), 16GB DDR4 (single-channel), Iris Xe, Win10 Pro, Python 3.9.13.
 - inference bestX (seg): **iGPU (OpenVINO) ≈ 45-50ms/เฟรม (~20-22 FPS)** = ตัวจริงปัจจุบัน;
   ONNX CPU ≈ 280ms (~2.7-3 FPS) = ชั้น fallback; PyTorch ≈ 315ms = fallback สุดท้าย.
-- Repo: `iceamonwat09/digital_vision2026`. Dev branch: `claude/dent-detection-camera-access-ub11gy`.
+- Repo: `iceamonwat09/digital_vision2026`. Dev branch ปัจจุบัน: `claude/artwork-red-box-drawing-lpqhpo`
+  (ก่อนหน้า: `claude/dent-detection-camera-access-ub11gy`). **ห้าม push ไป main**.
 - SQL Server: 172.32.0.50/VisionIQ. Defect log ผ่าน `sp_log_defect` (เก็บภาพ base64).
-- Tests: `pytest tests/` (artwork/label/barcode — ไม่ครอบคลุม camera/live loop).
+- Tests: `pytest tests/` — 298 ตัว (artwork/label/barcode — **ไม่ครอบคลุม camera/live loop**).
+  สถานะปัจจุบัน: **283 pass / 5 fail / 10 skip**.
+  ⚠️ `tests/test_inspection_golden.py` **fail 5 ตัวอยู่แล้ว** (pre-existing, `NameError: FieldResult`
+  ในโมดูล Label Paper) — ไม่เกี่ยวกับ artwork. ยืนยันด้วย `git stash` ก่อนโทษการแก้ของตัวเอง.
+- CONFIG_VERSION ปัจจุบัน: **`2026.08.07-aw-redbox-stable`** (เช็คที่ footer ว่ารันโค้ดใหม่จริง).
 
 ---
 
@@ -205,5 +344,11 @@ verify_openvino.py ต้อง PASS ทุก device×imgsz (4) เช็คต
 - [ ] fallback ครบทุกทางที่อาจล้มเหลว?
 - [ ] การนับ/DB logging เดิมไม่ถูกแตะ? (ถ้าแตะ inference_loop ให้ไล่ดู)
 - [ ] `python -c "import ast; ast.parse(open('app.py').read())"` ผ่าน?
+      (แตะ JS ด้วย → `node --check static/js/<ไฟล์>.js`)
+- [ ] แตะ JS ที่อ้าง element ใหม่ → **เพิ่ม element ใน `templates/` แล้วหรือยัง**?
+      (`$("id")` ที่ไม่มีจริงจะเงียบ ไม่ error — ฟีเจอร์หายไปเฉยๆ)
+- [ ] ค่าคงที่ที่ใช้ทั้ง Python และ JS แก้ครบสองฝั่งหรือยัง? (เช่น `zones.HL_*` ↔ `HL_*`)
 - [ ] bump `CONFIG_VERSION` ถ้าผู้ใช้ต้อง verify?
+- [ ] ถ้าแตะชั้นที่ "ชี้จุดให้คนดู" — เคสไม่มั่นใจ **ไม่แสดง** แทนที่จะเดา? (กฎเหล็ก 2)
+- [ ] dependency ใหม่เป็น optional + auto-fallback? (ไม่มี = ฟีเจอร์หาย ไม่ใช่ระบบพัง)
 - [ ] commit message ชัด + push ไป dev branch (ไม่ใช่ main)?

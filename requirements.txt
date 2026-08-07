@@ -64,6 +64,31 @@ requests>=2.31.0
 # Optional: the mode still runs without it, skipping only SPELL_FAIL.
 pyspellchecker>=0.8.0
 
+# Artwork Proof Check — red-box highlighter for the problem word on defect
+# crops (display-only; never affects the verdict). Locates the KNOWN word
+# with local Tesseract — benchmarked most accurate (~89% hit vs ~54% for
+# the no-dependency projection profile). Optional: without it the mode uses
+# the OCR backend's own bbox when present, else draws no box.
+# To enable on the Windows station:
+#   1) install the tesseract BINARY (UB-Mannheim build) — during setup tick
+#      the extra language data you need (Arabic/Thai) besides English.
+#      highlight._find_tesseract_cmd() AUTO-DETECTS the exe at the usual
+#      install paths (C:\Program Files\Tesseract-OCR\tesseract.exe and the
+#      per-user %LOCALAPPDATA%\Programs\Tesseract-OCR\ variant), so PATH is
+#      optional. Override with env ARTWORK_TESSERACT_CMD=<full path> if you
+#      installed it somewhere else.
+#   2) `py -3.9 -m pip install pytesseract`
+#      also tick Arabic / Hebrew / Chinese / Thai if those labels appear.
+#   3) restart; a red box appears on defect cards (English words). For
+#      other scripts set e.g. ARTWORK_HIGHLIGHT_TESS_LANG=eng+ara+heb+chi_tra+tha
+#      (only installed languages are used; missing ones are dropped safely).
+# Turn off with ARTWORK_HIGHLIGHT_TESSERACT=0.
+# NOTE: for PDFs that carry a live text layer, the highlighter uses the
+# EXACT PDF word boxes (layer ②, ARTWORK_HIGHLIGHT_PDF_TEXT=1 default) — any
+# script, no OCR/traineddata needed; Tesseract is only the fallback for
+# outlined PDFs and camera photos.
+# pytesseract>=0.3.10
+
 # Barcode decoding (EAN-13 etc.) — authoritative for the barcode field and
 # proves the symbol is machine-scannable. Optional: the code falls back to
 # cv2.barcode.BarcodeDetector (bundled with opencv) and then to OCR if neither
