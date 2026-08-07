@@ -6,6 +6,7 @@ __pycache__/
 .Python
 env/
 venv/
+.venv/
 viqenv/
 ENV/
 build/
@@ -71,3 +72,7 @@ data/auth/
 
 # TLS certs for HTTPS (self-signed, generated per machine via generate_cert.py)
 certs/
+
+# IIS deployment — web.config เก็บ path/secret เฉพาะเครื่อง (ต้นแบบอยู่ที่
+# deploy/web.config.example ซึ่ง track ไว้ในกิต)
+/web.config

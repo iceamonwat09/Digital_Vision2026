@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  =====================================================================
+  web.config ตัวอย่างสำหรับ Windows Server + IIS + HttpPlatformHandler
+  =====================================================================
+
+  วิธีใช้
+    1) คัดลอกไฟล์นี้ไปวางที่ "รากของเว็บไซต์" (physical path ที่ตั้งใน IIS)
+       แล้วเปลี่ยนชื่อเป็น  web.config
+    2) แก้ทุกจุดที่เขียนว่า  C:\VisionIQ\Digital_Vision2026  ให้ตรงกับเครื่องจริง
+    3) แก้ค่า AUTH_JWT_SECRET ให้เป็นค่าสุ่มของคุณเอง (ห้ามใช้ค่าตัวอย่าง)
+    4) ถ้าเว็บยังไม่ได้ผูก HTTPS ให้ตั้ง AUTH_COOKIE_SECURE = 0 ไปก่อน
+       (ตั้ง 1 ทั้งที่เป็น http:// จะทำให้ล็อกอินไม่ติด — เบราว์เซอร์ทิ้งคุกกี้)
+
+  หมายเหตุสำคัญ
+    • ต้องติดตั้ง HttpPlatformHandler v1.2 บนเซิร์ฟเวอร์ก่อน ไม่งั้น IIS จะขึ้น
+      HTTP 500.19 เพราะไม่รู้จัก <httpPlatform>
+    • Application Pool ต้องตั้ง .NET CLR version = "No Managed Code"
+    • ทุกอย่างใน <environmentVariables> จะถูกส่งให้โปรเซส Python — เป็นที่
+      เดียวที่ควรใส่ค่าตั้งของ deployment (แทนการแก้โค้ด)
+-->
+<configuration>
+  <system.webServer>
+
+    <!-- ส่งทุก request ให้ HttpPlatformHandler (ซึ่งจะ proxy ไป waitress) -->
+    <handlers>
+      <remove name="httpplatformhandler" />
+      <add name="httpplatformhandler"
+           path="*"
+           verb="*"
+           modules="httpPlatformHandler"
+           resourceType="Unspecified"
+           requireAccess="Script" />
+    </handlers>
+
+    <httpPlatform
+        processPath="C:\VisionIQ\Digital_Vision2026\.venv\Scripts\python.exe"
+        arguments="C:\VisionIQ\Digital_Vision2026\deploy\wsgi_iis.py"
+        workingDirectory="C:\VisionIQ\Digital_Vision2026"
+        stdoutLogEnabled="true"
+        stdoutLogFile="C:\VisionIQ\Digital_Vision2026\logs\iis-stdout"
+        startupTimeLimit="180"
+        startupRetryCount="3"
+        requestTimeout="00:20:00">
+      <!--
+        requestTimeout : เวลารอสูงสุดต่อ 1 request — ต้อง "ยาวกว่า" เวลาตรวจ
+                         Artwork ที่นานที่สุด (OCR ทีละโซน โซนละ ~60 วิ)
+                         และควรยาวกว่า channel_timeout ของ waitress
+        startupTimeLimit : app.py import ultralytics/torch ใช้เวลาหลายสิบวินาที
+                         ตอนบูตครั้งแรก — 180 วิเผื่อไว้พอ
+      -->
+      <environmentVariables>
+        <!-- ให้ log ภาษาไทยไม่เพี้ยน และเห็นผลทันทีไม่ค้างใน buffer -->
+        <environmentVariable name="PYTHONUNBUFFERED" value="1" />
+        <environmentVariable name="PYTHONIOENCODING" value="utf-8" />
+
+        <!-- เตรียม backend: db = ต่อ SQL Server แต่ไม่โหลดโมเดล YOLO
+             (เซิร์ฟเวอร์ไม่มีกล้อง) / none = ไม่ init อะไรเลย / full = โหลดโมเดลด้วย -->
+        <environmentVariable name="VISIONIQ_IIS_INIT" value="db" />
+
+        <!-- ── Login / RBAC ────────────────────────────────────────── -->
+        <environmentVariable name="AUTH_ENABLED" value="1" />
+        <!-- ต้องเปลี่ยน! สร้างค่าสุ่มด้วย:
+             .venv\Scripts\python.exe -c "import secrets;print(secrets.token_urlsafe(48))"
+             ถ้าไม่ตั้ง ระบบจะสร้างไฟล์ data\auth\secret.key ให้เอง (ต้องมีสิทธิ์เขียน) -->
+        <environmentVariable name="AUTH_JWT_SECRET" value="__CHANGE_ME__" />
+        <!-- 1 = ส่งคุกกี้เฉพาะบน HTTPS (ตั้ง 1 เมื่อผูก binding https แล้วเท่านั้น) -->
+        <environmentVariable name="AUTH_COOKIE_SECURE" value="1" />
+        <environmentVariable name="AUTH_ACCESS_TTL_MIN" value="60" />
+        <environmentVariable name="AUTH_REFRESH_TTL_DAYS" value="7" />
+        <environmentVariable name="AUTH_MAX_FAILED" value="5" />
+        <environmentVariable name="AUTH_LOCK_MINUTES" value="15" />
+
+        <!-- ── Artwork ─────────────────────────────────────────────── -->
+        <!-- OCR ผ่าน N8N — เซิร์ฟเวอร์ต้องต่อ URL นี้ได้ (ทดสอบด้วย curl ก่อน) -->
+        <environmentVariable name="N8N_OCR_WEBHOOK_URL"
+                             value="http://172.32.201.106:5678/webhook/artwork-ocr" />
+        <environmentVariable name="N8N_OCR_TIMEOUT_S" value="60" />
+        <environmentVariable name="N8N_TRANSLATE_WEBHOOK_URL"
+                             value="http://172.32.201.106:5678/webhook/artwork-translate" />
+        <!-- ภาษาที่ Tesseract ใช้ตอนวาดกรอบแดง — ใส่เฉพาะภาษาที่ติดตั้งจริง
+             (ใส่ภาษาที่ไม่ได้ติดตั้ง = กรอบแดงหายทั้งหมด แม้แต่ภาษาอังกฤษ) -->
+        <environmentVariable name="ARTWORK_HIGHLIGHT_TESS_LANG" value="eng" />
+        <!-- ใส่เมื่อ tesseract.exe ไม่ได้อยู่ในตำแหน่งมาตรฐาน (ปกติไม่ต้องใส่)
+        <environmentVariable name="ARTWORK_TESSERACT_CMD"
+                             value="C:\Program Files\Tesseract-OCR\tesseract.exe" />
+        -->
+      </environmentVariables>
+    </httpPlatform>
+
+    <security>
+      <requestFiltering>
+        <!-- ค่าเริ่มต้นของ IIS คือ ~28.6 MB ซึ่งเล็กกว่าเพดานอัปโหลด artwork
+             (40 MB ในโค้ด) → ไฟล์ใหญ่จะโดน IIS ปัดตกเป็น HTTP 404.13 ก่อนถึงแอป
+             80 MB = 83886080 ไบต์ เผื่อ multipart overhead -->
+        <requestLimits maxAllowedContentLength="83886080" />
+      </requestFiltering>
+    </security>
+
+    <!-- ปิด directory browsing (กันคนเปิดดูโครงสร้างโฟลเดอร์) -->
+    <directoryBrowse enabled="false" />
+
+    <httpProtocol>
+      <customHeaders>
+        <!-- ไม่บอกเวอร์ชัน IIS ให้โลกรู้ -->
+        <remove name="X-Powered-By" />
+        <add name="X-Content-Type-Options" value="nosniff" />
+        <add name="X-Frame-Options" value="SAMEORIGIN" />
+      </customHeaders>
+    </httpProtocol>
+
+  </system.webServer>
+</configuration>

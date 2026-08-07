@@ -1,0 +1,49 @@
+# =====================================================================
+# requirements-server.txt — สำหรับ "Windows Server (IIS)" ที่ไม่มีกล้อง
+# ใช้งาน: Login + ตรวจ Artwork (+ แดชบอร์ด/ประวัติ)
+# =====================================================================
+#
+# ต่างจาก requirements.txt (ของเครื่องสถานีที่ต่อกล้อง) ตรงที่ตัดของที่
+# เกี่ยวกับกล้อง/การเร่งความเร็ว inference ออก:
+#   - ไม่ลง onnxruntime / onnx / onnxslim / openvino  (ไม่มีกล้อง = ไม่ต้องเร่ง)
+#   - ไม่ลง pygrabber / comtypes                      (ใช้แจกแจงกล้อง USB เท่านั้น)
+#   - ไม่ลง gevent                                    (IIS + waitress ทำหน้าที่แทน)
+#   - เพิ่ม waitress                                  (WSGI server ที่ IIS เรียกใช้)
+#   - เพิ่ม pytesseract                               (กรอบแดงชี้คำผิดใน Artwork)
+#
+# ⚠️ ยังต้องลง opencv + ultralytics (ซึ่งจะดึง torch มาด้วย ~2 GB) ถึงแม้
+#    เซิร์ฟเวอร์จะไม่ตรวจกระป๋องเลย เพราะ app.py import โมดูลพวกนี้ไว้ที่หัวไฟล์
+#    (บรรทัด 12/19/20) ถ้าไม่มีจะ import ไม่ผ่านทั้งแอป (ล็อกอินก็ไม่ขึ้น).
+#    บน Windows ล้อ torch จาก PyPI เป็นรุ่น CPU อยู่แล้ว ไม่ต้องมี CUDA.
+#
+# ติดตั้ง (ใน venv ของโปรเจกต์ — ดู docs/DEPLOY_IIS_WINDOWS_SERVER.md):
+#     .venv\Scripts\python.exe -m pip install -r deploy\requirements-server.txt
+
+# ── Web ──────────────────────────────────────────────────────────────
+Flask==3.0.0
+Werkzeug==3.0.1
+waitress>=3.0.0            # WSGI server ที่ HttpPlatformHandler เรียกขึ้นมา
+
+# ── จำเป็นเพราะ app.py import ที่ระดับโมดูล ─────────────────────────
+opencv-python==4.8.1.78
+numpy>=1.26.0,<2.0         # opencv 4.8.1 ยังไม่รองรับ numpy 2.x
+ultralytics==8.1.0         # ดึง torch (CPU) มาด้วย — ไม่ได้ใช้ตรวจบนเซิร์ฟเวอร์
+Pillow==10.1.0
+
+# ── ฐานข้อมูล (ผู้ใช้/สิทธิ์ + ประวัติ) ──────────────────────────────
+pyodbc>=4.0.39             # ใช้ไดรเวอร์ {SQL Server} ที่ติดมากับ Windows อยู่แล้ว
+
+# ── Login + RBAC ────────────────────────────────────────────────────
+bcrypt>=4.1.0              # แฮชรหัสผ่าน — ขาดตัวนี้ = ล็อกอินไม่ได้เลย
+PyJWT>=2.8.0               # access/refresh token ใน httpOnly cookie
+
+# ── Artwork Proof Check ─────────────────────────────────────────────
+PyMuPDF>=1.24.0            # เปิด/เรนเดอร์ PDF + ดึง text layer (กรอบแดงชั้นที่ 1)
+requests>=2.31.0           # เรียก N8N webhook (OCR / แปลภาษา)
+python-Levenshtein>=0.25   # เทียบข้อความ
+scikit-image>=0.22.0       # ใช้ร่วมกับโหมดฉลากกระดาษ
+pyspellchecker>=0.8.0      # ⚠️ ขาดตัวนี้ = ชั้นตรวจ dictionary หายเงียบ (จุดบอด QC)
+pytesseract>=0.3.10        # กรอบแดงชั้นที่ 2 — ต้องลง tesseract.exe แยกด้วย
+
+# ── ไม่จำเป็นบนเซิร์ฟเวอร์ แต่ปลดคอมเมนต์ได้ถ้าต้องใช้ ──────────────
+# cryptography>=41.0.0     # เฉพาะตอนใช้ generate_cert.py (IIS ทำ TLS ให้แล้ว)

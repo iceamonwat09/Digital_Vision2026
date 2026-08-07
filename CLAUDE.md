@@ -311,14 +311,27 @@ path/ภาษาของ tesseract, ชั้นที่ใช้ต่อโ
   `pyspellchecker` แต่**ไม่อันตรายเท่า**: ไม่มี = ไม่มีกรอบแดงบนไฟล์ outline/ภาพถ่าย แต่ผลตรวจ QC
   เท่าเดิมทุกอย่าง (ไม่ใช่จุดบอด QC). เช็ค: `py -3.9 -c "import pytesseract; print(pytesseract.get_tesseract_version())"`.
   ต่างจาก pyspellchecker ตรงที่ **ต้องลง binary แยกจาก pip** (ดูหัวข้อ Artwork กรอบแดง).
-- **⚠️ Deploy IIS ในอนาคต (ยังไม่ทำ — บันทึกไว้ก่อน):** package ที่ลง user-site ของ dev
-  **IIS Application Pool identity เข้าไม่ถึง** → ชั้น dict หายเงียบใน production. วิธีแก้ตอน deploy คือทำ
-  **venv ในโฟลเดอร์โปรเจกต์** (`py -3.9 -m venv .venv` + `pip install -r requirements.txt`) แล้วชี้ IIS
-  FastCGI/HttpPlatform ไปที่ `.venv\Scripts\python.exe` (package อยู่กับโค้ด ทุก identity เห็นเท่ากัน).
-  **ระหว่างพัฒนาบนสถานีไม่ต้องทำ venv** — จะแยกเป็น 2 environment ทำให้สับสน + ดึง accel คนละชุด.
-  **⚠️ ก่อนสร้าง venv ต้อง pin accel ก่อน:** `requirements.txt` ปัจจุบัน **ไม่ตรงกับ stack ที่จูนไว้**
-  (`onnxruntime==1.19.2` comment ทิ้ง, `openvino` ไม่ pin เป็น 2024.6.0) — venv สดจะได้ accel ต่างจาก
-  สถานี = อาจตรวจช้าลงหรือเจอ bug OpenVINO 2025 ตรวจไม่เจอแบบเงียบๆ (ดูหัวข้อ OpenVINO ด้านบน).
+- **⚠️ Deploy IIS (Windows Server) — มีคู่มือแล้ว: `docs/DEPLOY_IIS_WINDOWS_SERVER.md`**
+  ใช้กับกรณี "เปิดให้ผู้ใช้ล็อกอินเข้ามาใช้โหมด Artwork ผ่านเว็บ" (เซิร์ฟเวอร์ไม่มีกล้อง).
+  ไฟล์ประกอบอยู่ใน `deploy/` ทั้งหมด — **เพิ่มใหม่ล้วน ไม่แตะ `app.py`** สถานีเดิมรัน
+  `py -3.9 app.py` ได้เหมือนเดิม 100%:
+  - `deploy/wsgi_iis.py` = entry point (waitress + `HTTP_PLATFORM_PORT`). **จำเป็นเพราะ
+    `init_system()` อยู่ใน `if __name__ == '__main__'` → ไม่ถูกเรียกตอนรันแบบ WSGI**;
+    คุมด้วย `VISIONIQ_IIS_INIT` (`db` default / `none` / `full`).
+  - `deploy/web.config.example` · `deploy/requirements-server.txt` · `deploy/check_server.py`
+    (สคริปต์ตรวจความพร้อม OK/WARN/FAIL — รันตัวนี้ก่อนโทษ IIS เสมอ).
+  - **venv ในโฟลเดอร์โปรเจกต์เป็นข้อบังคับบนเซิร์ฟเวอร์**: package ที่ลง user-site ของ dev
+    **IIS Application Pool identity เข้าไม่ถึง** → ชั้น dict (`pyspellchecker`) หายเงียบ = จุดบอด QC.
+    **ระหว่างพัฒนาบนสถานีไม่ต้องทำ venv** — จะแยกเป็น 2 environment ทำให้สับสน + ดึง accel คนละชุด.
+  - กับดักที่ต้องรู้: เพดานอัปโหลด IIS default (~28.6MB) < 40MB ของโค้ด → **404.13**;
+    `requestTimeout` default 2 นาที < เวลาตรวจจริง → **502.3**; `AUTH_COOKIE_SECURE=1`
+    บน `http://` → **ล็อกอินแล้ววนกลับหน้า login**; `app.py` import ultralytics ที่หัวไฟล์
+    → เซิร์ฟเวอร์ต้องลง torch แม้ไม่ตรวจกระป๋อง.
+  - **⚠️ ถ้าจะทำ venv บน "สถานี" ต้อง pin accel ก่อน:** `requirements.txt` ปัจจุบัน
+    **ไม่ตรงกับ stack ที่จูนไว้** (`onnxruntime==1.19.2` comment ทิ้ง, `openvino` ไม่ pin
+    เป็น 2024.6.0) — venv สดจะได้ accel ต่างจากสถานี = อาจตรวจช้าลงหรือเจอ bug OpenVINO 2025
+    ตรวจไม่เจอแบบเงียบๆ (ดูหัวข้อ OpenVINO ด้านบน). บนเซิร์ฟเวอร์ IIS ไม่มีปัญหานี้เพราะ
+    `requirements-server.txt` **ตัด onnx/openvino ออกทั้งหมด** (ไม่มีกล้อง = ไม่ต้องเร่ง).
 
 ---
 
