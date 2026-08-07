@@ -216,6 +216,8 @@ def run_inspection(rec_id: str, zone_list: List[dict],
                                     vocab_words=vocab_words,
                                     vocab_phrases=vocab_phrases)
 
+    _tag_highlight_risk(d, zone_list)
+
     preview = cv2.imread(os.path.join(d, "preview.png"))
     if preview is None:
         preview = ArtworkDocument(src).render(config.PREVIEW_DPI)
@@ -403,6 +405,31 @@ def _highlight_crop(rec_id: str, crop, found: str, zone_id: str,
         logger.debug("[artwork] highlight skipped for %s/%s",
                      rec_id, zone_id, exc_info=True)
         return crop
+
+
+def _tag_highlight_risk(insp_dir: str, zone_list: List[dict]) -> None:
+    """Mark zones whose crop will be too small/too wide for the red word
+    box to work (``hl_risk`` = "wide" | "small"), so the report can tell
+    the reviewer to redraw instead of leaving them wondering why a defect
+    has no box. Advisory only — never touches text, checks or verdict.
+    Silently does nothing if the page size cannot be read."""
+    try:
+        sizes = {}
+        for z in zone_list:
+            base = "source_b" if z.get("doc") == "b" else "source"
+            if base not in sizes:
+                doc = ArtworkDocument(_find_source(insp_dir, base))
+                page = doc.render(36)          # tiny render just for aspect
+                h, w = page.shape[:2]
+                sizes[base] = (w / 36.0 * 72.0, h / 36.0 * 72.0)
+            pw, ph = sizes[base]
+            risk = zones_mod.highlight_risk(z["bbox"], pw, ph, config.OCR_DPI)
+            if risk:
+                z["hl_risk"] = risk
+            else:
+                z.pop("hl_risk", None)
+    except Exception:
+        logger.debug("[artwork] highlight-risk tagging skipped", exc_info=True)
 
 
 def _pdf_text_boxes(rec_id: str, rep: dict, zone_id: str, found: str,

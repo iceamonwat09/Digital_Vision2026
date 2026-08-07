@@ -38,6 +38,8 @@ import os
 import re
 import shutil
 import sys
+import threading
+from collections import OrderedDict
 from typing import List, Optional, Tuple
 
 # A located region inside the crop, in PIXELS: (x0, y0, x1, y1).
@@ -57,11 +59,19 @@ _WORD_GAP_FRAC = 0.5      # column gap ≥ 0.5× band height separates two words
 
 # ── pure-python: which line / token does the word sit on ──────────────
 
+# Arabic-Indic and Extended Arabic-Indic digits → ASCII. The check layer
+# already folds these (``checks._norm_key``), so a defect can be raised
+# with "٤٧٥" while Tesseract reads the same cell as "475" — without the
+# same folding here the two could never be matched and the word would
+# never get a box on Arabic labels, which print both digit sets.
+_AR_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹", "01234567890123456789")
+
+
 def _norm(s: str) -> str:
-    """Uppercase, keep only letters/digits — same spirit as
-    ``checks._norm_key`` but dependency-free and used only for locating
-    (never for a verdict)."""
-    return re.sub(r"[\W_]+", "", (s or "").upper())
+    """Uppercase, fold Arabic-Indic digits, keep only letters/digits —
+    same spirit as ``checks._norm_key`` but dependency-free and used only
+    for locating (never for a verdict)."""
+    return re.sub(r"[\W_]+", "", (s or "").translate(_AR_DIGITS).upper())
 
 
 def locate_token(found: str, ocr_text: str) -> Optional[dict]:
@@ -489,8 +499,15 @@ _PSM_ORDER = (11, 3)
 # defect card asks for the SAME zone crop once per defect. Cache the word
 # list per (crop content, lang, psm) so the 2nd..Nth defect of a zone is
 # nearly free. Small bound — these lists are a few KB each.
-_WORDS_CACHE: dict = {}
+_WORDS_CACHE: "OrderedDict" = OrderedDict()
 _WORDS_CACHE_MAX = 12
+# Flask runs threaded and the browser fetches several defect crops of the
+# same zone at once, so this cache IS touched concurrently. Without the
+# lock the eviction (`next(iter(...))`) can raise "dictionary changed size
+# during iteration" mid-request; the caller swallows it and the card ends
+# up with NO box — an intermittent "sometimes there is no red box" that
+# looks exactly like an OCR failure.
+_WORDS_LOCK = threading.Lock()
 
 
 def _crop_key(crop):
@@ -505,13 +522,19 @@ def _tess_words(crop, lang: str, psm: int):
         ck = (_crop_key(crop), lang, psm)
     except Exception:
         ck = None
-    if ck is not None and ck in _WORDS_CACHE:
-        return _WORDS_CACHE[ck]
+    if ck is not None:
+        with _WORDS_LOCK:
+            hit = _WORDS_CACHE.get(ck)
+            if hit is not None:
+                _WORDS_CACHE.move_to_end(ck)     # keep it LRU
+                return hit
     words = _tess_words_uncached(crop, lang, psm)
     if ck is not None:
-        if len(_WORDS_CACHE) >= _WORDS_CACHE_MAX:
-            _WORDS_CACHE.pop(next(iter(_WORDS_CACHE)), None)
-        _WORDS_CACHE[ck] = words
+        with _WORDS_LOCK:
+            _WORDS_CACHE[ck] = words
+            _WORDS_CACHE.move_to_end(ck)
+            while len(_WORDS_CACHE) > _WORDS_CACHE_MAX:
+                _WORDS_CACHE.popitem(last=False)   # drop least recent
     return words
 
 
@@ -594,10 +617,28 @@ def _row_refine(crop, found: str, ocr_text: str, lang: str,
     fkey = _norm(found)
     if not fkey:
         return []
-    line = next((ln for ln in ocr_text.splitlines()
-                 if fkey and fkey in _norm(ln)), None)
-    if line is None:
+    # Pick the line by WHOLE-TOKEN equality, not substring. With substring
+    # a short numeric target lands on the wrong row: key "0" (from "0%") is
+    # contained in "Total fat 7 g 10%", so the anchor — and therefore the
+    # row — would come from a different line than the defect. If several
+    # lines legitimately contain the token, the row is ambiguous and the
+    # refine declines rather than guessing.
+    ftoks = [t for t in (_norm(t) for t in re.split(r"\s+", found)) if t]
+    cand = []
+    for ln in ocr_text.splitlines():
+        toks = [t for t in (_norm(w) for w in re.split(r"\s+", ln)) if t]
+        if not toks:
+            continue
+        if len(ftoks) == 1:
+            hit = any(t == fkey or (len(fkey) >= 4 and fkey in t)
+                      for t in toks)
+        else:
+            hit = fkey in "".join(toks)
+        if hit:
+            cand.append(ln)
+    if len(cand) != 1:
         return []
+    line = cand[0]
     # neighbours on that line, longest first (most distinctive)
     anchors = sorted({_norm(t) for t in re.split(r"\s+", line)}
                      - {fkey}, key=len, reverse=True)
@@ -958,10 +999,32 @@ def rotate_frac_box(box: Tuple[float, float, float, float],
     return (min(xs), min(ys), max(xs), max(ys))
 
 
+# A PDF word that the zone boundary cuts through comes back with its FULL
+# page rectangle, so part of it lies outside the zone. Clamping such a box
+# to the crop leaves a thin sliver glued to the border, which reads as "the
+# system boxed the wrong thing". Beyond this much of the word being outside,
+# the word is not really in this zone — say nothing instead.
+_MAX_CLIP_FRAC = 0.25
+
+
+def _clipped_out(fbox: Tuple[float, float, float, float]) -> float:
+    """Fraction of the box's area that falls outside the zone (0..1)."""
+    fx0, fy0, fx1, fy1 = fbox
+    w, h = fx1 - fx0, fy1 - fy0
+    if w <= 0 or h <= 0:
+        return 1.0
+    iw = max(0.0, min(fx1, 1.0) - max(fx0, 0.0))
+    ih = max(0.0, min(fy1, 1.0) - max(fy0, 0.0))
+    return 1.0 - (iw * ih) / (w * h)
+
+
 def frac_to_px(fbox: Tuple[float, float, float, float], W: int,
                H: int) -> Optional[Box]:
     """Scale a fraction box to pixel (x0,y0,x1,y1) inside a W×H crop, with
-    the same guards as the OCR path (min size, not the whole crop)."""
+    the same guards as the OCR path (min size, not the whole crop, and not
+    mostly outside the zone)."""
+    if _clipped_out(fbox) > _MAX_CLIP_FRAC:
+        return None
     fx0, fy0, fx1, fy1 = fbox
     x0, x1 = sorted((max(0, min(W, fx0 * W)), max(0, min(W, fx1 * W))))
     y0, y1 = sorted((max(0, min(H, fy0 * H)), max(0, min(H, fy1 * H))))

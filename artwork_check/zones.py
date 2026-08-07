@@ -30,6 +30,65 @@ saved as a template per print house so this is a one-time job per form.
 
 from __future__ import annotations
 
+# ── Highlight feasibility (advisory — never affects the verdict) ──────
+# Measured on real artwork: the red word-box needs the zone's text to be
+# roughly 9-20 px tall in the rendered crop. A zone drawn WIDE (the whole
+# printed strip) renders to something like 1600x340 after the crop's
+# max-side cap, its small print lands at ~8 px, and word localisation
+# collapses (0/14 target words found; raising the resolution only reached
+# 6/14 because the wide crop also mixes graphics, photos and several
+# scripts). A zone drawn tightly around the same table renders ~1450x990,
+# the text sits at 12-20 px, and localisation is 14/14.
+#
+# The short side of the crop separates those cases cleanly on every file
+# tested (fails: 340, 487 · works: 895, 988, 1186), so it is what we warn
+# on. Pure arithmetic — no rendering, no OCR — so it is free to compute
+# and safe to show while the human is still editing zones.
+HL_MIN_SHORT_SIDE = 700
+# 4:1 already separates "a text block" from "a whole printed strip" on the
+# files tested (the failing strip zone came out 1600x339 = 4.7:1).
+HL_MAX_ASPECT = 4.0
+
+
+def predict_crop_size(bbox, page_w_pt: float, page_h_pt: float,
+                      dpi: int, max_side: int = 1600,
+                      min_side: int = 1200) -> tuple:
+    """Pixel size of the crop ``pipeline.zone_crop_jpg`` would produce for
+    ``bbox`` — same dpi cap and small-zone boost, done in arithmetic."""
+    x, y, w, h = [float(v) for v in bbox]
+    pw = max(1.0, w * page_w_pt) / 72.0 * dpi
+    ph = max(1.0, h * page_h_pt) / 72.0 * dpi
+    longest = max(pw, ph)
+    if longest > max_side:                     # max-side cap
+        s = max_side / longest
+        pw, ph = pw * s, ph * s
+    longest = max(pw, ph)
+    if longest < min_side:                     # small-zone re-render boost
+        s = min(4.0, min_side / longest)
+        pw, ph = pw * s, ph * s
+        longest = max(pw, ph)
+        if longest > max_side:
+            s = max_side / longest
+            pw, ph = pw * s, ph * s
+    return int(round(pw)), int(round(ph))
+
+
+def highlight_risk(bbox, page_w_pt: float, page_h_pt: float,
+                   dpi: int) -> str:
+    """"" when the zone should highlight fine, else a short reason code:
+    ``"wide"`` (extreme aspect ratio) or ``"small"`` (crop too small for
+    the text to be readable). Advisory only."""
+    try:
+        pw, ph = predict_crop_size(bbox, page_w_pt, page_h_pt, dpi)
+    except Exception:
+        return ""
+    if min(pw, ph) <= 0:
+        return "small"
+    aspect = max(pw, ph) / float(min(pw, ph))
+    if min(pw, ph) < HL_MIN_SHORT_SIDE:
+        return "wide" if aspect >= HL_MAX_ASPECT else "small"
+    return ""
+
 import json
 import os
 import re

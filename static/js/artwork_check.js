@@ -30,6 +30,19 @@
     UNREADABLE: "อ่านไม่ชัด",
   };
 
+  // ข้อความอธิบายเมื่อโซนไม่เหมาะกับการวาดกรอบแดง (ค่า hl_risk มาจาก
+  // การคำนวณตอนส่งตรวจ — ดู zones.highlight_risk)
+  function hlRiskText(risk) {
+    const how = "ลากโซนให้กระชับเฉพาะบล็อกข้อความ (ดับเบิลคลิกที่โซนให้ระบบจัดให้พอดี) แล้วส่งตรวจใหม่";
+    if (risk === "wide") {
+      return "⚠ โซนนี้กว้างมากเมื่อเทียบกับความสูง ตัวอักษรในภาพจึงเล็กเกินกว่าจะชี้ตำแหน่งคำได้ — " +
+             "กรอบแดงอาจไม่ขึ้น (ผลตรวจ PASS/FAIL ไม่ได้รับผลกระทบ) · " + how;
+    }
+    return "⚠ โซนนี้ให้ภาพเล็กเกินไป ตัวอักษรไม่คมพอจะชี้ตำแหน่งคำ — " +
+           "กรอบแดงอาจไม่ขึ้น (ผลตรวจ PASS/FAIL ไม่ได้รับผลกระทบ) · " + how;
+  }
+  window.awHlRiskText = hlRiskText;
+
   function renderReport(rep, box) {
     const vClass = rep.verdict === "PASS" ? "aw-v-pass"
       : rep.verdict === "REVIEW" ? "aw-v-review" : "aw-v-fail";
@@ -145,6 +158,12 @@
               ' class="aw-zoomable" data-src="' + esc(cropUrl) + '" data-caption="' + esc(caption) + '"' +
               ' style="max-width:100%;border-radius:4px;cursor:zoom-in;">' +
           '</div>';
+        }
+
+        // โซนที่กว้าง/เล็กเกินไปจะชี้ตำแหน่งคำไม่ได้ — บอกเหตุผลไว้ ผู้ตรวจ
+        // จะได้ไม่นั่งสงสัยว่าทำไมไม่มีกรอบแดง (ค่านี้คำนวณตอนส่งตรวจ)
+        if (z && z.hl_risk && d.found) {
+          html += '<div class="aw-hl-warn">' + hlRiskText(z.hl_risk) + '</div>';
         }
 
         html += "</div>";
@@ -855,7 +874,43 @@
       pd.style.display = "none";
       pp.textContent = "";
     }
+    renderHlHint(z);
     updateRotPreview();
+  }
+
+  // เตือนตั้งแต่ตอนจัดโซน (ก่อนส่งตรวจ) ว่าโซนนี้จะชี้ตำแหน่งคำไม่ได้
+  // คำนวณจากเรขาคณิตอย่างเดียว — ต้องให้ผลตรงกับ zones.highlight_risk ฝั่ง
+  // เซิร์ฟเวอร์ (ดูค่าคงที่ในไฟล์นั้น)
+  const HL_DPI = 450, HL_MAX_SIDE = 1600, HL_MIN_SIDE = 1200;
+  const HL_MIN_SHORT = 700, HL_MAX_ASPECT = 4.0;
+  function predictCrop(bbox, pageW, pageH) {
+    let pw = Math.max(1, bbox[2] * pageW) / 72 * HL_DPI;
+    let ph = Math.max(1, bbox[3] * pageH) / 72 * HL_DPI;
+    let lo = Math.max(pw, ph);
+    if (lo > HL_MAX_SIDE) { const s = HL_MAX_SIDE / lo; pw *= s; ph *= s; }
+    lo = Math.max(pw, ph);
+    if (lo < HL_MIN_SIDE) {
+      const s = Math.min(4, HL_MIN_SIDE / lo); pw *= s; ph *= s;
+      lo = Math.max(pw, ph);
+      if (lo > HL_MAX_SIDE) { const s2 = HL_MAX_SIDE / lo; pw *= s2; ph *= s2; }
+    }
+    return [Math.round(pw), Math.round(ph)];
+  }
+  function renderHlHint(z) {
+    const el = $("awHlHint");
+    if (!el) return;
+    // ขนาดหน้าเป็นจุด (pt) — ประมาณจากสัดส่วนภาพ preview ที่โหลดมา
+    const img = $("awPreviewImg");
+    if (!z || !img || !img.naturalWidth) { el.style.display = "none"; return; }
+    const pageW = 842, pageH = pageW * (img.naturalHeight / img.naturalWidth);
+    const [pw, ph] = predictCrop(z.bbox, pageW, pageH);
+    const short = Math.min(pw, ph), aspect = Math.max(pw, ph) / (short || 1);
+    if (short >= HL_MIN_SHORT) { el.style.display = "none"; return; }
+    el.style.display = "";
+    el.textContent = (aspect >= HL_MAX_ASPECT
+      ? "⚠ โซนนี้กว้างมาก — กรอบแดงชี้คำอาจไม่ขึ้น"
+      : "⚠ โซนนี้เล็กไป — กรอบแดงชี้คำอาจไม่ขึ้น") +
+      " (ผลตรวจไม่กระทบ) ดับเบิลคลิกที่โซนให้ระบบจัดให้พอดี หรือลากใหม่ให้กระชับเฉพาะบล็อกข้อความ";
   }
   $("awPropType").addEventListener("change", () => {
     const z = selectedZone(); if (z) { z.type = $("awPropType").value; renderZones(); }

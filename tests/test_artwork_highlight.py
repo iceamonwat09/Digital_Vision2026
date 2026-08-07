@@ -653,3 +653,150 @@ def test_zone_words_empty_for_image(tmp_path):
     art = ArtworkDocument(str(ip))
     assert art.is_pdf is False
     assert art.zone_words([0.0, 0.0, 1.0, 1.0]) == []
+
+
+# ── P5: Arabic-Indic digits fold to ASCII before matching ─────────────
+
+def test_arabic_indic_digits_normalise_to_ascii():
+    # OCR ของอาหรับคืนตัวเลขเป็น ٤٧٥ ส่วน defect ที่ฟ้องมาเป็น 475 —
+    # ถ้าไม่พับให้เท่ากันก่อน คำเดียวกันจะจับคู่ไม่ติดเลย
+    assert hl._norm("٤٧٥") == "475"
+    assert hl._norm("۲۴%") == "24"
+    assert hl._norm("٤٧٥") == hl._norm("475")
+
+
+def test_arabic_indic_digits_match_ascii_word():
+    words = [("٤٧٥", (0, 0, 40, 20)), ("mg", (45, 0, 70, 20))]
+    boxes = hl.match_word_boxes(words, "475")
+    assert boxes == [(0, 0, 40, 20)]
+
+
+def test_digit_folding_does_not_merge_different_numbers():
+    words = [("٤٧٥", (0, 0, 40, 20)), ("١٧٠", (0, 30, 40, 50))]
+    assert hl.match_word_boxes(words, "170") == [(0, 30, 40, 50)]
+    assert hl.match_word_boxes(words, "999") == []
+
+
+# ── P9: a word the zone edge cuts through is not boxed ────────────────
+
+def test_frac_to_px_rejects_mostly_clipped_box():
+    # คำที่ถูกขอบโซนตัด: กล่องจาก PDF เป็นสี่เหลี่ยมเต็มคำบนหน้ากระดาษ
+    # อยู่ในโซนแค่ 10% — clamp แล้วจะได้แถบบางติดขอบ = ดูเหมือนวาดผิดที่
+    assert hl.frac_to_px((0.9, 0.2, 1.9, 0.3), 1000, 500) is None
+    assert hl.frac_to_px((-0.5, 0.2, 0.05, 0.3), 1000, 500) is None
+
+
+def test_frac_to_px_keeps_slightly_clipped_box():
+    # โดนตัดแค่ 10% ยังชี้ตำแหน่งถูก — ต้องวาด
+    box = hl.frac_to_px((0.9, 0.2, 1.01, 0.3), 1000, 500)
+    assert box is not None and box[0] == 900
+
+
+def test_clipped_out_fraction():
+    assert hl._clipped_out((0.0, 0.0, 1.0, 1.0)) == pytest.approx(0.0)
+    assert hl._clipped_out((0.5, 0.0, 1.5, 1.0)) == pytest.approx(0.5)
+    assert hl._clipped_out((2.0, 0.0, 3.0, 1.0)) == pytest.approx(1.0)
+    assert hl._clipped_out((0.5, 0.5, 0.5, 0.9)) == pytest.approx(1.0)
+
+
+# ── P6: row refine declines when the row is ambiguous ─────────────────
+
+def test_row_refine_declines_when_token_on_two_lines():
+    import numpy as np
+    crop = np.full((200, 400, 3), 255, np.uint8)
+    text = "Total fat 7 g 10%\nSodium 475 mg 10%"
+    # "10" อยู่ 2 บรรทัด → ชี้แถวไม่ได้ ต้องไม่เดา
+    assert hl._row_refine(crop, "10", text, "eng", [("Total", (0, 0, 1, 1))]) == []
+
+
+def test_row_refine_declines_on_substring_only_short_token():
+    import numpy as np
+    crop = np.full((200, 400, 3), 255, np.uint8)
+    # key "0" ไปอยู่ใน "10%" ของอีกบรรทัด — ห้ามนับเป็นแถวเดียวกัน
+    text = "Total fat 7 g 10%\nTrans fat 0 g"
+    out = hl._row_refine(crop, "0", text, "eng", [("Total", (0, 0, 1, 1))])
+    assert out == []
+
+
+def test_row_refine_needs_ocr_context():
+    import numpy as np
+    crop = np.full((100, 100, 3), 255, np.uint8)
+    assert hl._row_refine(crop, "24", "", "eng", [("a", (0, 0, 1, 1))]) == []
+    assert hl._row_refine(crop, "", "Sodium 24", "eng", [("a", (0, 0, 1, 1))]) == []
+
+
+# ── P10: word cache is bounded and thread-safe ────────────────────────
+
+def test_words_cache_is_bounded_lru():
+    import numpy as np
+    saved = hl._WORDS_CACHE.copy()
+    try:
+        hl._WORDS_CACHE.clear()
+        for i in range(hl._WORDS_CACHE_MAX + 5):
+            hl._WORDS_CACHE[("k%d" % i,)] = []
+            with hl._WORDS_LOCK:
+                while len(hl._WORDS_CACHE) > hl._WORDS_CACHE_MAX:
+                    hl._WORDS_CACHE.popitem(last=False)
+        assert len(hl._WORDS_CACHE) <= hl._WORDS_CACHE_MAX
+    finally:
+        hl._WORDS_CACHE.clear()
+        hl._WORDS_CACHE.update(saved)
+
+
+def test_words_cache_concurrent_access_is_safe():
+    import threading
+    import numpy as np
+    crop = np.full((60, 160, 3), 255, np.uint8)
+    errors = []
+
+    def worker():
+        try:
+            for _ in range(5):
+                hl._tess_words(crop, "eng", 3)
+        except Exception as exc:                     # pragma: no cover
+            errors.append(exc)
+
+    ts = [threading.Thread(target=worker) for _ in range(4)]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join()
+    assert errors == []
+
+
+# ── P14: zone geometry warning (advisory, never touches the verdict) ──
+
+def test_predict_crop_size_matches_pipeline_rules():
+    from artwork_check import zones
+    # โซนแคบ ๆ ถูกดันขึ้นถึง min_side
+    w, h = zones.predict_crop_size([0, 0, 0.1, 0.1], 842, 595, 450)
+    assert max(w, h) >= 1200
+    # โซนใหญ่ถูกกดลงไม่เกิน max_side
+    w, h = zones.predict_crop_size([0, 0, 1.0, 1.0], 842, 595, 450)
+    assert max(w, h) <= 1600
+
+
+def test_highlight_risk_flags_wide_strip():
+    from artwork_check import zones
+    # แถบยาวเต็มความกว้างหน้ากระดาษ สูงนิดเดียว = เคสที่วัดแล้วชี้คำไม่ได้
+    assert zones.highlight_risk([0.0, 0.4, 1.0, 0.06], 842, 595, 450) == "wide"
+
+
+def test_highlight_risk_clear_for_tight_table():
+    from artwork_check import zones
+    # โซนกระชับรอบตาราง = เคสที่วัดแล้วชี้คำได้ 14/14
+    assert zones.highlight_risk([0.59, 0.50, 0.28, 0.27], 842, 595, 450) == ""
+
+
+def test_highlight_risk_never_raises_on_bad_input():
+    from artwork_check import zones
+    assert zones.highlight_risk(None, 842, 595, 450) == ""
+    assert zones.highlight_risk([0, 0], 842, 595, 450) == ""
+    assert zones.highlight_risk(["a", "b", "c", "d"], 842, 595, 450) == ""
+
+
+def test_tag_highlight_risk_never_raises_without_source(tmp_path):
+    from artwork_check import pipeline
+    zl = [{"id": "z1", "bbox": [0, 0, 1, 0.05]}]
+    pipeline._tag_highlight_risk(str(tmp_path), zl)   # ไม่มีไฟล์ต้นฉบับ
+    assert "hl_risk" not in zl[0]                     # ข้ามเงียบ ไม่พัง
