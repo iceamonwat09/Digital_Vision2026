@@ -489,12 +489,19 @@
     if (previewImg.complete) { applyZoom(); renderZones(); }
   }
   previewImg.onload = () => { applyZoom(); renderZones(); };
-  // Give the right (results) panel more width once real result/table data
-  // exists; keep the editing-favored 7/5 while the user is still placing
-  // zones. Toggled true after inspect/translate, false on a new upload.
+  // เดิมสลับสัดส่วน 2 คอลัมน์ให้ฝั่งผลตรวจกว้างขึ้นเมื่อมีผลตรวจ/ตารางแล้ว
+  // (toggle true หลังส่งตรวจ/แปล, false ตอนอัปโหลดไฟล์ใหม่). เลย์เอาต์ปัจจุบันเป็น
+  // คอลัมน์เดียว (② อยู่ใต้ ①) คลาสนี้จึงไม่มีผลทางสายตาแล้ว — คงไว้ทั้ง
+  // ฟังก์ชันและจุดเรียกทั้ง 3 แห่ง เผื่อย้อนเลย์เอาต์กลับและกัน error
   const awGrid = document.querySelector(".aw-grid");
   function setResultsWide(wide) {
     if (awGrid) awGrid.classList.toggle("results-wide", !!wide);
+  }
+  // ② ย้ายไปอยู่ใต้ ① แล้ว — ถ้าไม่เลื่อนจอให้ ผู้ใช้ที่อยู่ตรงกล่องจัดโซน
+  // จะกด "ส่งตรวจสอบ" แล้วเหมือนไม่มีอะไรเกิดขึ้น. display-only ล้วน
+  function scrollToResults() {
+    const p = resultBox.closest(".aw-panel");
+    if (p && p.scrollIntoView) p.scrollIntoView({ behavior: "smooth", block: "start" });
   }
   function setBusy(b) {
     busy = b;
@@ -688,6 +695,28 @@
     applyZoom();
     renderZones();
   }, { passive: false });
+
+  // ปุ่ม "⤢ พอดีความกว้าง" — ใช้พื้นที่ของเลย์เอาต์เต็มความกว้างให้คุ้ม:
+  // ตั้งซูมให้ภาพพอดีช่องมองพอดี. clientWidth ของ .aw-stage-box = ความกว้าง
+  // ด้านในจริง (ไม่รวม border/scrollbar) ลบไว้เล็กน้อยกัน scrollbar แนวนอนโผล่.
+  // ⚠️ ต้อง sync ทั้ง zoomPct + zoomRange.value + ป้าย % พร้อมกัน ไม่งั้น
+  // สไลเดอร์จะค้างคนละค่ากับภาพจริงแบบเงียบ ๆ. ไม่แตะสูตรพิกัดใด ๆ —
+  // เรียก applyZoom()/renderZones() ชุดเดิมเหมือนสไลเดอร์ทุกประการ
+  const stageBox = zoomRange.closest(".aw-stage-box");
+  function setZoom(pct) {
+    zoomPct = Math.min(300, Math.max(30, Math.round(pct)));
+    zoomRange.value = zoomPct;
+    zoomLabel.textContent = zoomPct + "%";
+    applyZoom();
+    renderZones();
+  }
+  $("awZoomFit").addEventListener("click", () => {
+    if (!natW || !stageBox) return;
+    const avail = stageBox.clientWidth - 6;
+    // ปัดลง (ไม่ใช่ปัดใกล้สุด) — ปัดขึ้นแม้ 1% ก็ทำให้ภาพล้นกล่องแล้วมี
+    // scrollbar แนวนอนโผล่ ทั้งที่กดปุ่ม "พอดีความกว้าง"
+    if (avail > 0) setZoom(Math.floor(avail / natW * 100));
+  });
 
   function applyZoom() {
     if (!natW) return;
@@ -1207,8 +1236,10 @@
       switchTab("result");
       resetTextTab();
       setResultsWide(true);   // results exist → widen the results panel
+      scrollToResults();      // ② อยู่ล่าง — พาไปดูผลให้เลย
     } catch (e) {
       resultBox.innerHTML = '<div class="aw-empty">ตรวจไม่สำเร็จ: ' + esc(e.message) + "</div>";
+      scrollToResults();      // ข้อความ error ก็อยู่ในกล่อง ② เช่นกัน
     } finally {
       setBusy(false);
     }

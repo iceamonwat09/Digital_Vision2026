@@ -286,6 +286,38 @@ path/ภาษาของ tesseract, ชั้นที่ใช้ต่อโ
 
 ---
 
+## 🖼️ Artwork — เลย์เอาต์หน้าจอ (คอลัมน์เดียว เต็มความกว้าง)
+
+หน้า `/artwork_check` เป็น **คอลัมน์เดียว**: ① อัปโหลด/จัดโซน เต็มขอบซ้าย-ขวา แล้ว ② ผลการตรวจสอบ
+อยู่ล่าง (เดิม 2 คอลัมน์ 7/5 ใน `max-width:1380px` → ① ได้แค่ ~710px ทำงานกับ artwork ใหญ่ไม่ไหว).
+บนจอ 1920 กล่องจัดโซนกว้าง **1810px (×2.5 ของเดิม)** → A4 นอน @150dpi เห็นครบที่ zoom 100%,
+A3 พอดีที่ 72% (เดิมต้องย่อเหลือ 29% = ทิ้งรายละเอียด).
+
+- **ความกว้างของ panel ไม่เข้าไปในสูตรพิกัดโซนเลย** — โซนเป็นสัดส่วน 0..1, ภาพถูกกำหนดความกว้าง
+  เป็น px จาก `applyZoom()` และ `.aw-stage img { max-width:none }` ⇒ กล่องกว้างขึ้น = **เห็นภาพ
+  มากขึ้นที่ซูมเท่าเดิม ไม่ใช่ย่อภาพ**. ความละเอียดจึงลดลงไม่ได้เชิงโครงสร้าง.
+  พิสูจน์แล้วด้วยเบราว์เซอร์จริง (เทียบก่อน/หลังแก้): วาดโซนที่ zoom 100/60/250% ได้ค่าคลาดเคลื่อน
+  **0.781/0.797/0.781 px เท่ากันทุกหลัก** และ zoom mapping (60% → 1488px), wheel-zoom เท่าเดิมเป๊ะ.
+- **`.main-content { max-width:1400px }` อยู่ใน `static/css/style.css` = ของกลางทุกหน้า** —
+  ปลดเพดานได้เฉพาะใน `{% block extra_css %}` ของ `artwork_check.html` (render เฉพาะหน้านี้)
+  **ห้ามแก้ style.css** ไม่งั้นกระทบ Live/Label/Dashboard ทั้งหมด.
+- **`.results-wide` + `setResultsWide()` กลายเป็น no-op** (คอลัมน์เดียว) — คงคลาสและจุดเรียกทั้ง 3
+  ไว้ตามเดิม ไม่ต้องแตะ JS.
+- **wheel-zoom ผูกกับ `zoomRange.closest(".aw-stage-box")`** (`artwork_check.js`) — ถ้าย้าย
+  `#awZoomBar` ออกนอกกล่อง หรือเปลี่ยนชื่อคลาส **ซูมด้วยลูกกลิ้งจะตายเงียบ ไม่มี error**.
+- ปุ่ม **"⤢ พอดีความกว้าง"** (`#awZoomFit`): `floor(stageBox.clientWidth-6 / natW * 100)` clamp 30-300
+  — **ปัดลงเสมอ** (ปัดขึ้น 1% = ภาพล้นกล่อง มี scrollbar แนวนอนทั้งที่กด "พอดี") และต้อง sync
+  `zoomPct` + `zoomRange.value` + ป้าย % พร้อมกัน ไม่งั้นสไลเดอร์ค้างคนละค่ากับภาพ.
+- ② อยู่ล่างแล้ว → `scrollToResults()` พาจอไปที่ผลตรวจหลังกด "ส่งตรวจสอบ" (ทั้งกรณีสำเร็จและ error)
+  ไม่งั้นผู้ใช้ที่อยู่ตรงกล่องจัดโซนจะเหมือนกดแล้วไม่มีอะไรเกิดขึ้น.
+- **ยังไม่ได้ทำ (ถ้าอยากให้ภาพ "คมขึ้น" จริงระดับพิกเซล):** `PREVIEW_DPI=150` คือเพดานของภาพใน
+  ตัวแก้โซน ซูมเกิน 100% = ขยายภาพเบลอ. ต้องเพิ่มไฟล์ **display-only** แยก (เช่น `PREVIEW_DISPLAY_DPI`
+  → `preview_hi.png`) **ห้ามเปลี่ยน `preview.png`** เพราะถูกใช้ต่อโดย `propose_zones` / `snap_bbox` /
+  `autopair_bbox` และ `draw_overlay` (ซึ่งใช้ `putText` fontScale คงที่ 0.5 → DPI สูงขึ้น = ป้ายบน
+  overlay เล็กลงเชิงสัดส่วน).
+
+---
+
 ## 🖥️ Entrypoints & HTTPS
 
 - **`app.py`** = entrypoint หลัก (ผู้ใช้รัน `py -3.9 app.py`). `threaded=True`. รองรับ HTTPS.
@@ -327,14 +359,14 @@ path/ภาษาของ tesseract, ชั้นที่ใช้ต่อโ
 - HW สถานี: **i7-1165G7** (4C/8T, 15W, AVX-512), 16GB DDR4 (single-channel), Iris Xe, Win10 Pro, Python 3.9.13.
 - inference bestX (seg): **iGPU (OpenVINO) ≈ 45-50ms/เฟรม (~20-22 FPS)** = ตัวจริงปัจจุบัน;
   ONNX CPU ≈ 280ms (~2.7-3 FPS) = ชั้น fallback; PyTorch ≈ 315ms = fallback สุดท้าย.
-- Repo: `iceamonwat09/digital_vision2026`. Dev branch ปัจจุบัน: `claude/artwork-red-box-drawing-lpqhpo`
-  (ก่อนหน้า: `claude/dent-detection-camera-access-ub11gy`). **ห้าม push ไป main**.
+- Repo: `iceamonwat09/digital_vision2026`. Dev branch ปัจจุบัน: `claude/artwork-ui-layout-1lnwgt`
+  (ก่อนหน้า: `claude/artwork-red-box-drawing-lpqhpo`). **ห้าม push ไป main**.
 - SQL Server: 172.32.0.50/VisionIQ. Defect log ผ่าน `sp_log_defect` (เก็บภาพ base64).
 - Tests: `pytest tests/` — 298 ตัว (artwork/label/barcode — **ไม่ครอบคลุม camera/live loop**).
   สถานะปัจจุบัน: **283 pass / 5 fail / 10 skip**.
   ⚠️ `tests/test_inspection_golden.py` **fail 5 ตัวอยู่แล้ว** (pre-existing, `NameError: FieldResult`
   ในโมดูล Label Paper) — ไม่เกี่ยวกับ artwork. ยืนยันด้วย `git stash` ก่อนโทษการแก้ของตัวเอง.
-- CONFIG_VERSION ปัจจุบัน: **`2026.08.07-aw-redbox-stable`** (เช็คที่ footer ว่ารันโค้ดใหม่จริง).
+- CONFIG_VERSION ปัจจุบัน: **`2026.08.07-aw-fullwidth-ui`** (เช็คที่ footer ว่ารันโค้ดใหม่จริง).
 
 ---
 
