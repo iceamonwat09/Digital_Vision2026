@@ -178,7 +178,7 @@ verify_openvino.py ต้อง PASS ทุก device×imgsz (4) เช็คต
 *ประมาณ* ไม่ใช่ *วัด*). เทสต์ตอนนั้นตั้ง `blocks=[]` ตลอดจึงไม่เคยเจอ — **ถ้าจะเพิ่ม/สลับชั้น
 ต้องมีเทสต์ที่ป้อน bbox ที่ "เพี้ยนไปคนละแถว" ด้วยเสมอ**.
 
-- **ชั้น ② ดีที่สุดและฟรี** — ไม่ต้อง OCR/traineddata, รองรับฮีบรู/อาหรับ/จีน/ไทยทันที.
+- **ชั้น ① ดีที่สุดและฟรี** — ไม่ต้อง OCR/traineddata, รองรับฮีบรู/อาหรับ/จีน/ไทยทันที.
   ตรวจด้วย `ArtworkDocument.zone_words(bbox)` → `[(text, (fx0,fy0,fx1,fy1))]` เป็น**สัดส่วนในโซน**
   → `rotate_frac_box()` (ตามการหมุนโซน) → `frac_to_px()`.
 - **`_cv_box` (projection profile) = ชั้นสำรองสุดท้าย ปิดไว้ (`HIGHLIGHT_USE_PROFILE=False`)** —
@@ -257,7 +257,7 @@ verify_openvino.py ต้อง PASS ทุก device×imgsz (4) เช็คต
 - **ค่าคงที่ต้องตรงกันสองฝั่ง** (`zones.HL_*` ↔ `HL_*` ใน `artwork_check.js`) — แก้ข้างเดียวแล้ว
   คำเตือนตอนจัดโซนกับตอนดูผลจะไม่ตรงกัน.
 
-**Tesseract (ชั้น ③) — optional dependency:**
+**Tesseract (ชั้น ②) — optional dependency:**
 - `_find_tesseract_cmd()` **auto-detect ให้** ตามลำดับ: env `ARTWORK_TESSERACT_CMD` → PATH →
   `C:\Program Files\Tesseract-OCR\tesseract.exe` → `%LOCALAPPDATA%\Programs\Tesseract-OCR\`.
   **ไม่ต้องตั้ง PATH เอง**.
@@ -268,10 +268,16 @@ verify_openvino.py ต้อง PASS ทุก device×imgsz (4) เช็คต
 
 **Config (ทุกตัว opt-out ได้ — `artwork_check/config.py`):**
 `HIGHLIGHT_DEFECT_WORD` (ปิดทั้งฟีเจอร์) · `HIGHLIGHT_USE_PDF_TEXT` · `HIGHLIGHT_USE_TESSERACT` ·
-`HIGHLIGHT_USE_PROFILE` (default False) · `HIGHLIGHT_TESSERACT_LANG` · `HIGHLIGHT_MAX_BOXES`
+`HIGHLIGHT_USE_PROFILE` (default False) · `HIGHLIGHT_TESSERACT_LANG` · `HIGHLIGHT_MAX_BOXES` ·
+`CROP_MIN_SIDE` (=1200 ด้านยาวขั้นต่ำของ crop ในการ์ด — ตัวชี้เป็นชี้ตายของ Tesseract, ดูกับดักข้อ 6)
+
+**เครื่องมือ diagnose บนสถานี:** `py -3.9 diagnose_highlight.py <inspection-id>` — พิมพ์ config,
+path/ภาษาของ tesseract, ชั้นที่ใช้ต่อโซน, จำนวนกรอบต่อ defect และ**อ่านซ้ำทีละกรอบ**ว่าในกรอบ
+คือคำอะไร (`--save` เขียนไฟล์ `diag_<id>_<n>_<zone>.jpg` ออกมาดูด้วยตา). ใช้ตอบคำถาม
+"ทำไมกรอบไม่ขึ้น/ขึ้นผิดที่" ได้โดยไม่ต้องเดา.
 
 **ผลทดสอบ end-to-end (production path, 5 artwork จริง + 1 ภาพถ่าย):**
-- Cosma/GimCat (มี text layer) → ชั้น ② **8/8** เป๊ะ · StarKist/TerraMadre/JohnWest (outline) → ชั้น ③
+- Cosma/GimCat (มี text layer) → ชั้น ① **8/8** เป๊ะ · StarKist/TerraMadre/JohnWest (outline) → ชั้น ②
 - รวม **25/25** เมื่อตั้ง `eng+ara` (23/25 ด้วย `eng` ล้วน — อาหรับ MISS = ไม่วาด ไม่ error)
 - ภาพถ่ายกล้องจริง (Puffy Nee Nee): **9/9** รวม `Cude`/`Phosphours` ที่เป็นคำผิดจริง
 - **ไม่มีกรอบวางผิดแม้แต่จุดเดียวในทุกไฟล์**
@@ -324,9 +330,11 @@ verify_openvino.py ต้อง PASS ทุก device×imgsz (4) เช็คต
 - Repo: `iceamonwat09/digital_vision2026`. Dev branch ปัจจุบัน: `claude/artwork-red-box-drawing-lpqhpo`
   (ก่อนหน้า: `claude/dent-detection-camera-access-ub11gy`). **ห้าม push ไป main**.
 - SQL Server: 172.32.0.50/VisionIQ. Defect log ผ่าน `sp_log_defect` (เก็บภาพ base64).
-- Tests: `pytest tests/` (artwork/label/barcode — ไม่ครอบคลุม camera/live loop).
+- Tests: `pytest tests/` — 298 ตัว (artwork/label/barcode — **ไม่ครอบคลุม camera/live loop**).
+  สถานะปัจจุบัน: **283 pass / 5 fail / 10 skip**.
   ⚠️ `tests/test_inspection_golden.py` **fail 5 ตัวอยู่แล้ว** (pre-existing, `NameError: FieldResult`
   ในโมดูล Label Paper) — ไม่เกี่ยวกับ artwork. ยืนยันด้วย `git stash` ก่อนโทษการแก้ของตัวเอง.
+- CONFIG_VERSION ปัจจุบัน: **`2026.08.07-aw-redbox-stable`** (เช็คที่ footer ว่ารันโค้ดใหม่จริง).
 
 ---
 
@@ -336,6 +344,10 @@ verify_openvino.py ต้อง PASS ทุก device×imgsz (4) เช็คต
 - [ ] fallback ครบทุกทางที่อาจล้มเหลว?
 - [ ] การนับ/DB logging เดิมไม่ถูกแตะ? (ถ้าแตะ inference_loop ให้ไล่ดู)
 - [ ] `python -c "import ast; ast.parse(open('app.py').read())"` ผ่าน?
+      (แตะ JS ด้วย → `node --check static/js/<ไฟล์>.js`)
+- [ ] แตะ JS ที่อ้าง element ใหม่ → **เพิ่ม element ใน `templates/` แล้วหรือยัง**?
+      (`$("id")` ที่ไม่มีจริงจะเงียบ ไม่ error — ฟีเจอร์หายไปเฉยๆ)
+- [ ] ค่าคงที่ที่ใช้ทั้ง Python และ JS แก้ครบสองฝั่งหรือยัง? (เช่น `zones.HL_*` ↔ `HL_*`)
 - [ ] bump `CONFIG_VERSION` ถ้าผู้ใช้ต้อง verify?
 - [ ] ถ้าแตะชั้นที่ "ชี้จุดให้คนดู" — เคสไม่มั่นใจ **ไม่แสดง** แทนที่จะเดา? (กฎเหล็ก 2)
 - [ ] dependency ใหม่เป็น optional + auto-fallback? (ไม่มี = ฟีเจอร์หาย ไม่ใช่ระบบพัง)
