@@ -126,7 +126,7 @@ IIS พูดภาษา HTTP และรัน .NET / FastCGI เป็นห
 |---|---|---|---|---|
 | 1 | Windows Server + **IIS (Web Server role)** | 2016 ขึ้นไป | ✅ บังคับ | — (คุณเปิดแล้ว) |
 | 2 | **HttpPlatformHandler** | v1.2 (x64) | ✅ บังคับ | เว็บขึ้น **HTTP 500.19** |
-| 3 | **Python** (64-bit) | **3.9.13** (ให้ตรงกับสถานี) | ✅ บังคับ | — |
+| 3 | **Python** (64-bit) | **3.12** (❌ ห้าม 3.13 · ⚠️ 3.9 หมดอายุแล้ว — ดู [STEP 2](#step-2--ติดตั้ง-python-312-64-bit)) | ✅ บังคับ | — |
 | 4 | **venv + package** ตาม `deploy/requirements-server.txt` | — | ✅ บังคับ | ล็อกอินไม่ได้ / ตรวจไม่ได้ |
 | 5 | Git for Windows | ล่าสุด | 🟡 แนะนำ | อัปเดตโค้ดยาก (ต้องคัดลอกไฟล์เอง) |
 | 6 | **Tesseract-OCR** (UB-Mannheim build) | 5.x | 🟡 แนะนำ | ไฟล์ outline/ภาพถ่าย **ไม่มีกรอบแดงชี้คำผิด** (ผลตรวจยังถูกต้องเท่าเดิม) |
@@ -169,17 +169,43 @@ IIS พูดภาษา HTTP และรัน .NET / FastCGI เป็นห
 
 ---
 
-### STEP 2 — ติดตั้ง Python 3.9 (64-bit)
+### STEP 2 — ติดตั้ง Python 3.12 (64-bit)
 
-**ทำไม 3.9?** เพราะโค้ดทั้งโปรเจกต์ถูกทดสอบและ pin ไว้กับ Python 3.9 บนเครื่องสถานี
-ใช้เวอร์ชันเดียวกันบนเซิร์ฟเวอร์ = ลดตัวแปรลง 1 ตัว
+> ### ⚠️ อ่านก่อน: ทำไม **ไม่** ใช้ Python 3.9 บนเซิร์ฟเวอร์
+>
+> เครื่อง**สถานี**ถูกล็อกไว้ที่ Python 3.9 ด้วยเหตุผลเดียวคือ **ตัวเร่งความเร็วการตรวจกระป๋อง**:
+> `onnxruntime==1.19.2` และ `openvino==2024.6.0` เป็นล้อรุ่นสุดท้ายที่มี `cp39-win_amd64`
+> ถ้าอัปเวอร์ชัน Python ตัวเร่งจะหลุด pin แล้วเสี่ยงเจอบั๊ก "ตรวจไม่เจอแบบเงียบ ๆ"
+>
+> **แต่เซิร์ฟเวอร์ตัวนี้ไม่ได้ใช้ตัวเร่งเลย** — ไม่มีกล้อง ไม่ตรวจกระป๋อง และ
+> `deploy/requirements-server.txt` **ตัด onnx/openvino ออกทั้งหมด** อยู่แล้ว
+> ข้อจำกัดที่บังคับ 3.9 จึงไม่มีผลกับเครื่องนี้แม้แต่ข้อเดียว
+>
+> Python 3.9 **หมดอายุการสนับสนุนไปแล้วตั้งแต่ 31 ต.ค. 2025** = ไม่มี security patch อีกต่อไป
+> ซึ่งรับไม่ได้สำหรับเครื่องที่**เปิดให้ผู้ใช้ล็อกอินเข้ามาผ่านเครือข่าย**
 
-1. ดาวน์โหลด **`python-3.9.13-amd64.exe`** จาก
-   `https://www.python.org/downloads/release/python-3913/`
-   (เลือกหัวข้อ **Windows installer (64-bit)**)
+**เวอร์ชันที่ใช้ได้ (ตรวจสอบล้อจริงบน PyPI แล้ว):**
+
+| เวอร์ชัน | ใช้ได้ไหม | เหตุผล |
+|---|---|---|
+| **3.12** | ✅ **แนะนำ** | มีล้อ `cp312-win_amd64` ครบทุก package ที่ pin ไว้ + ได้ security update ยาวถึง **ต.ค. 2028** |
+| 3.11 | ✅ ใช้ได้ | ปลอดภัยเท่ากัน แต่หมดอายุเร็วกว่า (ต.ค. 2027) |
+| 3.13 | ❌ **ห้าม** | `numpy 1.26.4` และ `Pillow 10.1.0` **ไม่มีล้อ cp313** → ติดตั้งไม่ผ่าน |
+| 3.9 | ⚠️ ใช้ได้แต่ไม่ควร | หมดอายุแล้ว ไม่มี security patch |
+
+> **ยืนยันความเข้ากันได้แล้ว:** ซอร์สทุกไฟล์ของโปรเจกต์ compile ผ่านบน Python 3.11/3.12
+> และไม่มีการ import โมดูลที่ถูกถอดออกใน 3.12 (`distutils`, `imp`) หรือ API ที่เลิกใช้
+> (`datetime.utcnow()`, `locale.getdefaultlocale()`) เลย
+> ส่วน `opencv-python==4.8.1.78` ใช้ล้อแบบ **abi3** (`cp37-abi3`) ซึ่งรันได้กับ CPython 3.7+ ทุกตัว
+
+**ขั้นตอนติดตั้ง:**
+
+1. ดาวน์โหลด **`python-3.12.x-amd64.exe`** จาก
+   `https://www.python.org/downloads/windows/`
+   (เลือกหัวข้อ **Windows installer (64-bit)** ของ 3.12 ล่าสุด)
 2. คลิกขวาไฟล์ → **Run as administrator**
 3. ที่หน้าแรก ให้เลือก **Customize installation** (อย่ากด Install Now)
-   - ⚠️ ก่อนกด ให้ติ๊ก **Add Python 3.9 to PATH** ที่ด้านล่างด้วย
+   - ⚠️ ก่อนกด ให้ติ๊ก **Add python.exe to PATH** ที่ด้านล่างด้วย
 4. หน้า **Optional Features** — ติ๊กให้ครบ:
    - ☑ Documentation
    - ☑ **pip**
@@ -189,15 +215,18 @@ IIS พูดภาษา HTTP และรัน .NET / FastCGI เป็นห
    - ☑ **Install for all users**
    - ☑ Add Python to environment variables
    - ☑ Precompile standard library
-   - ช่อง **Customize install location** → พิมพ์ `C:\Python39`
+   - ช่อง **Customize install location** → พิมพ์ `C:\Python312`
    - กด **Install**
 6. เสร็จแล้วกด **Close**
 
 **ยืนยันผล** — ใน Command Prompt:
 ```cmd
-C:\Python39\python.exe --version
+C:\Python312\python.exe --version
 ```
-ต้องขึ้น `Python 3.9.13`
+ต้องขึ้น `Python 3.12.x`
+
+> 💡 **เครื่องสถานีไม่ต้องแตะอะไรทั้งสิ้น** — ยังใช้ Python 3.9 + `py -3.9 app.py`
+> ต่อไปเหมือนเดิม สองเครื่องนี้แยกขาดจากกัน (คนละ requirements, คนละ Python)
 
 ---
 
@@ -255,7 +284,7 @@ cd Digital_Vision2026
 cd /d C:\VisionIQ\Digital_Vision2026
 
 REM 1) สร้าง venv
-C:\Python39\python.exe -m venv .venv
+C:\Python312\python.exe -m venv .venv
 
 REM 2) อัปเกรด pip ก่อน (กัน wheel รุ่นใหม่ติดตั้งไม่ได้)
 .venv\Scripts\python.exe -m pip install --upgrade pip setuptools wheel
@@ -404,7 +433,7 @@ set VISIONIQ_IIS_INIT=db
 ======================================================================
   VisionIQ — IIS / waitress entry point
   CONFIG_VERSION   : 2026.08.07-aw-redbox-stable
-  Python           : 3.9.13
+  Python           : 3.12.x
   Listen           : 127.0.0.1:8000
   VISIONIQ_IIS_INIT: db (ต่อ SQL Server สำเร็จ)
   AUTH_ENABLED=True
@@ -978,7 +1007,7 @@ iisreset
 
 ## สรุปสั้นที่สุด
 
-1. ติดตั้ง **Python 3.9** + **HttpPlatformHandler** บนเซิร์ฟเวอร์
+1. ติดตั้ง **Python 3.12** (ไม่ใช่ 3.9 ที่หมดอายุแล้ว และ**ห้าม** 3.13) + **HttpPlatformHandler** บนเซิร์ฟเวอร์
 2. `git clone` โค้ด → สร้าง **venv ในโฟลเดอร์โปรเจกต์** → `pip install -r deploy\requirements-server.txt`
 3. รัน **`auth_schema.sql`** (อย่าลืม `-f 65001`) → **`python -m auth.seed_admin`**
 4. ทดสอบด้วย **`deploy\wsgi_iis.py`** ให้ผ่านก่อน แล้วค่อยต่อ IIS

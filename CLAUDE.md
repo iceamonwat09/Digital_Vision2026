@@ -320,6 +320,13 @@ path/ภาษาของ tesseract, ชั้นที่ใช้ต่อโ
     คุมด้วย `VISIONIQ_IIS_INIT` (`db` default / `none` / `full`).
   - `deploy/web.config.example` · `deploy/requirements-server.txt` · `deploy/check_server.py`
     (สคริปต์ตรวจความพร้อม OK/WARN/FAIL — รันตัวนี้ก่อนโทษ IIS เสมอ).
+  - **⚠️ เซิร์ฟเวอร์ใช้ Python 3.12 ไม่ใช่ 3.9** — ข้อจำกัด 3.9 ของสถานีมาจาก
+    `onnxruntime==1.19.2`/`openvino==2024.6.0` (ล้อ cp39 ตัวสุดท้าย) ซึ่ง
+    `requirements-server.txt` **ตัดออกหมดแล้ว** จึงไม่ผูกอีกต่อไป; 3.9 หมดอายุ
+    ตั้งแต่ 31 ต.ค. 2025 (ไม่มี security patch) = รับไม่ได้กับเครื่องที่เปิดให้ล็อกอิน.
+    **ห้าม 3.13** (`numpy 1.26`/`Pillow 10.1` ไม่มีล้อ cp313). ตรวจแล้ว: ซอร์สทั้งหมด
+    compile ผ่านบน 3.11/3.12 และไม่มี `distutils`/`imp`/`utcnow()`/`getdefaultlocale()`.
+    **สถานียังคงเป็น 3.9 เหมือนเดิม** — สองเครื่องแยกขาด คนละ requirements คนละ Python.
   - **venv ในโฟลเดอร์โปรเจกต์เป็นข้อบังคับบนเซิร์ฟเวอร์**: package ที่ลง user-site ของ dev
     **IIS Application Pool identity เข้าไม่ถึง** → ชั้น dict (`pyspellchecker`) หายเงียบ = จุดบอด QC.
     **ระหว่างพัฒนาบนสถานีไม่ต้องทำ venv** — จะแยกเป็น 2 environment ทำให้สับสน + ดึง accel คนละชุด.

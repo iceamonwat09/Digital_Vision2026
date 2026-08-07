@@ -69,6 +69,21 @@ def check_python() -> None:
     ok(f"executable : {sys.executable}")
     ok(f"version    : {sys.version.split()[0]}")
     ok(f"project    : {_ROOT}")
+
+    # เวอร์ชันที่รองรับบน "เซิร์ฟเวอร์" (คนละชุดกับสถานีที่ล็อกไว้ที่ 3.9 เพราะ
+    # onnxruntime/openvino — ซึ่ง requirements-server.txt ตัดออกหมดแล้ว)
+    ver = sys.version_info[:2]
+    if ver in ((3, 11), (3, 12)):
+        ok(f"เวอร์ชัน {ver[0]}.{ver[1]} อยู่ในช่วงที่รองรับและยังได้ security update")
+    elif ver >= (3, 13):
+        fail(f"Python {ver[0]}.{ver[1]} ใหม่เกินไปสำหรับชุด package ที่ pin ไว้ "
+             "(numpy 1.26 / Pillow 10.1 ไม่มีล้อ cp313) — ใช้ 3.12 แทน")
+    elif ver == (3, 10):
+        warn("Python 3.10 ใช้ได้ แต่ใกล้หมดอายุแล้ว — แนะนำ 3.12")
+    else:
+        warn(f"Python {ver[0]}.{ver[1]} หมดอายุการสนับสนุนแล้ว (ไม่มี security "
+             "patch) — เซิร์ฟเวอร์ที่เปิดให้ล็อกอินผ่านเครือข่ายควรใช้ 3.12")
+
     in_venv = hasattr(sys, "real_prefix") or sys.prefix != getattr(
         sys, "base_prefix", sys.prefix)
     if in_venv:
