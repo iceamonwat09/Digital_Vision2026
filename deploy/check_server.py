@@ -70,19 +70,26 @@ def check_python() -> None:
     ok(f"version    : {sys.version.split()[0]}")
     ok(f"project    : {_ROOT}")
 
-    # เวอร์ชันที่รองรับบน "เซิร์ฟเวอร์" (คนละชุดกับสถานีที่ล็อกไว้ที่ 3.9 เพราะ
-    # onnxruntime/openvino — ซึ่ง requirements-server.txt ตัดออกหมดแล้ว)
+    # เวอร์ชันที่รองรับ: 3.9 = ที่เลือกไว้ตั้งใจ (ให้ยังลงตัวเร่ง onnx/openvino ได้
+    # ในวันที่ต้องต่อกล้อง — ทั้งคู่มีล้อ cp39 เป็นรุ่นสุดท้าย) / 3.11-3.12 ก็ใช้ได้
+    # ถ้าไม่ต้องใช้กล้อง / 3.13 ใช้ไม่ได้เพราะ numpy 1.26 + Pillow 10.1 ไม่มีล้อ cp313
     ver = sys.version_info[:2]
-    if ver in ((3, 11), (3, 12)):
-        ok(f"เวอร์ชัน {ver[0]}.{ver[1]} อยู่ในช่วงที่รองรับและยังได้ security update")
+    if ver == (3, 9):
+        ok("เวอร์ชัน 3.9 — ตรงกับสถานี และรองรับตัวเร่ง onnx/openvino "
+           "เมื่อต้องต่อกล้อง (ดูภาคผนวก F)")
+        warn("Python 3.9 หมดการสนับสนุนแล้ว (31 ต.ค. 2025) ไม่มี security patch — "
+             "ต้องมีมาตรการชดเชย: ไม่เปิดออกอินเทอร์เน็ต + firewall เฉพาะ "
+             "Domain/Private + HTTPS + อัปเดต Windows (ภาคผนวก G)")
+    elif ver in ((3, 10), (3, 11), (3, 12)):
+        ok(f"เวอร์ชัน {ver[0]}.{ver[1]} ยังได้ security update")
+        warn(f"Python {ver[0]}.{ver[1]} ลงตัวเร่ง onnxruntime==1.19.2 / "
+             "openvino==2024.6.0 ไม่ได้ (มีล้อถึง cp39) — ถ้าวันหน้าต้องต่อกล้อง "
+             "บนเครื่องนี้จะต้องรื้อ environment ใหม่")
     elif ver >= (3, 13):
         fail(f"Python {ver[0]}.{ver[1]} ใหม่เกินไปสำหรับชุด package ที่ pin ไว้ "
-             "(numpy 1.26 / Pillow 10.1 ไม่มีล้อ cp313) — ใช้ 3.12 แทน")
-    elif ver == (3, 10):
-        warn("Python 3.10 ใช้ได้ แต่ใกล้หมดอายุแล้ว — แนะนำ 3.12")
+             "(numpy 1.26 / Pillow 10.1 ไม่มีล้อ cp313) — ติดตั้งไม่ผ่านแน่นอน")
     else:
-        warn(f"Python {ver[0]}.{ver[1]} หมดอายุการสนับสนุนแล้ว (ไม่มี security "
-             "patch) — เซิร์ฟเวอร์ที่เปิดให้ล็อกอินผ่านเครือข่ายควรใช้ 3.12")
+        fail(f"Python {ver[0]}.{ver[1]} เก่าเกินไป — ต้อง 3.9 ขึ้นไป")
 
     in_venv = hasattr(sys, "real_prefix") or sys.prefix != getattr(
         sys, "base_prefix", sys.prefix)
