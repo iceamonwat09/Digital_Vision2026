@@ -24,6 +24,7 @@
 | [7](#7-อัปเดตโค้ดในอนาคต-redeploy) | อัปเดตโค้ดในอนาคต |
 | [8](#8-สำรองข้อมูลและงานบำรุงรักษา) | สำรองข้อมูลและงานบำรุงรักษา |
 | [9](#9-ภาคผนวก) | ภาคผนวก (ตัวแปรทั้งหมด / ทางเลือกอื่น / X-Forwarded-For) |
+| [H](#h-แก้ปัญหา-http-5023-อย่างเป็นระบบ-deploydiagnose_iisps1) | **แก้ปัญหา HTTP 502.3 อย่างเป็นระบบ** + สคริปต์ตรวจอัตโนมัติ + แผนสำรอง |
 
 ---
 
@@ -908,11 +909,16 @@ C:\inetpub\logs\LogFiles\W3SVC<n>\                       ← access log ขอ�
 | อาการ | สาเหตุที่เป็นไปได้ | วิธีแก้ |
 |---|---|---|
 | **HTTP 500.19** — `unrecognized element 'httpPlatform'` | ยังไม่ได้ติดตั้ง HttpPlatformHandler | ทำ STEP 3 แล้วตรวจใน Modules ให้เห็นชื่อจริง |
+| **HTTP 500.19** — `This configuration section cannot be used at this path` (`0x80070021`) | section ถูกล็อกไว้ที่ระดับเครื่อง (`overrideModeDefault="Deny"`) — `web.config` ของ site จึงใช้ไม่ได้ | ปลดล็อกเฉพาะ section ที่ต้องใช้:<br>`appcmd unlock config -section:system.webServer/handlers` |
 | **HTTP 500.19** — config error อื่น ๆ | XML ใน `web.config` พิมพ์ผิด (ลืมปิดแท็ก / เครื่องหมายคำพูด) | เปิดไฟล์ด้วยเบราว์เซอร์ ถ้า XML ผิดจะฟ้องบรรทัดที่ผิด |
 | **HTTP 502.5** — "The process failed to start" | `processPath` ชี้ไป python ผิดที่ / venv พัง / import error | เปิด `logs\iis-stdout_*.log`; ถ้าไม่มีไฟล์เลย = path ผิดแน่นอน |
 | **`The system cannot find the path specified.`** ตอนสั่ง `.venv\Scripts\python.exe` | ยังไม่ได้สร้าง venv (ข้ามบรรทัด `python -m venv .venv`) **หรือ** คัดลอกคำสั่งหลายบรรทัดมาวางแล้วบรรทัดติดกันหมด | รัน `deploy\setup_venv.bat` (ทำให้ครบตามลำดับให้เอง) — ดู [STEP 5](#step-5--สร้าง-venv-และติดตั้ง-package) |
 | **HTTP 503** — Service Unavailable | Application Pool หยุดทำงาน (มัก crash ซ้ำจนถูกปิด) | IIS Manager → Application Pools → ดูสถานะ → กด **Start** แล้วดู Event Viewer |
-| ไม่มีไฟล์ `logs\iis-stdout_*.log` เกิดขึ้นเลย | โฟลเดอร์ `logs\` เขียนไม่ได้ / `stdoutLogEnabled` เป็น false | ทำ STEP 13 ให้สิทธิ์ Modify |
+| **HTTP 502.3** — Bad Gateway (`0x8007000d`) | เป็นชื่อรวมของความล้มเหลวหลายแบบ ต้องแยกก่อนว่าพังชั้นไหน | รัน `deploy\diagnose_iis.ps1` แล้วดู [ภาคผนวก H](#h-แก้ปัญหา-http-5023-อย่างเป็นระบบ-deploydiagnose_iisps1) |
+| **502.3 + ไม่มีทั้งโปรเซสและไฟล์ log** | IIS เปิดโปรเซสลูกไม่ได้เลย (โฟลเดอร์ log หาย / พอร์ตถูกจองหมด / นโยบายบล็อก) | [ภาคผนวก H.3](#h3-เปิดโปรเซสไม่ได้เลย--ตรวจ-4-เรื่องนี้ตามลำดับ) — **ไม่ใช่ปัญหาที่ venv หรือโค้ด** |
+| **502.3 + มีโปรเซสรันอยู่ปกติ** | waitress ผูกเฉพาะ IPv4 แต่ IIS ต่อผ่าน `localhost` → `::1` | แก้แล้วในโค้ดรุ่นนี้ ([ภาคผนวก H.2](#h2-โปรเซสรันอยู่-แต่-iis-ต่อไม่ติด--เกือบทุกครั้งคือเรื่อง-ipv6)) — อัปเดต `deploy\wsgi_iis.py` แล้ว Recycle |
+| **`Start-Website` ขึ้น `Cannot create a file when that file already exists`** | มี website อื่น (มัก **Default Web Site**) จับ binding พอร์ตเดียวกันอยู่ | `Stop-Website -Name 'Default Web Site'` แล้วค่อย `Start-Website` |
+| ไม่มีไฟล์ `logs\iis-stdout_*.log` เกิดขึ้นเลย | โฟลเดอร์ `logs\` **ไม่มีอยู่จริง** (handler จะไม่เปิดโปรเซสเลย) / เขียนไม่ได้ / `stdoutLogEnabled` เป็น false | สร้างโฟลเดอร์ก่อน แล้วทำ STEP 13 ให้สิทธิ์ Modify |
 | เปิดจากเซิร์ฟเวอร์ได้ แต่เครื่องอื่นเปิดไม่ได้ | Firewall | ทำ STEP 17 |
 
 ### 6.2 กลุ่ม "ล็อกอินไม่ผ่าน"
@@ -1253,6 +1259,110 @@ REM ตัวเร่ง iGPU — ลงเฉพาะเมื่อเซิ
 > Python 3.11/3.12 และไม่มีการใช้ API ที่ถูกถอด (`distutils`, `imp`,
 > `datetime.utcnow()`, `locale.getdefaultlocale()`) — **การย้ายเวอร์ชันในอนาคต
 > ติดแค่ตัวเร่ง onnx/openvino เท่านั้น ไม่ได้ติดที่ตัวโค้ด**
+
+---
+
+### H. แก้ปัญหา HTTP 502.3 อย่างเป็นระบบ (`deploy\diagnose_iis.ps1`)
+
+**502.3 ไม่ใช่อาการเดียว แต่เป็นชื่อรวมของความล้มเหลวหลายแบบ** เพราะ
+HttpPlatformHandler รายงานทุกความล้มเหลวเป็นรหัสนี้หมด การไล่แก้แบบเดาทีละอย่าง
+จึงเสียเวลามากและมักลงเอยด้วยการแก้ผิดจุด — ต้อง **แยกให้ขาดก่อนว่าพังชั้นไหน**
+
+#### H.1 แยกอาการด้วยหลักฐาน 2 ชิ้น
+
+หลังยิง request เข้าไปหนึ่งครั้ง ให้ดูแค่ 2 อย่างนี้ ก็แบ่งสาเหตุออกเป็น 3 กลุ่มได้ทันที
+
+```powershell
+Get-Process python -ErrorAction SilentlyContinue | Format-Table Id, Path, StartTime -Auto
+Get-ChildItem "C:\VisionIQ\Digital_Vision2026\logs" -Filter "iis-stdout*"
+```
+
+| มีโปรเซส? | มีไฟล์ log? | แปลว่า | ไปดูหัวข้อ |
+|---|---|---|---|
+| ✅ | ✅ | โปรเซสรันอยู่ แต่ IIS ต่อไม่ติด | H.2 |
+| ❌ | ✅ | โปรเซสเกิดแล้วตาย — **ในไฟล์ log มีสาเหตุจริงเขียนไว้** | อ่าน log ตรง ๆ |
+| ❌ | ❌ | **ไม่เคยเปิดโปรเซสได้เลย** — ล้มตั้งแต่ขั้น CreateProcess | H.3 |
+
+> ⚠️ กรณี "ไม่มีทั้งคู่" คือกรณีที่หลอกที่สุด เพราะไม่มีร่องรอยอะไรให้อ่านเลย
+> และ **ไม่ได้แปลว่าโค้ดผิด** — ตรวจสอบได้ง่าย ๆ ด้วยการรัน
+> `.venv\Scripts\python.exe deploy\wsgi_iis.py` ด้วยมือ ถ้ารันขึ้นปกติ
+> แสดงว่าปัญหาอยู่ที่ IIS ไม่ใช่ที่แอป
+
+#### H.2 โปรเซสรันอยู่ แต่ IIS ต่อไม่ติด — เกือบทุกครั้งคือเรื่อง IPv6
+
+HttpPlatformHandler ต่อไปยังโปรเซสลูกด้วย **ชื่อ `localhost`** ซึ่งบน Windows
+ถูกแปลเป็น **`::1` (IPv6) ก่อน `127.0.0.1` เสมอ** ถ้าเซิร์ฟเวอร์ WSGI ผูกเฉพาะ
+IPv4 การเชื่อมต่อจะถูกปฏิเสธ → ได้ 502.3 ทั้งที่โปรเซสทำงานปกติดี
+
+แก้ไว้ในโค้ดแล้วตั้งแต่รุ่นนี้: `_listen_kwargs()` ใน `wsgi_iis.py` จะเปิดรับทั้ง
+`127.0.0.1` และ `[::1]` โดยอัตโนมัติ **เมื่อรันอยู่ใต้ IIS** (ตรวจจาก
+`HTTP_PLATFORM_PORT`) และถอยกลับไปใช้ IPv4 อย่างเดียวเองถ้าเครื่องปิด IPv6 ไว้
+ตอนรันเองยังเป็น `127.0.0.1` เหมือนเดิมทุกประการ
+
+#### H.3 เปิดโปรเซสไม่ได้เลย — ตรวจ 4 เรื่องนี้ตามลำดับ
+
+| # | สาเหตุ | ทำไมถึงหาไม่เจอง่าย ๆ | ตรวจอย่างไร |
+|---|---|---|---|
+| 1 | **โฟลเดอร์ของ `stdoutLogFile` ไม่มีอยู่** | handler จะไม่เปิดโปรเซสเลยถ้าสร้างไฟล์ log ไม่ได้ — และไม่มีที่ไหนบอก | `Test-Path (Split-Path <stdoutLogFile>)` |
+| 2 | **ช่วง dynamic port ถูกจองไปเกือบหมด** (Hyper-V / WinNAT / Docker / WSL) | handler ต้องจองพอร์ตให้ลูกก่อนเปิดโปรเซส จองไม่ได้ = ล้มก่อนถึงขั้น spawn | `netsh int ipv4 show excludedportrange protocol=tcp` |
+| 3 | **นโยบายบล็อกการสร้างโปรเซส** (AppLocker / WDAC / EDR) | **เปลี่ยน identity เป็น LocalSystem แล้วก็ยังพัง** เพราะนโยบายไม่ได้ดูที่สิทธิ์บัญชี | Event log `Microsoft-Windows-AppLocker/EXE and DLL` |
+| 4 | **HttpPlatformHandler เสียหาย / เป็นเวอร์ชัน 1.0** | ติดตั้งอยู่และ IIS มองเห็น จึงไม่ขึ้น 500.19 ให้สงสัย | ดู FileVersion ของ `httpPlatformHandler.dll` ต้องเป็น 1.2.x |
+
+> **สิ่งที่ตัดออกได้แล้วโดยไม่ต้องเสียเวลาตรวจ** ถ้าอาการคือ "ไม่มีทั้งโปรเซสและ log":
+> ไม่ใช่เรื่อง venv, ไม่ใช่เรื่อง package ขาด, ไม่ใช่เรื่องโค้ดแอป, และ
+> **ไม่ใช่เรื่องสิทธิ์ NTFS** ถ้าลองเป็น LocalSystem แล้วยังพังเหมือนเดิม
+
+#### H.4 การทดสอบชี้ขาด: ให้ IIS เปิด `cmd.exe` แทน Python
+
+เป็นการทดลองที่ตัดตัวแปรออกได้มากที่สุดในครั้งเดียว — เปลี่ยน `processPath`
+เป็น `C:\Windows\System32\cmd.exe` และ `arguments` เป็น `/c ping -n 600 127.0.0.1`
+แล้วยิง request หนึ่งครั้ง (**รอบนี้ได้ 502 เป็นเรื่องปกติ** เพราะ `ping` ไม่ได้
+เปิดพอร์ตรอ — สิ่งที่ดูคือ *มีโปรเซสเกิดขึ้นหรือไม่* เท่านั้น)
+
+- **เห็น `cmd`/`PING` เกิดขึ้น** → กลไก spawn ปกติ ปัญหาอยู่ที่ Python/venv/โค้ด
+- **ไม่เห็นอะไรเลย** → ปัญหาอยู่ที่ handler/นโยบาย/การจองพอร์ต → ไปที่ H.5
+
+`deploy\diagnose_iis.ps1` ทำการทดลองนี้ให้อัตโนมัติ พร้อม **คืนค่า `web.config`
+เดิมเสมอ** ผ่าน `try/finally` (สำรองไว้ที่ `web.config.diagbak`)
+
+#### H.5 ใช้สคริปต์ตรวจอัตโนมัติ
+
+```powershell
+powershell -ExecutionPolicy Bypass -File deploy\diagnose_iis.ps1 -OutFile C:\Temp\visioniq-diag.txt
+```
+
+ไล่ตรวจ 11 ชั้นตามลำดับที่ request เดินทางจริง แล้วสรุปเป็น OK / WARN / FAIL
+พร้อมคำสั่งแก้ของแต่ละข้อ — ครอบคลุมทั้งการล็อก config section, เวอร์ชัน
+HttpPlatformHandler, ทุก path ที่อ้างใน `web.config`, ช่วงพอร์ตที่ถูกจอง,
+package ที่ "ขาดแล้วเงียบ", นโยบายความปลอดภัย, event log และการทดสอบจริง
+
+ถ้าไม่ต้องการให้แตะ `web.config` เลยให้ใส่ `-SkipDeepTest`
+
+#### H.6 แผนสำรอง — เลิกใช้ HttpPlatformHandler (`deploy\run_standalone.ps1`)
+
+เมื่อ H.4 บอกว่า **IIS เปิดโปรเซสลูกไม่ได้เลย** ปัญหาอยู่นอกเหนือการควบคุมของ
+โปรเจกต์นี้ (นโยบายองค์กร / ตัว handler เสียหาย) การดันต่อไม่คุ้มเวลา ให้เปลี่ยน
+มารัน waitress เป็นบริการถาวรแทน:
+
+```powershell
+REM ทางที่ง่ายที่สุด — waitress ฟังพอร์ต 80 ตรง ๆ (ต้องหยุด IIS ที่จับพอร์ต 80 ก่อน)
+powershell -ExecutionPolicy Bypass -File deploy\run_standalone.ps1 -Port 80
+
+REM ถ้ายังต้องการ TLS + log ของ IIS ให้ IIS ทำ reverse proxy ด้วย ARR
+powershell -ExecutionPolicy Bypass -File deploy\run_standalone.ps1 -Port 8000 -BindHost 127.0.0.1
+powershell -ExecutionPolicy Bypass -File deploy\run_standalone.ps1 -PrintArrGuide
+```
+
+สคริปต์จะ **อ่านค่าตั้งทั้งหมดจาก `web.config` ที่ทำไว้แล้ว** (ไม่ต้องพิมพ์ซ้ำ)
+สร้างไฟล์ `.cmd` ที่จำกัดสิทธิ์แล้ว (เพราะมีรหัสผ่าน SQL/JWT อยู่ข้างใน)
+ลงทะเบียน Scheduled Task ให้เริ่มเองตอนบูตและรีสตาร์ตเองถ้าล่ม เปิด firewall
+แล้วทดสอบให้จนกว่าเว็บจะตอบกลับ ถอนออกได้ด้วย `-Uninstall`
+
+> **ข้อควรรู้ด้านความปลอดภัย:** ถ้าเลือกให้ waitress ฟังพอร์ต 80 ตรง ๆ
+> (`-BindHost 0.0.0.0`) จะเสียประโยชน์ข้อ "ให้ IIS เป็นด่านหน้า" ในภาคผนวก G ไป
+> ให้ชดเชยด้วยการยืนยันว่า firewall เปิดเฉพาะ Domain/Private profile และ
+> ระบบนี้ไม่ถูกเปิดออกอินเทอร์เน็ต ทางเลือก ARR (`-BindHost 127.0.0.1`)
+> ยังคงคุณสมบัตินี้ไว้ครบและเป็นทางที่แนะนำถ้ามีเวลาติดตั้ง
 
 ---
 

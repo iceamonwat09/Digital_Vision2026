@@ -320,6 +320,24 @@ path/ภาษาของ tesseract, ชั้นที่ใช้ต่อโ
     คุมด้วย `VISIONIQ_IIS_INIT` (`db` default / `none` / `full`).
   - `deploy/web.config.example` · `deploy/requirements-server.txt` · `deploy/check_server.py`
     (สคริปต์ตรวจความพร้อม OK/WARN/FAIL — รันตัวนี้ก่อนโทษ IIS เสมอ).
+  - **⚠️ HTTP 502.3 = ชื่อรวมของความล้มเหลวหลายแบบ** (HttpPlatformHandler รายงานทุกอย่าง
+    เป็นรหัสนี้) → **ห้ามเดาทีละอย่าง** แยกด้วยหลักฐาน 2 ชิ้นก่อนเสมอ: *มีโปรเซส python
+    เกิดใหม่ไหม* + *มีไฟล์ `iis-stdout*` ไหม*.
+    - มีโปรเซส + ไม่ต่อติด = **IIS ต่อผ่านชื่อ `localhost` ซึ่ง Windows แปลเป็น `::1` ก่อน**
+      แต่ waitress ผูกแค่ IPv4 → แก้แล้วใน `wsgi_iis._listen_kwargs()` (เปิด dual-stack
+      เฉพาะตอนอยู่ใต้ IIS, มี fallback ถ้าเครื่องปิด IPv6; รันเองยังเป็น 127.0.0.1 เหมือนเดิม).
+    - **ไม่มีทั้งคู่ = ไม่เคยเปิดโปรเซสได้เลย** → ตัดเรื่อง venv/package/โค้ดออกได้ทันที.
+      ต้องสงสัย: โฟลเดอร์ของ `stdoutLogFile` ไม่มีจริง · ช่วง dynamic port ถูก
+      Hyper-V/WinNAT จองจนหมด · นโยบาย AppLocker/EDR บล็อกการสร้างโปรเซส
+      (**ตัวชี้: เปลี่ยน AppPool เป็น LocalSystem แล้วยังพังเหมือนเดิม = ไม่ใช่เรื่องสิทธิ์**).
+  - **`deploy/diagnose_iis.ps1`** = ตาข่ายนิรภัยฝั่ง deploy (คู่กับ `verify_onnx.py` ฝั่ง QC):
+    ไล่ตรวจ 11 ชั้นตามเส้นทางที่ request เดินจริง + **ทดสอบชี้ขาดด้วยการให้ IIS เปิด
+    `cmd.exe` แทน python** (แยก "spawn ไม่ได้เลย" ออกจาก "ติดที่ python") แล้วคืน
+    `web.config` เดิมเสมอผ่าน try/finally.
+  - **`deploy/run_standalone.ps1`** = แผน B เมื่อ HttpPlatformHandler ใช้ไม่ได้จริง ๆ:
+    รัน waitress เป็น Scheduled Task (อ่านค่าตั้งจาก `web.config` เดิมมาให้เอง,
+    จำกัดสิทธิ์ไฟล์ที่มีรหัสผ่าน, `-Uninstall` ถอนคืนได้). `-PrintArrGuide` = วิธีให้ IIS
+    ทำ reverse proxy ต่อหน้า (คงคุณสมบัติ "IIS เป็นด่านหน้า" ของภาคผนวก G ไว้).
   - **เซิร์ฟเวอร์ใช้ Python 3.9.13 เท่ากับสถานี (การตัดสินใจของเจ้าของระบบ)** —
     เหตุผล: เผื่อวันหน้าต้องต่อกล้องบนเซิร์ฟเวอร์ ซึ่งต้องใช้ `onnxruntime==1.19.2`/
     `openvino==2024.6.0` (ล้อ cp39-win_amd64 รุ่นสุดท้าย) เริ่มที่ 3.9 เลยจึงไม่ต้อง

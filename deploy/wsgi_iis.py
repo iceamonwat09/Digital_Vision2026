@@ -110,6 +110,30 @@ def _banner(port: int, init_result: str) -> None:
     print("=" * 70, flush=True)
 
 
+def _listen_kwargs(port: int):
+    """เลือกที่อยู่ที่จะเปิดรับ แล้วคืน ``(kwargs สำหรับ serve(), ข้อความอธิบาย)``.
+
+    ค่าเริ่มต้นยังเป็น loopback เท่านั้นเหมือนเดิม — ไม่เปิดออกเครือข่ายเองเด็ดขาด.
+
+    * ตั้ง ``VISIONIQ_WSGI_HOST`` = ระบุเองตรง ๆ (เช่น ``0.0.0.0`` เมื่อรันเป็น
+      Windows Service โดยไม่มี IIS อยู่ข้างหน้า) — เป็น opt-in ล้วน
+    * ไม่ตั้ง + อยู่ใต้ IIS = ฟังทั้ง IPv4 และ IPv6 loopback เพราะ
+      **HttpPlatformHandler ต่อไปที่ชื่อ ``localhost``** ซึ่ง Windows แปลเป็น
+      ``::1`` (IPv6) ก่อน ``127.0.0.1`` เสมอ — ถ้าฟังแค่ IPv4 จะได้ HTTP 502.3
+      ทั้งที่โปรเซสรันอยู่ดี ๆ (กับดักที่หาสาเหตุยากมาก)
+    * ไม่ตั้ง + รันเอง = ``127.0.0.1`` เหมือนเดิมเป๊ะ
+    """
+    host = (os.getenv("VISIONIQ_WSGI_HOST") or "").strip()
+    if host:
+        return {"host": host, "port": port}, host
+
+    if os.getenv("HTTP_PLATFORM_PORT"):
+        return ({"listen": "127.0.0.1:{0} [::1]:{0}".format(port)},
+                "127.0.0.1 + [::1] (dual-stack loopback)")
+
+    return {"host": "127.0.0.1", "port": port}, "127.0.0.1"
+
+
 def main() -> int:
     # IIS ส่งพอร์ตมาให้ทาง HTTP_PLATFORM_PORT; ถ้ารันเองให้ใช้ 8000
     port = int(os.getenv("HTTP_PLATFORM_PORT")
@@ -126,10 +150,10 @@ def main() -> int:
               "`.venv\\Scripts\\python.exe -m pip install waitress`", flush=True)
         return 2
 
-    serve(
-        application,
-        host="127.0.0.1",          # รับเฉพาะจาก IIS บนเครื่องเดียวกัน
-        port=port,
+    listen_kwargs, listen_desc = _listen_kwargs(port)
+    print(f"[wsgi_iis] เปิดรับที่ {listen_desc} พอร์ต {port}", flush=True)
+
+    common = dict(
         threads=int(os.getenv("VISIONIQ_WSGI_THREADS", "8")),
         # การตรวจ Artwork 1 ครั้งเรียก OCR ทีละโซน (โซนละไม่เกิน N8N_OCR_TIMEOUT_S
         # วินาที) รวมกันแล้วอาจนานหลายนาที — ค่า default ของ waitress คือ 120 วิ
@@ -142,6 +166,17 @@ def main() -> int:
                                             str(200 * 1024 * 1024))),
         ident="VisionIQ",
     )
+
+    try:
+        serve(application, **listen_kwargs, **common)
+    except OSError as e:
+        # เครื่องที่ปิด IPv6 ไว้จะ bind [::1] ไม่ได้ — ถอยไปใช้ IPv4 อย่างเดียว
+        # ดีกว่าปล่อยให้เว็บล่มทั้งระบบเพราะ address family เดียว
+        if "listen" not in listen_kwargs:
+            raise
+        print(f"[wsgi_iis] เปิด dual-stack ไม่สำเร็จ ({e}) — ถอยไปใช้ 127.0.0.1 อย่างเดียว",
+              flush=True)
+        serve(application, host="127.0.0.1", port=port, **common)
     return 0
 
 
