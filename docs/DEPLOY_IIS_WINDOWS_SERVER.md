@@ -74,11 +74,12 @@ IIS พูดภาษา HTTP และรัน .NET / FastCGI เป็นห
 
 ### 0.3 ของใหม่ที่เตรียมไว้ให้แล้วในโปรเจกต์
 
-เอกสารนี้มาพร้อมไฟล์ช่วย deploy 4 ไฟล์ (เป็นไฟล์ใหม่ทั้งหมด — **ไม่แก้ `app.py`
+เอกสารนี้มาพร้อมไฟล์ช่วย deploy 5 ไฟล์ (เป็นไฟล์ใหม่ทั้งหมด — **ไม่แก้ `app.py`
 และไม่กระทบการรันบนสถานีเดิมด้วย `py -3.9 app.py` แม้แต่นิดเดียว**):
 
 | ไฟล์ | หน้าที่ |
 |---|---|
+| `deploy/setup_venv.bat` | สร้าง venv + ติดตั้ง package ให้ครบในคำสั่งเดียว (กันปัญหาคัดลอกคำสั่งแล้วบรรทัดติดกัน) |
 | `deploy/wsgi_iis.py` | จุดเริ่มโปรเซสสำหรับ IIS (เปิด waitress + เลือกว่าจะ init อะไร) |
 | `deploy/web.config.example` | ต้นแบบ `web.config` ของ IIS — คัดลอกไปแก้ path แล้วใช้ได้เลย |
 | `deploy/requirements-server.txt` | รายการ package เฉพาะเซิร์ฟเวอร์ (ตัดของที่เกี่ยวกับกล้องออก) |
@@ -277,30 +278,175 @@ cd Digital_Vision2026
 
 ### STEP 5 — สร้าง venv และติดตั้ง package
 
-> **ทำไมต้อง venv?** เพราะ IIS จะรันแอปด้วยบัญชี **Application Pool Identity**
-> ไม่ใช่บัญชีของคุณ — package ที่ `pip install` ลงไปที่ user-site ของคุณ
-> (`%APPDATA%\Python\...`) **บัญชีนั้นมองไม่เห็น** ผลคือชั้นตรวจ dictionary
-> (`pyspellchecker`) จะหายไปแบบเงียบ ๆ = คำผิดขึ้นเครื่องหมายถูก = **จุดบอด QC**
-> การทำ venv ในโฟลเดอร์โปรเจกต์ทำให้ package อยู่กับโค้ด ทุก identity เห็นเท่ากัน
+> ### 🚨 อ่านก่อนคัดลอกคำสั่ง
+> **อย่าคัดลอกทั้งบล็อกไปวางใน Command Prompt ทีเดียว** — การคัดลอกจากหน้าเว็บ/PDF
+> มักทำให้ **ขึ้นบรรทัดใหม่หายไป** ทุกคำสั่งจะติดกันเป็นบรรทัดเดียว แล้วขึ้น
+> `The system cannot find the path specified.` แบบนี้:
+> ```
+> cd /d C:\VisionIQ\Digital_Vision2026REM 1) สร้าง venvC:\Python39\python.exe -m venv .venv...
+>                                     ↑ ติดกันหมด
+> ```
+> ให้ใช้ **วิธีที่ 1 (สคริปต์)** หรือถ้าพิมพ์เอง ให้ **รันทีละบรรทัด กด Enter ทีละครั้ง**
+
+#### 5.1 ทำไมต้องทำ venv ในโฟลเดอร์โปรเจกต์ (อธิบายละเอียด)
+
+**ปัญหาอยู่ที่ "Python หา package จากที่ไหน"**
+
+เวลา `import spellchecker` Python จะไล่หาในรายการโฟลเดอร์ที่เรียกว่า `sys.path`
+ซึ่งมีโฟลเดอร์ปลายทางของ package อยู่ **2 ที่** บน Windows:
+
+| ที่เก็บ | path จริง | ใครเขียนได้ | ใครเห็น |
+|---|---|---|---|
+| **system site-packages** | `C:\Python39\Lib\site-packages` | ต้องเป็น Administrator | ทุกบัญชีที่รัน `C:\Python39\python.exe` |
+| **user site-packages** | `C:\Users\`**`<ชื่อบัญชีคุณ>`**`\AppData\Roaming\Python\Python39\site-packages` | เจ้าของบัญชีนั้น | ⚠️ **เฉพาะบัญชีนั้นบัญชีเดียว** |
+
+**จุดที่พลาดกันบ่อย:** เวลาสั่ง `pip install xxx` ธรรมดา ถ้าเขียนลง system site-packages
+ไม่ได้ (ไม่ได้เปิด cmd เป็น Administrator) **pip จะเปลี่ยนไปลงที่ user site-packages
+ของคุณให้อัตโนมัติ** โดยขึ้นข้อความเตือนเล็ก ๆ ซึ่งคนมักมองข้าม
+
+**แล้วมันพังตอนไหน** — เพราะ IIS **ไม่ได้รันแอปด้วยบัญชีของคุณ**
+
+```
+   ตอนคุณทดสอบเอง                          ตอน IIS รันจริง
+   ─────────────────────                    ────────────────────────────
+   บัญชี : YourName                          บัญชี : IIS AppPool\VisionIQPool
+   %APPDATA% ชี้ไปที่                         %APPDATA% ชี้ไปที่ (คนละที่)
+   C:\Users\YourName\AppData\Roaming        C:\Users\VisionIQPool\... หรือไม่มีเลย
+        │                                        │
+        ▼                                        ▼
+   เห็น pyspellchecker ✅                     ไม่เห็น pyspellchecker ❌
+   ทดสอบผ่าน                                 import ล้มเหลว
+```
+
+**และนี่คือส่วนที่อันตรายที่สุด** — โค้ดของโปรเจกต์ดักไว้ว่า *"ไม่มีก็ไม่เป็นไร"*:
+
+```python
+# artwork_check/checks.py:637 — _get_spellcheckers()
+try:
+    from spellchecker import SpellChecker
+    ...
+except ImportError:
+    pass                  # ← กลืน error ทิ้ง
+return _spellcheckers     # ← คืนลิสต์ว่าง = ข้ามชั้นตรวจ dictionary ไปเงียบ ๆ
+```
+
+ผลลัพธ์คือ **ไม่มีข้อความ error ใด ๆ ทั้งสิ้น** เว็บทำงานปกติทุกอย่าง แต่คำสะกดผิด
+อย่าง `Sunflow` / `EXPIR` / `Thailan` จะขึ้นเครื่องหมาย ✓ เหมือนไม่มีปัญหา
+= **จุดบอด QC ที่ตรวจจับไม่ได้จากการดูหน้าจอ**
+
+**venv แก้ปัญหานี้ยังไง**
+
+`python -m venv .venv` สร้างโฟลเดอร์ที่มี Python ครบชุดของตัวเองอยู่ในโปรเจกต์:
+
+```
+C:\VisionIQ\Digital_Vision2026\
+├── .venv\
+│   ├── Scripts\python.exe        ← interpreter ที่ IIS จะเรียก
+│   ├── Lib\site-packages\        ← package ทั้งหมดอยู่ตรงนี้
+│   │   ├── flask\
+│   │   ├── spellchecker\
+│   │   └── ...
+│   └── pyvenv.cfg                ← include-system-site-packages = false
+├── app.py
+└── deploy\
+```
+
+สิ่งที่เปลี่ยนไปมี 3 อย่าง:
+
+1. **package ถูกระบุด้วย "ที่อยู่บนดิสก์" ไม่ใช่ "ชื่อบัญชี"** — `.venv\Lib\site-packages`
+   เป็น path คงที่ ใครก็ตามที่รัน `.venv\Scripts\python.exe` จะเห็นชุดเดียวกันเป๊ะ
+   สิทธิ์การเข้าถึงถูกควบคุมด้วย **NTFS permission** (ซึ่งเราให้ไว้ใน STEP 13) แทน
+   ที่จะขึ้นกับว่า `%APPDATA%` ของบัญชีนั้นชี้ไปไหน
+2. **venv ปิด user site-packages ทิ้ง** — `pyvenv.cfg` ตั้ง
+   `include-system-site-packages = false` และ Python ในโหมด venv จะไม่เอา
+   user site-packages เข้ามาใน `sys.path` เลย → **ไม่มีทางที่ package จาก
+   โปรไฟล์ของใครคนใดคนหนึ่งจะแอบเข้ามาทำให้ผลต่างกัน**
+3. **`pip install` ใน venv ไม่ต้องใช้สิทธิ์ Administrator** และไม่มีทาง fallback ไป
+   user site เพราะเขียนลง `.venv\Lib\site-packages` ได้อยู่แล้ว
+
+แล้วใน `web.config` เราชี้ IIS ไปที่ interpreter ตัวนั้นตรง ๆ:
+```xml
+processPath="C:\VisionIQ\Digital_Vision2026\.venv\Scripts\python.exe"
+```
+→ **สิ่งที่คุณทดสอบ กับสิ่งที่ IIS รัน คือ interpreter ตัวเดียวกันและ package ชุดเดียวกัน**
+
+> 💡 **บนเครื่องสถานีไม่ต้องทำ venv** — เพราะรันด้วยบัญชีคนเดิมเสมอ (`py -3.9 app.py`)
+> ไม่มีเรื่องหลาย identity และการแยกเป็น 2 environment จะทำให้สับสน
+> (เสี่ยงดึงตัวเร่ง onnx/openvino คนละชุดกับที่จูนไว้)
+
+#### 5.2 วิธีที่ 1 — ใช้สคริปต์ (แนะนำ)
+
+รันบรรทัดเดียวจบ สคริปต์จะทำครบทุกขั้นตามลำดับ และหยุดพร้อมบอกสาเหตุถ้าติดอะไร:
 
 ```cmd
 cd /d C:\VisionIQ\Digital_Vision2026
+```
+```cmd
+deploy\setup_venv.bat
+```
 
-REM 1) สร้าง venv
+ถ้า Python **ไม่ได้อยู่ที่ `C:\Python39`** ให้ใส่ path จริงต่อท้าย:
+```cmd
+deploy\setup_venv.bat "D:\Python39\python.exe"
+```
+
+> **หา Python ไม่เจอ?** ใช้คำสั่งนี้ดูว่ามีตัวไหนอยู่บนเครื่องบ้าง:
+> ```cmd
+> where python
+> ```
+> หรือ
+> ```cmd
+> py -0p
+> ```
+
+สคริปต์จะทำ 5 ขั้น: ตรวจ Python → สร้าง `.venv` → อัปเกรด pip → ติดตั้ง package
+(ใช้เวลา 10–20 นาที เพราะ torch ไฟล์ใหญ่) → รัน `check_server.py` ให้อัตโนมัติ
+แล้วพิมพ์ path ของ interpreter ที่ต้องเอาไปใส่ใน `web.config` ให้ด้วย
+
+**รันซ้ำได้ปลอดภัย** — ถ้าติดตั้งหลุดกลางทาง (เน็ตหลุด) ให้รันซ้ำ pip จะข้ามตัวที่ลงแล้ว
+
+#### 5.3 วิธีที่ 2 — พิมพ์เอง (ต้องรันทีละบรรทัด)
+
+**บรรทัดที่ 1** — เข้าโฟลเดอร์โปรเจกต์:
+```cmd
+cd /d C:\VisionIQ\Digital_Vision2026
+```
+
+**บรรทัดที่ 2** — ตรวจว่า Python อยู่จริง (ต้องขึ้น `Python 3.9.13`):
+```cmd
+C:\Python39\python.exe --version
+```
+
+**บรรทัดที่ 3** — สร้าง venv (**ห้ามข้ามข้อนี้** — ถ้าข้าม บรรทัดถัดไปจะขึ้น
+`The system cannot find the path specified.`):
+```cmd
 C:\Python39\python.exe -m venv .venv
+```
 
-REM 2) อัปเกรด pip ก่อน (กัน wheel รุ่นใหม่ติดตั้งไม่ได้)
+**บรรทัดที่ 4** — อัปเกรด pip:
+```cmd
 .venv\Scripts\python.exe -m pip install --upgrade pip setuptools wheel
+```
 
-REM 3) ติดตั้ง package ทั้งหมด  ** ใช้เวลา 10-20 นาที (torch ไฟล์ใหญ่) **
+**บรรทัดที่ 5** — ติดตั้ง package ทั้งหมด (10–20 นาที):
+```cmd
 .venv\Scripts\python.exe -m pip install -r deploy\requirements-server.txt
 ```
 
-**ยืนยันผล:**
+#### 5.4 ยืนยันผล
+
 ```cmd
 .venv\Scripts\python.exe -c "import flask, cv2, ultralytics, pyodbc, bcrypt, jwt, fitz, waitress; print('imports OK')"
 ```
 ต้องขึ้น `imports OK`
+
+**และยืนยันว่า venv ทำงานจริง** (สำคัญ — พิสูจน์ว่าไม่ได้ไปหยิบ package จากที่อื่น):
+```cmd
+.venv\Scripts\python.exe -c "import sys, spellchecker; print(sys.prefix); print(spellchecker.__file__)"
+```
+ทั้งสองบรรทัดที่พิมพ์ออกมา **ต้องมีคำว่า `.venv` อยู่ในนั้น**
+ถ้า path ของ `spellchecker` ชี้ไปที่ `C:\Users\...\AppData\Roaming\...`
+แสดงว่ายังหยิบจาก user site-packages อยู่ = ปัญหาที่อธิบายในข้อ 5.1 ยังไม่ถูกแก้
 
 > 💡 ถ้าติดตั้ง torch ช้าหรือหลุดกลางทาง ให้รันคำสั่ง `pip install` ซ้ำได้เลย
 > (pip จะข้ามตัวที่ลงเสร็จแล้ว)
@@ -764,6 +910,7 @@ C:\inetpub\logs\LogFiles\W3SVC<n>\                       ← access log ขอ�
 | **HTTP 500.19** — `unrecognized element 'httpPlatform'` | ยังไม่ได้ติดตั้ง HttpPlatformHandler | ทำ STEP 3 แล้วตรวจใน Modules ให้เห็นชื่อจริง |
 | **HTTP 500.19** — config error อื่น ๆ | XML ใน `web.config` พิมพ์ผิด (ลืมปิดแท็ก / เครื่องหมายคำพูด) | เปิดไฟล์ด้วยเบราว์เซอร์ ถ้า XML ผิดจะฟ้องบรรทัดที่ผิด |
 | **HTTP 502.5** — "The process failed to start" | `processPath` ชี้ไป python ผิดที่ / venv พัง / import error | เปิด `logs\iis-stdout_*.log`; ถ้าไม่มีไฟล์เลย = path ผิดแน่นอน |
+| **`The system cannot find the path specified.`** ตอนสั่ง `.venv\Scripts\python.exe` | ยังไม่ได้สร้าง venv (ข้ามบรรทัด `python -m venv .venv`) **หรือ** คัดลอกคำสั่งหลายบรรทัดมาวางแล้วบรรทัดติดกันหมด | รัน `deploy\setup_venv.bat` (ทำให้ครบตามลำดับให้เอง) — ดู [STEP 5](#step-5--สร้าง-venv-และติดตั้ง-package) |
 | **HTTP 503** — Service Unavailable | Application Pool หยุดทำงาน (มัก crash ซ้ำจนถูกปิด) | IIS Manager → Application Pools → ดูสถานะ → กด **Start** แล้วดู Event Viewer |
 | ไม่มีไฟล์ `logs\iis-stdout_*.log` เกิดขึ้นเลย | โฟลเดอร์ `logs\` เขียนไม่ได้ / `stdoutLogEnabled` เป็น false | ทำ STEP 13 ให้สิทธิ์ Modify |
 | เปิดจากเซิร์ฟเวอร์ได้ แต่เครื่องอื่นเปิดไม่ได้ | Firewall | ทำ STEP 17 |
@@ -983,6 +1130,10 @@ Python จะรันบรรทัดพวกนี้ทันทีที�
 ### E. คำสั่งที่ใช้บ่อย (สรุปไว้ที่เดียว)
 
 ```cmd
+REM ── สร้าง venv + ติดตั้ง package (ครั้งแรก / ซ่อม venv ที่พัง) ──
+cd /d C:\VisionIQ\Digital_Vision2026
+deploy\setup_venv.bat
+
 REM ── ตรวจความพร้อมทั้งระบบ ──────────────────────────────────
 cd /d C:\VisionIQ\Digital_Vision2026
 .venv\Scripts\python.exe deploy\check_server.py
@@ -1108,7 +1259,7 @@ REM ตัวเร่ง iGPU — ลงเฉพาะเมื่อเซิ
 ## สรุปสั้นที่สุด
 
 1. ติดตั้ง **Python 3.9.13** (เลือกไว้เพื่อรองรับกล้องในอนาคต — **ห้าม** 3.13) + **HttpPlatformHandler** บนเซิร์ฟเวอร์
-2. `git clone` โค้ด → สร้าง **venv ในโฟลเดอร์โปรเจกต์** → `pip install -r deploy\requirements-server.txt`
+2. `git clone` โค้ด → รัน **`deploy\setup_venv.bat`** (สร้าง venv ในโฟลเดอร์โปรเจกต์ + ติดตั้ง package)
 3. รัน **`auth_schema.sql`** (อย่าลืม `-f 65001`) → **`python -m auth.seed_admin`**
 4. ทดสอบด้วย **`deploy\wsgi_iis.py`** ให้ผ่านก่อน แล้วค่อยต่อ IIS
 5. สร้าง **App Pool (No Managed Code)** → **Website** → วาง **`web.config`** → ให้สิทธิ์ **Modify**
