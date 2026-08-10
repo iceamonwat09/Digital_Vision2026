@@ -537,10 +537,30 @@ sqlcmd -f 65001 -S 172.32.0.50 -d VisionIQ -U sa -P "P@ssw0rd" -i Connection_sql
 
 #### 8.2 สร้างผู้ใช้ admin คนแรก
 
+> 🛑 **ตรวจก่อนเสมอว่ามีผู้ใช้อยู่แล้วหรือไม่ — `seed_admin` เป็น upsert**
+>
+> ถ้าฐานข้อมูลนี้เคยใช้งานมาก่อน (เช่นย้ายมาจากเครื่องอื่น หรือเคยติดตั้งไว้แล้ว)
+> การรัน `seed_admin` กับชื่อที่มีอยู่จะ **เขียนทับรหัสผ่านเดิมทันที**
+> ผู้ใช้เดิมจะล็อกอินไม่ได้อีกโดยไม่มีคำเตือนใด ๆ
+>
+> ```cmd
+> .venv\Scripts\python.exe -c "from auth import store; [print(u['username'], u['role'], 'active' if u['is_active'] else 'disabled') for u in store.list_users()]"
+> ```
+>
+> ถ้าตารางยังไม่มี/ยังไม่มีผู้ใช้ คำสั่งนี้จะไม่พิมพ์อะไรเลย
+>
+> - **มีผู้ใช้อยู่แล้วและยังจำรหัสได้** → ข้ามข้อ 8.2 นี้ไปเลย
+> - **มีผู้ใช้อยู่แล้วแต่ลืมรหัส** → รันคำสั่งด้านล่างได้ (เจตนารีเซ็ต)
+> - **ยังไม่มีผู้ใช้เลย** → รันคำสั่งด้านล่างเพื่อสร้างคนแรก
+
 ```cmd
 cd /d C:\VisionIQ\Digital_Vision2026
 .venv\Scripts\python.exe -m auth.seed_admin --username admin --password "Str0ng!Pass1"
 ```
+
+> ⚠️ ต้องเรียกแบบ **`-m auth.seed_admin`** เท่านั้น — เรียกเป็นไฟล์ตรง ๆ
+> (`python auth\seed_admin.py`) จะพังด้วย `ImportError: attempted relative import`
+> เพราะไฟล์นี้ใช้ relative import ภายในแพ็กเกจ `auth`
 
 ต้องขึ้น: `✓ พร้อมใช้งาน: user 'admin' (role=Admin, id=1)`
 
@@ -683,6 +703,33 @@ copy deploy\web.config.example web.config
 
 > 💡 **ตำแหน่งของ `web.config` ต้องอยู่ที่รากของ Physical path** ที่ตั้งไว้ใน STEP 11
 > คือ `C:\VisionIQ\Digital_Vision2026\web.config` (ไม่ใช่ในโฟลเดอร์ `deploy\`)
+
+6. **ปลดล็อก configuration section (ห้ามข้าม — ไม่ทำจะได้ 500.19 แน่นอน)**
+
+IIS ล็อก section `<handlers>` และ `<httpPlatform>` ไว้ที่ระดับเครื่องเป็นค่าเริ่มต้น
+(`overrideModeDefault="Deny"`) ทำให้ `web.config` ของเว็บไซต์ใช้ section เหล่านี้ไม่ได้
+เปิด PowerShell **แบบ Administrator** แล้วรัน:
+
+```powershell
+& "$env:windir\system32\inetsrv\appcmd.exe" unlock config -section:system.webServer/handlers
+& "$env:windir\system32\inetsrv\appcmd.exe" unlock config -section:system.webServer/httpPlatform
+```
+
+ต้องได้ข้อความ `Unlocked section "..." at configuration path "MACHINE/WEBROOT/APPHOST".`
+
+<details>
+<summary>อาการถ้าลืมทำข้อนี้</summary>
+
+```
+HTTP Error 500.19 - Internal Server Error
+Error Code   0x80070021
+Config Error This configuration section cannot be used at this path.
+             This happens when the section is locked at a parent level.
+```
+
+ข้อความนี้ **ไม่ได้บอกวิธีแก้** และชี้ไปที่บรรทัด `<handlers>` ใน `web.config`
+ทำให้เข้าใจผิดว่า `web.config` เขียนผิด ทั้งที่ไฟล์ถูกต้องทุกอย่าง
+</details>
 
 ---
 
