@@ -286,6 +286,94 @@ path/ภาษาของ tesseract, ชั้นที่ใช้ต่อโ
 
 ---
 
+## 🖼️ Artwork — เลย์เอาต์หน้าจอ (คอลัมน์เดียว เต็มความกว้าง)
+
+หน้า `/artwork_check` เป็น **คอลัมน์เดียว**: ① อัปโหลด/จัดโซน เต็มขอบซ้าย-ขวา แล้ว ② ผลการตรวจสอบ
+อยู่ล่าง (เดิม 2 คอลัมน์ 7/5 ใน `max-width:1380px` → ① ได้แค่ ~710px ทำงานกับ artwork ใหญ่ไม่ไหว).
+บนจอ 1920 กล่องจัดโซนกว้าง **1810px (×2.5 ของเดิม)** → A4 นอน @150dpi เห็นครบที่ zoom 100%,
+A3 พอดีที่ 72% (เดิมต้องย่อเหลือ 29% = ทิ้งรายละเอียด).
+
+- **ความกว้างของ panel ไม่เข้าไปในสูตรพิกัดโซนเลย** — โซนเป็นสัดส่วน 0..1, ภาพถูกกำหนดความกว้าง
+  เป็น px จาก `applyZoom()` และ `.aw-stage img { max-width:none }` ⇒ กล่องกว้างขึ้น = **เห็นภาพ
+  มากขึ้นที่ซูมเท่าเดิม ไม่ใช่ย่อภาพ**. ความละเอียดจึงลดลงไม่ได้เชิงโครงสร้าง.
+  พิสูจน์แล้วด้วยเบราว์เซอร์จริง (เทียบก่อน/หลังแก้): วาดโซนที่ zoom 100/60/250% ได้ค่าคลาดเคลื่อน
+  **0.781/0.797/0.781 px เท่ากันทุกหลัก** และ zoom mapping (60% → 1488px), wheel-zoom เท่าเดิมเป๊ะ.
+- **`.main-content { max-width:1400px }` อยู่ใน `static/css/style.css` = ของกลางทุกหน้า** —
+  ปลดเพดานได้เฉพาะใน `{% block extra_css %}` ของ `artwork_check.html` (render เฉพาะหน้านี้)
+  **ห้ามแก้ style.css** ไม่งั้นกระทบ Live/Label/Dashboard ทั้งหมด.
+- **`.results-wide` + `setResultsWide()` กลายเป็น no-op** (คอลัมน์เดียว) — คงคลาสและจุดเรียกทั้ง 3
+  ไว้ตามเดิม ไม่ต้องแตะ JS.
+- **wheel-zoom ผูกกับ `zoomRange.closest(".aw-stage-box")`** (`artwork_check.js`) — ถ้าย้าย
+  `#awZoomBar` ออกนอกกล่อง หรือเปลี่ยนชื่อคลาส **ซูมด้วยลูกกลิ้งจะตายเงียบ ไม่มี error**.
+- **ลากเมาส์เพื่อเลื่อนภาพ (pan)** — เปลี่ยนแค่ `scrollLeft/scrollTop` ของ `.aw-stage-box`
+  ⇒ **scrollbar เดิมทำงานเหมือนเดิมทุกอย่าง** ไม่แตะสูตรพิกัดโซนเลย. 2 ท่า:
+  - **ปุ่มซ้ายลากบนพื้นที่ว่าง** (ไม่ใช่บนโซน + ไม่ได้กด "เพิ่มโซน") — ท่านี้เดิมไม่ทำอะไรเลย
+    จึงเอามาใช้ได้โดยไม่ทับของเดิม. โซนมี `stopPropagation` ใน `startDrag` อยู่แล้ว
+    event จึงไม่ไหลมาถึง handler ของ pan ตอนลากย้าย/ย่อขยายโซน.
+  - **ปุ่มกลาง (ล้อ) ลาก** — ใช้ได้เสมอแม้อยู่บนโซนหรือกำลังวาดโซน. ต้องมี
+    `if (ev.button !== 0) return;` ทั้งใน `startDrag` และ handler `mousedown` ของ `stage`
+    ไม่งั้นปุ่มกลางจะไป **ย้ายโซน/วาดโซน** แทนที่จะเลื่อนภาพ.
+  - `ev.preventDefault()` ใน `panStart` **จำเป็นทั้งสองปุ่ม**: กัน native image drag ของ
+    เบราว์เซอร์ (ปุ่มซ้าย) และกัน autoscroll วงกลมของ Windows (ปุ่มกลาง).
+  - `canPan()` เช็ค **ทั้งแนวนอนและแนวตั้ง** — กด "พอดีความกว้าง" แล้วภาพยังสูงเกินกล่อง
+    (A3 ที่ 72% = 1786x1263 ในกล่องสูง 840) ⇒ ยังต้องลากเลื่อนแนวตั้งได้.
+  - `updatePannable()` (เรียกจาก `applyZoom()` + `ResizeObserver` + `window.resize`) คุม
+    คลาส `.aw-pannable` = เคอร์เซอร์มือ. ขึ้นมือทั้งที่เลื่อนไม่ได้ = ผู้ใช้ลากแล้วงง.
+- ปุ่ม **"⤢ พอดีความกว้าง"** (`#awZoomFit`): `floor(stageBox.clientWidth-6 / natW * 100)` clamp 30-300
+  — **ปัดลงเสมอ** (ปัดขึ้น 1% = ภาพล้นกล่อง มี scrollbar แนวนอนทั้งที่กด "พอดี") และต้อง sync
+  `zoomPct` + `zoomRange.value` + ป้าย % พร้อมกัน ไม่งั้นสไลเดอร์ค้างคนละค่ากับภาพ.
+- ② อยู่ล่างแล้ว → `scrollToResults()` พาจอไปที่ผลตรวจหลังกด "ส่งตรวจสอบ" (ทั้งกรณีสำเร็จและ error)
+  ไม่งั้นผู้ใช้ที่อยู่ตรงกล่องจัดโซนจะเหมือนกดแล้วไม่มีอะไรเกิดขึ้น.
+- **ยังไม่ได้ทำ (ถ้าอยากให้ภาพ "คมขึ้น" จริงระดับพิกเซล):** `PREVIEW_DPI=150` คือเพดานของภาพใน
+  ตัวแก้โซน ซูมเกิน 100% = ขยายภาพเบลอ. ต้องเพิ่มไฟล์ **display-only** แยก (เช่น `PREVIEW_DISPLAY_DPI`
+  → `preview_hi.png`) **ห้ามเปลี่ยน `preview.png`** เพราะถูกใช้ต่อโดย `propose_zones` / `snap_bbox` /
+  `autopair_bbox` และ `draw_overlay` (ซึ่งใช้ `putText` fontScale คงที่ 0.5 → DPI สูงขึ้น = ป้ายบน
+  overlay เล็กลงเชิงสัดส่วน).
+
+---
+
+## 🔐 Artwork — ประวัติการตรวจ "เห็นเฉพาะของตัวเอง"
+
+หน้า `/artwork_check/history` แสดงเฉพาะการตรวจที่ผู้ใช้คนนั้นเป็นคนอัปโหลด
+(role ใน `HISTORY_ADMIN_ROLES` เห็นทั้งหมด). **ขอบเขต: โหมด Artwork เท่านั้น** —
+Label Paper / Live / Dashboard / `/api/defects` ไม่ถูกแตะ และ **ไม่ต้องแก้ SQL schema เลย**.
+
+- **เจ้าของเก็บใน `owner.json` แยกจาก `report.json`** (`{user_id, username, saved_at}`) เพราะ
+  `report.json` เกิดตอนกด "ส่งตรวจสอบ" เท่านั้น แต่ระหว่างจัดโซนมี endpoint ที่ต้องเช็คสิทธิ์แล้ว
+  (preview/crop/propose/snap/autopair) — ถ้ารอ report.json ช่วงนั้นจะไม่มีเจ้าของให้เทียบ.
+  เขียนตอน `pipeline.start_inspection(owner=...)`; `routes.py` เป็นคนหา user จาก `g.current_user`
+  → **`pipeline.py` ไม่ import Flask** (ยังเทสต์ได้ตรง ๆ).
+- **ด่านเดียวคุมทุก endpoint: `@artwork_bp.before_request`** อ่าน `rec_id` จาก `request.view_args`
+  ⇒ ครอบคลุม **13 route** ที่มี `<rec_id>` ทั้งหมด **รวมถึง route ที่จะเพิ่มในอนาคต**.
+  ⚠️ **การกรองเฉพาะรายการ (`/api/artwork/history`) ไม่ใช่การป้องกัน** — ถ้าไม่มีด่านนี้ ใครที่รู้ id
+  ก็เปิด `/api/artwork/<id>/report` ของคนอื่นได้ตรง ๆ. เทสต์ `test_http_other_user_blocked_on_every_rec_route`
+  **ไล่จาก `url_map` จริง** ไม่ใช่ลิสต์ที่เขียนมือ → เพิ่ม route ใหม่แล้วลืมกัน = เทสต์แดงทันที.
+- **นโยบายอยู่ที่เดียวใน `artwork_check/ownership.py`** (ไม่มี Flask): ปิด flag → ผ่านหมด ·
+  ไม่มีระบบล็อกอิน (`viewer is None`) → ผ่านหมด · admin → ผ่านหมด · **บันทึกเก่าที่ไม่มี `owner.json`
+  → admin เท่านั้น** · เจ้าของ → ผ่าน.
+  - `viewer is None` = auth ปิด ≠ `viewer == {}` = auth เปิดแต่หาผู้ใช้ไม่เจอ (**ไม่มีสิทธิ์อะไรเลย**) —
+    ต้องเช็คด้วย `is None` ห้ามใช้ความ falsy ไม่งั้นสองเคสนี้จะรวมกันเป็น "ผ่านหมด".
+  - เทียบ id ต้อง `bool(oid) and bool(vid) and oid == vid` — ไม่งั้น `"" == ""` ทำให้ทุกคนเป็นเจ้าของ
+    ของบันทึกที่ `user_id` ว่าง.
+- **`AUTH_ENABLED=False` ต้องไม่กรอง** ไม่งั้นหน้าประวัติว่างเปล่าทั้งที่ระบบทำงานปกติ.
+- **ผลข้างเคียงที่ตั้งใจ:** role `Manager`/`Viewer` (ซึ่งมี `view_history`) จะเห็นเฉพาะงานของตัวเอง
+  ด้วย — `Viewer` ที่ไม่เคยอัปโหลดจะเห็นตารางว่าง. ถ้าต้องการให้เห็นทั้งหมด เพิ่มชื่อ role ใน
+  `ARTWORK_HISTORY_ADMIN_ROLES` (env, คั่นด้วย comma) ไม่ต้องแก้โค้ด.
+- **ผูกกับ "ชื่อ" role ตามที่ผู้ใช้เลือก** ⇒ ถ้ามีคนเปลี่ยนชื่อ role `Admin` ในหน้าจัดการผู้ใช้
+  **สิทธิ์เห็นทั้งหมดจะหยุดทำงานเงียบ ๆ** ต้องมาแก้ค่าคอนฟิกให้ตรงกัน.
+- **ปุ่มลบใช้ด่านเดียวกัน** (DELETE มี `rec_id`) ⇒ เจ้าของ + admin เท่านั้น. JS ไม่ต้องซ่อนปุ่ม
+  เพราะรายการที่แสดง = รายการที่ลบได้อยู่แล้ว (server กรองมาให้).
+- `list_inspections(limit, can_view=None)` — `can_view=None` = เส้นทางเดิมเป๊ะ. ตอนกรองมีเพดาน
+  `_MAX_SCAN=2000` กันผู้ใช้ใหม่ที่ยังไม่มีบันทึกต้องไล่อ่านทั้งคลังทุกครั้ง. เพิ่ม field `owner`
+  (ชื่อผู้ตรวจ) ในผลลัพธ์ = คอลัมน์ใหม่ในตาราง (JS `COLS=7` ต้องตรงกับ `<th>` ใน template).
+- **Config:** `ARTWORK_HISTORY_PER_USER` (default `true`; ตั้ง `false` + รีสตาร์ต = กลับพฤติกรรมเดิม
+  100% ทันที) · `ARTWORK_HISTORY_ADMIN_ROLES` (default `Admin`).
+- **ตอน deploy ครั้งแรก:** บันทึกเก่าทั้งหมดจะหายจากสายตาผู้ใช้ทั่วไปทันที (เห็นได้เฉพาะ admin)
+  และงานที่ค้างอยู่ระหว่างจัดโซนตอนรีสตาร์ตจะกลายเป็น "ไม่มีเจ้าของ" → เจ้าตัวเปิดต่อไม่ได้
+  ต้องอัปโหลดใหม่ ⇒ **ควร deploy ตอนไม่มีคนใช้งาน**.
+
+---
+
 ## 🖥️ Entrypoints & HTTPS
 
 - **`app.py`** = entrypoint หลัก (ผู้ใช้รัน `py -3.9 app.py`). `threaded=True`. รองรับ HTTPS.
@@ -327,14 +415,14 @@ path/ภาษาของ tesseract, ชั้นที่ใช้ต่อโ
 - HW สถานี: **i7-1165G7** (4C/8T, 15W, AVX-512), 16GB DDR4 (single-channel), Iris Xe, Win10 Pro, Python 3.9.13.
 - inference bestX (seg): **iGPU (OpenVINO) ≈ 45-50ms/เฟรม (~20-22 FPS)** = ตัวจริงปัจจุบัน;
   ONNX CPU ≈ 280ms (~2.7-3 FPS) = ชั้น fallback; PyTorch ≈ 315ms = fallback สุดท้าย.
-- Repo: `iceamonwat09/digital_vision2026`. Dev branch ปัจจุบัน: `claude/artwork-red-box-drawing-lpqhpo`
-  (ก่อนหน้า: `claude/dent-detection-camera-access-ub11gy`). **ห้าม push ไป main**.
+- Repo: `iceamonwat09/digital_vision2026`. Dev branch ปัจจุบัน: `claude/artwork-ui-layout-1lnwgt`
+  (ก่อนหน้า: `claude/artwork-red-box-drawing-lpqhpo`). **ห้าม push ไป main**.
 - SQL Server: 172.32.0.50/VisionIQ. Defect log ผ่าน `sp_log_defect` (เก็บภาพ base64).
-- Tests: `pytest tests/` — 298 ตัว (artwork/label/barcode — **ไม่ครอบคลุม camera/live loop**).
-  สถานะปัจจุบัน: **283 pass / 5 fail / 10 skip**.
+- Tests: `pytest tests/` — 324 ตัว (artwork/label/barcode — **ไม่ครอบคลุม camera/live loop**).
+  เพิ่มล่าสุด: `tests/test_artwork_ownership.py` 26 ตัว (สิทธิ์เห็นประวัติ artwork).
   ⚠️ `tests/test_inspection_golden.py` **fail 5 ตัวอยู่แล้ว** (pre-existing, `NameError: FieldResult`
   ในโมดูล Label Paper) — ไม่เกี่ยวกับ artwork. ยืนยันด้วย `git stash` ก่อนโทษการแก้ของตัวเอง.
-- CONFIG_VERSION ปัจจุบัน: **`2026.08.07-aw-redbox-stable`** (เช็คที่ footer ว่ารันโค้ดใหม่จริง).
+- CONFIG_VERSION ปัจจุบัน: **`2026.08.11-aw-pan-drag`** (เช็คที่ footer ว่ารันโค้ดใหม่จริง).
 
 ---
 

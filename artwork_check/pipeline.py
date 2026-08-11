@@ -38,7 +38,15 @@ logger = logging.getLogger(__name__)
 ALLOWED_EXT = (".pdf", ".png", ".jpg", ".jpeg")
 
 
-def start_inspection(file_bytes: bytes, filename: str) -> dict:
+def start_inspection(file_bytes: bytes, filename: str,
+                     owner: Optional[dict] = None) -> dict:
+    """เริ่มการตรวจใหม่จากไฟล์ที่อัปโหลด.
+
+    ``owner`` = ``{"user_id", "username"}`` ของคนที่อัปโหลด (routes.py เป็นคน
+    หามาจาก session) — เก็บไว้เพื่อให้หน้าประวัติแสดงเฉพาะงานของเจ้าของได้.
+    ``None`` (ค่าเริ่มต้น / ไม่มีระบบล็อกอิน) = ไม่บันทึกเจ้าของ, ทุกอย่าง
+    ทำงานเหมือนเดิมทุกประการ.
+    """
     ext = os.path.splitext(filename)[1].lower()
     if ext not in ALLOWED_EXT:
         raise ValueError(f"รองรับเฉพาะไฟล์ {', '.join(ALLOWED_EXT)}")
@@ -47,6 +55,7 @@ def start_inspection(file_bytes: bytes, filename: str) -> dict:
 
     rec_id = report.new_inspection_id()
     d = report.inspection_dir(rec_id, create=True)
+    report.save_owner(rec_id, owner)
     src_path = os.path.join(d, f"source{ext}")
     with open(src_path, "wb") as f:
         f.write(file_bytes)

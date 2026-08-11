@@ -6,6 +6,22 @@
   const body = document.getElementById("awHistBody");
   const detailPanel = document.getElementById("awDetailPanel");
   const detail = document.getElementById("awDetail");
+  const scopeNote = document.getElementById("awScopeNote");
+  const COLS = 7;
+
+  /* ป้ายบอกว่ารายการนี้คือของใคร — ผู้ใช้ต้องเข้าใจได้ทันทีว่าทำไมงานของ
+     เพื่อนร่วมทีมไม่อยู่ในตาราง (scope มาจาก /api/artwork/history) */
+  function renderScope(scope, username) {
+    if (!scopeNote) return;
+    if (scope === "own") {
+      scopeNote.innerHTML = "👤 กำลังแสดง <b>เฉพาะการตรวจของคุณ</b>" +
+        (username ? " (" + esc(username) + ")" : "") +
+        " — งานของผู้ใช้อื่นและบันทึกเก่าที่ไม่มีเจ้าของจะไม่แสดงที่นี่";
+    } else {
+      scopeNote.innerHTML = "🗂️ กำลังแสดง <b>การตรวจทั้งหมดของทุกผู้ใช้</b>";
+    }
+    scopeNote.style.display = "";
+  }
 
   function badge(v) {
     const cls = v === "PASS" ? "aw-b-pass"
@@ -17,10 +33,16 @@
     try {
       const res = await api("/api/artwork/history?limit=100");
       const recs = res.records || [];
+      renderScope(res.scope, res.username);
       if (!recs.length) {
-        body.innerHTML = '<tr><td colspan="6" class="aw-empty">ยังไม่มีประวัติการตรวจ</td></tr>';
+        body.innerHTML = '<tr><td colspan="' + COLS + '" class="aw-empty">' +
+          (res.scope === "own" ? "คุณยังไม่มีประวัติการตรวจ"
+                               : "ยังไม่มีประวัติการตรวจ") + "</td></tr>";
         return;
       }
+      /* ทุกแถวที่แสดงอยู่ = แถวที่ผู้ใช้คนนี้มีสิทธิ์ลบอยู่แล้ว (รายการถูกกรอง
+         มาจาก server) จึงไม่ต้องซ่อนปุ่มลบเป็นราย ๆ — และต่อให้ซ่อน ด่านจริง
+         ก็อยู่ที่ server เสมอ */
       body.innerHTML = recs.map((r) =>
         '<tr class="clickable" data-id="' + esc(r.id) + '">' +
         "<td>" + esc(r.created_at) + "</td>" +
@@ -28,6 +50,7 @@
         "<td>" + esc(r.brand || "—") + "</td>" +
         "<td>" + badge(r.verdict) + "</td>" +
         "<td>" + esc(r.defect_count) + "</td>" +
+        '<td class="aw-owner">' + esc(r.owner || "—") + "</td>" +
         '<td><button class="aw-btn-danger" data-del="' + esc(r.id) + '">ลบ</button></td>' +
         "</tr>").join("");
 
@@ -53,7 +76,7 @@
         });
       });
     } catch (e) {
-      body.innerHTML = '<tr><td colspan="6" class="aw-empty">โหลดไม่สำเร็จ: ' +
+      body.innerHTML = '<tr><td colspan="' + COLS + '" class="aw-empty">โหลดไม่สำเร็จ: ' +
         esc(e.message) + "</td></tr>";
     }
   }

@@ -11,16 +11,80 @@ from __future__ import annotations
 import logging
 import os
 
-from flask import (Blueprint, jsonify, render_template, request,
+from flask import (Blueprint, g, jsonify, render_template, request,
                    send_file, send_from_directory)
 
-from . import config, pipeline, report, translate, vocab, zones as zones_mod
+from . import (config, ownership, pipeline, report, translate, vocab,
+               zones as zones_mod)
 
 logger = logging.getLogger(__name__)
 
 artwork_bp = Blueprint("artwork_check", __name__)
 
 MAX_UPLOAD_MB = 40
+
+
+# ── ผู้ใช้ปัจจุบัน + ด่านเจ้าของ ──────────────────────────────────────
+
+def _viewer():
+    """claims ของผู้ใช้ที่ล็อกอินอยู่ หรือ ``None`` ถ้าไม่มีระบบล็อกอิน.
+
+    ``g.auth_enabled`` / ``g.current_user`` ถูกตั้งโดย ``auth.access`` ใน
+    ``before_request`` ระดับแอป (ซึ่งทำงานก่อน before_request ของ blueprint
+    เสมอ). โหมด artwork ต้องทำงานได้แม้ไม่มีโมดูล auth ติดตั้ง → ใช้
+    ``getattr`` กัน AttributeError แล้วถือว่า "ไม่มีระบบล็อกอิน".
+
+    คืน ``{}`` (ไม่ใช่ ``None``) เมื่อล็อกอินเปิดอยู่แต่หาผู้ใช้ไม่เจอ —
+    ปกติเข้าไม่ถึงจุดนี้เพราะ guard ของ auth ตอบ 401 ไปก่อน แต่ถ้าเกิดขึ้น
+    ต้องแปลว่า "ไม่มีสิทธิ์" ไม่ใช่ "ไม่กรอง".
+    """
+    if not getattr(g, "auth_enabled", False):
+        return None
+    return getattr(g, "current_user", None) or {}
+
+
+def _owner_of_request():
+    """ข้อมูลเจ้าของที่จะบันทึกคู่กับการตรวจที่กำลังจะสร้าง."""
+    viewer = _viewer()
+    if not viewer:
+        return None
+    return {"user_id": str(viewer.get("sub") or ""),
+            "username": viewer.get("username") or ""}
+
+
+@artwork_bp.before_request
+def _ownership_guard():
+    """ด่านเดียวที่คุมทุก endpoint ซึ่งอ้างถึงการตรวจรายการหนึ่ง.
+
+    ทุก route ของโหมดนี้ที่แตะข้อมูลของการตรวจใดการตรวจหนึ่งมี ``<rec_id>``
+    ใน URL ทั้งหมด (preview/overlay/crop/report/inspect/propose/snap/
+    autopair/translate/upload_ref/DELETE) → เช็คที่นี่ที่เดียวจึงครอบคลุม
+    ครบ **รวมถึง route ที่จะเพิ่มในอนาคต** โดยไม่ต้องไล่ใส่ decorator ทีละตัว
+    (ซึ่งลืมได้ = ช่องโหว่เงียบ).
+
+    หมายเหตุ: ``/api/artwork/history`` และ ``/api/artwork/upload`` ไม่มี
+    ``rec_id`` จึงผ่านด่านนี้ — history กรองด้วย ``ownership.make_filter``
+    ในตัว handler ส่วน upload คือการสร้างของใหม่ (ยังไม่มีเจ้าของให้เทียบ).
+    """
+    rec_id = (request.view_args or {}).get("rec_id")
+    if not rec_id:
+        return None
+    viewer = _viewer()
+    if viewer is None or not config.HISTORY_PER_USER:
+        return None                      # ไม่มีระบบล็อกอิน/ปิดฟีเจอร์ = เหมือนเดิม
+    try:
+        owner = report.load_owner(rec_id)
+    except ValueError:
+        return None                      # id ผิดรูปแบบ — ให้ handler เดิมตอบ 400
+    if ownership.can_access(owner, viewer):
+        return None
+    logger.warning("[artwork] %s ถูกปฏิเสธ: %s (เจ้าของ=%s)",
+                   viewer.get("username") or "?", rec_id,
+                   (owner or {}).get("username") or "ไม่มีข้อมูล")
+    return jsonify({
+        "error": "บันทึกการตรวจนี้เป็นของผู้ใช้อื่น",
+        "status": 403,
+    }), 403
 
 
 # ── Pages ─────────────────────────────────────────────────────────────
@@ -46,7 +110,8 @@ def api_upload():
     if len(data) > MAX_UPLOAD_MB * 1024 * 1024:
         return jsonify({"error": f"ไฟล์ใหญ่เกิน {MAX_UPLOAD_MB} MB"}), 400
     try:
-        result = pipeline.start_inspection(data, f.filename)
+        result = pipeline.start_inspection(data, f.filename,
+                                           owner=_owner_of_request())
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
     except Exception as e:
@@ -360,8 +425,21 @@ def api_report(rec_id):
 
 @artwork_bp.route("/api/artwork/history")
 def api_history():
+    """รายการประวัติ. ผู้ใช้ทั่วไปเห็นเฉพาะงานที่ตัวเองอัปโหลด; role ที่อยู่ใน
+    ``HISTORY_ADMIN_ROLES`` เห็นทั้งหมด; ไม่มีระบบล็อกอิน = เห็นทั้งหมด.
+
+    ``scope`` บอก UI ว่ากำลังแสดงชุดไหน ("own"/"all") เพื่อขึ้นป้ายให้ผู้ใช้
+    เข้าใจว่าทำไมบางบันทึกไม่อยู่ในรายการ.
+    """
     limit = request.args.get("limit", 50, type=int)
-    return jsonify({"records": report.list_inspections(limit=limit)})
+    viewer = _viewer()
+    records = report.list_inspections(limit=limit,
+                                      can_view=ownership.make_filter(viewer))
+    return jsonify({
+        "records": records,
+        "scope": ownership.scope_of(viewer),
+        "username": (viewer or {}).get("username", ""),
+    })
 
 
 @artwork_bp.route("/api/artwork/<rec_id>", methods=["DELETE"])

@@ -13,6 +13,7 @@ Inspection folder layout (one per upload):
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import shutil
@@ -24,6 +25,8 @@ import cv2
 import numpy as np
 
 from . import config
+
+logger = logging.getLogger(__name__)
 
 _SEVERITY_RANK = {"critical": 2, "warning": 1, "info": 0}
 _CLASS_COLORS_BGR = {
@@ -107,27 +110,100 @@ def load_report(rec_id: str) -> Optional[dict]:
         return json.load(f)
 
 
-def list_inspections(limit: int = 50) -> List[dict]:
+# ── เจ้าของการตรวจ ───────────────────────────────────────────────────
+# เก็บแยกไฟล์ ไม่ใส่ใน report.json เพราะ report.json เกิดตอนกด "ส่งตรวจสอบ"
+# เท่านั้น แต่ระหว่างจัดโซนมี endpoint ที่ต้องเช็คสิทธิ์แล้ว (preview / crop /
+# propose / snap / autopair) — ถ้ารอ report.json ช่วงนั้นจะไม่มีเจ้าของให้เทียบ.
+_OWNER_FILE = "owner.json"
+# เพดานจำนวนโฟลเดอร์ที่ไล่อ่านตอนกรองตามเจ้าของ — กันกรณีผู้ใช้ใหม่ที่ยังไม่มี
+# บันทึกของตัวเองเลย ต้องไล่ทั้งคลังประวัติทุกครั้งที่เปิดหน้า
+_MAX_SCAN = 2000
+
+
+def save_owner(rec_id: str, owner: Optional[dict]) -> None:
+    """บันทึกว่าใครเป็นคนอัปโหลดการตรวจนี้ (best-effort — ไม่ raise).
+
+    ``owner`` = ``{"user_id": "7", "username": "somchai"}`` หรือ ``None``
+    (ไม่มีระบบล็อกอิน) ซึ่งจะไม่เขียนไฟล์เลย = บันทึกนั้นไม่มีเจ้าของ.
+    """
+    if not owner:
+        return
+    try:
+        with open(os.path.join(inspection_dir(rec_id), _OWNER_FILE),
+                  "w", encoding="utf-8") as f:
+            json.dump({
+                "user_id": str(owner.get("user_id") or ""),
+                "username": owner.get("username") or "",
+                "saved_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+            }, f, ensure_ascii=False, indent=1)
+    except OSError as e:
+        # การตรวจต้องทำงานต่อได้แม้เขียนไฟล์นี้ไม่สำเร็จ. ผลคือบันทึกนั้น
+        # กลายเป็น "ไม่มีเจ้าของ" = เห็นได้เฉพาะ admin (ปลอดภัยไว้ก่อน)
+        logger.warning("[artwork] save_owner failed for %s: %s", rec_id, e)
+
+
+def load_owner(rec_id: str) -> Optional[dict]:
+    """เจ้าของการตรวจนี้ หรือ ``None`` ถ้าเป็นบันทึกเก่า/อ่านไม่ได้.
+
+    ``None`` แปลว่า "ไม่รู้ว่าใครเป็นเจ้าของ" เสมอ — ฝั่งนโยบาย
+    (``ownership.can_access``) เป็นคนตัดสินว่าให้ใครเห็น.
+    """
+    p = os.path.join(inspection_dir(rec_id), _OWNER_FILE)
+    try:
+        with open(p, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def list_inspections(limit: int = 50, can_view=None) -> List[dict]:
+    """รายการตรวจล่าสุด (ใหม่สุดก่อน).
+
+    ``can_view`` = callable ``(owner_dict|None) -> bool`` สำหรับกรองตามเจ้าของ.
+    ``None`` (ค่าเริ่มต้น) = ไม่กรอง → เดินเส้นทางเดิมทุกประการ.
+    """
     out = []
     try:
         ids = sorted(os.listdir(config.INSPECTIONS_DIR), reverse=True)
     except FileNotFoundError:
         return []
-    for rec_id in ids[:max(1, limit)]:
+    limit = max(1, limit)
+    # ไม่กรอง = ตัดตั้งแต่ต้นเหมือนเดิม; ถ้ากรองต้องเดินต่อจนกว่าจะครบ limit
+    # (แต่มีเพดานกันไล่ทั้งโฟลเดอร์เมื่อผู้ใช้ใหม่ยังไม่มีบันทึกของตัวเอง)
+    scan = ids[:limit] if can_view is None else ids[:_MAX_SCAN]
+    for rec_id in scan:
+        if len(out) >= limit:
+            break
+        owner = None
+        if can_view is not None:
+            try:
+                owner = load_owner(rec_id)
+            except ValueError:      # ชื่อโฟลเดอร์ไม่ใช่ id ที่ถูกต้อง
+                continue
+            if not can_view(owner):
+                continue
         rep = None
         try:
             rep = load_report(rec_id)
         except (ValueError, json.JSONDecodeError):
             pass
         if rep:
-            out.append({
+            row = {
                 "id": rec_id,
                 "created_at": rep.get("created_at", ""),
                 "filename": rep.get("filename", ""),
                 "brand": rep.get("brand", ""),
                 "verdict": rep.get("verdict", ""),
                 "defect_count": len(rep.get("defects", [])),
-            })
+            }
+            if can_view is None:
+                try:
+                    owner = load_owner(rec_id)
+                except ValueError:
+                    owner = None
+            row["owner"] = (owner or {}).get("username", "")
+            out.append(row)
     return out
 
 

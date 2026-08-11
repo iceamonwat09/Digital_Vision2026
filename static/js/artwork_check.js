@@ -489,12 +489,19 @@
     if (previewImg.complete) { applyZoom(); renderZones(); }
   }
   previewImg.onload = () => { applyZoom(); renderZones(); };
-  // Give the right (results) panel more width once real result/table data
-  // exists; keep the editing-favored 7/5 while the user is still placing
-  // zones. Toggled true after inspect/translate, false on a new upload.
+  // เดิมสลับสัดส่วน 2 คอลัมน์ให้ฝั่งผลตรวจกว้างขึ้นเมื่อมีผลตรวจ/ตารางแล้ว
+  // (toggle true หลังส่งตรวจ/แปล, false ตอนอัปโหลดไฟล์ใหม่). เลย์เอาต์ปัจจุบันเป็น
+  // คอลัมน์เดียว (② อยู่ใต้ ①) คลาสนี้จึงไม่มีผลทางสายตาแล้ว — คงไว้ทั้ง
+  // ฟังก์ชันและจุดเรียกทั้ง 3 แห่ง เผื่อย้อนเลย์เอาต์กลับและกัน error
   const awGrid = document.querySelector(".aw-grid");
   function setResultsWide(wide) {
     if (awGrid) awGrid.classList.toggle("results-wide", !!wide);
+  }
+  // ② ย้ายไปอยู่ใต้ ① แล้ว — ถ้าไม่เลื่อนจอให้ ผู้ใช้ที่อยู่ตรงกล่องจัดโซน
+  // จะกด "ส่งตรวจสอบ" แล้วเหมือนไม่มีอะไรเกิดขึ้น. display-only ล้วน
+  function scrollToResults() {
+    const p = resultBox.closest(".aw-panel");
+    if (p && p.scrollIntoView) p.scrollIntoView({ behavior: "smooth", block: "start" });
   }
   function setBusy(b) {
     busy = b;
@@ -689,9 +696,102 @@
     renderZones();
   }, { passive: false });
 
+  // ปุ่ม "⤢ พอดีความกว้าง" — ใช้พื้นที่ของเลย์เอาต์เต็มความกว้างให้คุ้ม:
+  // ตั้งซูมให้ภาพพอดีช่องมองพอดี. clientWidth ของ .aw-stage-box = ความกว้าง
+  // ด้านในจริง (ไม่รวม border/scrollbar) ลบไว้เล็กน้อยกัน scrollbar แนวนอนโผล่.
+  // ⚠️ ต้อง sync ทั้ง zoomPct + zoomRange.value + ป้าย % พร้อมกัน ไม่งั้น
+  // สไลเดอร์จะค้างคนละค่ากับภาพจริงแบบเงียบ ๆ. ไม่แตะสูตรพิกัดใด ๆ —
+  // เรียก applyZoom()/renderZones() ชุดเดิมเหมือนสไลเดอร์ทุกประการ
+  const stageBox = zoomRange.closest(".aw-stage-box");
+  function setZoom(pct) {
+    zoomPct = Math.min(300, Math.max(30, Math.round(pct)));
+    zoomRange.value = zoomPct;
+    zoomLabel.textContent = zoomPct + "%";
+    applyZoom();
+    renderZones();
+  }
+  $("awZoomFit").addEventListener("click", () => {
+    if (!natW || !stageBox) return;
+    const avail = stageBox.clientWidth - 6;
+    // ปัดลง (ไม่ใช่ปัดใกล้สุด) — ปัดขึ้นแม้ 1% ก็ทำให้ภาพล้นกล่องแล้วมี
+    // scrollbar แนวนอนโผล่ ทั้งที่กดปุ่ม "พอดีความกว้าง"
+    if (avail > 0) setZoom(Math.floor(avail / natW * 100));
+  });
+
+  // ── ลากด้วยเมาส์เพื่อเลื่อนภาพ (pan) ────────────────────────────
+  // เดิมเลื่อนดูภาพได้ทาง scrollbar อย่างเดียว. เพิ่ม 2 ทางที่ "ไม่ชน" กับ
+  // การจัดโซน — **scrollbar ยังทำงานเหมือนเดิมทุกอย่าง** เพราะเราแค่เปลี่ยน
+  // scrollLeft/scrollTop ของกล่องเดิม ไม่ได้เปลี่ยนวิธีแสดงผลหรือพิกัดใด ๆ:
+  //   • **ปุ่มกลาง (ล้อ) ลาก** = เลื่อนได้เสมอ แม้ชี้อยู่บนโซนหรือกำลังวาดโซน
+  //   • **ปุ่มซ้ายลากบนพื้นที่ว่าง** (ไม่ใช่บนโซน และไม่ได้กด "เพิ่มโซน")
+  //     — ท่านี้เดิม "ไม่ทำอะไรเลย" จึงเอามาใช้ได้โดยไม่ทับของเดิม
+  // ผูกไว้ที่ .aw-stage-box (กล่องที่ scroll ได้) → ลากบนพื้นเทารอบภาพก็ได้.
+  // โซนมี stopPropagation ใน startDrag อยู่แล้ว event จึงไม่ไหลมาถึงที่นี่
+  // ตอนลากย้าย/ย่อขยายโซน.
+  let pan = null;
+
+  function panStart(ev) {
+    if (!stageBox) return;
+    if (ev.button === 1) {
+      // ปุ่มกลาง: ใช้ได้ทุกกรณี (startDrag/วาดโซน มองข้ามปุ่มที่ไม่ใช่ซ้าย)
+    } else if (ev.button === 0) {
+      if (drawMode) return;                        // กำลังวาดโซน = ปล่อยให้วาด
+      if (ev.target.closest && ev.target.closest(".aw-zone")) return;
+    } else {
+      return;                                      // ปุ่มขวา = ไม่ยุ่ง
+    }
+    if (!canPan()) return;                         // ไม่มีอะไรให้เลื่อน
+    // จำเป็นทั้งคู่: กันเบราว์เซอร์ลากรูป (native image drag) ตอนใช้ปุ่มซ้าย
+    // และกัน autoscroll วงกลมของ Windows ตอนใช้ปุ่มกลาง
+    ev.preventDefault();
+    pan = { x: ev.clientX, y: ev.clientY,
+            left: stageBox.scrollLeft, top: stageBox.scrollTop };
+    stageBox.classList.add("aw-panning");
+  }
+
+  function canPan() {
+    return stageBox.scrollWidth > stageBox.clientWidth + 1 ||
+           stageBox.scrollHeight > stageBox.clientHeight + 1;
+  }
+
+  // เปิด/ปิดเคอร์เซอร์มือเฉพาะตอนที่ "มีอะไรให้เลื่อนจริง" — ถ้าภาพเล็กกว่า
+  // กล่องแล้วยังขึ้นมือ ผู้ใช้จะลากแล้วงงว่าทำไมไม่ขยับ
+  function updatePannable() {
+    if (stageBox) stageBox.classList.toggle("aw-pannable", canPan());
+  }
+
+  if (stageBox) {
+    stageBox.addEventListener("mousedown", panStart);
+    document.addEventListener("mousemove", (ev) => {
+      if (!pan) return;
+      ev.preventDefault();
+      stageBox.scrollLeft = pan.left - (ev.clientX - pan.x);
+      stageBox.scrollTop = pan.top - (ev.clientY - pan.y);
+    });
+    document.addEventListener("mouseup", () => {
+      if (!pan) return;
+      pan = null;
+      stageBox.classList.remove("aw-panning");
+    });
+    // เมาส์หลุดออกนอกหน้าต่างระหว่างลาก แล้วปล่อยปุ่มข้างนอก → mouseup ไม่มา
+    // ทำให้ค้างสถานะลาก. mouseleave ของ document ปิดให้เอง
+    document.addEventListener("mouseleave", () => {
+      if (!pan) return;
+      pan = null;
+      stageBox.classList.remove("aw-panning");
+    });
+    // กล่องถูกลากย่อ/ขยาย (resize:vertical) หรือหน้าต่างเปลี่ยนขนาด →
+    // "เลื่อนได้หรือไม่" เปลี่ยนตาม ต้องอัปเดตเคอร์เซอร์ให้ตรง
+    window.addEventListener("resize", updatePannable);
+    if (typeof ResizeObserver !== "undefined") {
+      new ResizeObserver(updatePannable).observe(stageBox);
+    }
+  }
+
   function applyZoom() {
     if (!natW) return;
     previewImg.style.width = Math.round(natW * zoomPct / 100) + "px";
+    updatePannable();
   }
   function dispW() { return previewImg.clientWidth || natW; }
   function dispH() { return previewImg.clientHeight || natH; }
@@ -773,6 +873,7 @@
 
   let drag = null;
   function startDrag(ev, zone, el, isResize) {
+    if (ev.button !== 0) return;   // ปุ่มกลาง/ขวา = ไม่ย้ายโซน (ปล่อยให้ pan)
     if (drawMode) return;   // ปล่อยให้ event ทะลุไปที่ stage เพื่อวาดโซนใหม่
     ev.preventDefault();
     ev.stopPropagation();
@@ -969,6 +1070,7 @@
   }
 
   stage.addEventListener("mousedown", (ev) => {
+    if (ev.button !== 0) return;   // ปุ่มกลาง/ขวา = ไม่เริ่มวาดโซน (ปล่อยให้ pan)
     if (!drawMode || busy || draw) return;
     ev.preventDefault();
     const p = drawPoint(ev);
@@ -1207,8 +1309,10 @@
       switchTab("result");
       resetTextTab();
       setResultsWide(true);   // results exist → widen the results panel
+      scrollToResults();      // ② อยู่ล่าง — พาไปดูผลให้เลย
     } catch (e) {
       resultBox.innerHTML = '<div class="aw-empty">ตรวจไม่สำเร็จ: ' + esc(e.message) + "</div>";
+      scrollToResults();      // ข้อความ error ก็อยู่ในกล่อง ② เช่นกัน
     } finally {
       setBusy(false);
     }
