@@ -318,6 +318,48 @@ A3 พอดีที่ 72% (เดิมต้องย่อเหลือ 2
 
 ---
 
+## 🔐 Artwork — ประวัติการตรวจ "เห็นเฉพาะของตัวเอง"
+
+หน้า `/artwork_check/history` แสดงเฉพาะการตรวจที่ผู้ใช้คนนั้นเป็นคนอัปโหลด
+(role ใน `HISTORY_ADMIN_ROLES` เห็นทั้งหมด). **ขอบเขต: โหมด Artwork เท่านั้น** —
+Label Paper / Live / Dashboard / `/api/defects` ไม่ถูกแตะ และ **ไม่ต้องแก้ SQL schema เลย**.
+
+- **เจ้าของเก็บใน `owner.json` แยกจาก `report.json`** (`{user_id, username, saved_at}`) เพราะ
+  `report.json` เกิดตอนกด "ส่งตรวจสอบ" เท่านั้น แต่ระหว่างจัดโซนมี endpoint ที่ต้องเช็คสิทธิ์แล้ว
+  (preview/crop/propose/snap/autopair) — ถ้ารอ report.json ช่วงนั้นจะไม่มีเจ้าของให้เทียบ.
+  เขียนตอน `pipeline.start_inspection(owner=...)`; `routes.py` เป็นคนหา user จาก `g.current_user`
+  → **`pipeline.py` ไม่ import Flask** (ยังเทสต์ได้ตรง ๆ).
+- **ด่านเดียวคุมทุก endpoint: `@artwork_bp.before_request`** อ่าน `rec_id` จาก `request.view_args`
+  ⇒ ครอบคลุม **13 route** ที่มี `<rec_id>` ทั้งหมด **รวมถึง route ที่จะเพิ่มในอนาคต**.
+  ⚠️ **การกรองเฉพาะรายการ (`/api/artwork/history`) ไม่ใช่การป้องกัน** — ถ้าไม่มีด่านนี้ ใครที่รู้ id
+  ก็เปิด `/api/artwork/<id>/report` ของคนอื่นได้ตรง ๆ. เทสต์ `test_http_other_user_blocked_on_every_rec_route`
+  **ไล่จาก `url_map` จริง** ไม่ใช่ลิสต์ที่เขียนมือ → เพิ่ม route ใหม่แล้วลืมกัน = เทสต์แดงทันที.
+- **นโยบายอยู่ที่เดียวใน `artwork_check/ownership.py`** (ไม่มี Flask): ปิด flag → ผ่านหมด ·
+  ไม่มีระบบล็อกอิน (`viewer is None`) → ผ่านหมด · admin → ผ่านหมด · **บันทึกเก่าที่ไม่มี `owner.json`
+  → admin เท่านั้น** · เจ้าของ → ผ่าน.
+  - `viewer is None` = auth ปิด ≠ `viewer == {}` = auth เปิดแต่หาผู้ใช้ไม่เจอ (**ไม่มีสิทธิ์อะไรเลย**) —
+    ต้องเช็คด้วย `is None` ห้ามใช้ความ falsy ไม่งั้นสองเคสนี้จะรวมกันเป็น "ผ่านหมด".
+  - เทียบ id ต้อง `bool(oid) and bool(vid) and oid == vid` — ไม่งั้น `"" == ""` ทำให้ทุกคนเป็นเจ้าของ
+    ของบันทึกที่ `user_id` ว่าง.
+- **`AUTH_ENABLED=False` ต้องไม่กรอง** ไม่งั้นหน้าประวัติว่างเปล่าทั้งที่ระบบทำงานปกติ.
+- **ผลข้างเคียงที่ตั้งใจ:** role `Manager`/`Viewer` (ซึ่งมี `view_history`) จะเห็นเฉพาะงานของตัวเอง
+  ด้วย — `Viewer` ที่ไม่เคยอัปโหลดจะเห็นตารางว่าง. ถ้าต้องการให้เห็นทั้งหมด เพิ่มชื่อ role ใน
+  `ARTWORK_HISTORY_ADMIN_ROLES` (env, คั่นด้วย comma) ไม่ต้องแก้โค้ด.
+- **ผูกกับ "ชื่อ" role ตามที่ผู้ใช้เลือก** ⇒ ถ้ามีคนเปลี่ยนชื่อ role `Admin` ในหน้าจัดการผู้ใช้
+  **สิทธิ์เห็นทั้งหมดจะหยุดทำงานเงียบ ๆ** ต้องมาแก้ค่าคอนฟิกให้ตรงกัน.
+- **ปุ่มลบใช้ด่านเดียวกัน** (DELETE มี `rec_id`) ⇒ เจ้าของ + admin เท่านั้น. JS ไม่ต้องซ่อนปุ่ม
+  เพราะรายการที่แสดง = รายการที่ลบได้อยู่แล้ว (server กรองมาให้).
+- `list_inspections(limit, can_view=None)` — `can_view=None` = เส้นทางเดิมเป๊ะ. ตอนกรองมีเพดาน
+  `_MAX_SCAN=2000` กันผู้ใช้ใหม่ที่ยังไม่มีบันทึกต้องไล่อ่านทั้งคลังทุกครั้ง. เพิ่ม field `owner`
+  (ชื่อผู้ตรวจ) ในผลลัพธ์ = คอลัมน์ใหม่ในตาราง (JS `COLS=7` ต้องตรงกับ `<th>` ใน template).
+- **Config:** `ARTWORK_HISTORY_PER_USER` (default `true`; ตั้ง `false` + รีสตาร์ต = กลับพฤติกรรมเดิม
+  100% ทันที) · `ARTWORK_HISTORY_ADMIN_ROLES` (default `Admin`).
+- **ตอน deploy ครั้งแรก:** บันทึกเก่าทั้งหมดจะหายจากสายตาผู้ใช้ทั่วไปทันที (เห็นได้เฉพาะ admin)
+  และงานที่ค้างอยู่ระหว่างจัดโซนตอนรีสตาร์ตจะกลายเป็น "ไม่มีเจ้าของ" → เจ้าตัวเปิดต่อไม่ได้
+  ต้องอัปโหลดใหม่ ⇒ **ควร deploy ตอนไม่มีคนใช้งาน**.
+
+---
+
 ## 🖥️ Entrypoints & HTTPS
 
 - **`app.py`** = entrypoint หลัก (ผู้ใช้รัน `py -3.9 app.py`). `threaded=True`. รองรับ HTTPS.
@@ -362,11 +404,11 @@ A3 พอดีที่ 72% (เดิมต้องย่อเหลือ 2
 - Repo: `iceamonwat09/digital_vision2026`. Dev branch ปัจจุบัน: `claude/artwork-ui-layout-1lnwgt`
   (ก่อนหน้า: `claude/artwork-red-box-drawing-lpqhpo`). **ห้าม push ไป main**.
 - SQL Server: 172.32.0.50/VisionIQ. Defect log ผ่าน `sp_log_defect` (เก็บภาพ base64).
-- Tests: `pytest tests/` — 298 ตัว (artwork/label/barcode — **ไม่ครอบคลุม camera/live loop**).
-  สถานะปัจจุบัน: **283 pass / 5 fail / 10 skip**.
+- Tests: `pytest tests/` — 324 ตัว (artwork/label/barcode — **ไม่ครอบคลุม camera/live loop**).
+  เพิ่มล่าสุด: `tests/test_artwork_ownership.py` 26 ตัว (สิทธิ์เห็นประวัติ artwork).
   ⚠️ `tests/test_inspection_golden.py` **fail 5 ตัวอยู่แล้ว** (pre-existing, `NameError: FieldResult`
   ในโมดูล Label Paper) — ไม่เกี่ยวกับ artwork. ยืนยันด้วย `git stash` ก่อนโทษการแก้ของตัวเอง.
-- CONFIG_VERSION ปัจจุบัน: **`2026.08.07-aw-fullwidth-ui`** (เช็คที่ footer ว่ารันโค้ดใหม่จริง).
+- CONFIG_VERSION ปัจจุบัน: **`2026.08.11-aw-history-owner`** (เช็คที่ footer ว่ารันโค้ดใหม่จริง).
 
 ---
 

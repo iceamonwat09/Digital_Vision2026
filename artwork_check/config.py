@@ -138,6 +138,23 @@ N8N_TRANSLATE_TIMEOUT_S = float(os.getenv("N8N_TRANSLATE_TIMEOUT_S", "60"))
 # ตั้ง 0 = ส่งก้อนเดียวทั้งหมดแบบเดิม (ปุ่ม rollback).
 TRANSLATE_CHUNK_LINES = int(os.getenv("ARTWORK_TRANSLATE_CHUNK_LINES", "30"))
 
+# ── ประวัติการตรวจ: ใครเห็นของใคร ───────────────────────────────────
+# True  = ผู้ใช้เห็นเฉพาะการตรวจที่ตัวเองเป็นคนอัปโหลด (ยกเว้น role ใน
+#         HISTORY_ADMIN_ROLES ที่เห็นทั้งหมด)
+# False = ทุกคนเห็นทุกบันทึก = พฤติกรรมก่อนมีฟีเจอร์นี้ 100% (ปุ่ม rollback)
+# ⚠️ ไม่ว่าตั้งค่าไหน ถ้า AUTH_ENABLED=False (ไม่มีระบบล็อกอิน) จะไม่กรอง
+#    เลย — ไม่งั้นหน้าประวัติจะว่างเปล่าเพราะไม่มีตัวตนผู้ใช้ให้เทียบ.
+HISTORY_PER_USER = os.getenv(
+    "ARTWORK_HISTORY_PER_USER", "true").strip().lower() not in ("0", "false", "no")
+# ชื่อ role ที่เห็นประวัติของทุกคน. เก็บเป็นค่าตั้งไม่ใช่ hard-code เพื่อให้
+# เพิ่ม role (เช่น "Manager") ได้โดยไม่ต้องแก้โค้ด.
+# ⚠️ ผูกกับ "ชื่อ" role: ถ้ามีคนเปลี่ยนชื่อ role Admin ในหน้าจัดการผู้ใช้
+#    สิทธิ์นี้จะหยุดทำงานเงียบ ๆ — ต้องมาแก้ค่านี้ให้ตรงกัน.
+HISTORY_ADMIN_ROLES = tuple(
+    r.strip() for r in os.getenv("ARTWORK_HISTORY_ADMIN_ROLES", "Admin").split(",")
+    if r.strip()
+)
+
 # ── Defect classes (severity drives the verdict) ─────────────────────
 #   critical → FAIL, warning → REVIEW, info → shown only
 DEFECT_CLASSES = {
