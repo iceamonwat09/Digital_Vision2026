@@ -88,8 +88,17 @@
   .aw-zoom-bar  { display:flex; align-items:center; gap:8px; padding:5px 8px; background:#eef2f7;
                   border-bottom:1px solid #d8dde4; font-size:12px; color:#546e7a; position:sticky;
                   top:0; z-index:10; }
+  /* เคอร์เซอร์มือ = "ลากเลื่อนภาพได้" ติดเฉพาะตอนภาพใหญ่เกินกล่องจริง ๆ
+     (คลาส aw-pannable ตั้งโดย updatePannable() ใน artwork_check.js).
+     cursor สืบทอดลงลูก → บนภาพก็เป็นมือ ส่วนบนโซนถูก .aw-zone{cursor:move}
+     ทับ และตอนกด "เพิ่มโซน" ถูก crosshair (inline บน .aw-stage) ทับ */
+  .aw-stage-box.aw-pannable { cursor:grab; }
+  .aw-pan-hint { color:#90a4ae; font-size:11.5px; margin-left:2px; }
+  .aw-stage-box.aw-panning, .aw-stage-box.aw-panning * { cursor:grabbing !important; }
   .aw-stage  { position:relative; display:inline-block; line-height:0; }
-  .aw-stage img { display:block; max-width:none; }
+  /* ห้ามให้เบราว์เซอร์ "ลากรูป" (native image drag) แย่ง event ตอน pan
+     ด้วยปุ่มซ้าย — preventDefault ใน JS กันได้แล้ว นี่คือชั้นกันซ้ำ */
+  .aw-stage img { display:block; max-width:none; -webkit-user-drag:none; user-select:none; }
   .aw-empty  { color:#90a4ae; padding:40px; text-align:center; font-size:14px; line-height:1.5; }
 
   .aw-zone   { position:absolute; border:2px solid rgba(25,118,210,.85); background:rgba(25,118,210,.07);
@@ -318,6 +327,7 @@
           <button id="awZoomReset" class="aw-btn" style="padding:2px 8px; font-size:12px;">↺ 100%</button>
           <button id="awZoomFit" class="aw-btn" style="padding:2px 8px; font-size:12px;"
                   title="ย่อ/ขยายให้ภาพพอดีความกว้างของช่องมอง (ไม่เปลี่ยนพิกัดโซน)">⤢ พอดีความกว้าง</button>
+          <span class="aw-pan-hint">✋ ลากบนพื้นที่ว่างเพื่อเลื่อนภาพ (หรือกดล้อลากก็ได้)</span>
         </div>
         <div id="awStageEmpty" class="aw-empty">
           ยังไม่มีไฟล์ — เลือกไฟล์ Artwork ด้านบน<br>

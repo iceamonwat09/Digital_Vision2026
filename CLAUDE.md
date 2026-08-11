@@ -305,6 +305,20 @@ A3 พอดีที่ 72% (เดิมต้องย่อเหลือ 2
   ไว้ตามเดิม ไม่ต้องแตะ JS.
 - **wheel-zoom ผูกกับ `zoomRange.closest(".aw-stage-box")`** (`artwork_check.js`) — ถ้าย้าย
   `#awZoomBar` ออกนอกกล่อง หรือเปลี่ยนชื่อคลาส **ซูมด้วยลูกกลิ้งจะตายเงียบ ไม่มี error**.
+- **ลากเมาส์เพื่อเลื่อนภาพ (pan)** — เปลี่ยนแค่ `scrollLeft/scrollTop` ของ `.aw-stage-box`
+  ⇒ **scrollbar เดิมทำงานเหมือนเดิมทุกอย่าง** ไม่แตะสูตรพิกัดโซนเลย. 2 ท่า:
+  - **ปุ่มซ้ายลากบนพื้นที่ว่าง** (ไม่ใช่บนโซน + ไม่ได้กด "เพิ่มโซน") — ท่านี้เดิมไม่ทำอะไรเลย
+    จึงเอามาใช้ได้โดยไม่ทับของเดิม. โซนมี `stopPropagation` ใน `startDrag` อยู่แล้ว
+    event จึงไม่ไหลมาถึง handler ของ pan ตอนลากย้าย/ย่อขยายโซน.
+  - **ปุ่มกลาง (ล้อ) ลาก** — ใช้ได้เสมอแม้อยู่บนโซนหรือกำลังวาดโซน. ต้องมี
+    `if (ev.button !== 0) return;` ทั้งใน `startDrag` และ handler `mousedown` ของ `stage`
+    ไม่งั้นปุ่มกลางจะไป **ย้ายโซน/วาดโซน** แทนที่จะเลื่อนภาพ.
+  - `ev.preventDefault()` ใน `panStart` **จำเป็นทั้งสองปุ่ม**: กัน native image drag ของ
+    เบราว์เซอร์ (ปุ่มซ้าย) และกัน autoscroll วงกลมของ Windows (ปุ่มกลาง).
+  - `canPan()` เช็ค **ทั้งแนวนอนและแนวตั้ง** — กด "พอดีความกว้าง" แล้วภาพยังสูงเกินกล่อง
+    (A3 ที่ 72% = 1786x1263 ในกล่องสูง 840) ⇒ ยังต้องลากเลื่อนแนวตั้งได้.
+  - `updatePannable()` (เรียกจาก `applyZoom()` + `ResizeObserver` + `window.resize`) คุม
+    คลาส `.aw-pannable` = เคอร์เซอร์มือ. ขึ้นมือทั้งที่เลื่อนไม่ได้ = ผู้ใช้ลากแล้วงง.
 - ปุ่ม **"⤢ พอดีความกว้าง"** (`#awZoomFit`): `floor(stageBox.clientWidth-6 / natW * 100)` clamp 30-300
   — **ปัดลงเสมอ** (ปัดขึ้น 1% = ภาพล้นกล่อง มี scrollbar แนวนอนทั้งที่กด "พอดี") และต้อง sync
   `zoomPct` + `zoomRange.value` + ป้าย % พร้อมกัน ไม่งั้นสไลเดอร์ค้างคนละค่ากับภาพ.
@@ -408,7 +422,7 @@ Label Paper / Live / Dashboard / `/api/defects` ไม่ถูกแตะ แ�
   เพิ่มล่าสุด: `tests/test_artwork_ownership.py` 26 ตัว (สิทธิ์เห็นประวัติ artwork).
   ⚠️ `tests/test_inspection_golden.py` **fail 5 ตัวอยู่แล้ว** (pre-existing, `NameError: FieldResult`
   ในโมดูล Label Paper) — ไม่เกี่ยวกับ artwork. ยืนยันด้วย `git stash` ก่อนโทษการแก้ของตัวเอง.
-- CONFIG_VERSION ปัจจุบัน: **`2026.08.11-aw-history-owner`** (เช็คที่ footer ว่ารันโค้ดใหม่จริง).
+- CONFIG_VERSION ปัจจุบัน: **`2026.08.11-aw-pan-drag`** (เช็คที่ footer ว่ารันโค้ดใหม่จริง).
 
 ---
 
