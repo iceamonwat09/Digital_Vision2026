@@ -42,8 +42,8 @@ def main() -> int:
     print("การตั้งค่าปัจจุบัน")
     print("=" * 72)
     print(f"  เปิดใช้ฟีเจอร์ (HIGHLIGHT_DEFECT_WORD) : {acfg.HIGHLIGHT_DEFECT_WORD}")
-    print(f"  ชั้น ② PDF text layer                 : {acfg.HIGHLIGHT_USE_PDF_TEXT}")
-    print(f"  ชั้น ③ Tesseract                      : {acfg.HIGHLIGHT_USE_TESSERACT}")
+    print(f"  ชั้น ① PDF text layer                 : {acfg.HIGHLIGHT_USE_PDF_TEXT}")
+    print(f"  ชั้น ② Tesseract                      : {acfg.HIGHLIGHT_USE_TESSERACT}")
     print(f"  ชั้นสำรอง profile (ควรเป็น False)      : {acfg.HIGHLIGHT_USE_PROFILE}")
     print(f"  ภาษา Tesseract (env TESS_LANG)        : {acfg.HIGHLIGHT_TESSERACT_LANG!r}")
     print(f"  กรอบสูงสุดต่อ defect                   : {acfg.HIGHLIGHT_MAX_BOXES}")
@@ -103,6 +103,14 @@ def main() -> int:
                   "(ไม่มี Tesseract ให้ตรวจทาน — พิกัดจาก LLM อาจคลาดเคลื่อน)")
         else:
             print("         → ไม่มีแหล่งพิกัดเลย → จะไม่วาดกรอบ")
+        # รูปทรงโซนเป็นสาเหตุอันดับหนึ่งที่กรอบไม่ขึ้น — บอกไว้ตรงนี้เลย
+        risk = z.get("hl_risk")
+        if risk == "wide":
+            print("         ⚠ โซนนี้กว้างมากเทียบกับความสูง → ตัวอักษรเล็กเกินกว่าจะชี้คำได้"
+                  " (ลากโซนให้กระชับเฉพาะบล็อกข้อความแล้วส่งตรวจใหม่)")
+        elif risk == "small":
+            print("         ⚠ โซนนี้ให้ภาพเล็กเกินไป → ตัวอักษรไม่คมพอจะชี้คำ"
+                  " (ลากโซนให้ครอบเนื้อหาให้พอดีแล้วส่งตรวจใหม่)")
 
     defects = rep.get("defects", [])
     print(f"\ndefect ทั้งหมด {len(defects)} รายการ "
@@ -194,7 +202,8 @@ def main() -> int:
         print("ทุกรายการไม่วาดเลย — ตรวจตามลำดับ:")
         print("  1) 'Tesseract ใช้งานได้' ด้านบนเป็น True ไหม")
         print("  2) ภาษาที่ใช้จริงครอบคลุมภาษาของคำที่ฟ้องไหม")
-        print("  3) รายงานนี้ตรวจก่อนอัปเดตโค้ดหรือเปล่า (ต้องส่งตรวจใหม่)")
+        print("  3) มี ⚠ ที่โซนด้านบนไหม (โซนกว้าง/เล็กเกินไป = ต้องลากโซนใหม่)")
+        print("  4) รายงานนี้ตรวจก่อนอัปเดตโค้ดหรือเปล่า (ต้องส่งตรวจใหม่)")
     print("=" * 72)
     return 0
 
