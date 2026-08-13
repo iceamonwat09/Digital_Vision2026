@@ -543,7 +543,10 @@
       showDoc("a");
       stage.style.display = "inline-block";
       stageEmpty.style.display = "none";
+      // แถบเครื่องมือโผล่เหนือกล่อง → กล่องเลิกเป็น "กล่องเปล่ารอรับไฟล์"
+      // (มุมบนตรง ต่อกับแถบ, เส้นทึบแทนเส้นประ)
       $("awZoomBar").style.display = "";
+      $("awStageBox").classList.remove("is-empty");
       setBusy(false);
       resultBox.innerHTML = '<div class="aw-empty">กด "↻ เสนอโซนใหม่" ให้ระบบเสนอโซน ' +
         'หรือ "+ เพิ่มโซน" วาดเอง แล้วกด "ส่งตรวจสอบ"</div>';
@@ -684,8 +687,12 @@
     renderZones();
   });
 
+  // กล่องภาพ (ช่องมองที่ scroll ได้). ⚠️ เดิมหาโดย zoomRange.closest(".aw-stage-box")
+  // ซึ่งพังทันทีที่ย้ายแถบเครื่องมือออกไปนอกกล่อง — ตอนนี้อ้างด้วย id ตรง ๆ
+  const stageBox = $("awStageBox");
+
   // scroll wheel บน stage-box = zoom (Ctrl ไม่ต้องกด)
-  zoomRange.closest(".aw-stage-box").addEventListener("wheel", (ev) => {
+  stageBox.addEventListener("wheel", (ev) => {
     if (!natW) return;
     ev.preventDefault();
     const delta = ev.deltaY > 0 ? -5 : 5;
@@ -702,7 +709,6 @@
   // ⚠️ ต้อง sync ทั้ง zoomPct + zoomRange.value + ป้าย % พร้อมกัน ไม่งั้น
   // สไลเดอร์จะค้างคนละค่ากับภาพจริงแบบเงียบ ๆ. ไม่แตะสูตรพิกัดใด ๆ —
   // เรียก applyZoom()/renderZones() ชุดเดิมเหมือนสไลเดอร์ทุกประการ
-  const stageBox = zoomRange.closest(".aw-stage-box");
   function setZoom(pct) {
     zoomPct = Math.min(300, Math.max(30, Math.round(pct)));
     zoomRange.value = zoomPct;

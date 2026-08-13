@@ -601,17 +601,20 @@ def _merge_words(a: list, b: list) -> list:
     return out
 
 
-def _row_refine(crop, found: str, ocr_text: str, lang: str,
-                words: list) -> List[Box]:
-    """Locate ``found`` by re-reading only the row it sits on.
+def _anchor_row_bands(crop_h: int, found: str, ocr_text: str,
+                      words: list) -> List[Tuple[int, int]]:
+    """Vertical band(s) of the table ROW that ``found`` sits on, MEASURED
+    from neighbour words on the same line that Tesseract did read.
 
     ``ocr_text`` is the zone text from the OCR BACKEND — the same text the
-    defect was raised from, so the line holding ``found`` also holds its
-    neighbours ("Sodium 475 mg 24% …"). Those neighbours are ordinary
-    words that whole-image OCR reads reliably; one of them fixes the row's
-    y band. Cropping that band and reading it alone gives the small
-    numeric cell the resolution it needs. Both the anchor and the final
-    box are pixel-verified, so this cannot invent a box on another row."""
+    defect was raised from — so the line holding ``found`` also holds its
+    neighbours ("Sodium 475 mg 24% …"). One neighbour that whole-image OCR
+    located unambiguously fixes the row's y band.
+
+    Returns [] when the row cannot be pinned down with confidence (target
+    line not unique, no usable anchor, anchor appears more than once) —
+    callers must then draw nothing rather than guess.
+    """
     if not (ocr_text and words and found):
         return []
     fkey = _norm(found)
@@ -645,14 +648,28 @@ def _row_refine(crop, found: str, ocr_text: str, lang: str,
     anchors = [a for a in anchors if len(a) >= 4 and not a.isdigit()][:3]
     if not anchors:
         return []
-    H, W = crop.shape[:2]
+    bands = []
     for a in anchors:
         boxes = [b for k, b in words if k == a or a in k]
         if len(boxes) != 1:          # ambiguous anchor → cannot fix a row
             continue
         ax0, ay0, ax1, ay1 = boxes[0]
         h = max(8, ay1 - ay0)
-        y0, y1 = max(0, ay0 - h // 2), min(H, ay1 + h // 2)
+        bands.append((max(0, ay0 - h // 2), min(crop_h, ay1 + h // 2)))
+    return bands
+
+
+def _row_refine(crop, found: str, ocr_text: str, lang: str,
+                words: list) -> List[Box]:
+    """Locate ``found`` by re-reading only the row it sits on.
+
+    Cropping the row band found by ``_anchor_row_bands`` and reading it
+    alone gives a small numeric cell the resolution it needs (the same
+    cell read at page level comes back wrong). Both the anchor and the
+    final box are pixel-verified, so this cannot invent a box on another
+    row."""
+    H, W = crop.shape[:2]
+    for y0, y1 in _anchor_row_bands(H, found, ocr_text, words):
         band = crop[y0:y1, 0:W]
         if band.size == 0:
             continue
@@ -667,6 +684,51 @@ def _row_refine(crop, found: str, ocr_text: str, lang: str,
             if verified:
                 return verified
     return []
+
+
+def _verify_boxes_by_row(crop, boxes: List[Box], found: str, ocr_text: str,
+                         lang: str) -> List[Box]:
+    """Confirm an OCR-backend (LLM) box by its ROW instead of by reading it.
+
+    Why this exists: ``_verify_boxes(require_positive=True)`` proves a box
+    by re-reading the word inside it. That is impossible for a script whose
+    Tesseract traineddata is not installed — an Arabic word re-read with
+    ``eng`` comes back as Latin noise, so a perfectly good box from the OCR
+    backend is always thrown away and the reviewer gets **no red box at
+    all** on exactly the labels that need one most (real case: the
+    misspelled ``كربوهيدات كلية`` in a bilingual nutrition table).
+
+    What can still be measured without that traineddata is the ROW: the
+    same table line carries ASCII neighbours ("Total carbohydrate 0 g 0%")
+    that Tesseract does read, and their pixels fix the row's y band. That
+    is precisely the axis where an LLM bbox was observed to fail (it landed
+    a row or two off), so proving the row — not the glyphs — closes the
+    documented failure mode.
+
+    Conservative by construction: the target's line must be unique in the
+    backend text, the anchor word must occur exactly once in the crop, the
+    box's centre must fall inside the measured band, and the box must not
+    be taller than the band (a multi-row blob is not a word). Anything
+    short of that returns [] → nothing is drawn.
+    """
+    if not boxes or not _tesseract_available():
+        return []
+    words: list = []
+    for psm in _PSM_ORDER:
+        w = _tess_words(crop, lang, psm)
+        words = w if not words else _merge_words(words, w)
+    bands = _anchor_row_bands(crop.shape[0], found, ocr_text, words)
+    if not bands:
+        return []
+    kept = []
+    for b in boxes:
+        cy = (b[1] + b[3]) / 2.0
+        bh = b[3] - b[1]
+        for y0, y1 in bands:
+            if y0 <= cy <= y1 and bh <= 1.2 * (y1 - y0):
+                kept.append(b)
+                break
+    return kept
 
 
 # Tesseract needs roughly 20-30 px of x-height. Small zone crops fall well
@@ -1040,7 +1102,8 @@ def frac_to_px(fbox: Tuple[float, float, float, float], W: int,
 def locate_all(crop, found: str, ocr_text: str,
                blocks: Optional[list] = None, ocr_wh=None,
                use_tesseract: bool = True, use_profile: bool = False,
-               tess_lang: str = "eng", max_boxes: int = 0) -> List[Box]:
+               tess_lang: str = "eng", max_boxes: int = 0,
+               row_verify: bool = True) -> List[Box]:
     """EVERY pixel box of ``found`` inside ``crop`` (BGR numpy), using the
     most reliable strategy that produces a hit:
 
@@ -1053,6 +1116,11 @@ def locate_all(crop, found: str, ocr_text: str,
          reviewer at the wrong number. So it is used only when Tesseract
          found nothing, and it is passed through the same re-OCR check
          first.
+         When the target's script has no traineddata installed, that check
+         can never pass (an Arabic word re-read with ``eng`` is noise), so
+         ``row_verify`` falls back to proving the box's ROW from ASCII
+         neighbours on the same line — the axis where an LLM bbox actually
+         fails. See ``_verify_boxes_by_row``.
       3. Projection profile — deterministic but error-prone (draws a wrong
          box ~40% of the time on dense tables), so OFF by default
          (``use_profile``); kept for a no-dependency last resort. Always
@@ -1076,8 +1144,16 @@ def locate_all(crop, found: str, ocr_text: str,
         blk = _block_boxes(found, blocks or [], W, H, ocr_wh)
         if blk and use_tesseract:
             # LLM coordinates: only draw what the pixels can confirm.
-            blk = _verify_boxes(crop, blk, found, tess_lang,
-                                require_positive=True)
+            verified = _verify_boxes(crop, blk, found, tess_lang,
+                                     require_positive=True)
+            if not verified and row_verify and not _norm(found).isascii():
+                # Reading the word is impossible without its traineddata
+                # (Arabic/Hebrew/CJK on an ``eng``-only install) — but the
+                # ROW can still be measured from ASCII neighbours on the
+                # same line. See ``_verify_boxes_by_row``.
+                verified = _verify_boxes_by_row(crop, blk, found,
+                                                ocr_text or "", tess_lang)
+            blk = verified
         hits = blk
     if not hits and use_profile:
         loc = locate_token(found, ocr_text or "")
@@ -1167,7 +1243,8 @@ def draw_boxes(crop, boxes):
 def annotate(crop, found: str, ocr_text: str,
              blocks: Optional[list] = None, ocr_wh=None,
              use_tesseract: bool = True, use_profile: bool = False,
-             tess_lang: str = "eng", max_boxes: int = 1):
+             tess_lang: str = "eng", max_boxes: int = 1,
+             row_verify: bool = True):
     """Convenience: locate + draw. ``max_boxes`` = 1 boxes only the best
     occurrence (previous behavior); > 1 boxes up to that many occurrences
     of the same word; 0 = unlimited. Returns the annotated crop, or the
@@ -1176,7 +1253,8 @@ def annotate(crop, found: str, ocr_text: str,
         boxes = locate_all(crop, found, ocr_text, blocks, ocr_wh,
                            use_tesseract=use_tesseract,
                            use_profile=use_profile,
-                           tess_lang=tess_lang, max_boxes=max_boxes)
+                           tess_lang=tess_lang, max_boxes=max_boxes,
+                           row_verify=row_verify)
     except Exception:
         boxes = []
     if not boxes:

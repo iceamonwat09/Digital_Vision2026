@@ -114,6 +114,13 @@ HIGHLIGHT_TESSERACT_LANG = os.getenv("ARTWORK_HIGHLIGHT_TESS_LANG",
 # ผู้ตรวจแก้ไม่ครบ. 6 = เห็นครบทุกจุดในตารางปกติ แต่ไม่ท่วมรูปถ้าคำนั้น
 # ปรากฏเยอะผิดปกติ. ตั้ง 1 = พฤติกรรมเดิม (กรอบเดียว), 0 = ไม่จำกัด.
 HIGHLIGHT_MAX_BOXES = int(os.getenv("ARTWORK_HIGHLIGHT_MAX_BOXES", "6"))
+# พิสูจน์กรอบของ OCR backend ด้วย "แถว" เมื่ออ่านคำนั้นซ้ำไม่ได้ (ภาษาที่ไม่มี
+# traineddata เช่นอาหรับบนเครื่องที่ลงแต่ eng). ปิด = กลับพฤติกรรมเดิมคือ
+# ไม่วาดกรอบให้ภาษาเหล่านั้นเลย. มีผลเฉพาะคำที่ไม่ใช่ ASCII เท่านั้น.
+# ⚠️ ทางที่ดีที่สุดยังคือติดตั้ง traineddata ของภาษานั้นแล้วตั้ง
+#    ARTWORK_HIGHLIGHT_TESS_LANG=eng+ara — ตัวนี้เป็นตาข่ายรองรับเมื่อไม่มี.
+HIGHLIGHT_ROW_VERIFY = os.getenv(
+    "ARTWORK_HIGHLIGHT_ROW_VERIFY", "1").strip().lower() not in ("0", "false", "")
 # ขนาดด้านยาวขั้นต่ำของภาพ crop ในการ์ด defect. โซนเล็กเรนเดอร์ที่ OCR_DPI แล้ว
 # ได้ภาพเล็กมาก (โซนกว้าง 78pt ที่ 450dpi = ~490px) ซึ่ง (ก) คนอ่านไม่ออก และ
 # (ข) Tesseract ตาบอด — วัดจาก crop จริงของสถานี: 488px หาคำเจอ 0/8 แต่ 976px

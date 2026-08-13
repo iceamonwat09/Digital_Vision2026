@@ -409,7 +409,8 @@ def _highlight_crop(rec_id: str, crop, found: str, zone_id: str,
                            use_tesseract=config.HIGHLIGHT_USE_TESSERACT,
                            use_profile=config.HIGHLIGHT_USE_PROFILE,
                            tess_lang=config.HIGHLIGHT_TESSERACT_LANG,
-                           max_boxes=config.HIGHLIGHT_MAX_BOXES)
+                           max_boxes=config.HIGHLIGHT_MAX_BOXES,
+                           row_verify=config.HIGHLIGHT_ROW_VERIFY)
     except Exception:
         logger.debug("[artwork] highlight skipped for %s/%s",
                      rec_id, zone_id, exc_info=True)
