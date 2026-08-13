@@ -47,6 +47,7 @@ def main() -> int:
     print(f"  ชั้นสำรอง profile (ควรเป็น False)      : {acfg.HIGHLIGHT_USE_PROFILE}")
     print(f"  ภาษา Tesseract (env TESS_LANG)        : {acfg.HIGHLIGHT_TESSERACT_LANG!r}")
     print(f"  กรอบสูงสุดต่อ defect                   : {acfg.HIGHLIGHT_MAX_BOXES}")
+    print(f"  พิสูจน์กรอบด้วยแถว (ภาษาที่อ่านไม่ได้)    : {acfg.HIGHLIGHT_ROW_VERIFY}")
 
     cmd = hl._find_tesseract_cmd()
     print(f"  พบ tesseract.exe ที่                   : {cmd}")

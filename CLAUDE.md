@@ -171,6 +171,7 @@ verify_openvino.py ต้อง PASS ทุก device×imgsz (4) เช็คต
 | 1 | **PDF text-layer word box** (`pdf_ingest.zone_words()`) | โซน `engine == "pdf-text"` | **เป๊ะระดับ vector, ทุกภาษา** |
 | 2 | **Tesseract** (`_tess_boxes`) | ไฟล์ outline / ภาพถ่าย | 89% (benchmark), วัดจากพิกเซลจริง + self-verify |
 | 3 | `blocks[].bbox` จาก OCR backend (`_block_boxes`) | Tesseract หาไม่เจอ/ไม่มี | **พิกัดจาก LLM = การประมาณ ต้องผ่าน `_verify_boxes` ก่อน** |
+| 3b | **พิสูจน์ "แถว" แทนการอ่านคำ** (`_verify_boxes_by_row`) | คำที่ Tesseract ไม่มี traineddata | วัดแถวจากคำ ASCII ข้างเคียง |
 | 4 | ไม่วาด | ไม่มั่นใจ | — |
 
 ⚠️ **ลำดับนี้เคยสลับกันแล้วพัง:** เดิมให้ `blocks[].bbox` มาก่อน Tesseract และ **ไม่ตรวจสอบเลย** →
@@ -185,6 +186,33 @@ verify_openvino.py ต้อง PASS ทุก device×imgsz (4) เช็คต
   benchmark พบว่า **วาดผิดคำ ~40%** บนตารางหนาแน่น. ห้ามเปิดเป็น default.
 - **วาดทุกจุดที่คำปรากฏ** (`HIGHLIGHT_MAX_BOXES=6`) — คำผิดมักพิมพ์ซ้ำหลายแถว
   (จริง: `Cude` โผล่ 3 จุดในตารางเดียว) วาดจุดเดียว = ผู้ตรวจแก้ไม่ครบ.
+
+**⚠️ ชั้น 3b — ทำไมบางครั้ง "เจอคำผิดแต่ไม่มีกรอบแดง" (เคสจริง ส.ค. 2026):**
+สถานีลง traineddata แค่ `eng` → คำอาหรับที่สะกดผิด (`كربوهيدات كلية`) **ไม่มีกรอบเลย**
+ขณะที่ `24%` บนการ์ดถัดไปมีกรอบปกติ. ไล่แล้วพบว่าไม่ใช่บั๊กของการจับคู่ — ชั้น ② อ่านอาหรับ
+ไม่ออก (0 กรอบ) ส่วนชั้น ③ **หา bbox เจอ (1 กรอบ) แต่ถูก `_verify_boxes(require_positive=True)`
+ทิ้งทุกครั้ง** เพราะการ "อ่านซ้ำเพื่อพิสูจน์คำ" เป็นไปไม่ได้เมื่อไม่มี traineddata ของภาษานั้น
+(อ่านอาหรับด้วย `eng` ได้แต่ขยะ). วัดจากเคสจำลองที่สร้างตามภาพจริง:
+
+| ภาษาของคำ | ชั้น ② Tesseract | ชั้น ③ bbox | ผ่านพิสูจน์ | วาดจริง |
+|---|---|---|---|---|
+| อาหรับ (`eng` อย่างเดียว) | 0 | 1 | **0** | **0 ← บั๊ก** |
+| อาหรับ (`eng+ara`) | 1 | 1 | 1 | 1 |
+| `20%` / อังกฤษ | 1 | 1 | 1 | 1 |
+
+- **ทางแก้ที่ดีที่สุด = ติดตั้ง traineddata แล้วตั้ง `ARTWORK_HIGHLIGHT_TESS_LANG=eng+ara`**
+  (ตรงกับผลทดสอบเดิมของ repo: 25/25 ด้วย `eng+ara` เทียบ 23/25 ด้วย `eng`).
+- **ชั้น 3b = ตาข่ายรองรับเมื่อไม่มี traineddata**: พิสูจน์ **"แถว"** แทน **"คำ"** —
+  บรรทัดเดียวกันมีคำ ASCII ("Total carbohydrate 0 g 0%") ที่ Tesseract อ่านได้ ใช้พิกเซล
+  ของคำนั้นล็อกย่านแนวตั้งของแถว แล้วรับ bbox ของ LLM เฉพาะที่ **กึ่งกลางตกในแถวนั้น**
+  และ **ไม่สูงเกิน 1.2 เท่าของแถว**. นี่คือแกนที่ bbox ของ LLM เคยพลาดจริง (ไปโผล่คนละแถว)
+  จึงเป็นการพิสูจน์ที่ตรงจุด ไม่ใช่การผ่อนเกณฑ์.
+- **เงื่อนไขที่ทำให้ "ไม่วาด" (ตั้งใจให้เข้มไว้ก่อน)**: บรรทัดของคำต้องไม่ซ้ำในข้อความ backend ·
+  คำ anchor ต้องยาว ≥4 ตัว ไม่ใช่ตัวเลข และปรากฏครั้งเดียวในภาพ · ใช้เฉพาะคำ **ที่ไม่ใช่ ASCII**
+  (คำอังกฤษที่พิสูจน์ไม่ผ่าน = กรอบน่าสงสัยจริง ต้องคงพฤติกรรมเดิมคือไม่วาด).
+- Config: `ARTWORK_HIGHLIGHT_ROW_VERIFY` (default `1`; ตั้ง `0` = กลับพฤติกรรมเดิม 100%).
+- เทสต์: `tests/test_artwork_highlight.py` 11 ตัว (mock Tesseract ให้ "อ่านภาษานั้นไม่ออก"
+  จึง deterministic ไม่ต้องพึ่ง binary) — รวมเคส **bbox เลื่อนไปคนละแถวต้องไม่วาด**.
 
 **⚠️ กับดักที่เจอมาแล้ว (อย่าทำซ้ำ):**
 1. **fuzzy match กับคำสั้น/CJK = กรอบผิดคำ** — จีน `灰分`(เถ้า) เคยจับกรอบเดียวกับ `水分`(ความชื้น)
@@ -423,11 +451,11 @@ Label Paper / Live / Dashboard / `/api/defects` ไม่ถูกแตะ แ�
 - Repo: `iceamonwat09/digital_vision2026`. Dev branch ปัจจุบัน: `claude/artwork-ui-layout-1lnwgt`
   (ก่อนหน้า: `claude/artwork-red-box-drawing-lpqhpo`). **ห้าม push ไป main**.
 - SQL Server: 172.32.0.50/VisionIQ. Defect log ผ่าน `sp_log_defect` (เก็บภาพ base64).
-- Tests: `pytest tests/` — 324 ตัว (artwork/label/barcode — **ไม่ครอบคลุม camera/live loop**).
+- Tests: `pytest tests/` — 335 ตัว (artwork/label/barcode — **ไม่ครอบคลุม camera/live loop**).
   เพิ่มล่าสุด: `tests/test_artwork_ownership.py` 26 ตัว (สิทธิ์เห็นประวัติ artwork).
   ⚠️ `tests/test_inspection_golden.py` **fail 5 ตัวอยู่แล้ว** (pre-existing, `NameError: FieldResult`
   ในโมดูล Label Paper) — ไม่เกี่ยวกับ artwork. ยืนยันด้วย `git stash` ก่อนโทษการแก้ของตัวเอง.
-- CONFIG_VERSION ปัจจุบัน: **`2026.08.13-aw-toolbar-fix`** (เช็คที่ footer ว่ารันโค้ดใหม่จริง).
+- CONFIG_VERSION ปัจจุบัน: **`2026.08.13-aw-hl-rowproof`** (เช็คที่ footer ว่ารันโค้ดใหม่จริง).
 
 ---
 

@@ -800,3 +800,130 @@ def test_tag_highlight_risk_never_raises_without_source(tmp_path):
     zl = [{"id": "z1", "bbox": [0, 0, 1, 0.05]}]
     pipeline._tag_highlight_risk(str(tmp_path), zl)   # ไม่มีไฟล์ต้นฉบับ
     assert "hl_risk" not in zl[0]                     # ข้ามเงียบ ไม่พัง
+
+
+# ── พิสูจน์กรอบด้วย "แถว" เมื่อ Tesseract อ่านภาษานั้นไม่ได้ ──────────
+#
+# เคสจริงจากสถานี: ตารางโภชนาการสองภาษา คำอาหรับ "كربوهيدات كلية" สะกดผิด
+# แต่ไม่มีกรอบแดงขึ้นเลย เพราะสถานีติดตั้งแต่ traineddata ของ eng — การอ่าน
+# ซ้ำเพื่อ "พิสูจน์คำ" จึงเป็นไปไม่ได้ และ bbox ที่ backend ให้มาถูกทิ้งทุกครั้ง.
+# ทางออก: พิสูจน์ "แถว" จากคำข้างเคียงที่อ่านได้จริงแทน (ดู _verify_boxes_by_row)
+
+AR = "كربوهيدات كلية"          # คำเป้าหมาย (ไม่ใช่ ASCII)
+
+# ข้อความจาก OCR backend — บรรทัดที่มีคำเป้าหมายมีคำอังกฤษอยู่ด้วย
+AR_TEXT = (
+    "Nutritional information\n"
+    "Total fat 7 g 10%\n"
+    "Sodium 475 mg 20%\n"
+    "Total carbohydrate 0 g 0% " + AR + "\n"
+    "Protein 26 g 52%\n"
+)
+
+# คำที่ Tesseract (eng) อ่านได้จริงจาก crop — สังเกตว่า "ไม่มี" คำอาหรับ
+AR_WORDS = [
+    ("TOTALFAT", (40, 100, 200, 130)),
+    ("SODIUM", (40, 200, 160, 230)),
+    ("TOTALCARBOHYDRATE", (40, 300, 300, 330)),   # anchor ของแถวเป้าหมาย
+    ("PROTEIN", (40, 400, 150, 430)),
+]
+
+
+@pytest.fixture
+def tess_stub(monkeypatch):
+    """จำลองเครื่องที่มี Tesseract แต่ 'อ่านภาษาของคำเป้าหมายไม่ออก'."""
+    monkeypatch.setattr(hl, "_tesseract_available", lambda: True)
+    monkeypatch.setattr(hl, "_tess_words", lambda *a, **k: list(AR_WORDS))
+
+    def _verify(crop, boxes, found, lang, require_positive=False):
+        # อ่านซ้ำแล้วพิสูจน์ไม่ได้ (สคริปต์ที่ไม่มี traineddata)
+        return [] if require_positive else boxes
+
+    monkeypatch.setattr(hl, "_verify_boxes", _verify)
+
+
+def test_row_band_found_via_ascii_neighbour():
+    bands = hl._anchor_row_bands(500, AR, AR_TEXT, AR_WORDS)
+    assert bands, "ควรชี้แถวได้จากคำอังกฤษบนบรรทัดเดียวกัน"
+    y0, y1 = bands[0]
+    assert y0 <= 315 <= y1          # กึ่งกลางแถว "Total carbohydrate"
+
+
+def test_row_band_declines_when_line_is_ambiguous():
+    """คำเป้าหมายโผล่ 2 บรรทัด = ชี้แถวไม่ได้ → ต้องไม่เดา"""
+    txt = AR_TEXT + AR + " another line\n"
+    assert hl._anchor_row_bands(500, AR, txt, AR_WORDS) == []
+
+
+def test_row_band_declines_when_anchor_is_not_unique():
+    words = list(AR_WORDS) + [("TOTALCARBOHYDRATE", (40, 460, 300, 490))]
+    assert hl._anchor_row_bands(500, AR, AR_TEXT, words) == []
+
+
+def test_row_band_declines_without_backend_text():
+    assert hl._anchor_row_bands(500, AR, "", AR_WORDS) == []
+
+
+def test_verify_by_row_keeps_box_on_the_right_row(tess_stub):
+    import numpy as np
+    crop = np.full((500, 400, 3), 255, np.uint8)
+    box = (320, 300, 390, 330)                       # แถวเดียวกับ anchor
+    assert hl._verify_boxes_by_row(crop, [box], AR, AR_TEXT, "eng") == [box]
+
+
+def test_verify_by_row_drops_box_on_another_row(tess_stub):
+    """กับดักที่เคยเจอจริง: bbox ของ LLM ไปโผล่คนละแถว — ต้องไม่วาด"""
+    import numpy as np
+    crop = np.full((500, 400, 3), 255, np.uint8)
+    for wrong in ((320, 200, 390, 230), (320, 400, 390, 430)):
+        assert hl._verify_boxes_by_row(crop, [wrong], AR, AR_TEXT, "eng") == []
+
+
+def test_verify_by_row_drops_multi_row_blob(tess_stub):
+    """กรอบสูงคร่อมหลายแถว ไม่ใช่ 'คำ' → ไม่วาด"""
+    import numpy as np
+    crop = np.full((500, 400, 3), 255, np.uint8)
+    blob = (320, 200, 390, 430)
+    assert hl._verify_boxes_by_row(crop, [blob], AR, AR_TEXT, "eng") == []
+
+
+def _ar_blocks(y):
+    """block ของ backend สำหรับคำอาหรับ (bbox = [x, y, w, h] พิกเซล)"""
+    return [{"text": AR, "bbox": [320, y, 70, 30]}]
+
+
+def test_locate_all_draws_arabic_box_via_row_proof(tess_stub):
+    import numpy as np
+    crop = np.full((500, 400, 3), 255, np.uint8)
+    hits = hl.locate_all(crop, AR, AR_TEXT, blocks=_ar_blocks(300),
+                         ocr_wh=(400, 500), tess_lang="eng")
+    assert len(hits) == 1, "ควรวาดกรอบให้คำอาหรับได้แม้ไม่มี traineddata"
+
+
+def test_locate_all_refuses_arabic_box_on_wrong_row(tess_stub):
+    import numpy as np
+    crop = np.full((500, 400, 3), 255, np.uint8)
+    hits = hl.locate_all(crop, AR, AR_TEXT, blocks=_ar_blocks(200),
+                         ocr_wh=(400, 500), tess_lang="eng")
+    assert hits == [], "bbox คนละแถว = ต้องไม่วาด (ผิดแบบมั่นใจแย่กว่าไม่วาด)"
+
+
+def test_locate_all_row_verify_off_restores_old_behaviour(tess_stub):
+    import numpy as np
+    crop = np.full((500, 400, 3), 255, np.uint8)
+    hits = hl.locate_all(crop, AR, AR_TEXT, blocks=_ar_blocks(300),
+                         ocr_wh=(400, 500), tess_lang="eng", row_verify=False)
+    assert hits == []
+
+
+def test_row_proof_only_applies_to_non_ascii(tess_stub):
+    """คำ ASCII ที่พิสูจน์ด้วยการอ่านซ้ำไม่ผ่าน = กรอบน่าสงสัยจริง
+    (ภาษาอังกฤษอ่านออกอยู่แล้ว) จึงต้องคงพฤติกรรมเดิมคือ 'ไม่วาด'
+    ไม่ใช่ผ่อนปรนให้ด้วยการเช็คแถว — ไม่งั้นการแก้นี้จะเปิดช่องใหม่"""
+    import numpy as np
+    crop = np.full((500, 400, 3), 255, np.uint8)
+    # "0 g" อยู่บนแถวเป้าหมาย เป็น ASCII และไม่อยู่ในคำที่ Tesseract อ่านได้
+    blocks = [{"text": "0 g", "bbox": [250, 300, 40, 30]}]
+    hits = hl.locate_all(crop, "0 g", AR_TEXT, blocks=blocks,
+                         ocr_wh=(400, 500), tess_lang="eng")
+    assert hits == []
