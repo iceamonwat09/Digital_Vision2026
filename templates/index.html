@@ -446,6 +446,10 @@
             startBtn.disabled = true;
             startBtn.title = 'เฟสนี้กล้อง Hikrobot ใช้ได้เฉพาะ 📷 ถ่ายรูปตรวจ';
         } else {
+            // Switching AWAY from hik must hand Start back immediately, not
+            // leave it dead until the next 1s status poll. stopBtn.disabled is
+            // the authoritative "detection is not running" flag.
+            startBtn.disabled = !stopBtn.disabled;
             startBtn.title = '';
         }
     };

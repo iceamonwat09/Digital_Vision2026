@@ -89,6 +89,27 @@ pyspellchecker>=0.8.0
 # outlined PDFs and camera photos.
 # pytesseract>=0.3.10
 
+# Hikrobot industrial camera (GigE Vision / USB3 Vision) — the "กล้อง Hikrobot"
+# snapshot source. NOT INSTALLABLE VIA PIP and deliberately not listed as a
+# package: the driver is the vendor's MVS SDK, whose Python binding ships with
+# the Windows installer as plain ctypes files (no compilation, works on 3.9).
+# To enable on the station:
+#   1) install MVS for Windows from hikrobotics.com (Download Center). It puts
+#      the binding at
+#        C:\Program Files (x86)\MVS\Development\Samples\Python\MvImport
+#      and the DLL at
+#        C:\Program Files (x86)\Common Files\MVS\Runtime\Win64_x64
+#      hik_camera._load_mvs() AUTO-DETECTS both; override with env
+#      HIK_MVS_SDK_PATH=<folder containing MvCameraControl_class.py> if needed.
+#   2) open the MVS client once and confirm the camera streams there FIRST —
+#      if it does not, no amount of application code will help.
+#   3) set HIK_ENABLED = True in config.py and restart.
+#   4) verify with `py -3.9 diagnose_hik.py --save`.
+# Optional in the same sense as Tesseract: without the SDK the tab reports
+# "SDK not installed" and every other mode runs completely unaffected.
+# ⚠️ A GigE camera also needs the PC NIC on the SAME SUBNET as the camera, and
+# Jumbo Frames (9014) enabled, or frames tear / never arrive.
+
 # Barcode decoding (EAN-13 etc.) — authoritative for the barcode field and
 # proves the symbol is machine-scannable. Optional: the code falls back to
 # cv2.barcode.BarcodeDetector (bundled with opencv) and then to OCR if neither

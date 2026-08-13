@@ -580,6 +580,10 @@ class HikCamera:
         memset(byref(frame_out), 0, sizeof(frame_out))
         try:
             with self._cap_lock:
+                # Re-check under the lock: release() may have closed the handle
+                # while this call was queued on the lock.
+                if self._cam is None or not self.is_initialized:
+                    return (False, None)
                 ret = self._cam.MV_CC_GetImageBuffer(frame_out, self.grab_timeout_ms)
                 if ret != MV_OK:
                     return (False, None)
@@ -615,6 +619,11 @@ class HikCamera:
         h = int(info.nHeight) or int(getattr(info, "nExtendHeight", 0) or 0)
         length = int(info.nFrameLen)
         if w <= 0 or h <= 0 or length <= 0:
+            return None
+        # A NULL payload with MV_OK should not happen, but np.ctypeslib.as_array
+        # on a null pointer segfaults the process rather than raising — too
+        # expensive a way to find out the SDK surprised us.
+        if not frame_out.pBufAddr:
             return None
 
         pixel_type = int(info.enPixelType)
@@ -715,23 +724,36 @@ class HikCamera:
     # ── teardown ───────────────────────────────────────────────────────────
 
     def release(self):
-        """Stop, close and destroy the handle. Idempotent and never raises."""
-        cam = self._cam
-        self.is_initialized = False
-        if cam is None:
-            return
-        for step, fn in (("MV_CC_StopGrabbing", cam.MV_CC_StopGrabbing if self._grabbing else None),
-                         ("MV_CC_CloseDevice", cam.MV_CC_CloseDevice),
-                         ("MV_CC_DestroyHandle", cam.MV_CC_DestroyHandle)):
-            if fn is None:
-                continue
-            try:
-                fn()
-            except Exception as e:
-                logger.warning(f"{step} failed during release ({e})")
-        self._grabbing = False
-        self._cam = None
-        self._convert_buf = None
+        """
+        Stop, close and destroy the handle. Idempotent and never raises.
+
+        ⚠️ MUST hold _cap_lock. Closing/destroying a handle while another thread
+        is still inside MV_CC_GetImageBuffer on it is a use-after-free in native
+        code — it kills the whole Flask process, not just the request. This is
+        reachable in practice: api_viewfinder_stop only joins the capture thread
+        with timeout=1.0, and a grab can legitimately block for the full
+        HIK_GRAB_TIMEOUT_MS (default 1000ms) when the camera freezes or the
+        cable is pulled — exactly the failure the snapshot path already guards
+        against elsewhere. Taking the lock makes release WAIT for the in-flight
+        grab instead of racing it.
+        """
+        with self._cap_lock:
+            cam = self._cam
+            self.is_initialized = False
+            if cam is None:
+                return
+            for step, fn in (("MV_CC_StopGrabbing", cam.MV_CC_StopGrabbing if self._grabbing else None),
+                             ("MV_CC_CloseDevice", cam.MV_CC_CloseDevice),
+                             ("MV_CC_DestroyHandle", cam.MV_CC_DestroyHandle)):
+                if fn is None:
+                    continue
+                try:
+                    fn()
+                except Exception as e:
+                    logger.warning(f"{step} failed during release ({e})")
+            self._grabbing = False
+            self._cam = None
+            self._convert_buf = None
         logger.info("Hikrobot camera released")
 
     def __del__(self):

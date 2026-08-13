@@ -19,6 +19,7 @@ what ``diagnose_hik.py`` is for, on the station, with the camera plugged in.
 
 import ctypes
 import sys
+import time
 import types
 
 import numpy as np
@@ -543,6 +544,49 @@ def test_release_is_idempotent(fake_sdk):
     cam.release()
     assert handle.calls.count("DestroyHandle") == 1
     assert cam.is_initialized is False
+
+
+def test_release_waits_for_an_in_flight_grab(fake_sdk):
+    """
+    Regression: closing/destroying the handle while another thread is inside
+    MV_CC_GetImageBuffer is a native use-after-free that kills the whole Flask
+    process. It is reachable — api_viewfinder_stop only joins the capture thread
+    with timeout=1.0 while a grab may block for the full HIK_GRAB_TIMEOUT_MS
+    (1000ms) on a frozen/unplugged camera. release() must WAIT, not race.
+    """
+    import threading
+    cam = _open(fake_sdk)
+    handle = cam._cam
+    in_grab = threading.Event()
+    seen = {}
+
+    def slow_grab(frame_out, timeout):
+        in_grab.set()
+        time.sleep(0.3)
+        seen["destroyed_mid_grab"] = "DestroyHandle" in handle.calls
+        return 0x8000000E
+
+    handle.MV_CC_GetImageBuffer = slow_grab
+    t = threading.Thread(target=cam.read_frame, daemon=True)
+    t.start()
+    assert in_grab.wait(2), "grab never started"
+
+    started = time.perf_counter()
+    cam.release()
+    waited = time.perf_counter() - started
+    t.join(3)
+
+    assert seen.get("destroyed_mid_grab") is False
+    assert waited > 0.1, "release() returned without waiting for the grab"
+
+
+def test_read_frame_racing_a_release_fails_softly(fake_sdk):
+    """A read that was queued on the lock when release() won must return the
+    normal 'no frame' signal, not touch the destroyed handle."""
+    cam = _open(fake_sdk)
+    fake_sdk.repeat = (PIXEL_MONO8, 2, 2, bytes(4))
+    cam.release()
+    assert cam.read_frame() is None
 
 
 def test_read_frame_after_release_returns_none(fake_sdk):

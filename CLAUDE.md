@@ -187,6 +187,14 @@ verify_openvino.py ต้อง PASS ทุก device×imgsz (4) เช็คต
 7. **ตั้ง exposure/gain ขณะ Auto ยังเปิด = ค่าไม่ติด** — ต้อง `ExposureAuto=Off` ก่อนเสมอ.
 8. **ไม่เจรจา `GevSCPSPacketSize` = ภาพขาด/ช้ามาก** — `MV_CC_GetOptimalPacketSize()` ทุกครั้ง
    (GigE เท่านั้น; USB3 ไม่มี node นี้) และควรเปิด **Jumbo Frame 9014** บนการ์ดแลนด้วย.
+9. **🔴 `release()` ต้องถือ `_cap_lock` — ไม่งั้น process ตายทั้งตัว** (เจอตอน audit, มีเทสต์กันแล้ว).
+   ปิด/ทำลาย handle ขณะอีกเธรดยังอยู่กลาง `MV_CC_GetImageBuffer` = **use-after-free ระดับ native**
+   → Flask ตายยกแอป ไม่ใช่แค่ exception. **เข้าถึงได้จริง** เพราะ `api_viewfinder_stop` ทำแค่
+   `join(timeout=1.0)` แต่ grab ค้างได้เต็ม `HIK_GRAB_TIMEOUT_MS` (1000ms) ตอนกล้องแช่/สายหลุด —
+   ซึ่งเป็นเคสที่ระบบ snapshot ตั้งใจกันอยู่แล้วพอดี. พิสูจน์แล้ว: ก่อนแก้ `release()` คืนใน **0ms**
+   และเรียก `DestroyHandle` ทับ grab; หลังแก้รอ **601ms** จน grab จบ.
+   `read_frame()` จึงต้อง **เช็ค `_cam is None` ซ้ำอีกครั้งใน lock** ด้วย (ของเดิมเช็คนอก lock
+   แล้ว release อาจแทรกระหว่างรอ lock). เทสต์: `test_release_waits_for_an_in_flight_grab`.
 
 **Config (`config.py`):** `HIK_ENABLED` (default `False`) · `HIK_SOURCE_PREFIX="hik:"` ·
 `HIK_MVS_SDK_PATH` · `HIK_EXPOSURE_AUTO`/`HIK_EXPOSURE_US` (หน่วย **µs** ไม่ใช่ log2 แบบ UVC) ·
@@ -197,7 +205,7 @@ verify_openvino.py ต้อง PASS ทุก device×imgsz (4) เช็คต
 - `py -3.9 diagnose_hik.py --save` = ตาข่ายนิรภัย (แนวเดียวกับ `verify_openvino.py`):
   เช็ค SDK, ลิสต์กล้อง+subnet, เปิด, วัด fps จริง, packet size, **lost packet**, เขียน `hik_sample.jpg`.
   **ต้องเปิดรูปดูด้วยตาเพื่อยืนยันว่าสีไม่สลับ** (กับดักข้อ 1). รายงานอย่างเดียว **ไม่แก้ IP กล้องให้เอง**.
-- `tests/test_hik_camera.py` **32 ตัว** — ยัด **fake MVS module** เข้า `sys.modules` (แนวเดียวกับที่
+- `tests/test_hik_camera.py` **34 ตัว** — ยัด **fake MVS module** เข้า `sys.modules` (แนวเดียวกับที่
   mock Tesseract) จึง deterministic ไม่ต้องมีกล้อง. 3 ตัวสุดท้ายที่ import `app` ใช้ `importorskip`.
 
 **⚠️ ยังไม่ได้พิสูจน์ (ต้องทำบนสถานี):** โค้ดทั้งหมดเขียนจากเอกสาร SDK — **ยังไม่เคยรันกับกล้องจริง**.
@@ -522,12 +530,12 @@ Label Paper / Live / Dashboard / `/api/defects` ไม่ถูกแตะ แ�
 - Repo: `iceamonwat09/digital_vision2026`. Dev branch ปัจจุบัน: `claude/hikrobot-lan-camera-integration-psg74g`
   (ก่อนหน้า: `claude/artwork-ui-layout-1lnwgt`). **ห้าม push ไป main**.
 - SQL Server: 172.32.0.50/VisionIQ. Defect log ผ่าน `sp_log_defect` (เก็บภาพ base64).
-- Tests: `pytest tests/` — **367 ตัว** (artwork/label/barcode/กล้อง Hikrobot —
+- Tests: `pytest tests/` — **369 ตัว** (artwork/label/barcode/กล้อง Hikrobot —
   **ยังไม่ครอบคลุม camera.py/live loop ของ USB**).
   ก่อนหน้า: `tests/test_artwork_ownership.py` 26 ตัว (สิทธิ์เห็นประวัติ artwork).
-  เพิ่มล่าสุด: `tests/test_hik_camera.py` **32 ตัว** (กล้อง Hikrobot GigE — ใช้ fake MVS SDK
+  เพิ่มล่าสุด: `tests/test_hik_camera.py` **34 ตัว** (กล้อง Hikrobot GigE — ใช้ fake MVS SDK
   จึงรันได้โดยไม่ต้องมีกล้อง; 3 ตัวที่ import `app` จะ skip ถ้าไม่มี ultralytics/pyodbc).
-  **baseline ที่วัดจริง ส.ค. 2026: ก่อนแก้ 310 passed / หลังแก้ 339 passed — fail 5 ตัวเท่าเดิม.**
+  **baseline ที่วัดจริง ส.ค. 2026: ก่อนแก้ 310 passed / หลังแก้ 341 passed — fail 5 ตัวเท่าเดิม.**
   ⚠️ `tests/test_inspection_golden.py` **fail 5 ตัวอยู่แล้ว** (pre-existing, `NameError: FieldResult`
   ในโมดูล Label Paper) — ไม่เกี่ยวกับ artwork. ยืนยันด้วย `git stash` ก่อนโทษการแก้ของตัวเอง.
 - CONFIG_VERSION ปัจจุบัน: **`2026.08.13-hik-gige-snapshot`** (เช็คที่ footer ว่ารันโค้ดใหม่จริง).
