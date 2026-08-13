@@ -136,6 +136,77 @@ verify_openvino.py ต้อง PASS ทุก device×imgsz (4) เช็คต
 
 ---
 
+## 🏭 กล้องอุตสาหกรรม Hikrobot (GigE Vision) — โหมดถ่ายรูปตรวจ (ส.ค. 2026)
+
+ผู้ใช้ได้กล้อง Hikrobot มา (ยืนยันจากรูป: **RJ45 สกรีน `LAN/POE` + ขั้วกลม I/O + ไฟ `PWR` +
+เมาท์ C-mount**) เพื่อเดินตาม `docs/PLAN_LINE_DENT_INSPECTION.md`. เฟสนี้ทำ **snapshot อย่างเดียว**.
+
+**⚠️ ข้อเท็จจริงที่ต้องรู้ก่อนแตะเรื่องนี้ (เคยเข้าใจผิดกันบ่อย):**
+1. **RJ45 บนกล้องอุตสาหกรรม ≠ IP camera** — เป็น **GigE Vision** ไม่มี RTSP.
+   `cv2.VideoCapture("rtsp://...")` **ใช้ไม่ได้เด็ดขาด** ต้องผ่าน **MVS SDK** เท่านั้น.
+2. **`UD38142B` ที่พิมพ์มากับกล่อง = รหัสเอกสาร ไม่ใช่รุ่นกล้อง** (รูปแบบเดียวกับ
+   `UD24388B_GigE Line Scan Camera User Manual`). รุ่นจริงอยู่บนสติกเกอร์ตัวกล้อง (`MV-...`).
+3. MVS SDK Python binding เป็น **ctypes ล้วน** → **ใช้กับ py3.9 ได้เลย ไม่ต้องคอมไพล์/อัป Python**
+   และครอบทั้ง GigE + USB3 ด้วยโค้ดชุดเดียว.
+   Path: `C:\Program Files (x86)\MVS\Development\Samples\Python\MvImport`
+   (DLL: `...\Common Files\MVS\Runtime\Win64_x64` — `hik_camera` ใส่ให้เองถ้า PATH ไม่มี).
+
+**โครงสร้าง:** `hik_camera.py` → `class HikCamera` มี **interface เหมือน `camera.Camera` เป๊ะ**
+(`initialize`/`read_frame`/`release`/`set_control`) ⇒ `viewfinder_loop`, `_grab_latest_frame`,
+`/api/snapshot`, MJPEG generator, ตัวกันภาพค้าง **ใช้โค้ดเดิม 100% ไม่ถูกแก้เลย**
+(แนวเดียวกับ `StreamCamera`). แตะ `app.py` แค่ 4 จุด: `_open_camera_ladder` (early-branch),
+`/api/hik/scan` (endpoint ใหม่), guard ใน `start_detection`, ขยาย whitelist ของ `/api/camera/control`.
+
+- **`HIK_ENABLED=False` เป็นค่า default** ⇒ แท็บไม่ขึ้น ไม่มีโค้ดส่วนนี้ถูกเรียก = ทุกโหมดเดิมเท่าเดิม.
+- **SDK เป็น optional dependency** — ไม่มี MVS = แท็บขึ้นข้อความบอก แต่แอปทำงานปกติ (ไม่ error)
+  แพทเทิร์นเดียวกับ `pytesseract`.
+- **`/api/hik/scan` แยกจาก `/api/camera/scan` โดยเจตนา** — JS ฝั่ง USB ทำ `parseInt(val)`
+  ถ้าเอาคีย์ `"hik:<serial>"` ไปปนจะกลายเป็น `NaN` เงียบๆ.
+- **live detection ยังถูกบล็อก (409)** — ตรรกะนับแบบ "เฟรมว่าง" ใช้ที่ความเร็วไลน์ไม่ได้
+  ต้องรอ triggered mode (`PLAN_LINE_DENT_INSPECTION.md` §4). ปล่อยให้ทำงานครึ่งๆ = ตัวเลขนับผิด.
+
+**⚠️ กับดักที่เจอจริงระหว่างทำ (อย่าทำซ้ำ):**
+1. **แปลง Bayer เองด้วย cv2 = R↔B สลับแบบเงียบ** — OpenCV กับ GenICam ตั้งชื่อ Bayer pattern
+   **คนละ convention** (`cv2.COLOR_BayerRG2BGR` ≠ GenICam `BayerRG`). เดาผิด = ไม่มี error
+   แต่โมเดลเห็นสีที่ไม่เคยเทรน. **default จึงใช้ `MV_CC_ConvertPixelType` ของ SDK เอง**
+   (ผู้ผลิตรู้ convention ตัวเอง) ช้ากว่านิดแต่ถูกแน่. Mono8 → `cv2.cvtColor(GRAY2BGR)` (ไม่กำกวม).
+   จะเปิดทางลัด cv2 ต้อง **พิสูจน์ว่าได้ภาพเท่ากันก่อน**.
+2. **เขียน syntax ของ Jinja ในคอมเมนต์ JS ของ `templates/*.html` = หน้าพังทั้งหน้า** —
+   เจอจริงตอนทำ: คอมเมนต์อธิบายว่า element ถูกครอบด้วยเงื่อนไข Jinja ทำให้ Jinja มองเป็นแท็กจริง
+   แล้ว `{% endblock %}` ท้ายไฟล์พังตาม (`TemplateSyntaxError`). **ต้อง render จริงถึงจะเจอ**
+   — `node --check` ไม่จับ เพราะ JS ถูกไวยากรณ์.
+3. **Jinja `config` = `app.config` ของ Flask ไม่ใช่ `config.py` ของเรา** — เขียน
+   `{% if config.HIK_ENABLED %}` จะได้ Undefined (falsy) เสมอ = ฟีเจอร์ไม่โผล่แบบเงียบ.
+   ต้องส่งผ่าน `@app.context_processor` (ตอนนี้ส่งชื่อ `hik_enabled`).
+4. **กล้อง GigE ที่ IP คนละ subnet กับการ์ดแลน จะ enumerate เจอ แต่เปิดไม่ได้** — กับดักอันดับ 1
+   ของการต่อครั้งแรก. `scan_hik_cameras()` เทียบ `nCurrentIp` กับ `nNetExport` แล้วตั้ง
+   `reachable=False` + ข้อความบอกวิธีแก้ (dropdown disable ตัวนั้นไว้เลย).
+5. **ไม่คืน frame buffer = ภาพหยุดถาวร** — SDK มีบัฟเฟอร์แค่ `HIK_IMAGE_NODE_NUM` ตัว
+   `MV_CC_FreeImageBuffer` จึงอยู่ใน `finally` เสมอ. และต้อง **copy ก่อนคืน** ไม่งั้นเฟรมก่อนหน้าถูกทับ.
+6. **ตั้ง `Width` ขณะ `OffsetX` ยังใหญ่อยู่ = fail** — ลำดับ ROI ต้อง offset=0 → width/height → offset.
+7. **ตั้ง exposure/gain ขณะ Auto ยังเปิด = ค่าไม่ติด** — ต้อง `ExposureAuto=Off` ก่อนเสมอ.
+8. **ไม่เจรจา `GevSCPSPacketSize` = ภาพขาด/ช้ามาก** — `MV_CC_GetOptimalPacketSize()` ทุกครั้ง
+   (GigE เท่านั้น; USB3 ไม่มี node นี้) และควรเปิด **Jumbo Frame 9014** บนการ์ดแลนด้วย.
+
+**Config (`config.py`):** `HIK_ENABLED` (default `False`) · `HIK_SOURCE_PREFIX="hik:"` ·
+`HIK_MVS_SDK_PATH` · `HIK_EXPOSURE_AUTO`/`HIK_EXPOSURE_US` (หน่วย **µs** ไม่ใช่ log2 แบบ UVC) ·
+`HIK_GAIN_AUTO`/`HIK_GAIN_DB` · `HIK_ROI` · `HIK_FRAME_RATE` · `HIK_PACKET_SIZE_AUTO` ·
+`HIK_IMAGE_NODE_NUM=3` · `HIK_GRAB_TIMEOUT_MS=1000`
+
+**เครื่องมือ/เทสต์:**
+- `py -3.9 diagnose_hik.py --save` = ตาข่ายนิรภัย (แนวเดียวกับ `verify_openvino.py`):
+  เช็ค SDK, ลิสต์กล้อง+subnet, เปิด, วัด fps จริง, packet size, **lost packet**, เขียน `hik_sample.jpg`.
+  **ต้องเปิดรูปดูด้วยตาเพื่อยืนยันว่าสีไม่สลับ** (กับดักข้อ 1). รายงานอย่างเดียว **ไม่แก้ IP กล้องให้เอง**.
+- `tests/test_hik_camera.py` **32 ตัว** — ยัด **fake MVS module** เข้า `sys.modules` (แนวเดียวกับที่
+  mock Tesseract) จึง deterministic ไม่ต้องมีกล้อง. 3 ตัวสุดท้ายที่ import `app` ใช้ `importorskip`.
+
+**⚠️ ยังไม่ได้พิสูจน์ (ต้องทำบนสถานี):** โค้ดทั้งหมดเขียนจากเอกสาร SDK — **ยังไม่เคยรันกับกล้องจริง**.
+และ **`bestX.pt` เทรนจากภาพ webcam + แสงห้อง** → กล้อง/เลนส์/แสงใหม่ = **domain shift**
+⇒ **verdict จากกล้องตัวนี้ยังเชื่อเป็น QC ไม่ได้จนกว่าจะ blind test** (`PLAN_LINE_DENT_INSPECTION.md` §9).
+งานที่ส่งมอบคือ *ท่อภาพที่ถูกต้อง* ไม่ใช่ *ความแม่นที่พิสูจน์แล้ว*.
+
+---
+
 ## 🏗️ สถาปัตยกรรมสำคัญ (app.py)
 
 - **Live USB/RTSP** = 2 thread: `capture_loop` (อ่านกล้อง → `latest_raw_frame`) +
@@ -448,14 +519,18 @@ Label Paper / Live / Dashboard / `/api/defects` ไม่ถูกแตะ แ�
 - HW สถานี: **i7-1165G7** (4C/8T, 15W, AVX-512), 16GB DDR4 (single-channel), Iris Xe, Win10 Pro, Python 3.9.13.
 - inference bestX (seg): **iGPU (OpenVINO) ≈ 45-50ms/เฟรม (~20-22 FPS)** = ตัวจริงปัจจุบัน;
   ONNX CPU ≈ 280ms (~2.7-3 FPS) = ชั้น fallback; PyTorch ≈ 315ms = fallback สุดท้าย.
-- Repo: `iceamonwat09/digital_vision2026`. Dev branch ปัจจุบัน: `claude/artwork-ui-layout-1lnwgt`
-  (ก่อนหน้า: `claude/artwork-red-box-drawing-lpqhpo`). **ห้าม push ไป main**.
+- Repo: `iceamonwat09/digital_vision2026`. Dev branch ปัจจุบัน: `claude/hikrobot-lan-camera-integration-psg74g`
+  (ก่อนหน้า: `claude/artwork-ui-layout-1lnwgt`). **ห้าม push ไป main**.
 - SQL Server: 172.32.0.50/VisionIQ. Defect log ผ่าน `sp_log_defect` (เก็บภาพ base64).
-- Tests: `pytest tests/` — 335 ตัว (artwork/label/barcode — **ไม่ครอบคลุม camera/live loop**).
-  เพิ่มล่าสุด: `tests/test_artwork_ownership.py` 26 ตัว (สิทธิ์เห็นประวัติ artwork).
+- Tests: `pytest tests/` — **367 ตัว** (artwork/label/barcode/กล้อง Hikrobot —
+  **ยังไม่ครอบคลุม camera.py/live loop ของ USB**).
+  ก่อนหน้า: `tests/test_artwork_ownership.py` 26 ตัว (สิทธิ์เห็นประวัติ artwork).
+  เพิ่มล่าสุด: `tests/test_hik_camera.py` **32 ตัว** (กล้อง Hikrobot GigE — ใช้ fake MVS SDK
+  จึงรันได้โดยไม่ต้องมีกล้อง; 3 ตัวที่ import `app` จะ skip ถ้าไม่มี ultralytics/pyodbc).
+  **baseline ที่วัดจริง ส.ค. 2026: ก่อนแก้ 310 passed / หลังแก้ 339 passed — fail 5 ตัวเท่าเดิม.**
   ⚠️ `tests/test_inspection_golden.py` **fail 5 ตัวอยู่แล้ว** (pre-existing, `NameError: FieldResult`
   ในโมดูล Label Paper) — ไม่เกี่ยวกับ artwork. ยืนยันด้วย `git stash` ก่อนโทษการแก้ของตัวเอง.
-- CONFIG_VERSION ปัจจุบัน: **`2026.08.13-aw-hl-rowproof`** (เช็คที่ footer ว่ารันโค้ดใหม่จริง).
+- CONFIG_VERSION ปัจจุบัน: **`2026.08.13-hik-gige-snapshot`** (เช็คที่ footer ว่ารันโค้ดใหม่จริง).
 
 ---
 

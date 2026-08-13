@@ -9,7 +9,7 @@ import os
 # print it on startup and confirm it is actually executing the new code.
 # NOTE: shown on the navbar badge too — keep it short (<= ~28 chars) or it
 # gets ellipsized there (full value always visible in the footer / hover).
-CONFIG_VERSION = "2026.08.13-aw-hl-rowproof"
+CONFIG_VERSION = "2026.08.13-hik-gige-snapshot"
 
 # ====================
 # CAMERA CONFIGURATION
@@ -124,6 +124,55 @@ VIEWFINDER_CAMERA_FPS = 30
 # Enable this to test available cameras at startup
 # Set to False for faster startup (skips camera scanning)
 TEST_CAMERAS_ON_STARTUP = False
+
+# ── กล้องอุตสาหกรรม Hikrobot (GigE Vision / USB3 Vision ผ่าน MVS SDK) ────
+# ⚠️ RJ45 บนกล้องอุตสาหกรรม = GigE Vision ไม่ใช่ IP camera → ไม่มี RTSP
+#    ต้องคุยผ่าน MVS SDK เท่านั้น (ดู hik_camera.py).
+#
+# HIK_ENABLED = False (ค่าเริ่มต้น) ⇒ แท็บ "กล้อง Hikrobot" ไม่ขึ้นในหน้า Live
+# และไม่มีโค้ดส่วนใดของกล้องนี้ถูกเรียกเลย = ทุกโหมดเดิมทำงานเหมือนเดิม 100%.
+# เปิดใช้: ตั้ง True + รีสตาร์ต (Flask อ่าน config ตอน start เท่านั้น).
+HIK_ENABLED = False
+
+# คำนำหน้าที่ใช้แยกว่า camera_index ตัวนี้เป็นกล้อง Hikrobot ("hik:<serial>")
+# — รูปแบบเดียวกับ STREAM_SOURCE_SENTINEL ที่ใช้แยกแหล่งภาพแบบ push.
+HIK_SOURCE_PREFIX = "hik:"
+
+# โฟลเดอร์ MvImport ของ MVS SDK. None = ให้ค้นหาเองตาม path มาตรฐาน
+# (Windows: C:\Program Files (x86)\MVS\Development\Samples\Python\MvImport).
+# ตั้ง env HIK_MVS_SDK_PATH ก็ได้ผลเหมือนกัน (env ชนะค่านี้).
+HIK_MVS_SDK_PATH = None
+
+# ── ค่าตั้งกล้อง (opt-in ทุกตัว: None = ไม่แตะ ใช้ค่าที่ตั้งไว้ในกล้อง/MVS) ──
+# HIK_EXPOSURE_AUTO : True = ให้กล้องปรับเอง, False = ล็อกเอง, None = ไม่แตะ
+# HIK_EXPOSURE_US   : เวลารับแสงเป็น "ไมโครวินาที" (ไม่ใช่สเกล log2 แบบ UVC)
+#                     แผนไลน์จริงต้องการ ~150-200µs (ดู docs/PLAN_LINE_DENT_INSPECTION.md §7)
+#                     แต่ต้องมีไฟแรงพอ — ตอนตั้งโต๊ะทดลองเริ่มที่ค่า auto ก่อน
+# HIK_GAIN_DB       : gain สูง = noise ซึ่งกลืน dent ตื้น → ใช้ต่ำสุดที่ภาพยังสว่างพอ
+HIK_EXPOSURE_AUTO = None
+HIK_EXPOSURE_US = None
+HIK_GAIN_AUTO = None
+HIK_GAIN_DB = None
+
+# ROI แบบ (offset_x, offset_y, width, height) — None = ใช้เต็มเซนเซอร์.
+# ครอปในกล้องช่วยลดแบนด์วิดท์ GigE และเพิ่ม fps จริง (ไม่ใช่แค่ครอปทีหลัง).
+HIK_ROI = None
+
+# จำกัดเฟรมเรตไม่ให้ชนเพดาน 1Gbps (None = ไม่จำกัด ใช้ค่ากล้อง)
+HIK_FRAME_RATE = None
+
+# เจรจาขนาด packet ที่ใหญ่ที่สุดที่ลิงก์รับได้ (GigE เท่านั้น).
+# ⚠️ ปิดตัวนี้ = ภาพขาด/ช้ามาก — ควรเปิดไว้เสมอ. ได้ผลเต็มที่เมื่อเปิด
+# Jumbo Frame 9014 บนการ์ดแลนของ PC ด้วย.
+HIK_PACKET_SIZE_AUTO = True
+
+# ความยาวคิวเฟรมในไดรเวอร์. น้อย = ได้เฟรม "สด" (คิวยาวจะจ่ายภาพเก่าเงียบๆ
+# ซึ่งอันตรายกับระบบ QC และทำให้ตัวกัน "ภาพค้าง" ของ snapshot ไร้ผล).
+HIK_IMAGE_NODE_NUM = 3
+
+# เวลารอเฟรมสูงสุด (ms) ต่อการอ่าน 1 ครั้ง. หมดเวลา = คืน (False, None)
+# ให้ loop เดิม idle ต่อ (สัญญาเดียวกับ camera.Camera.read_frame).
+HIK_GRAB_TIMEOUT_MS = 1000
 
 # ====================
 # YOLO MODEL CONFIGURATION

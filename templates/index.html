@@ -49,6 +49,9 @@
                     <button id="tabUsb"  class="src-tab src-tab-active" onclick="switchSource('usb')">กล้อง USB</button>
                     <button id="tabRtsp" class="src-tab" onclick="switchSource('rtsp')">กล้อง IP (RTSP)</button>
                     <button id="tabStream" class="src-tab" onclick="switchSource('stream')">สตรีม</button>
+                    {% if hik_enabled %}
+                    <button id="tabHik" class="src-tab" onclick="switchSource('hik')">กล้อง Hikrobot</button>
+                    {% endif %}
                 </div>
 
                 <!-- USB panel -->
@@ -87,6 +90,20 @@
                         <button id="refreshStreamCamsBtn" class="btn btn-icon" title="ขออนุญาต/รีเฟรชกล้อง">&#x1F504;</button>
                     </div>
                     <p class="control-hint" id="streamHint">ใช้กล้องของเครื่องที่เปิดหน้านี้ (ต้องเข้าผ่าน HTTPS หรือ localhost)</p>
+                </div>
+
+                <!-- Hikrobot panel (GigE Vision ผ่าน MVS SDK) — โผล่เฉพาะเมื่อ
+                     config.HIK_ENABLED = True เท่านั้น -->
+                <div id="panelHik" class="camera-panel" style="display:none">
+                    <div class="camera-select-group">
+                        <select id="hikCameraSelect" class="camera-select" title="เลือกกล้อง Hikrobot">
+                            <option value="" disabled selected>กดรีเฟรชเพื่อค้นหากล้อง…</option>
+                        </select>
+                        <button id="refreshHikBtn" class="btn btn-icon" title="ค้นหากล้อง Hikrobot">&#x1F504;</button>
+                    </div>
+                    <p class="control-hint" id="hikHint">
+                        กล้องอุตสาหกรรมต่อผ่านสาย LAN (GigE Vision) — เฟสนี้ใช้ได้กับ “📷 ถ่ายรูปตรวจ” เท่านั้น
+                    </p>
                 </div>
             </section>
 
@@ -166,7 +183,7 @@
                 <div id="snapLivePanel">
                     <p class="snap-aim-hint">เล็งให้กระป๋องอยู่ในกรอบ<br>แล้วกดปุ่มถ่าย</p>
                     <div class="snap-set-grid">
-                        <div>
+                        <div id="snapQualityBox">
                             <label class="snap-q-label" for="snapQuality">📷 ความละเอียดภาพจากกล้อง</label>
                             <select id="snapQuality" class="camera-select snap-quality">
                                 <option value="smooth" selected>ลื่นที่สุด · 720p (แนะนำ)</option>
@@ -205,6 +222,32 @@
                                    oninput="onContrastInput()">
                             <div id="contrastHint" class="cam-ctrl-hint">
                                 ⚠️ ไม่การันตีตรวจดีขึ้น — ปรับแล้วดูผลตรวจจริงเทียบกัน
+                            </div>
+                        </div>
+                    </div>
+                    <!-- ปรับกล้อง Hikrobot สดๆ ขณะเล็ง. กล้องอุตสาหกรรมไม่มี knob
+                         brightness/contrast แบบ UVC — ตัวจริงคือ exposure/gain -->
+                    <div id="snapHikCtrls" style="display:none">
+                        <div class="cam-ctrl">
+                            <div class="cam-ctrl-head">
+                                <span class="cam-ctrl-label">⏱️ เวลารับแสง (Exposure)</span>
+                                <span id="hikExpVal" class="cam-ctrl-val">5000 µs</span>
+                            </div>
+                            <input type="range" id="hikExpSlider" min="50" max="20000" step="50" value="5000"
+                                   oninput="onHikExposureInput()">
+                            <div id="hikExpHint" class="cam-ctrl-hint">
+                                ยิ่งสั้น = หยุดการเคลื่อนไหวได้ดี แต่ต้องมีไฟแรงพอ (ไลน์จริงต้องการ ~150-200 µs)
+                            </div>
+                        </div>
+                        <div class="cam-ctrl">
+                            <div class="cam-ctrl-head">
+                                <span class="cam-ctrl-label">📶 อัตราขยาย (Gain)</span>
+                                <span id="hikGainVal" class="cam-ctrl-val">0 dB</span>
+                            </div>
+                            <input type="range" id="hikGainSlider" min="0" max="24" step="1" value="0"
+                                   oninput="onHikGainInput()">
+                            <div id="hikGainHint" class="cam-ctrl-hint">
+                                ⚠️ gain สูง = noise ซึ่งกลืน dent ตื้น — ใช้ต่ำสุดที่ภาพยังสว่างพอ
                             </div>
                         </div>
                     </div>
@@ -355,8 +398,18 @@
     const refreshStreamCamsBtn = document.getElementById('refreshStreamCamsBtn');
     const streamHint           = document.getElementById('streamHint');
 
+    // Hikrobot GigE source. The tab only renders when config.HIK_ENABLED is on
+    // (guarded by a Jinja conditional in the markup above), so every use below
+    // is null-checked — an unguarded null here would kill the whole script.
+    // NOTE: never write Jinja tag syntax in these comments — this file IS a
+    // Jinja template, so the comment would be parsed as a real tag and the
+    // whole Live page would fail to render.
+    const hikCameraSelect = document.getElementById('hikCameraSelect');
+    const refreshHikBtn   = document.getElementById('refreshHikBtn');
+    const hikHint         = document.getElementById('hikHint');
+
     let statusCheckInterval = null;
-    let currentSource = 'usb';   // 'usb' | 'rtsp' | 'stream'
+    let currentSource = 'usb';   // 'usb' | 'rtsp' | 'stream' | 'hik'
     let currentMode  = null;     // populated from /api/modes
 
     // ── Source tab switching ──────────────────────────
@@ -370,13 +423,80 @@
         document.getElementById('tabUsb').classList.toggle('src-tab-active',    src === 'usb');
         document.getElementById('tabRtsp').classList.toggle('src-tab-active',   src === 'rtsp');
         document.getElementById('tabStream').classList.toggle('src-tab-active', src === 'stream');
+        const tabHik = document.getElementById('tabHik');
+        if (tabHik) {
+            document.getElementById('panelHik').style.display = src === 'hik' ? '' : 'none';
+            tabHik.classList.toggle('src-tab-active', src === 'hik');
+        }
         // Lazily enumerate browser cameras the first time STREAM is selected, so
         // we never prompt for camera permission unless the user actually wants it.
         if (src === 'stream' && streamCameraSelect.dataset.scanned !== '1') {
             streamCameraSelect.dataset.scanned = '1';
             scanStreamCameras();
         }
+        // Same idea for Hikrobot: enumerating touches the network, so only do it
+        // when the operator actually opens the tab.
+        if (src === 'hik' && hikCameraSelect && hikCameraSelect.dataset.scanned !== '1') {
+            hikCameraSelect.dataset.scanned = '1';
+            scanHikCameras();
+        }
+        // Live detection on the Hikrobot source needs the triggered pipeline
+        // (see docs/PLAN_LINE_DENT_INSPECTION.md §4) — snapshot only for now.
+        if (src === 'hik') {
+            startBtn.disabled = true;
+            startBtn.title = 'เฟสนี้กล้อง Hikrobot ใช้ได้เฉพาะ 📷 ถ่ายรูปตรวจ';
+        } else {
+            startBtn.title = '';
+        }
     };
+
+    // ── Hikrobot device discovery ─────────────────────
+    // Separate from scanCameras(): the USB dropdown parseInt()s its value, and a
+    // "hik:<serial>" key would become NaN there. Keeping the two lists apart is
+    // what guarantees the USB path is untouched.
+    function scanHikCameras() {
+        if (!hikCameraSelect) return;
+        refreshHikBtn.disabled = true;
+        hikCameraSelect.innerHTML = '<option value="" disabled selected>กำลังค้นหา…</option>';
+        fetch('/api/hik/scan')
+            .then(r => r.json())
+            .then(data => {
+                if (!data.enabled) {
+                    hikCameraSelect.innerHTML = '<option value="" disabled selected>ปิดใช้งานอยู่ (HIK_ENABLED)</option>';
+                    return;
+                }
+                if (!data.sdk || !data.sdk.available) {
+                    hikCameraSelect.innerHTML = '<option value="" disabled selected>ยังไม่ได้ติดตั้ง MVS SDK</option>';
+                    hikHint.textContent = (data.sdk && data.sdk.message)
+                        || 'ยังไม่ได้ติดตั้ง MVS SDK';
+                    return;
+                }
+                const cams = data.cameras || [];
+                if (!cams.length) {
+                    hikCameraSelect.innerHTML = '<option value="" disabled selected>ไม่พบกล้อง</option>';
+                    hikHint.textContent = 'ไม่พบกล้อง — เช็คไฟ PWR (PoE), สายแลน และลองเปิดโปรแกรม MVS ดูก่อน';
+                    return;
+                }
+                hikCameraSelect.innerHTML = '';
+                cams.forEach(c => {
+                    const opt = document.createElement('option');
+                    opt.value = c.key;
+                    opt.textContent = c.name;
+                    // A camera on the wrong subnet enumerates but cannot open —
+                    // disabling it here stops the operator from picking a dud.
+                    opt.disabled = (c.reachable === false);
+                    hikCameraSelect.appendChild(opt);
+                });
+                const bad = cams.find(c => c.reachable === false);
+                hikHint.textContent = bad ? bad.hint
+                    : 'กล้องอุตสาหกรรมต่อผ่านสาย LAN (GigE Vision) — เฟสนี้ใช้ได้กับ “📷 ถ่ายรูปตรวจ” เท่านั้น';
+            })
+            .catch(() => {
+                hikCameraSelect.innerHTML = '<option value="" disabled selected>ค้นหาไม่สำเร็จ</option>';
+            })
+            .finally(() => { refreshHikBtn.disabled = false; });
+    }
+    if (refreshHikBtn) refreshHikBtn.addEventListener('click', scanHikCameras);
 
     // Frame Capture (best-frame test) — server freezes the feed on the sharpest
     // NG frame for a few seconds. Display only; USB/RTSP source, no other effect.
@@ -427,6 +547,29 @@
     };
     window.onContrastInput = function() {
         _onControlInput('contrast', 'contrastSlider', 'contrastVal', 'contrastHint');
+    };
+
+    // Hikrobot knobs are absolute engineering units (µs, dB), not a 0-100%
+    // scale, so they are sent RAW instead of going through the 0-255 mapping
+    // above. Same throttle and same endpoint.
+    function _onRawControlInput(control, sliderId, valId, hintId, unit) {
+        const v = parseInt(document.getElementById(sliderId).value, 10);
+        document.getElementById(valId).textContent = v + ' ' + unit;
+        _ctrlPending[control] = v;
+        if (_ctrlTimers[control]) return;
+        _ctrlTimers[control] = setTimeout(() => {
+            _ctrlTimers[control] = null;
+            if (_ctrlPending[control] != null) {
+                _sendControl(control, _ctrlPending[control], hintId);
+                _ctrlPending[control] = null;
+            }
+        }, 120);
+    }
+    window.onHikExposureInput = function() {
+        _onRawControlInput('exposure', 'hikExpSlider', 'hikExpVal', 'hikExpHint', 'µs');
+    };
+    window.onHikGainInput = function() {
+        _onRawControlInput('gain', 'hikGainSlider', 'hikGainVal', 'hikGainHint', 'dB');
     };
 
     window.saveRtsp = function() {
@@ -838,7 +981,9 @@
                 } else if (!isActive && videoStream.getAttribute('src')) {
                     videoStream.removeAttribute('src');
                 }
-                startBtn.disabled  = isActive;
+                // Hikrobot is snapshot-only in this phase, so the status poll
+                // must not hand Start back every second on that tab.
+                startBtn.disabled  = isActive || currentSource === 'hik';
                 stopBtn.disabled   = !isActive;
                 cameraSelect.disabled      = isActive;
                 refreshCamerasBtn.disabled = isActive;
@@ -1047,6 +1192,7 @@
     const snapQuality     = document.getElementById('snapQuality');
     const snapImgsz       = document.getElementById('snapImgsz');
     const snapCamCtrls    = document.getElementById('snapCamCtrls');
+    const snapHikCtrls    = document.getElementById('snapHikCtrls');
     const snapVerdict     = document.getElementById('snapVerdict');
     const snapDents       = document.getElementById('snapDents');
     const snapConf        = document.getElementById('snapConf');
@@ -1066,6 +1212,11 @@
         if (currentSource === 'usb') {
             const val = cameraSelect.value;
             return (val === '' || val === null) ? null : parseInt(val);
+        }
+        // Hikrobot keys are strings ("hik:<serial>") — parseInt would turn them
+        // into NaN, which is exactly why they live in their own dropdown.
+        if (currentSource === 'hik') {
+            return (hikCameraSelect && hikCameraSelect.value) || null;
         }
         const url = rtspUrlInput.value.trim();
         return url || null;
@@ -1186,13 +1337,23 @@
             alert('กรุณากด Stop Detection ก่อน แล้วจึงถ่ายรูปตรวจ');
             return;
         }
-        // Brightness/contrast sliders drive the USB viewfinder camera — the
-        // browser camera (STREAM) can't be adjusted from the server, so hide them.
-        snapCamCtrls.style.display = (currentSource === 'stream') ? 'none' : '';
+        // Show only the controls the active camera actually has:
+        //   USB/RTSP → brightness/contrast (UVC)   Hikrobot → exposure/gain
+        //   STREAM   → none (a browser camera can't be driven from the server)
+        snapCamCtrls.style.display = (currentSource === 'stream' || currentSource === 'hik')
+            ? 'none' : '';
+        if (snapHikCtrls) snapHikCtrls.style.display = (currentSource === 'hik') ? '' : 'none';
+        // The quality ladder is a UVC concept (pick a mode the webcam supports).
+        // An industrial camera has one native sensor size (optionally cropped by
+        // HIK_ROI), so the picker would be a control that does nothing.
+        const qualityBox = document.getElementById('snapQualityBox');
+        if (qualityBox) qualityBox.style.display = (currentSource === 'hik') ? 'none' : '';
         if (currentSource === 'stream') { openSnapshotStream(); return; }
         const cameraIndex = resolveCameraIndex();
         if (cameraIndex === null) {
-            alert('กรุณาเลือกกล้อง/ใส่ RTSP URL ก่อนถ่ายรูป');
+            alert(currentSource === 'hik'
+                ? 'กรุณาเลือกกล้อง Hikrobot ก่อนถ่ายรูป (กดรีเฟรชถ้ายังไม่มีในรายการ)'
+                : 'กรุณาเลือกกล้อง/ใส่ RTSP URL ก่อนถ่ายรูป');
             return;
         }
         snapBtn.disabled = true;

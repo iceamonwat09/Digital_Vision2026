@@ -17,6 +17,9 @@ from werkzeug.serving import WSGIRequestHandler
 import config
 from logger import setup_logger
 from camera import Camera, StreamCamera, scan_cameras_fast
+# Hikrobot GigE/USB3 industrial cameras (MVS SDK). Importing costs nothing when
+# the SDK is absent — hik_camera only touches it lazily on first use.
+from hik_camera import HikCamera, is_hik_key, scan_hik_cameras, sdk_status
 from yolo_detector import YOLODetector
 from database import Database
 from modes import registry as mode_registry
@@ -33,10 +36,16 @@ logger = setup_logger(__name__)
 # Initialize Flask app
 app = Flask(__name__, template_folder=config.TEMPLATES_DIR, static_folder=config.STATIC_DIR)
 
-# Inject CONFIG_VERSION into every template automatically
+# Inject CONFIG_VERSION into every template automatically.
+# NOTE: Jinja's built-in `config` is Flask's app.config, NOT our config module —
+# templates must use these explicit names, or a feature flag silently reads as
+# Undefined (falsy) and the feature just never appears.
 @app.context_processor
 def inject_config():
-    return {"config_version": config.CONFIG_VERSION}
+    return {
+        "config_version": config.CONFIG_VERSION,
+        "hik_enabled": bool(getattr(config, "HIK_ENABLED", False)),
+    }
 
 # Fallback auth template globals. base.html references has_perm()/current_user/
 # auth_enabled — if the auth layer fails to load (e.g. bcrypt/PyJWT not yet
@@ -286,6 +295,8 @@ viewfinder_capture_size = None   # (w, h) actually opened, for status/diagnostic
 viewfinder_frame_ts = 0.0        # time.monotonic() when viewfinder_frame was published
 viewfinder_jpeg = None           # newest DISPLAY-downscaled JPEG bytes (encoded once,
                                  # shared by all MJPEG viewers — see generate_viewfinder)
+_hik_open_error = None           # last Hikrobot open failure reason (SDK missing /
+                                 # wrong subnet / already in use), surfaced to the UI
 
 # Serialises camera-ownership transitions (start/stop detection, start/stop
 # viewfinder, mode switch). Flask runs threaded, so without this two concurrent
@@ -737,22 +748,46 @@ def video_feed():
     )
 
 
+# Accepted live camera controls → clamp range.
+#   brightness/contrast : UVC 0-255 (unchanged behaviour)
+#   exposure            : microseconds — an industrial camera's real knob. The
+#                         floor is 20µs (below that most sensors reject it) and
+#                         the ceiling 200000µs (0.2s) keeps a slider drag from
+#                         freezing the viewfinder at multi-second exposures.
+#   gain                : dB. Capped low on purpose — high gain adds noise that
+#                         swallows shallow dents (PLAN_LINE_DENT_INSPECTION §7).
+_CAMERA_CONTROL_RANGES = {
+    "brightness": (0, 255),
+    "contrast":   (0, 255),
+    "exposure":   (20, 200000),
+    "gain":       (0, 30),
+}
+
+
 @app.route('/api/camera/control', methods=['POST'])
 def api_camera_control():
-    """Adjust a camera image control (brightness/contrast, 0-255) on the fly.
-    Applies to the live USB detection camera when it is running, otherwise to
-    the snapshot viewfinder camera when it is open — so the operator can tune
-    lighting while aiming a test shot. Never touches RTSP-config/STREAM paths
-    (StreamCamera has no set_control, so it is skipped by the hasattr check)."""
+    """Adjust a camera image control on the fly. Applies to the live USB
+    detection camera when it is running, otherwise to the snapshot viewfinder
+    camera when it is open — so the operator can tune lighting while aiming a
+    test shot. Never touches RTSP-config/STREAM paths (StreamCamera has no
+    set_control, so it is skipped by the hasattr check).
+
+    brightness/contrast are the UVC knobs (0-255) and behave exactly as before.
+    exposure (µs) / gain (dB) are the Hikrobot equivalents — a UVC Camera
+    returns None for them and a HikCamera returns None for brightness/contrast,
+    so each camera type simply ignores the controls it does not have."""
     data = request.get_json(silent=True) or {}
     control = data.get("control")
-    if control not in ("brightness", "contrast"):
-        return jsonify({"status": "error", "message": "control ต้องเป็น brightness/contrast"}), 400
+    if control not in _CAMERA_CONTROL_RANGES:
+        return jsonify({"status": "error",
+                        "message": "control ต้องเป็น brightness/contrast/exposure/gain"}), 400
+    lo, hi = _CAMERA_CONTROL_RANGES[control]
     try:
         value = int(data.get("value"))
     except (TypeError, ValueError):
-        return jsonify({"status": "error", "message": "value ต้องเป็นตัวเลข 0-255"}), 400
-    value = max(0, min(255, value))
+        return jsonify({"status": "error",
+                        "message": f"value ต้องเป็นตัวเลข {lo}-{hi}"}), 400
+    value = max(lo, min(hi, value))
     # Prefer the live detection camera; fall back to the snapshot viewfinder.
     candidates = [camera, viewfinder_camera if viewfinder_active else None]
     for cam in candidates:
@@ -800,6 +835,24 @@ def api_scan_cameras():
     return jsonify({"cameras": cameras})
 
 
+@app.route('/api/hik/scan', methods=['GET'])
+def api_scan_hik_cameras():
+    """
+    Enumerate Hikrobot GigE/USB3 cameras for the "กล้อง Hikrobot" source tab.
+
+    Deliberately a SEPARATE endpoint from /api/camera/scan: the USB dropdown's
+    JS does parseInt() on the selected value, which a "hik:<serial>" key would
+    silently turn into NaN. Keeping the two lists apart means the existing USB
+    path cannot be affected at all.
+    """
+    if not getattr(config, "HIK_ENABLED", False):
+        return jsonify({"enabled": False, "sdk": {"available": False},
+                        "cameras": []})
+    status = sdk_status()
+    cameras = scan_hik_cameras() if status["available"] else []
+    return jsonify({"enabled": True, "sdk": status, "cameras": cameras})
+
+
 @app.route('/api/detection/start', methods=['POST'])
 @_serialized
 def start_detection():
@@ -834,6 +887,17 @@ def start_detection():
         camera_index = int(camera_index_raw)
     else:
         camera_index = camera_index_raw  # RTSP URL string
+
+    # Hikrobot cameras are wired into the snapshot path only for now. Live
+    # detection on this source needs the triggered architecture from
+    # docs/PLAN_LINE_DENT_INSPECTION.md §4 (the free-running empty-frame counting
+    # logic below does not hold at line speed), so refuse clearly rather than
+    # start a pipeline whose counts would be wrong.
+    if is_hik_key(camera_index):
+        return jsonify({
+            "status": "error",
+            "message": "กล้อง Hikrobot รองรับเฉพาะโหมดถ่ายรูปตรวจในเฟสนี้ — กดปุ่ม 📷 ถ่ายรูปตรวจ แทน"
+        }), 409
 
     # Initialize camera on demand. The STREAM sentinel uses a virtual camera fed
     # by frames pushed from the browser (/api/stream/push); everything else opens
@@ -1050,6 +1114,29 @@ def _open_camera_ladder(cam_index, ladder=None):
     there is no fragile mid-session reopen. Returns (camera, (width, height)) or
     (None, None).
     """
+    # Hikrobot industrial cameras have ONE native sensor mode (optionally
+    # cropped by HIK_ROI in config) — there is no UVC-style resolution ladder to
+    # walk, so trying lower rungs would just waste seconds on repeated opens.
+    # Open once and report whatever the sensor actually delivered.
+    if is_hik_key(cam_index):
+        global _hik_open_error
+        _hik_open_error = None
+        cam = HikCamera(device_key=cam_index)
+        if not cam.initialize():
+            # Keep the specific reason (SDK missing / wrong subnet / in use) —
+            # the generic "can't open camera" message is useless for GigE setup.
+            _hik_open_error = cam.last_error
+            logger.error(f"Hikrobot camera open failed: {cam.last_error}")
+            return None, None
+        result = cam.read_frame()
+        if result and result[0] and result[1] is not None:
+            ah, aw = result[1].shape[:2]
+            logger.info(f"Snapshot camera (Hikrobot {cam.model or '?'}) opened at {aw}x{ah}")
+            return cam, (aw, ah)
+        logger.warning("Hikrobot camera opened but delivered no frame; releasing")
+        cam.release()
+        return None, None
+
     if ladder is None:
         ladder = config.SNAPSHOT_RESOLUTION_LADDER
     for width, height, fps in ladder:
@@ -1118,10 +1205,12 @@ def api_viewfinder_start():
     # is never reopened mid-session. Lower quality = higher fps = smoother aim.
     cam, size = _open_camera_ladder(camera_index, _ladder_for_quality(quality))
     if cam is None:
-        return jsonify({
-            "status": "error",
-            "message": f"เปิดกล้อง {camera_index} ไม่ได้ หรือกล้องถูกใช้งานอยู่"
-        }), 500
+        # Hikrobot failures carry an actionable reason (SDK not installed, camera
+        # on the wrong subnet, handle held by the MVS client) — show it instead
+        # of the generic message, which tells a GigE user nothing.
+        message = (_hik_open_error if (is_hik_key(camera_index) and _hik_open_error)
+                   else f"เปิดกล้อง {camera_index} ไม่ได้ หรือกล้องถูกใช้งานอยู่")
+        return jsonify({"status": "error", "message": message}), 500
 
     viewfinder_camera = cam
     viewfinder_capture_size = size
