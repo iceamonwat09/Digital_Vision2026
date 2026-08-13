@@ -9,7 +9,7 @@ import os
 # print it on startup and confirm it is actually executing the new code.
 # NOTE: shown on the navbar badge too — keep it short (<= ~28 chars) or it
 # gets ellipsized there (full value always visible in the footer / hover).
-CONFIG_VERSION = "2026.08.11-aw-pan-drag"
+CONFIG_VERSION = "2026.08.13-aw-toolbar-fix"
 
 # ====================
 # CAMERA CONFIGURATION

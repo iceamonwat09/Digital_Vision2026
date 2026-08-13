@@ -9,7 +9,9 @@
      และ <style> นี้มาหลัง style.css ใน <head> จึงชนะด้วย order (specificity เท่ากัน)
      โดยที่โหมดอื่น + หน้า /artwork_check/history (มี .aw-wrap ของตัวเอง) ไม่ถูกแตะ */
   .main-content { max-width: none; }
-  .aw-wrap   { max-width: none; margin: 24px auto; padding: 0 16px; }
+  /* กว้างพอทำงานกับ artwork ใหญ่ (กล่องภาพ ~1530px บนจอ 1920 = 2 เท่าของ
+     เลย์เอาต์เดิม) แต่ยังเว้นขอบซ้าย-ขวาและอยู่กึ่งกลางจอ ไม่ชิดขอบจนอึดอัด */
+  .aw-wrap   { max-width: 1600px; margin: 24px auto; padding: 0 20px; }
   .aw-head   { display:flex; align-items:baseline; justify-content:space-between; flex-wrap:wrap; gap:12px; margin-bottom:8px; }
   .aw-head h2{ margin:0; }
   .aw-sub    { color:#666; font-size:14px; }
@@ -82,18 +84,34 @@
      max-width:none) — กล่องกว้างขึ้น = เห็นภาพมากขึ้นที่ซูมเท่าเดิม ไม่ใช่
      ย่อภาพลง. resize:vertical ให้ผู้ใช้ลากย่อกล่องเองได้เมื่ออยากเห็นผลตรวจ
      ด้านล่างไปพร้อมกัน (max-height คุมไม่ให้สูงเกินจอ) */
-  .aw-stage-box { background:#f5f7fa; border:1px dashed #cfd8dc; border-radius:6px; min-height:320px;
-                  overflow:auto; max-height:calc(100vh - 240px); position:relative;
-                  resize:vertical; }
-  .aw-zoom-bar  { display:flex; align-items:center; gap:8px; padding:5px 8px; background:#eef2f7;
-                  border-bottom:1px solid #d8dde4; font-size:12px; color:#546e7a; position:sticky;
-                  top:0; z-index:10; }
+  .aw-stage-box { background:#f7f9fc; border:1px solid #e1e8f0; border-radius:0 0 8px 8px;
+                  min-height:320px; overflow:auto; max-height:calc(100vh - 280px);
+                  position:relative; resize:vertical; }
+  /* ยังไม่มีไฟล์ = กล่องเปล่า ใช้เส้นประบอกว่า "รอรับภาพ" (มุมโค้งครบทั้ง 4
+     เพราะตอนนั้นแถบเครื่องมือถูกซ่อนอยู่) */
+  .aw-stage-box.is-empty { border-style:dashed; border-radius:8px; margin-top:14px; }
+  /* ── แถบเครื่องมือเหนือกล่องภาพ (อยู่นอกกล่อง = ไม่เลื่อนตามรูป) ─────
+     ซ้าย = สลับไฟล์หลัก/ชิ้นงาน · ขวา = ซูม + คำใบ้การลากเลื่อน */
+  .aw-toolbar { display:flex; align-items:center; flex-wrap:wrap; gap:10px;
+                margin-top:14px; padding:7px 12px; background:#f4f7fb;
+                border:1px solid #e1e8f0; border-radius:8px 8px 0 0;
+                border-bottom:none; font-size:12px; color:#546e7a; }
+  .aw-tb-group { display:flex; align-items:center; gap:8px; }
+  .aw-tb-label { white-space:nowrap; }
+  .aw-toolbar input[type=range] { width:130px; vertical-align:middle; }
+  .aw-tb-pct   { min-width:38px; font-weight:700; color:#0d47a1; text-align:right; }
+  .aw-btn-sm   { padding:3px 9px; font-size:12px; line-height:1.4; }
+  .aw-pan-hint { color:#90a4ae; font-size:11.5px; margin-left:auto; white-space:nowrap; }
+  /* เส้นแบ่งบาง ๆ ระหว่างกลุ่มปุ่ม — อ่านง่ายขึ้นโดยไม่รกตา */
+  .aw-doc-tabs { position:relative; padding-right:12px; }
+  .aw-doc-tabs::after { content:""; position:absolute; right:0; top:50%; transform:translateY(-50%);
+                        width:1px; height:18px; background:#d4dde8; }
+
   /* เคอร์เซอร์มือ = "ลากเลื่อนภาพได้" ติดเฉพาะตอนภาพใหญ่เกินกล่องจริง ๆ
      (คลาส aw-pannable ตั้งโดย updatePannable() ใน artwork_check.js).
      cursor สืบทอดลงลูก → บนภาพก็เป็นมือ ส่วนบนโซนถูก .aw-zone{cursor:move}
      ทับ และตอนกด "เพิ่มโซน" ถูก crosshair (inline บน .aw-stage) ทับ */
   .aw-stage-box.aw-pannable { cursor:grab; }
-  .aw-pan-hint { color:#90a4ae; font-size:11.5px; margin-left:2px; }
   .aw-stage-box.aw-panning, .aw-stage-box.aw-panning * { cursor:grabbing !important; }
   .aw-stage  { position:relative; display:inline-block; line-height:0; }
   /* ห้ามให้เบราว์เซอร์ "ลากรูป" (native image drag) แย่ง event ตอน pan
@@ -314,25 +332,32 @@
         <button id="awTemplateSave" class="aw-btn" disabled>บันทึก template…</button>
       </div>
 
-      <div class="aw-stage-box" style="margin-top:12px;">
-        <div id="awZoomBar" class="aw-zoom-bar" style="display:none;">
-          <span id="awDocTabs" class="aw-doc-tabs" style="display:none;">
-            <button type="button" id="awDocTabA" class="aw-doc-tab active-a">🅰 ไฟล์หลัก</button>
-            <button type="button" id="awDocTabB" class="aw-doc-tab">🅱 ชิ้นงาน</button>
-          </span>
-          <span>🔍 ซูม</span>
+      <!-- แถบเครื่องมืออยู่ "นอก" กล่องภาพ จึงไม่เลื่อนตามรูปเวลาลาก/ซูม
+           (เดิมอยู่ข้างในและ sticky เฉพาะแนวตั้ง → พอเลื่อนภาพไปทางขวา
+           ปุ่มไฟล์หลัก/ชิ้นงานจะหลุดออกนอกจอ) -->
+      <div id="awZoomBar" class="aw-toolbar" style="display:none;">
+        <span id="awDocTabs" class="aw-doc-tabs" style="display:none;">
+          <button type="button" id="awDocTabA" class="aw-doc-tab active-a">🅰 ไฟล์หลัก</button>
+          <button type="button" id="awDocTabB" class="aw-doc-tab">🅱 ชิ้นงาน</button>
+        </span>
+        <span class="aw-tb-group">
+          <span class="aw-tb-label">🔍 ซูม</span>
           <input id="awZoomRange" type="range" min="30" max="300" value="100"
-                 style="width:120px; vertical-align:middle;" title="ดับเบิลคลิกเพื่อกลับ 100%">
-          <span id="awZoomLabel" style="min-width:36px; font-weight:600; color:#0d47a1;">100%</span>
-          <button id="awZoomReset" class="aw-btn" style="padding:2px 8px; font-size:12px;">↺ 100%</button>
-          <button id="awZoomFit" class="aw-btn" style="padding:2px 8px; font-size:12px;"
+                 title="ดับเบิลคลิกเพื่อกลับ 100%">
+          <span id="awZoomLabel" class="aw-tb-pct">100%</span>
+          <button id="awZoomReset" class="aw-btn aw-btn-sm">↺ 100%</button>
+          <button id="awZoomFit" class="aw-btn aw-btn-sm"
                   title="ย่อ/ขยายให้ภาพพอดีความกว้างของช่องมอง (ไม่เปลี่ยนพิกัดโซน)">⤢ พอดีความกว้าง</button>
-          <span class="aw-pan-hint">✋ ลากบนพื้นที่ว่างเพื่อเลื่อนภาพ (หรือกดล้อลากก็ได้)</span>
-        </div>
+        </span>
+        <span class="aw-pan-hint">✋ ลากบนพื้นที่ว่างเพื่อเลื่อนภาพ (หรือกดล้อเมาส์ลาก)</span>
+      </div>
+
+      <div id="awStageBox" class="aw-stage-box is-empty">
         <div id="awStageEmpty" class="aw-empty">
-          ยังไม่มีไฟล์ — เลือกไฟล์ Artwork ด้านบน<br>
-          จากนั้นกด "↻ เสนอโซนใหม่" ให้ระบบเสนอโซน หรือ "+ เพิ่มโซน" วาดเอง<br>
-          ปรับ/ย้าย/ลบ (ปุ่ม Delete) ได้ก่อนส่งตรวจ
+          ยังไม่ได้เลือกไฟล์ — กรุณาเลือกไฟล์ Artwork ที่ด้านบน<br>
+          จากนั้นกด "↻ เสนอโซนใหม่" เพื่อให้ระบบกำหนดโซนอัตโนมัติ
+          หรือกด "+ เพิ่มโซน" เพื่อกำหนดเอง<br>
+          สามารถปรับขนาด ย้าย หรือลบโซน (ปุ่ม Delete) ได้ก่อนส่งตรวจสอบ
         </div>
         <div id="awStage" class="aw-stage" style="display:none;">
           <img id="awPreviewImg" alt="artwork preview">
@@ -381,20 +406,28 @@
       </div>
 
       <div class="aw-hint">
-        🧭 <b>วิธีจัดโซนให้ตรวจแม่น</b>
+        🧭 <b>แนวทางการกำหนดโซนเพื่อให้ผลตรวจแม่นยำ</b>
         <ul>
-          <li>วาดกรอบหยาบๆ ให้<b>ใหญ่กว่าเนื้อหาเล็กน้อย</b> แล้ว<b>ดับเบิลคลิกที่โซน</b> — ระบบจะขยับกรอบให้พอดีเนื้อหาเอง (คลิกซ้ำได้ถ้ายังไม่พอดี) อย่าวาดเล็กจนตัดข้อความ เพราะ OCR จะอ่านไม่ครบแล้วฟ้องว่าข้อความหาย</li>
-          <li>panel ที่ซ้ำกัน (เช่น SIDE 1–4) ใส่<b>กลุ่มเดียวกัน</b> — ระบบจะโหวตเสียงข้างมากหา panel ที่สะกดต่าง</li>
-          <li>โซน zoom ใส่กลุ่มเดียวกับ panel ที่มันขยาย — ระบบจะเช็คว่า zoom ตรงกับฉลากจริง</li>
-          <li>เทียบข้ามไฟล์: ระบบใส่กลุ่ม <b>A B C…</b> เรียงลำดับให้อัตโนมัติทั้งสองไฟล์
-              — โซนลำดับเดียวกันจับคู่กันเอง (สังเกต <b>⇄</b> บนแท็กโซน) ก่อนส่งตรวจให้กวาดตา
-              เช็คว่าคู่ถูกต้อง แก้ตัวอักษรกลุ่มทับได้ตามปกติ โซนที่วาดเพิ่มเองก็ได้ตัวอักษร
-              ถัดไปให้อัตโนมัติ (ตั้งโซนฝั่งชิ้นงานเป็น type <b>zoom</b> ถ้าต้องการให้ชิ้นงานเป็น
-              "ต้นแบบอ้างอิง" แล้วชี้ความผิดไปที่ไฟล์ใหม่)</li>
-          <li>เส้น dieline / color bar ตั้งเป็น ignore</li>
-          <li>ข้อความหมุน 90° (รหัสข้างบาร์โค้ด/แถบ TM) และโลโก้อักษรวิจิตร — OCR อ่านไม่นิ่ง
-              ควรตั้งเป็น ignore (หรือยอมรับ warning "อ่านไม่ชัด")</li>
-          <li>จัดเสร็จแล้วกด "บันทึก template" — layout เดิมของโรงพิมพ์เดิมจะโหลดมาใช้ซ้ำได้เลย</li>
+          <li><b>ขนาดของโซน</b> — กำหนดกรอบให้<b>ครอบคลุมเนื้อหาโดยเผื่อขอบเล็กน้อย</b>
+              จากนั้น<b>ดับเบิลคลิกที่โซน</b> ระบบจะปรับกรอบให้พอดีกับเนื้อหาโดยอัตโนมัติ
+              (ดับเบิลคลิกซ้ำได้หากยังไม่พอดี) หลีกเลี่ยงการกำหนดกรอบเล็กจนตัดข้อความ
+              เนื่องจาก OCR จะอ่านได้ไม่ครบ และระบบจะรายงานว่าข้อความหายไป</li>
+          <li><b>panel ที่มีเนื้อหาซ้ำกัน</b> (เช่น SIDE 1–4) ให้กำหนดเป็น<b>กลุ่มเดียวกัน</b>
+              ระบบจะเปรียบเทียบด้วยเสียงข้างมากเพื่อระบุ panel ที่สะกดแตกต่างจากพวก</li>
+          <li><b>โซนประเภท zoom</b> ให้กำหนดกลุ่มเดียวกับ panel ที่ขยายมา
+              ระบบจะตรวจสอบว่าเนื้อหาในภาพขยายตรงกับฉลากจริง</li>
+          <li><b>การเปรียบเทียบข้ามไฟล์</b> — ระบบกำหนดกลุ่ม <b>A B C…</b> ตามลำดับให้อัตโนมัติ
+              ทั้งสองไฟล์ โซนลำดับเดียวกันจะจับคู่กันเอง (สังเกตสัญลักษณ์ <b>⇄</b> บนแท็กโซน)
+              ก่อนส่งตรวจสอบ ควรตรวจทานว่าการจับคู่ถูกต้อง และสามารถแก้ไขตัวอักษรกลุ่มได้ตามต้องการ
+              โซนที่เพิ่มเองภายหลังจะได้รับตัวอักษรลำดับถัดไปโดยอัตโนมัติ
+              (หากต้องการใช้ไฟล์ชิ้นงานเป็นต้นแบบอ้างอิงและรายงานความผิดไปที่ไฟล์ใหม่
+              ให้กำหนดโซนฝั่งชิ้นงานเป็นประเภท <b>zoom</b>)</li>
+          <li><b>เส้น dieline และ color bar</b> ให้กำหนดเป็นประเภท ignore</li>
+          <li><b>ข้อความที่หมุน 90°</b> (รหัสข้างบาร์โค้ด หรือแถบ TM) และ<b>โลโก้อักษรประดิษฐ์</b>
+              — OCR อ่านได้ไม่สม่ำเสมอ แนะนำให้กำหนดเป็นประเภท ignore
+              หรือยอมรับคำเตือน "อ่านไม่ชัด"</li>
+          <li><b>เมื่อกำหนดโซนเรียบร้อยแล้ว</b> ให้กด "บันทึก template"
+              เพื่อนำผังโซนของโรงพิมพ์เดิมกลับมาใช้ซ้ำในครั้งถัดไป</li>
         </ul>
       </div>
       <div id="awEnvWarn" class="aw-warn" style="display:none;"></div>
