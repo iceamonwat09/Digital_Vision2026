@@ -125,6 +125,14 @@ MIN_PRECISION = 0.95
 MAX_PHANTOM_CHARS = 3
 # โซนเดิม 2 DPI ต้องตรงกันอย่างน้อยเท่านี้จึงถือว่า "อ่านได้จริง ไม่ใช่เดา"
 MIN_SELF_AGREE = 0.80
+# ความสูงตัวอักษรขั้นต่ำใน crop (พิกเซล) ที่ OCR ยังอ่านได้น่าเชื่อถือ.
+# วัดจากบล็อกจริงบล็อกเดียวกัน เปลี่ยนแค่ DPI:
+#     9.0 px -> recall  1.2%      17.2 px -> 93.9%
+#    12.4 px -> recall 23.2%      22.1 px -> 98.5%
+#                                 31.0 px -> 100%
+# ต่ำกว่า ~15 px คือ "ภาพเล็กเกินไป" ไม่ใช่ "engine อ่านไม่ออก" — ต้องแยก
+# สองอย่างนี้ให้ออก ไม่งั้นจะสรุปผิดว่า OCR ใช้ไม่ได้
+MIN_LINE_PX = 15.0
 
 DPI_A_FACTOR = 1.0                     # ใช้ config.OCR_DPI ตรง ๆ
 DPI_B_FACTOR = 0.7                     # เรนเดอร์ที่สองสำหรับ self-consistency
@@ -431,6 +439,11 @@ def layer_groundtruth(ad, zones, engines, dpi, verbose):
         truth_w = _words(z["truth"])
         if not truth_w:
             continue
+        nlines = len([l for l in str(z["truth"]).splitlines() if l.strip()])
+        line_px = img.shape[0] / float(max(1, nlines))
+        too_small = line_px < MIN_LINE_PX
+        z["line_px"] = round(line_px, 1)
+        z["too_small"] = bool(too_small)
         line = "   โซน %-2d %5dx%-5d เฉลย %4d คำ |" % (
             i, img.shape[1], img.shape[0], len(truth_w))
         for eng in engines:
@@ -455,6 +468,16 @@ def layer_groundtruth(ad, zones, engines, dpi, verbose):
             if verbose and missed:
                 line += "\n        %s อ่านตก: %s" % (
                     eng.name, " ".join(missed[:8]))
+        if too_small:
+            line += ("\n        [!] ตัวอักษรสูงราว %.1f px (ต่ำกว่าเกณฑ์ %.0f) "
+                     "— ภาพเล็กเกินไป ไม่ใช่ engine อ่านไม่ออก"
+                     % (line_px, MIN_LINE_PX))
+            line += ("\n            ลอง --dpi %d  (หรือแก้ที่ต้นทาง: "
+                     "ocr.read_zone ไม่มีการเพิ่ม DPI ให้โซนเล็ก"
+                     % int(dpi * (MIN_LINE_PX * 1.6 / max(1.0, line_px))))
+            line += "\n            ต่างจาก zone_crop_jpg ที่มี CROP_MIN_SIDE)"
+            res.setdefault("_small_zones", 0)
+            res["_small_zones"] = res.get("_small_zones", 0) + 1
         print(line)
     return res
 
