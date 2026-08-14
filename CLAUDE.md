@@ -412,6 +412,37 @@ Label Paper / Live / Dashboard / `/api/defects` ไม่ถูกแตะ แ�
 
 ---
 
+## 🔑 Login — ปุ่ม "ลงทะเบียน" (self-service registration)
+
+หน้า `/login` มีปุ่ม **ลงทะเบียน** เปิด modal (ฟอร์มเดียวกับ "เพิ่มผู้ใช้ใหม่" ของแอดมิน
+แต่ตัด **ชื่อผู้ใช้** + **บทบาท (role)** ออก). โค้ด: `auth/registration.py` (กติกาล้วน ไม่มี Flask)
++ `POST /api/auth/register` ใน `auth/routes.py` + modal ใน `templates/login.html`/`static/js/login.js`.
+
+- **username = email (lowercase เสมอ)** — `normalize_email()` พับเป็นตัวเล็กก่อนเทียบ/บันทึก
+  ไม่งั้น `A@x.com` กับ `a@x.com` กลายเป็น 2 บัญชีบน collation ที่ case-sensitive.
+- **role fix ฝั่งเซิร์ฟเวอร์** (`AUTH_REGISTER_ROLE`, default `Viewer`) — body ที่ส่ง `role` มา
+  **ถูกละทิ้ง** (เทสต์ `test_client_cannot_choose_role` กันไว้). endpoint นี้ยกระดับสิทธิ์ไม่ได้.
+- **โดเมนอีเมลเทียบแบบตรงทั้งโดเมน** (`@thaiunion.com` เท่านั้น) → subdomain
+  (`mail.thaiunion.com`) และโดเมนหลอก (`evil-thaiunion.com`) ต้องไม่ผ่าน — มีเทสต์ทั้งคู่.
+- **อีเมลยาว > 64 ตัว = ปฏิเสธ** เพราะ `AuthUsers.Username` เป็น `NVARCHAR(64)`
+  (username = email) ไม่งั้นไปพังที่ SQL Server. ค่าคงที่อยู่ที่ `ac.USERNAME_MAX_LEN`
+  **ต้องตรงกับ `Connection_sql/auth_schema.sql`** และกับเลข 64 ใน `login.js`.
+- **`/api/auth/register` ต้องอยู่ใน `_PUBLIC_PATHS` ของ `access.py`** ไม่งั้นคนที่ยังไม่ล็อกอิน
+  โดน 401 = ปุ่มลงทะเบียนใช้ไม่ได้เลย (เทสต์ `test_register_endpoint_is_public` กันไว้).
+- **สิทธิ์ที่เห็นหลังล็อกอิน = สิทธิ์ของ role นั้นล้วน ๆ** — ถ้าอยากให้บัญชีที่สมัครเองเห็นแค่
+  *ตรวจ Artwork* ให้ไปติ๊กสิทธิ์ของ role `Viewer` ที่หน้า `/admin/users` (การ์ด "บทบาทและสิทธิ์
+  การใช้งาน") **ไม่ต้องแก้โค้ด** — และการแก้ตรงนั้นกระทบบัญชี Viewer เดิมทุกคนด้วย.
+- กันสแปม: throttle ต่อ IP ในหน่วยความจำ (`AUTH_REGISTER_MAX_PER_IP_HOUR`, `0` = ปิด)
+  **นับเฉพาะคำขอที่อีเมลฟอร์แมตถูก** — พิมพ์อีเมลผิดจะได้ไม่กินโควตาของคนที่สมัครจริง.
+- **kill switch:** `AUTH_REGISTER_ENABLED=0` = ซ่อนปุ่ม **และ** API ตอบ 403 (ซ่อน UI อย่างเดียว
+  ไม่ใช่การป้องกัน — เทสต์ยิงตรงเข้า endpoint ตอนปิด flag).
+- เทสต์: `tests/test_auth_registration.py` 39 ตัว (mock `store`+bcrypt → ไม่ต้องมี SQL Server).
+- **บั๊กเก่าที่แก้ไปพร้อมกัน:** `.pw-strength{display:flex}` / `.pw-rules{display:grid}` ใน
+  `auth.css` **ชนะ attribute `hidden`** → แถบวัดความแข็งแรงรหัสผ่านโผล่เป็นแถบเทาว่างบนหน้า
+  login ตั้งแต่ยังไม่พิมพ์อะไร. เพิ่ม `.pw-strength[hidden], .pw-rules[hidden]{display:none}`.
+
+---
+
 ## 🔌 N8N Artwork OCR — เคส "ไม่มีการยิง HTTP ออกไปเลย"
 
 **คนละอาการกับ "ยิงแล้วพัง"** — ที่เคยแก้ไปก่อนหน้านี้คืออาการ *ยิงแล้วไปไม่ถึง*
@@ -500,8 +531,8 @@ timeout = Gemini ช้า/โควตา · 413 = payload เกิน) ③ �
 - HW สถานี: **i7-1165G7** (4C/8T, 15W, AVX-512), 16GB DDR4 (single-channel), Iris Xe, Win10 Pro, Python 3.9.13.
 - inference bestX (seg): **iGPU (OpenVINO) ≈ 45-50ms/เฟรม (~20-22 FPS)** = ตัวจริงปัจจุบัน;
   ONNX CPU ≈ 280ms (~2.7-3 FPS) = ชั้น fallback; PyTorch ≈ 315ms = fallback สุดท้าย.
-- Repo: `iceamonwat09/digital_vision2026`. Dev branch ปัจจุบัน: `claude/artwork-ui-layout-1lnwgt`
-  (ก่อนหน้า: `claude/artwork-red-box-drawing-lpqhpo`). **ห้าม push ไป main**.
+- Repo: `iceamonwat09/digital_vision2026`. Dev branch ปัจจุบัน: `claude/login-registration-feature-2ndkn9`
+  (ก่อนหน้า: `claude/artwork-ui-layout-1lnwgt`). **ห้าม push ไป main**.
 - SQL Server: 172.32.0.50/VisionIQ. Defect log ผ่าน `sp_log_defect` (เก็บภาพ base64).
 - **N8N รันบนเครื่องสถานีเอง** → default ของ `N8N_OCR_WEBHOOK_URL` (`config.py`) และ
   `N8N_TRANSLATE_WEBHOOK_URL` (`artwork_check/config.py`) ชี้ `http://127.0.0.1:5678/...`.
@@ -510,11 +541,12 @@ timeout = Gemini ช้า/โควตา · 413 = payload เกิน) ③ �
   ถ้า N8N ผูกเฉพาะ IPv4 จะต่อไม่ติดโดยไม่มี error ที่อ่านออก. ย้ายเครื่องเมื่อไรตั้ง env ทับได้
   ไม่ต้องแก้โค้ด. ⚠️ **IP `172.32.201.106` ที่เหลือใน `generate_cert.py`/README = IP ของสถานีเอง
   สำหรับใบรับรอง HTTPS ห้ามเปลี่ยนเป็น 127.0.0.1** ไม่งั้นเครื่องอื่นเปิดเว็บไม่ได้.
-- Tests: `pytest tests/` — 339 ตัว (artwork/label/barcode — **ไม่ครอบคลุม camera/live loop**).
-  เพิ่มล่าสุด: `tests/test_artwork_ownership.py` 30 ตัว (สิทธิ์เห็นประวัติ + ชื่อผู้ตรวจ).
+- Tests: `pytest tests/` — 378 ตัว (artwork/label/barcode/auth — **ไม่ครอบคลุม camera/live loop**).
+  เพิ่มล่าสุด: `tests/test_auth_registration.py` 39 ตัว (ปุ่มลงทะเบียนหน้า login),
+  `tests/test_artwork_ownership.py` 30 ตัว (สิทธิ์เห็นประวัติ + ชื่อผู้ตรวจ).
   ⚠️ `tests/test_inspection_golden.py` **fail 5 ตัวอยู่แล้ว** (pre-existing, `NameError: FieldResult`
   ในโมดูล Label Paper) — ไม่เกี่ยวกับ artwork. ยืนยันด้วย `git stash` ก่อนโทษการแก้ของตัวเอง.
-- CONFIG_VERSION ปัจจุบัน: **`2026.08.14-aw-owner-name`** (เช็คที่ footer ว่ารันโค้ดใหม่จริง).
+- CONFIG_VERSION ปัจจุบัน: **`2026.08.14-auth-self-register`** (เช็คที่ footer ว่ารันโค้ดใหม่จริง).
 
 ---
 

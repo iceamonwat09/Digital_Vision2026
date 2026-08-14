@@ -4,6 +4,7 @@ Flask blueprint for authentication + user management.
 Routes
   GET  /login                 — login page
   POST /api/auth/login        — sign in (sets httpOnly cookies)
+  POST /api/auth/register     — self-service sign-up (public; role is fixed)
   POST /api/auth/logout       — clear cookies
   POST /api/auth/refresh      — mint a new access token from the refresh cookie
   GET  /api/auth/me           — current user + permissions
@@ -25,7 +26,7 @@ import re
 
 from flask import (Blueprint, g, jsonify, render_template, request)
 
-from . import config as ac, passwords, store, tokens
+from . import config as ac, passwords, registration, store, tokens
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +69,14 @@ def _public_user(user: dict, perms: list) -> dict:
 
 @auth_bp.route("/login")
 def login_page():
-    return render_template("login.html")
+    # The template only *hides* the sign-up UI when registration is off; the
+    # API below is what actually enforces it.
+    return render_template(
+        "login.html",
+        register_enabled=ac.REGISTER_ENABLED,
+        register_domains=list(ac.REGISTER_EMAIL_DOMAINS),
+        register_domains_label=registration.domains_label(),
+    )
 
 
 # ── Auth API ──────────────────────────────────────────────────────────
@@ -124,6 +132,72 @@ def api_login():
     resp = jsonify({"status": "ok", "user": _public_user(user, perms)})
     _set_auth_cookies(resp, access, refresh, remember)
     return resp
+
+
+@auth_bp.route("/api/auth/register", methods=["POST"])
+def api_register():
+    """Self-service sign-up — public (no session required).
+
+    Fixed by policy, never by the client:
+      • role     = ac.REGISTER_ROLE ("Viewer") — any ``role`` in the body is
+                   ignored, so this endpoint can never mint an admin.
+      • username = the email address (the form has no username field).
+      • email    = must sit on an allowed company domain, case-insensitive.
+    """
+    if not ac.REGISTER_ENABLED:
+        return jsonify({"error": "ระบบปิดการลงทะเบียนด้วยตนเอง "
+                                 "กรุณาติดต่อผู้ดูแลระบบ"}), 403
+    if not store.db_available():
+        return jsonify({"error": "ระบบฐานข้อมูลไม่พร้อม (pyodbc ไม่ได้ติดตั้ง)"}), 503
+    if not passwords.hashing_available():
+        return jsonify({"error": "bcrypt ไม่ได้ติดตั้ง"}), 503
+
+    body = request.get_json(silent=True) or request.form
+    ok, email, err = registration.check_email(body.get("email"))
+    if not ok:
+        return jsonify({"error": err}), 400
+
+    password = body.get("password") or ""
+    confirm = body.get("confirm_password")
+    if confirm is not None and confirm != password:
+        return jsonify({"error": "รหัสผ่านและการยืนยันรหัสผ่านไม่ตรงกัน"}), 400
+    ok, errs = passwords.validate_password(password)
+    if not ok:
+        return jsonify({"error": "รหัสผ่านไม่ผ่านเงื่อนไข", "details": errs}), 400
+
+    # Throttle only well-formed attempts, so a typo in the email does not
+    # consume a legitimate user's quota.
+    allowed, retry = registration.check_rate(_client_ip())
+    if not allowed:
+        return jsonify({"error": "ลงทะเบียนบ่อยเกินไป กรุณารอสักครู่แล้วลองใหม่",
+                        "retry_after": retry}), 429
+
+    role_id = store.get_role_id(ac.REGISTER_ROLE)
+    if role_id is None:
+        logger.error("register: role '%s' missing in DB", ac.REGISTER_ROLE)
+        return jsonify({"error": f"ระบบยังไม่ได้ตั้งค่า role "
+                                 f"'{ac.REGISTER_ROLE}' — ติดต่อผู้ดูแลระบบ"}), 503
+
+    if store.get_user_by_login(email) is not None:
+        return jsonify({"error": "อีเมลนี้ถูกใช้งานแล้ว "
+                                 "หากลืมรหัสผ่านกรุณาติดต่อผู้ดูแลระบบ"}), 409
+
+    try:
+        uid = store.create_user(email, email,
+                                passwords.hash_password(password), role_id)
+    except Exception as e:
+        # A duplicate can still slip past the check above (two requests racing
+        # on the same address) — the UNIQUE index is the real guard.
+        logger.error("self-register failed for %s: %s", email, e)
+        return jsonify({"error": "สร้างบัญชีไม่สำเร็จ "
+                                 "(อีเมลนี้อาจถูกใช้แล้ว) กรุณาลองใหม่"}), 409
+
+    store.record_admin_action(None, "self_register", email,
+                              f"role={ac.REGISTER_ROLE}")
+    logger.info("self-registered user '%s' (id=%s, role=%s)",
+                email, uid, ac.REGISTER_ROLE)
+    return jsonify({"status": "ok", "username": email,
+                    "role": ac.REGISTER_ROLE}), 201
 
 
 @auth_bp.route("/api/auth/refresh", methods=["POST"])
