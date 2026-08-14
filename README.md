@@ -157,8 +157,8 @@ FRAME_CAPTURE_EDGE_MARGIN = 0.02   # กระป๋องต้องห่า�
 
 | ตัวแปร | ค่า default | หน้าที่ |
 |---|---|---|
-| `N8N_OCR_WEBHOOK_URL` | `http://172.32.201.106:5678/webhook/artwork-ocr` | OCR ถอดข้อความจากภาพโซน |
-| `N8N_TRANSLATE_WEBHOOK_URL` | `http://172.32.201.106:5678/webhook/artwork-translate` | แปลข้อความเป็น EN (แท็บคำแปล) |
+| `N8N_OCR_WEBHOOK_URL` | `http://127.0.0.1:5678/webhook/artwork-ocr` | OCR ถอดข้อความจากภาพโซน |
+| `N8N_TRANSLATE_WEBHOOK_URL` | `http://127.0.0.1:5678/webhook/artwork-translate` | แปลข้อความเป็น EN (แท็บคำแปล) |
 | `OCR_BACKEND` | (ว่าง) | `n8n` / `stub` / `vertex` — ว่างไว้ระบบเลือก n8n ให้เมื่อมี URL |
 | `ARTWORK_OCR_DPI` | `450` | ความละเอียดที่ render โซนส่ง OCR |
 | `ARTWORK_PREVIEW_DPI` | `150` | ความละเอียด preview ในเบราว์เซอร์ |

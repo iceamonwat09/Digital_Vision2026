@@ -180,9 +180,11 @@ CROP_MIN_SIDE = int(os.getenv("ARTWORK_CROP_MIN_SIDE", "1200"))
 # layers and NEVER affects the PASS/FAIL verdict — it only helps a human
 # read a foreign-language label. Leave empty to disable the tab's
 # translate button (the table still shows source text + spell hints).
+# ชี้ 127.0.0.1 เหมือน N8N_OCR_WEBHOOK_URL (N8N รันบนเครื่องสถานีเอง) —
+# ⚠️ ต้องแก้ทั้งสองที่เสมอ ถ้าแก้ที่เดียวอีกตัวจะยิงไปเครื่องเก่าแบบเงียบ ๆ
 N8N_TRANSLATE_WEBHOOK_URL = os.getenv(
     "N8N_TRANSLATE_WEBHOOK_URL",
-    "http://172.32.201.106:5678/webhook/artwork-translate",
+    "http://127.0.0.1:5678/webhook/artwork-translate",
 ).strip()
 N8N_TRANSLATE_TIMEOUT_S = float(os.getenv("N8N_TRANSLATE_TIMEOUT_S", "60"))
 # จำนวนบรรทัดสูงสุดต่อ 1 request แปล/AI-spell. ลิสต์ยาว (เทียบ 2 ไฟล์ =

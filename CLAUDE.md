@@ -396,6 +396,11 @@ Label Paper / Live / Dashboard / `/api/defects` ไม่ถูกแตะ แ�
   **สิทธิ์เห็นทั้งหมดจะหยุดทำงานเงียบ ๆ** ต้องมาแก้ค่าคอนฟิกให้ตรงกัน.
 - **ปุ่มลบใช้ด่านเดียวกัน** (DELETE มี `rec_id`) ⇒ เจ้าของ + admin เท่านั้น. JS ไม่ต้องซ่อนปุ่ม
   เพราะรายการที่แสดง = รายการที่ลบได้อยู่แล้ว (server กรองมาให้).
+- **ชื่อผู้ตรวจแสดง 2 ที่**: คอลัมน์ "ผู้ตรวจ" ในตารางประวัติ · บรรทัด `👤 <ชื่อ>` ในหัวรายงาน
+  ตอนเปิดดูรายละเอียด (และหลังกด "ส่งตรวจสอบ" บนหน้าตรวจ). `routes._with_owner()` แนบ
+  ชื่อ **ตอนตอบเท่านั้น** ไม่เขียนลง `report.json` ⇒ เจ้าของมีแหล่งความจริงเดียวคือ
+  `owner.json` (ไฟล์เดียวกับที่ด่านสิทธิ์ใช้) ไม่มีทางไม่ตรงกัน. บันทึกเก่า = ค่าว่าง →
+  UI ไม่แสดงบรรทัดนั้น (ดีกว่าโชว์ "ไม่ทราบ").
 - `list_inspections(limit, can_view=None)` — `can_view=None` = เส้นทางเดิมเป๊ะ. ตอนกรองมีเพดาน
   `_MAX_SCAN=2000` กันผู้ใช้ใหม่ที่ยังไม่มีบันทึกต้องไล่อ่านทั้งคลังทุกครั้ง. เพิ่ม field `owner`
   (ชื่อผู้ตรวจ) ในผลลัพธ์ = คอลัมน์ใหม่ในตาราง (JS `COLS=7` ต้องตรงกับ `<th>` ใน template).
@@ -404,6 +409,84 @@ Label Paper / Live / Dashboard / `/api/defects` ไม่ถูกแตะ แ�
 - **ตอน deploy ครั้งแรก:** บันทึกเก่าทั้งหมดจะหายจากสายตาผู้ใช้ทั่วไปทันที (เห็นได้เฉพาะ admin)
   และงานที่ค้างอยู่ระหว่างจัดโซนตอนรีสตาร์ตจะกลายเป็น "ไม่มีเจ้าของ" → เจ้าตัวเปิดต่อไม่ได้
   ต้องอัปโหลดใหม่ ⇒ **ควร deploy ตอนไม่มีคนใช้งาน**.
+
+---
+
+## 🔑 Login — ปุ่ม "ลงทะเบียน" (self-service registration)
+
+หน้า `/login` มีปุ่ม **ลงทะเบียน** เปิด modal (ฟอร์มเดียวกับ "เพิ่มผู้ใช้ใหม่" ของแอดมิน
+แต่ตัด **ชื่อผู้ใช้** + **บทบาท (role)** ออก). โค้ด: `auth/registration.py` (กติกาล้วน ไม่มี Flask)
++ `POST /api/auth/register` ใน `auth/routes.py` + modal ใน `templates/login.html`/`static/js/login.js`.
+
+- **username = email (lowercase เสมอ)** — `normalize_email()` พับเป็นตัวเล็กก่อนเทียบ/บันทึก
+  ไม่งั้น `A@x.com` กับ `a@x.com` กลายเป็น 2 บัญชีบน collation ที่ case-sensitive.
+- **role fix ฝั่งเซิร์ฟเวอร์** (`AUTH_REGISTER_ROLE`, default `Viewer`) — body ที่ส่ง `role` มา
+  **ถูกละทิ้ง** (เทสต์ `test_client_cannot_choose_role` กันไว้). endpoint นี้ยกระดับสิทธิ์ไม่ได้.
+- **โดเมนอีเมลเทียบแบบตรงทั้งโดเมน** (`@thaiunion.com` เท่านั้น) → subdomain
+  (`mail.thaiunion.com`) และโดเมนหลอก (`evil-thaiunion.com`) ต้องไม่ผ่าน — มีเทสต์ทั้งคู่.
+- **อีเมลยาว > 64 ตัว = ปฏิเสธ** เพราะ `AuthUsers.Username` เป็น `NVARCHAR(64)`
+  (username = email) ไม่งั้นไปพังที่ SQL Server. ค่าคงที่อยู่ที่ `ac.USERNAME_MAX_LEN`
+  **ต้องตรงกับ `Connection_sql/auth_schema.sql`** และกับเลข 64 ใน `login.js`.
+- **`/api/auth/register` ต้องอยู่ใน `_PUBLIC_PATHS` ของ `access.py`** ไม่งั้นคนที่ยังไม่ล็อกอิน
+  โดน 401 = ปุ่มลงทะเบียนใช้ไม่ได้เลย (เทสต์ `test_register_endpoint_is_public` กันไว้).
+- **สิทธิ์ที่เห็นหลังล็อกอิน = สิทธิ์ของ role นั้นล้วน ๆ** — ถ้าอยากให้บัญชีที่สมัครเองเห็นแค่
+  *ตรวจ Artwork* ให้ไปติ๊กสิทธิ์ของ role `Viewer` ที่หน้า `/admin/users` (การ์ด "บทบาทและสิทธิ์
+  การใช้งาน") **ไม่ต้องแก้โค้ด** — และการแก้ตรงนั้นกระทบบัญชี Viewer เดิมทุกคนด้วย.
+- กันสแปม: throttle ต่อ IP ในหน่วยความจำ (`AUTH_REGISTER_MAX_PER_IP_HOUR`, `0` = ปิด)
+  **นับเฉพาะคำขอที่อีเมลฟอร์แมตถูก** — พิมพ์อีเมลผิดจะได้ไม่กินโควตาของคนที่สมัครจริง.
+- **kill switch:** `AUTH_REGISTER_ENABLED=0` = ซ่อนปุ่ม **และ** API ตอบ 403 (ซ่อน UI อย่างเดียว
+  ไม่ใช่การป้องกัน — เทสต์ยิงตรงเข้า endpoint ตอนปิด flag).
+- เทสต์: `tests/test_auth_registration.py` 39 ตัว (mock `store`+bcrypt → ไม่ต้องมี SQL Server).
+- **บั๊กเก่าที่แก้ไปพร้อมกัน:** `.pw-strength{display:flex}` / `.pw-rules{display:grid}` ใน
+  `auth.css` **ชนะ attribute `hidden`** → แถบวัดความแข็งแรงรหัสผ่านโผล่เป็นแถบเทาว่างบนหน้า
+  login ตั้งแต่ยังไม่พิมพ์อะไร. เพิ่ม `.pw-strength[hidden], .pw-rules[hidden]{display:none}`.
+
+---
+
+## 🔌 N8N Artwork OCR — เคส "ไม่มีการยิง HTTP ออกไปเลย"
+
+**คนละอาการกับ "ยิงแล้วพัง"** — ที่เคยแก้ไปก่อนหน้านี้คืออาการ *ยิงแล้วไปไม่ถึง*
+(`a34c4c2` ตั้ง default เป็น `localhost` ผิด → แก้กลับเป็น IP สถานี, ต่อมา `578d751`
+ย้ายมา `127.0.0.1` เพราะ N8N มารันบนสถานีเอง). ถ้า **ไม่มี log `[N8N→OCR] POST` เลย**
+แปลว่าโค้ดตัดสินใจไม่ยิงตั้งแต่ต้น ซึ่งมี **5 ทาง** (ส่วนใหญ่ถูกต้องตามออกแบบ ไม่ใช่บั๊ก):
+
+| # | เงื่อนไข | ที่เกิด | เป็นบั๊กไหม |
+|---|---|---|---|
+| 1 | โซน `type == "ignore"` | `ocr.read_all_zones()` ข้ามก่อนถึง `read_zone` | ไม่ (ตั้งใจ) |
+| 2 | **PDF text layer ≥ `EMBEDDED_TEXT_MIN_CHARS` (12)** → `engine="pdf-text"` | `ocr.read_zone()` บรรทัดแรก | **ไม่ — และพบบ่อยสุด** (แม่นกว่า OCR + ฟรี) |
+| 3 | `vertex_client.is_enabled()` เท็จ → `engine="none"` | `OCR_BACKEND` ถูกตั้งเป็นค่าอื่น หรือ URL ว่าง | ใช่ (ตั้งค่าผิด) |
+| 4 | `crop.size == 0` (bbox ตัดออกนอกหน้า) | `ocr.read_zone()` | ใช่ (โซนผิด) |
+| 5 | **cache `ocr_only.json` ยัง valid** | `pipeline.run_ocr_only()` (แท็บ "ข้อความ + คำแปล") | ไม่ (ตั้งใจ) |
+
+- **ทาง ② คือคำตอบของ "ทำไมบางไฟล์ยิง บางไฟล์ไม่ยิง"** — artwork ที่ยัง**ไม่ได้ outline**
+  ตัวหนังสือ (มี text layer) จะไม่แตะ N8N เลยทั้งไฟล์ ส่วนไฟล์ outline/ภาพถ่ายจะยิงทุกโซน.
+  **ไฟล์เดียวกันยังผสมกันได้** (บางโซนมี text layer บางโซนเป็นกราฟิก) → ดูรายโซนเท่านั้น.
+- **ทาง ⑤ ทำให้ "กดแล้วเงียบ"** — key = hash ของ (id/type/group/bbox/doc/rotate ของทุกโซน +
+  auto_rotate). ขยับโซนแม้นิดเดียว = cache หลุด. ลบ `data/artwork_check/inspections/<id>/ocr_only.json`
+  = บังคับ OCR ใหม่. **`run_inspection()` (ปุ่ม "ส่งตรวจสอบ") ไม่ใช้ cache นี้** — ยิงใหม่เสมอ.
+- **`_resolve_backend()` auto-เลือก `n8n` เมื่อ `OCR_BACKEND` ว่างและมี URL** ⇒ การตั้ง env
+  `OCR_BACKEND=stub`/`vertex` ทับ จะปิดการยิงทั้งระบบแบบเงียบ ๆ (ไม่ error, ได้ข้อความ stub).
+
+**เครื่องมือ:** `py -3.9 diagnose_n8n_ocr.py [<inspection-id>] [--no-ping|--ping-only|--scan]`
+— อ่านอย่างเดียว ไม่แตะ report/cache/verdict. ทำ 4 อย่าง:
+① พิมพ์ config ที่ตัดสินใจจริง (backend ที่ resolve ได้, URL ทั้ง OCR+translate, เตือนเมื่อ
+host สองตัวไม่ตรงกัน / ใช้ `localhost` / ใช้ **Test URL** `/webhook-test/` ที่ตายนอกโหมด
+listen) ② ยิงภาพ JPEG เล็ก ๆ ผ่าน `ocr_n8n.ocr_image()` = เส้นทางเดียวกับของจริง แล้วแปล
+error ให้ (connection refused = N8N ไม่ได้รัน · 404 = workflow ไม่ได้ Activate/path ผิด ·
+timeout = Gemini ช้า/โควตา · 413 = payload เกิน) ③ ไล่ทีละโซนของการตรวจจริง **โดยไม่เรียก OCR**
+บอกว่าโซนไหน "จะยิง" โซนไหนไม่ยิงเพราะข้อไหนใน 5 ทาง พร้อมเทียบกับ `engine` ที่บันทึกไว้ใน
+`report.json` และเช็คสถานะ cache ทาง ⑤ ④ **`--scan` กวาดทุกการตรวจ** หาไฟล์ที่
+"น่าจะได้ text แต่ยังยิง OCR" — เคสที่ต้องจับคือโซนที่มีข้อความ **1..11 ตัว**
+(ต่ำกว่า `EMBEDDED_TEXT_MIN_CHARS`) = ทิ้งข้อความจริงไปเดาด้วย OCR ทั้งที่โซนแค่ลากคาบเกี่ยว;
+โซนที่ได้ 0 ตัว = outline/กราฟิกจริง ยิง OCR ถูกแล้ว.
+
+**⚠️ การตัดสินเป็น "รายโซน" ไม่ใช่ "รายไฟล์"** — `embedded_text(bbox)` อ่านเฉพาะในกรอบโซน
+⇒ ไฟล์ที่มี text layer เต็มหน้ายังมีโซนที่ยิง OCR ได้ (โซนวางบนโลโก้/ภาพถ่ายที่ไม่มีตัวอักษร
+เป็น text) และไฟล์ outline ทั้งไฟล์จะยิงทุกโซน.
+
+**ลำดับการไล่ที่เร็วที่สุด:** ดู log บนคอนโซลก่อน — `[artwork] zone z1 engine=... chars=...`
+บอกทาง ①②③④ ครบอยู่แล้วต่อโซน ส่วน `[N8N→OCR] POST ...` คือหลักฐานว่ายิงจริง.
+ถ้า log หายไปทั้งคู่ = request ไม่เคยถึง pipeline (ดูฝั่ง route/สิทธิ์แทน).
 
 ---
 
@@ -448,14 +531,22 @@ Label Paper / Live / Dashboard / `/api/defects` ไม่ถูกแตะ แ�
 - HW สถานี: **i7-1165G7** (4C/8T, 15W, AVX-512), 16GB DDR4 (single-channel), Iris Xe, Win10 Pro, Python 3.9.13.
 - inference bestX (seg): **iGPU (OpenVINO) ≈ 45-50ms/เฟรม (~20-22 FPS)** = ตัวจริงปัจจุบัน;
   ONNX CPU ≈ 280ms (~2.7-3 FPS) = ชั้น fallback; PyTorch ≈ 315ms = fallback สุดท้าย.
-- Repo: `iceamonwat09/digital_vision2026`. Dev branch ปัจจุบัน: `claude/artwork-ui-layout-1lnwgt`
-  (ก่อนหน้า: `claude/artwork-red-box-drawing-lpqhpo`). **ห้าม push ไป main**.
+- Repo: `iceamonwat09/digital_vision2026`. Dev branch ปัจจุบัน: `claude/login-registration-feature-2ndkn9`
+  (ก่อนหน้า: `claude/artwork-ui-layout-1lnwgt`). **ห้าม push ไป main**.
 - SQL Server: 172.32.0.50/VisionIQ. Defect log ผ่าน `sp_log_defect` (เก็บภาพ base64).
-- Tests: `pytest tests/` — 335 ตัว (artwork/label/barcode — **ไม่ครอบคลุม camera/live loop**).
-  เพิ่มล่าสุด: `tests/test_artwork_ownership.py` 26 ตัว (สิทธิ์เห็นประวัติ artwork).
+- **N8N รันบนเครื่องสถานีเอง** → default ของ `N8N_OCR_WEBHOOK_URL` (`config.py`) และ
+  `N8N_TRANSLATE_WEBHOOK_URL` (`artwork_check/config.py`) ชี้ `http://127.0.0.1:5678/...`.
+  **มี 2 ที่ ต้องแก้ให้ตรงกันเสมอ** — แก้ที่เดียวอีกตัวจะยิงไปเครื่องเก่าแบบเงียบ ๆ.
+  ใช้ `127.0.0.1` ไม่ใช่ `localhost` เพราะ Windows resolve `localhost` เป็น `::1` (IPv6) ก่อน
+  ถ้า N8N ผูกเฉพาะ IPv4 จะต่อไม่ติดโดยไม่มี error ที่อ่านออก. ย้ายเครื่องเมื่อไรตั้ง env ทับได้
+  ไม่ต้องแก้โค้ด. ⚠️ **IP `172.32.201.106` ที่เหลือใน `generate_cert.py`/README = IP ของสถานีเอง
+  สำหรับใบรับรอง HTTPS ห้ามเปลี่ยนเป็น 127.0.0.1** ไม่งั้นเครื่องอื่นเปิดเว็บไม่ได้.
+- Tests: `pytest tests/` — 378 ตัว (artwork/label/barcode/auth — **ไม่ครอบคลุม camera/live loop**).
+  เพิ่มล่าสุด: `tests/test_auth_registration.py` 39 ตัว (ปุ่มลงทะเบียนหน้า login),
+  `tests/test_artwork_ownership.py` 30 ตัว (สิทธิ์เห็นประวัติ + ชื่อผู้ตรวจ).
   ⚠️ `tests/test_inspection_golden.py` **fail 5 ตัวอยู่แล้ว** (pre-existing, `NameError: FieldResult`
   ในโมดูล Label Paper) — ไม่เกี่ยวกับ artwork. ยืนยันด้วย `git stash` ก่อนโทษการแก้ของตัวเอง.
-- CONFIG_VERSION ปัจจุบัน: **`2026.08.13-aw-hl-rowproof`** (เช็คที่ footer ว่ารันโค้ดใหม่จริง).
+- CONFIG_VERSION ปัจจุบัน: **`2026.08.14-auth-self-register`** (เช็คที่ footer ว่ารันโค้ดใหม่จริง).
 
 ---
 

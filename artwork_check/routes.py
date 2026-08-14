@@ -43,6 +43,22 @@ def _viewer():
     return getattr(g, "current_user", None) or {}
 
 
+def _with_owner(rec_id: str, rep: dict) -> dict:
+    """แนบชื่อผู้ตรวจลงในรายงานที่ส่งกลับ (เพื่อแสดงผลเท่านั้น).
+
+    อ่านจาก ``owner.json`` ตอนตอบ ไม่ได้เขียนลง ``report.json`` — เจ้าของ
+    จึงมีแหล่งความจริงเดียว (ไฟล์เดียวกับที่ด่านสิทธิ์ใช้) ไม่มีทางไม่ตรงกัน.
+    บันทึกเก่าที่ไม่มีเจ้าของจะได้ค่าว่าง → ฝั่ง UI ไม่แสดงบรรทัดนี้.
+    """
+    try:
+        owner = report.load_owner(rec_id) or {}
+    except (ValueError, OSError):
+        owner = {}
+    out = dict(rep)
+    out["owner"] = owner.get("username", "")
+    return out
+
+
 def _owner_of_request():
     """ข้อมูลเจ้าของที่จะบันทึกคู่กับการตรวจที่กำลังจะสร้าง."""
     viewer = _viewer()
@@ -178,7 +194,7 @@ def api_inspect(rec_id):
     except Exception as e:
         logger.exception("[artwork] inspection failed for %s", rec_id)
         return jsonify({"error": f"ตรวจไม่สำเร็จ: {e}"}), 500
-    return jsonify(rep)
+    return jsonify(_with_owner(rec_id, rep))
 
 
 @artwork_bp.route("/api/artwork/<rec_id>/preview.png")
@@ -420,7 +436,7 @@ def api_report(rec_id):
         return jsonify({"error": "bad id"}), 400
     if rep is None:
         return jsonify({"error": "ไม่พบรายงาน"}), 404
-    return jsonify(rep)
+    return jsonify(_with_owner(rec_id, rep))
 
 
 @artwork_bp.route("/api/artwork/history")

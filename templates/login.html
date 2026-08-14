@@ -50,6 +50,7 @@
                 </label>
             </div>
 
+            <div class="auth-ok" id="auth-ok" role="status" hidden></div>
             <div class="auth-error" id="auth-error" role="alert" hidden></div>
 
             <button type="submit" id="login-btn" class="btn-primary">
@@ -58,8 +59,66 @@
             </button>
         </form>
 
+        {% if register_enabled %}
+        <p class="auth-alt">ยังไม่มีบัญชี?
+            <button type="button" class="link-btn" id="register-open">ลงทะเบียน</button>
+        </p>
+        {% endif %}
+
         <p class="auth-foot">{{ config_version }}</p>
     </div>
+
+    {% if register_enabled %}
+    <!-- ── Modal: ลงทะเบียนด้วยตนเอง ─────────────────────────────────
+         ฟอร์มเดียวกับ "เพิ่มผู้ใช้ใหม่" ของ Admin แต่ตัด "ชื่อผู้ใช้" (ใช้อีเมลแทน)
+         และ "บทบาท (role)" ออก — role ถูก fix ที่ฝั่งเซิร์ฟเวอร์. -->
+    <div class="modal-overlay" id="rg-modal" hidden
+         data-domains="{{ register_domains|join(',') }}">
+        <div class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="rg-title">
+            <div class="modal-header">
+                <h3 id="rg-title">ลงทะเบียนผู้ใช้ใหม่</h3>
+                <button class="modal-close" id="rg-close" type="button" aria-label="ปิด">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="field">
+                    <label for="rg-email">อีเมล</label>
+                    <input id="rg-email" type="email" autocomplete="email"
+                           placeholder="name{{ '@' + register_domains[0] if register_domains else '@company.com' }}">
+                    <p class="muted small">
+                        {% if register_domains_label %}
+                        ใช้ได้เฉพาะอีเมล {{ register_domains_label }} (พิมพ์เล็ก/ใหญ่ก็ได้) —
+                        {% endif %}
+                        อีเมลนี้จะเป็นชื่อผู้ใช้สำหรับเข้าสู่ระบบ
+                    </p>
+                </div>
+                <div class="field">
+                    <label for="rg-password">รหัสผ่าน</label>
+                    <div class="pw-wrap">
+                        <input id="rg-password" type="password" placeholder="รหัสผ่าน"
+                               autocomplete="new-password">
+                        <button type="button" class="pw-toggle" data-target="rg-password">แสดง</button>
+                    </div>
+                    <ul class="pw-rules" id="rg-pw-rules" hidden></ul>
+                </div>
+                <div class="field">
+                    <label for="rg-confirm">ยืนยันรหัสผ่าน</label>
+                    <div class="pw-wrap">
+                        <input id="rg-confirm" type="password" placeholder="พิมพ์รหัสผ่านอีกครั้ง"
+                               autocomplete="new-password">
+                        <button type="button" class="pw-toggle" data-target="rg-confirm">แสดง</button>
+                    </div>
+                    <p class="field-hint" id="rg-pw-match" hidden></p>
+                </div>
+                <p class="muted small">รหัสผ่าน: ≥ 8 ตัว มีพิมพ์ใหญ่/พิมพ์เล็ก/ตัวเลข/อักขระพิเศษ (!@#$%^&amp;*)</p>
+                <div class="auth-error" id="rg-error" role="alert" hidden></div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="rg-cancel" type="button">ยกเลิก</button>
+                <button class="btn btn-primary" id="rg-submit" type="button">สร้างบัญชี</button>
+            </div>
+        </div>
+    </div>
+    {% endif %}
 
     <script src="{{ url_for('static', filename='js/login.js') }}?v={{ config_version }}"></script>
 </body>
