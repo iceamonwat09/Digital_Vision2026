@@ -229,7 +229,9 @@ FOV = เส้นผ่านศูนย์กลางฝา × 1.4):**
    `read_frame()` จึงต้อง **เช็ค `_cam is None` ซ้ำอีกครั้งใน lock** ด้วย (ของเดิมเช็คนอก lock
    แล้ว release อาจแทรกระหว่างรอ lock). เทสต์: `test_release_waits_for_an_in_flight_grab`.
 
-**Config (`config.py`):** `HIK_ENABLED` (default `False`) · `HIK_SOURCE_PREFIX="hik:"` ·
+**Config (`config.py`):** `HIK_ENABLED` (default `False`; เปิดด้วย **env `HIK_ENABLED=true`**
+ได้โดยไม่ต้องแก้ไฟล์ที่ git ติดตาม — env ชนะค่าในไฟล์เสมอ. แบนเนอร์ตอน start พิมพ์บอกว่าเปิด/ปิด
+และเจอ MVS SDK ไหม เพื่อไม่ต้องเดาว่าทำไมแท็บไม่โผล่) · `HIK_SOURCE_PREFIX="hik:"` ·
 `HIK_MVS_SDK_PATH` · `HIK_EXPOSURE_AUTO`/`HIK_EXPOSURE_US` (หน่วย **µs** ไม่ใช่ log2 แบบ UVC) ·
 `HIK_GAIN_AUTO`/`HIK_GAIN_DB` · `HIK_ROI` · `HIK_FRAME_RATE` · `HIK_PACKET_SIZE_AUTO` ·
 `HIK_IMAGE_NODE_NUM=3` · `HIK_GRAB_TIMEOUT_MS=1000`

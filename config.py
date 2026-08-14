@@ -131,8 +131,17 @@ TEST_CAMERAS_ON_STARTUP = False
 #
 # HIK_ENABLED = False (ค่าเริ่มต้น) ⇒ แท็บ "กล้อง Hikrobot" ไม่ขึ้นในหน้า Live
 # และไม่มีโค้ดส่วนใดของกล้องนี้ถูกเรียกเลย = ทุกโหมดเดิมทำงานเหมือนเดิม 100%.
-# เปิดใช้: ตั้ง True + รีสตาร์ต (Flask อ่าน config ตอน start เท่านั้น).
-HIK_ENABLED = False
+#
+# เปิดใช้ได้ 2 ทาง (ทั้งคู่ต้อง **รีสตาร์ต** — Flask อ่าน config ตอน start เท่านั้น):
+#   1) แก้ HIK_ENABLED_DEFAULT ข้างล่างเป็น True  (ถาวร แต่ไฟล์นี้ git ติดตาม
+#      อยู่ ⇒ อาจต้อง resolve conflict ตอน pull ครั้งถัดไป)
+#   2) ตั้ง environment variable ก่อนรัน — ไม่ต้องแตะไฟล์เลย ไม่มีปัญหาตอน pull:
+#         PowerShell : $env:HIK_ENABLED="true";  py -3.9 app.py
+#         CMD        : set HIK_ENABLED=true  &&  py -3.9 app.py
+# ถ้าตั้ง env ไว้ env จะชนะเสมอ (ตั้ง "false" เพื่อปิดชั่วคราวก็ได้)
+HIK_ENABLED_DEFAULT = False
+_hik_env = os.getenv("HIK_ENABLED", "").strip().lower()
+HIK_ENABLED = (_hik_env in ("1", "true", "yes", "on")) if _hik_env else HIK_ENABLED_DEFAULT
 
 # คำนำหน้าที่ใช้แยกว่า camera_index ตัวนี้เป็นกล้อง Hikrobot ("hik:<serial>")
 # — รูปแบบเดียวกับ STREAM_SOURCE_SENTINEL ที่ใช้แยกแหล่งภาพแบบ push.

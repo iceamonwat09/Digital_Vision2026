@@ -1869,6 +1869,16 @@ if __name__ == '__main__':
     print(f"  CONFIG_VERSION      : {config.CONFIG_VERSION}")
     print(f"  OCR_BACKEND         : {config.OCR_BACKEND or '(auto)'}")
     print(f"  N8N_OCR_WEBHOOK_URL : {config.N8N_OCR_WEBHOOK_URL}")
+    # Say plainly whether the Hikrobot tab will appear. Hunting the UI for a
+    # missing tab (and not knowing whether the flag or the SDK is the reason)
+    # is the exact confusion this line removes.
+    if config.HIK_ENABLED:
+        _sdk = sdk_status()
+        print(f"  HIK_ENABLED         : True  → แท็บ 'กล้อง Hikrobot' จะแสดง"
+              f" · MVS SDK: {'พบแล้ว' if _sdk['available'] else 'ไม่พบ'}")
+    else:
+        print("  HIK_ENABLED         : False → แท็บ 'กล้อง Hikrobot' ถูกซ่อน"
+              " (เปิดด้วย env HIK_ENABLED=true แล้วรีสตาร์ต)")
     print("=" * 64)
 
     # HTTPS is opt-in (config.USE_HTTPS). It is required for the browser STREAM
