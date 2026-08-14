@@ -381,6 +381,15 @@ def render(ad, bbox, dpi):
 
 # ── ชั้นการทดสอบ ────────────────────────────────────────────────────────
 
+def _hash_of(fp):
+    import hashlib
+    try:
+        with open(fp, "rb") as f:
+            return hashlib.sha1(f.read()).hexdigest()
+    except OSError:
+        return ""
+
+
 def layer_triage(path, page):
     txt = page.get_text("text").strip()
     words = page.get_text("words")
@@ -550,6 +559,10 @@ def main():
     ap.add_argument("--n8n-limit", type=int, default=20,
                     help="เพดานจำนวนครั้งที่ยิง webhook (กันค่าใช้จ่ายบานปลาย)")
     ap.add_argument("--skip-consistency", action="store_true")
+    ap.add_argument("--limit", type=int, default=0,
+                    help="วัดไม่เกิน N ไฟล์ (0 = ไม่จำกัด)")
+    ap.add_argument("--keep-duplicates", action="store_true",
+                    help="ไม่ข้ามไฟล์ที่เนื้อหาซ้ำกัน (ค่าเริ่มต้นข้าม)")
     ap.add_argument("--verbose", action="store_true",
                     help="แสดงคำที่อ่านตกด้วย")
     ap.add_argument("--out", default="", help="เขียนผลเป็น JSON ไฟล์นี้")
@@ -563,6 +576,41 @@ def main():
     if not paths:
         print("ไม่พบไฟล์ PDF ตามที่ระบุ")
         return 2
+
+    # ไฟล์ในคลังการตรวจชื่อ "source.pdf" เหมือนกันหมด — ต้องแยกด้วยโฟลเดอร์
+    # (inspection id) ไม่งั้นอ่านผลไม่รู้ว่าบรรทัดไหนคือไฟล์ไหน
+    def _label(fp):
+        base = os.path.basename(fp)
+        parent = os.path.basename(os.path.dirname(fp))
+        if base.lower().startswith("source") and parent:
+            return "%s/%s" % (parent, base)
+        return base
+
+    # คลังการตรวจมักมีไฟล์เดียวกันซ้ำหลายรายการ (ตรวจซ้ำหลายรอบ) — วัดซ้ำ
+    # ไม่ได้ข้อมูลเพิ่มแต่กินเวลาเป็นสิบเท่า จึงข้ามไฟล์ที่เนื้อหาซ้ำ
+    uniq, seen, dupes = [], {}, 0
+    if not args.keep_duplicates:
+        import hashlib
+        for fp in paths:
+            try:
+                with open(fp, "rb") as f:
+                    h = hashlib.sha1(f.read()).hexdigest()
+            except OSError:
+                continue
+            if h in seen:
+                dupes += 1
+                seen[h].append(_label(fp))
+                continue
+            seen[h] = [_label(fp)]
+            uniq.append(fp)
+        if dupes:
+            print("ข้ามไฟล์ที่เนื้อหาซ้ำ %d รายการ (ใช้ --keep-duplicates "
+                  "ถ้าต้องการวัดทุกรายการ)" % dupes)
+        paths = uniq
+    if args.limit and len(paths) > args.limit:
+        print("จำกัดที่ %d ไฟล์แรก (จาก %d) ตาม --limit"
+              % (args.limit, len(paths)))
+        paths = paths[:args.limit]
 
     want = [e.strip().lower() for e in args.engines.split(",") if e.strip()]
     engines = []
@@ -595,8 +643,8 @@ def main():
                           "phantom_zones": 0, "probe_zones": 0,
                           "agree_sum": 0.0, "agree_zones": 0, "low": 0}
 
-    for path in paths:
-        name = os.path.basename(path)
+    for fi, path in enumerate(paths, 1):
+        name = _label(path)
         try:
             doc = fitz.open(path)
             page = doc[0]
@@ -605,7 +653,11 @@ def main():
             continue
         print()
         print("#" * 88)
-        print("# %s" % name)
+        print("# [%d/%d] %s" % (fi, len(paths), name))
+        same = seen.get(_hash_of(path), [])
+        if len(same) > 1:
+            print("#   (ไฟล์เดียวกับอีก %d รายการ: %s)"
+                  % (len(same) - 1, ", ".join(same[1:4])))
         print("#" * 88)
 
         tri = layer_triage(path, page)
