@@ -570,8 +570,14 @@ def main():
 
     paths = []
     for pat in args.files:
+        # รับโฟลเดอร์ได้ตรง ๆ: --files TEST  =  --files "TEST\\*.pdf"
+        if os.path.isdir(pat):
+            paths.extend(sorted(glob.glob(os.path.join(pat, "*.pdf"))))
+            paths.extend(sorted(glob.glob(os.path.join(pat, "*.PDF"))))
+            continue
         hits = sorted(glob.glob(pat))
         paths.extend(hits if hits else ([pat] if os.path.exists(pat) else []))
+    paths = sorted(set(paths))
     paths = [p for p in paths if p.lower().endswith(".pdf")]
     if not paths:
         print("ไม่พบไฟล์ PDF ตามที่ระบุ")
@@ -731,6 +737,41 @@ def main():
 
         report["files"].append(frec)
         doc.close()
+
+    # ── สรุปรายไฟล์ (จำเป็นเมื่อทดสอบหลายไฟล์: ค่ารวมกลบไฟล์ที่มีปัญหา) ──
+    if len(report["files"]) > 1:
+        print()
+        print("=" * 88)
+        print("สรุปรายไฟล์")
+        print("=" * 88)
+        print("%-32s %7s %4s %6s %8s %9s %8s %s"
+              % ("ไฟล์", "textลาย", "เตือน", "โซนวัด", "recall",
+                 "precision", "แต่งขึ้น", "ตรงกันเอง"))
+        print("-" * 88)
+        for f in report["files"]:
+            g = f.get("groundtruth", {})
+            n = f.get("notext", {})
+            c = f.get("consistency", {})
+            e0 = usable[0].name
+            gg = g.get(e0, {})
+            nn = n.get(e0, {})
+            cc = c.get(e0, {})
+            rec = (gg.get("hit", 0) / float(gg["gt"])) if gg.get("gt") else None
+            pre = ((gg.get("got", 0) - gg.get("extra", 0)) /
+                   float(gg["got"])) if gg.get("got") else None
+            agr = (cc.get("agree_sum", 0) / cc["zones"]) if cc.get("zones") else None
+            cov = f["triage"]["coverage"]
+            flag = "[!!]" if f["triage"]["banner_misleading"] else ""
+            print("%-32s %6.0f%% %4s %6d %6s %9s %8s %9s"
+                  % (f["file"][:32], cov * 100, flag, gg.get("zones", 0),
+                     ("%.1f%%" % (rec * 100)) if rec is not None else "-",
+                     ("%.1f%%" % (pre * 100)) if pre is not None else "-",
+                     ("%d/%d" % (nn.get("phantom_zones", 0), nn.get("zones", 0))
+                      if nn.get("zones") else "-"),
+                     ("%.0f%%" % (agr * 100)) if agr is not None else "-"))
+        if len(usable) > 1:
+            print("(ตารางนี้แสดง engine แรก: %s — ดูรายละเอียด engine อื่นใน --out)"
+                  % usable[0].name)
 
     # ── สรุป ────────────────────────────────────────────────────────────
     print()
