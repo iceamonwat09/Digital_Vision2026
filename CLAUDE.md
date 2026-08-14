@@ -451,11 +451,18 @@ Label Paper / Live / Dashboard / `/api/defects` ไม่ถูกแตะ แ�
 - Repo: `iceamonwat09/digital_vision2026`. Dev branch ปัจจุบัน: `claude/artwork-ui-layout-1lnwgt`
   (ก่อนหน้า: `claude/artwork-red-box-drawing-lpqhpo`). **ห้าม push ไป main**.
 - SQL Server: 172.32.0.50/VisionIQ. Defect log ผ่าน `sp_log_defect` (เก็บภาพ base64).
+- **N8N รันบนเครื่องสถานีเอง** → default ของ `N8N_OCR_WEBHOOK_URL` (`config.py`) และ
+  `N8N_TRANSLATE_WEBHOOK_URL` (`artwork_check/config.py`) ชี้ `http://127.0.0.1:5678/...`.
+  **มี 2 ที่ ต้องแก้ให้ตรงกันเสมอ** — แก้ที่เดียวอีกตัวจะยิงไปเครื่องเก่าแบบเงียบ ๆ.
+  ใช้ `127.0.0.1` ไม่ใช่ `localhost` เพราะ Windows resolve `localhost` เป็น `::1` (IPv6) ก่อน
+  ถ้า N8N ผูกเฉพาะ IPv4 จะต่อไม่ติดโดยไม่มี error ที่อ่านออก. ย้ายเครื่องเมื่อไรตั้ง env ทับได้
+  ไม่ต้องแก้โค้ด. ⚠️ **IP `172.32.201.106` ที่เหลือใน `generate_cert.py`/README = IP ของสถานีเอง
+  สำหรับใบรับรอง HTTPS ห้ามเปลี่ยนเป็น 127.0.0.1** ไม่งั้นเครื่องอื่นเปิดเว็บไม่ได้.
 - Tests: `pytest tests/` — 335 ตัว (artwork/label/barcode — **ไม่ครอบคลุม camera/live loop**).
   เพิ่มล่าสุด: `tests/test_artwork_ownership.py` 26 ตัว (สิทธิ์เห็นประวัติ artwork).
   ⚠️ `tests/test_inspection_golden.py` **fail 5 ตัวอยู่แล้ว** (pre-existing, `NameError: FieldResult`
   ในโมดูล Label Paper) — ไม่เกี่ยวกับ artwork. ยืนยันด้วย `git stash` ก่อนโทษการแก้ของตัวเอง.
-- CONFIG_VERSION ปัจจุบัน: **`2026.08.13-aw-hl-rowproof`** (เช็คที่ footer ว่ารันโค้ดใหม่จริง).
+- CONFIG_VERSION ปัจจุบัน: **`2026.08.13-n8n-localhost`** (เช็คที่ footer ว่ารันโค้ดใหม่จริง).
 
 ---
 
