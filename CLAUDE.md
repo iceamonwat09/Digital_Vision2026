@@ -412,6 +412,46 @@ Label Paper / Live / Dashboard / `/api/defects` ไม่ถูกแตะ แ�
 
 ---
 
+## 🔌 N8N Artwork OCR — เคส "ไม่มีการยิง HTTP ออกไปเลย"
+
+**คนละอาการกับ "ยิงแล้วพัง"** — ที่เคยแก้ไปก่อนหน้านี้คืออาการ *ยิงแล้วไปไม่ถึง*
+(`a34c4c2` ตั้ง default เป็น `localhost` ผิด → แก้กลับเป็น IP สถานี, ต่อมา `578d751`
+ย้ายมา `127.0.0.1` เพราะ N8N มารันบนสถานีเอง). ถ้า **ไม่มี log `[N8N→OCR] POST` เลย**
+แปลว่าโค้ดตัดสินใจไม่ยิงตั้งแต่ต้น ซึ่งมี **5 ทาง** (ส่วนใหญ่ถูกต้องตามออกแบบ ไม่ใช่บั๊ก):
+
+| # | เงื่อนไข | ที่เกิด | เป็นบั๊กไหม |
+|---|---|---|---|
+| 1 | โซน `type == "ignore"` | `ocr.read_all_zones()` ข้ามก่อนถึง `read_zone` | ไม่ (ตั้งใจ) |
+| 2 | **PDF text layer ≥ `EMBEDDED_TEXT_MIN_CHARS` (12)** → `engine="pdf-text"` | `ocr.read_zone()` บรรทัดแรก | **ไม่ — และพบบ่อยสุด** (แม่นกว่า OCR + ฟรี) |
+| 3 | `vertex_client.is_enabled()` เท็จ → `engine="none"` | `OCR_BACKEND` ถูกตั้งเป็นค่าอื่น หรือ URL ว่าง | ใช่ (ตั้งค่าผิด) |
+| 4 | `crop.size == 0` (bbox ตัดออกนอกหน้า) | `ocr.read_zone()` | ใช่ (โซนผิด) |
+| 5 | **cache `ocr_only.json` ยัง valid** | `pipeline.run_ocr_only()` (แท็บ "ข้อความ + คำแปล") | ไม่ (ตั้งใจ) |
+
+- **ทาง ② คือคำตอบของ "ทำไมบางไฟล์ยิง บางไฟล์ไม่ยิง"** — artwork ที่ยัง**ไม่ได้ outline**
+  ตัวหนังสือ (มี text layer) จะไม่แตะ N8N เลยทั้งไฟล์ ส่วนไฟล์ outline/ภาพถ่ายจะยิงทุกโซน.
+  **ไฟล์เดียวกันยังผสมกันได้** (บางโซนมี text layer บางโซนเป็นกราฟิก) → ดูรายโซนเท่านั้น.
+- **ทาง ⑤ ทำให้ "กดแล้วเงียบ"** — key = hash ของ (id/type/group/bbox/doc/rotate ของทุกโซน +
+  auto_rotate). ขยับโซนแม้นิดเดียว = cache หลุด. ลบ `data/artwork_check/inspections/<id>/ocr_only.json`
+  = บังคับ OCR ใหม่. **`run_inspection()` (ปุ่ม "ส่งตรวจสอบ") ไม่ใช้ cache นี้** — ยิงใหม่เสมอ.
+- **`_resolve_backend()` auto-เลือก `n8n` เมื่อ `OCR_BACKEND` ว่างและมี URL** ⇒ การตั้ง env
+  `OCR_BACKEND=stub`/`vertex` ทับ จะปิดการยิงทั้งระบบแบบเงียบ ๆ (ไม่ error, ได้ข้อความ stub).
+
+**เครื่องมือ:** `py -3.9 diagnose_n8n_ocr.py [<inspection-id>] [--no-ping|--ping-only]`
+— อ่านอย่างเดียว ไม่แตะ report/cache/verdict. ทำ 3 อย่าง:
+① พิมพ์ config ที่ตัดสินใจจริง (backend ที่ resolve ได้, URL ทั้ง OCR+translate, เตือนเมื่อ
+host สองตัวไม่ตรงกัน / ใช้ `localhost` / ใช้ **Test URL** `/webhook-test/` ที่ตายนอกโหมด
+listen) ② ยิงภาพ JPEG เล็ก ๆ ผ่าน `ocr_n8n.ocr_image()` = เส้นทางเดียวกับของจริง แล้วแปล
+error ให้ (connection refused = N8N ไม่ได้รัน · 404 = workflow ไม่ได้ Activate/path ผิด ·
+timeout = Gemini ช้า/โควตา · 413 = payload เกิน) ③ ไล่ทีละโซนของการตรวจจริง **โดยไม่เรียก OCR**
+บอกว่าโซนไหน "จะยิง" โซนไหนไม่ยิงเพราะข้อไหนใน 5 ทาง พร้อมเทียบกับ `engine` ที่บันทึกไว้ใน
+`report.json` และเช็คสถานะ cache ทาง ⑤.
+
+**ลำดับการไล่ที่เร็วที่สุด:** ดู log บนคอนโซลก่อน — `[artwork] zone z1 engine=... chars=...`
+บอกทาง ①②③④ ครบอยู่แล้วต่อโซน ส่วน `[N8N→OCR] POST ...` คือหลักฐานว่ายิงจริง.
+ถ้า log หายไปทั้งคู่ = request ไม่เคยถึง pipeline (ดูฝั่ง route/สิทธิ์แทน).
+
+---
+
 ## 🖥️ Entrypoints & HTTPS
 
 - **`app.py`** = entrypoint หลัก (ผู้ใช้รัน `py -3.9 app.py`). `threaded=True`. รองรับ HTTPS.
