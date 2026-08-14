@@ -364,6 +364,34 @@ def test_initialize_runs_the_required_gige_sequence(fake_sdk):
     cam.release()
 
 
+def test_frame_rate_is_capped_by_default(fake_sdk):
+    """
+    Measured on the station with the actual camera (MV-CS050-10GC): running
+    uncapped gives 2448x2048 @ 23.21 fps = 930.9 Mbps = 93% of the 1GbE link,
+    and MVS reported 3066 lost packets. The camera also shares the plant network
+    with the SQL Server, so an uncapped stream is antisocial as well as lossy.
+    Snapshot aiming does not need 23 fps — the cap must stay on by default.
+    """
+    assert config.HIK_FRAME_RATE, "an uncapped default floods the GigE link"
+    fake_sdk.devices = [GIGE_OK]
+    cam = hik_camera.HikCamera(device_key="hik:01234567")
+    assert cam.initialize() is True
+    calls = cam._cam.calls
+    assert "SetBool:AcquisitionFrameRateEnable=True" in calls
+    assert f"SetFloat:AcquisitionFrameRate={float(config.HIK_FRAME_RATE)}" in calls
+    cam.release()
+
+
+def test_frame_rate_cap_can_be_turned_off(fake_sdk):
+    """None = use the camera's own rate (only sane on a dedicated NIC)."""
+    fake_sdk.devices = [GIGE_OK]
+    cam = hik_camera.HikCamera(device_key="hik:01234567", frame_rate=None)
+    cam.frame_rate = None                      # explicit opt-out, not config default
+    assert cam.initialize() is True
+    assert not any("AcquisitionFrameRate" in c for c in cam._cam.calls)
+    cam.release()
+
+
 def test_usb_device_skips_gige_only_packet_size(fake_sdk):
     fake_sdk.devices = [USB_OK]
     cam = hik_camera.HikCamera(device_key="hik:USB00001")

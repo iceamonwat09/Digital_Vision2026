@@ -141,6 +141,39 @@ verify_openvino.py ต้อง PASS ทุก device×imgsz (4) เช็คต
 ผู้ใช้ได้กล้อง Hikrobot มา (ยืนยันจากรูป: **RJ45 สกรีน `LAN/POE` + ขั้วกลม I/O + ไฟ `PWR` +
 เมาท์ C-mount**) เพื่อเดินตาม `docs/PLAN_LINE_DENT_INSPECTION.md`. เฟสนี้ทำ **snapshot อย่างเดียว**.
 
+**✅ รุ่นจริงยืนยันแล้วจากโปรแกรม MVS บนสถานี (13 ส.ค. 2026) — เปิดดูภาพได้ปกติ:**
+
+| | ค่า |
+|---|---|
+| รุ่น / serial | **`MV-CS050-10GC`** / `DA4994130` · เฟิร์มแวร์ `V4.0.42` |
+| เซนเซอร์ | Sony **IMX264, 2/3", global shutter**, พิกเซล 3.45µm ⇒ **8.45 × 7.07 mm** |
+| ความละเอียด / เฟรมเรตสูงสุด | **2448 × 2048 (5MP)** @ **24.2 fps** |
+| exposure ที่ทำได้ | **15µs–10s** (โหมดปกติ) · **1–14µs** (UltraShort) — เกินพอสำหรับไลน์ที่ต้องการ ~150-200µs |
+| เครือข่าย | กล้อง `172.32.1.253/24` · การ์ดแลน `172.32.1.9` · gateway `172.32.1.254` ⇒ **subnet ตรงกัน ผ่าน** |
+
+**🔴 สิ่งที่วัดได้จากแถบสถานะ MVS แล้วต้องแก้ (อย่าปล่อยผ่าน):**
+- `2448x2048 @ 23.21 fps` = **BW 930.9 Mbps = 93% ของลิงก์ 1Gbps** → **`Packets Lost: 3066`**
+  (`Errors: 0` เพราะขอส่งซ้ำทัน แต่แปลว่าลิงก์ตันจริง)
+- **930.9 Mbps ตรงกับ 8 bit/พิกเซลเป๊ะ ⇒ กล้องส่ง Bayer 8-bit** (ไม่ใช่ RGB) ⇒ **ทุกเฟรม
+  วิ่งผ่าน `MV_CC_ConvertPixelType`** ⇒ กับดักข้อ 1 (สีสลับ) เป็นเรื่องที่ต้องพิสูจน์ด้วยตาจริง ๆ
+- **กล้องเสียบอยู่บนวงเดียวกับระบบงาน** (SQL Server `172.32.0.50` อยู่ `172.32.x` เหมือนกัน)
+  ⇒ ปล่อย 931 Mbps = ไปบีบเครือข่ายโรงงานด้วย ไม่ใช่แค่ตัวเอง
+- **ทางแก้ที่ทำแล้ว: `HIK_FRAME_RATE = 10.0` เป็นค่า default** (10 fps = 401 Mbps = 40% ของลิงก์)
+  โหมดถ่ายรูปตรวจไม่ต้องการ 23 fps อยู่แล้ว — viewfinder แค่ให้เล็งได้ ชัตเตอร์หยิบเฟรมล่าสุด.
+  จะปลดเป็น `None` ได้ต่อเมื่อ **แยกการ์ดแลนให้กล้องโดยเฉพาะ** + เปิด Jumbo Frame.
+
+**เลนส์ C-mount ที่ต้องซื้อ (คำนวณจากเซนเซอร์ตัวนี้ — `f = ระยะทำงาน × 7.07 ÷ FOV`,
+FOV = เส้นผ่านศูนย์กลางฝา × 1.4):**
+
+| เส้นผ่านศูนย์กลางฝา | 15cm | 20cm | 25cm | 30cm | 40cm | 50cm |
+|---|---|---|---|---|---|---|
+| 65 mm | 11.6 | 15.5 | 19.4 | 23.3 | 31.1 | 38.8 |
+| 73 mm | 10.4 | 13.8 | 17.3 | 20.7 | 27.7 | 34.6 |
+| 83 mm | 9.1 | 12.2 | 15.2 | 18.2 | 24.3 | 30.4 |
+| 99 mm | 7.6 | 10.2 | 12.7 | 15.3 | 20.4 | 25.5 |
+
+ได้ความละเอียดบนฝา ~**44-68 µm/พิกเซล** (ฝา 65-99mm) — ละเอียดกว่าที่ dent ระดับ QA ต้องการมาก.
+
 **⚠️ ข้อเท็จจริงที่ต้องรู้ก่อนแตะเรื่องนี้ (เคยเข้าใจผิดกันบ่อย):**
 1. **RJ45 บนกล้องอุตสาหกรรม ≠ IP camera** — เป็น **GigE Vision** ไม่มี RTSP.
    `cv2.VideoCapture("rtsp://...")` **ใช้ไม่ได้เด็ดขาด** ต้องผ่าน **MVS SDK** เท่านั้น.
@@ -205,7 +238,7 @@ verify_openvino.py ต้อง PASS ทุก device×imgsz (4) เช็คต
 - `py -3.9 diagnose_hik.py --save` = ตาข่ายนิรภัย (แนวเดียวกับ `verify_openvino.py`):
   เช็ค SDK, ลิสต์กล้อง+subnet, เปิด, วัด fps จริง, packet size, **lost packet**, เขียน `hik_sample.jpg`.
   **ต้องเปิดรูปดูด้วยตาเพื่อยืนยันว่าสีไม่สลับ** (กับดักข้อ 1). รายงานอย่างเดียว **ไม่แก้ IP กล้องให้เอง**.
-- `tests/test_hik_camera.py` **34 ตัว** — ยัด **fake MVS module** เข้า `sys.modules` (แนวเดียวกับที่
+- `tests/test_hik_camera.py` **36 ตัว** — ยัด **fake MVS module** เข้า `sys.modules` (แนวเดียวกับที่
   mock Tesseract) จึง deterministic ไม่ต้องมีกล้อง. 3 ตัวสุดท้ายที่ import `app` ใช้ `importorskip`.
 
 **⚠️ ยังไม่ได้พิสูจน์ (ต้องทำบนสถานี):** โค้ดทั้งหมดเขียนจากเอกสาร SDK — **ยังไม่เคยรันกับกล้องจริง**.
@@ -530,12 +563,12 @@ Label Paper / Live / Dashboard / `/api/defects` ไม่ถูกแตะ แ�
 - Repo: `iceamonwat09/digital_vision2026`. Dev branch ปัจจุบัน: `claude/hikrobot-lan-camera-integration-psg74g`
   (ก่อนหน้า: `claude/artwork-ui-layout-1lnwgt`). **ห้าม push ไป main**.
 - SQL Server: 172.32.0.50/VisionIQ. Defect log ผ่าน `sp_log_defect` (เก็บภาพ base64).
-- Tests: `pytest tests/` — **369 ตัว** (artwork/label/barcode/กล้อง Hikrobot —
+- Tests: `pytest tests/` — **371 ตัว** (artwork/label/barcode/กล้อง Hikrobot —
   **ยังไม่ครอบคลุม camera.py/live loop ของ USB**).
   ก่อนหน้า: `tests/test_artwork_ownership.py` 26 ตัว (สิทธิ์เห็นประวัติ artwork).
-  เพิ่มล่าสุด: `tests/test_hik_camera.py` **34 ตัว** (กล้อง Hikrobot GigE — ใช้ fake MVS SDK
+  เพิ่มล่าสุด: `tests/test_hik_camera.py` **36 ตัว** (กล้อง Hikrobot GigE — ใช้ fake MVS SDK
   จึงรันได้โดยไม่ต้องมีกล้อง; 3 ตัวที่ import `app` จะ skip ถ้าไม่มี ultralytics/pyodbc).
-  **baseline ที่วัดจริง ส.ค. 2026: ก่อนแก้ 310 passed / หลังแก้ 341 passed — fail 5 ตัวเท่าเดิม.**
+  **baseline ที่วัดจริง ส.ค. 2026: ก่อนแก้ 310 passed / หลังแก้ 343 passed — fail 5 ตัวเท่าเดิม.**
   ⚠️ `tests/test_inspection_golden.py` **fail 5 ตัวอยู่แล้ว** (pre-existing, `NameError: FieldResult`
   ในโมดูล Label Paper) — ไม่เกี่ยวกับ artwork. ยืนยันด้วย `git stash` ก่อนโทษการแก้ของตัวเอง.
 - CONFIG_VERSION ปัจจุบัน: **`2026.08.13-hik-gige-snapshot`** (เช็คที่ footer ว่ารันโค้ดใหม่จริง).
