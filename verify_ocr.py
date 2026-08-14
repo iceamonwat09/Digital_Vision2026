@@ -30,10 +30,13 @@ PDF ที่ยังมี text layer ให้ "เฉลยฟรี": ข�
 วิธีใช้ (รันบนเครื่องสถานี)
 ---------------------------
     py -3.9 verify_ocr.py --files "C:\\artwork\\*.pdf"
-    py -3.9 verify_ocr.py --files a.pdf b.pdf --engines pdftext,tesseract
+    py -3.9 verify_ocr.py --files a.pdf b.pdf --engines tesseract
     py -3.9 verify_ocr.py --files a.pdf --engines tesseract ^
                           --tess-lang eng+ara+tha+chi_tra
     py -3.9 verify_ocr.py --files a.pdf --engines tesseract,n8n --n8n-limit 12
+
+  หมายเหตุ: PDF text layer ไม่ใช่ "engine" ที่เลือกได้ — มันคือ *เฉลย*
+  ที่ใช้วัด engine อื่น จึงถูกใช้อัตโนมัติเสมอเมื่อไฟล์นั้นมี
 
   --engines n8n จะ **ยิง webhook จริง** (เสียเวลา/ค่าใช้จ่าย) จึงไม่อยู่ใน
   ค่าเริ่มต้น และมี --n8n-limit จำกัดจำนวนครั้งเสมอ.
@@ -503,9 +506,10 @@ def main():
                     "(ใช้ PDF text layer เป็นเฉลย)")
     ap.add_argument("--files", nargs="+", required=True,
                     help="ไฟล์ PDF (รับ wildcard ได้ เช่น \"C:\\aw\\*.pdf\")")
-    ap.add_argument("--engines", default="pdftext,tesseract",
+    ap.add_argument("--engines", default="tesseract",
                     help="คั่นด้วย comma: tesseract,n8n "
-                         "(n8n = ยิง webhook จริง)")
+                         "(n8n = ยิง webhook จริง; pdf text layer เป็นเฉลย "
+                         "ใช้อัตโนมัติ ไม่ต้องระบุ)")
     ap.add_argument("--tess-lang", default="eng",
                     help="ภาษา Tesseract เช่น eng+ara+tha+chi_tra+deu")
     ap.add_argument("--tess-psm", type=int, default=6)
