@@ -448,7 +448,8 @@ Label Paper / Live / Dashboard / `/api/defects` ไม่ถูกแตะ แ�
 **คนละอาการกับ "ยิงแล้วพัง"** — ที่เคยแก้ไปก่อนหน้านี้คืออาการ *ยิงแล้วไปไม่ถึง*
 (`a34c4c2` ตั้ง default เป็น `localhost` ผิด → แก้กลับเป็น IP สถานี, ต่อมา `578d751`
 ย้ายมา `127.0.0.1` เพราะ N8N มารันบนสถานีเอง). ถ้า **ไม่มี log `[N8N→OCR] POST` เลย**
-แปลว่าโค้ดตัดสินใจไม่ยิงตั้งแต่ต้น ซึ่งมี **5 ทาง** (ส่วนใหญ่ถูกต้องตามออกแบบ ไม่ใช่บั๊ก):
+แปลว่าโค้ดตัดสินใจไม่ยิงตั้งแต่ต้น ซึ่งมี **5 ทาง** (ส่วนใหญ่ถูกต้องตามออกแบบ ไม่ใช่บั๊ก)
+บวก **1 ทางที่กลับด้าน คือยิงทั้งที่มี text layer**:
 
 | # | เงื่อนไข | ที่เกิด | เป็นบั๊กไหม |
 |---|---|---|---|
@@ -457,13 +458,18 @@ Label Paper / Live / Dashboard / `/api/defects` ไม่ถูกแตะ แ�
 | 3 | `vertex_client.is_enabled()` เท็จ → `engine="none"` | `OCR_BACKEND` ถูกตั้งเป็นค่าอื่น หรือ URL ว่าง | ใช่ (ตั้งค่าผิด) |
 | 4 | `crop.size == 0` (bbox ตัดออกนอกหน้า) | `ocr.read_zone()` | ใช่ (โซนผิด) |
 | 5 | **cache `ocr_only.json` ยัง valid** | `pipeline.run_ocr_only()` (แท็บ "ข้อความ + คำแปล") | ไม่ (ตั้งใจ) |
+| **6** | **มี text layer พอ แต่เป็นคำผิดรูป → ปฏิเสธแล้ว "ยิง OCR แทน"** | `ocr.read_zone()` (`PDFTEXT_GARBLED_CHECK`) | **ไม่ (ตั้งใจ) — กลับด้านกับข้อ 2** |
 
 - **ทาง ② คือคำตอบของ "ทำไมบางไฟล์ยิง บางไฟล์ไม่ยิง"** — artwork ที่ยัง**ไม่ได้ outline**
   ตัวหนังสือ (มี text layer) จะไม่แตะ N8N เลยทั้งไฟล์ ส่วนไฟล์ outline/ภาพถ่ายจะยิงทุกโซน.
   **ไฟล์เดียวกันยังผสมกันได้** (บางโซนมี text layer บางโซนเป็นกราฟิก) → ดูรายโซนเท่านั้น.
 - **ทาง ⑤ ทำให้ "กดแล้วเงียบ"** — key = hash ของ (id/type/group/bbox/doc/rotate ของทุกโซน +
-  auto_rotate). ขยับโซนแม้นิดเดียว = cache หลุด. ลบ `data/artwork_check/inspections/<id>/ocr_only.json`
+  auto_rotate + **ค่าตั้ง OCR ที่เปลี่ยนผลการอ่าน** ดู `pipeline._ocr_fingerprint()`).
+  ขยับโซนแม้นิดเดียว = cache หลุด. ลบ `data/artwork_check/inspections/<id>/ocr_only.json`
   = บังคับ OCR ใหม่. **`run_inspection()` (ปุ่ม "ส่งตรวจสอบ") ไม่ใช้ cache นี้** — ยิงใหม่เสมอ.
+  > ⚠️ ก่อนหน้านี้ key มีแค่ layout โซน ⇒ แก้ค่า OCR แล้ว cache ไม่หลุด แท็บแปลเสิร์ฟ
+  > ข้อความเก่าตลอดไปแบบเงียบ. **ถ้าเพิ่มค่าตั้งที่กระทบการอ่าน ต้องใส่ใน `_ocr_fingerprint()` ด้วย**
+  > (มีเทสต์ `test_artwork_ocr_cache.py` ไล่รายชื่อคีย์กันลืม).
 - **`_resolve_backend()` auto-เลือก `n8n` เมื่อ `OCR_BACKEND` ว่างและมี URL** ⇒ การตั้ง env
   `OCR_BACKEND=stub`/`vertex` ทับ จะปิดการยิงทั้งระบบแบบเงียบ ๆ (ไม่ error, ได้ข้อความ stub).
 
@@ -487,6 +493,75 @@ timeout = Gemini ช้า/โควตา · 413 = payload เกิน) ③ �
 **ลำดับการไล่ที่เร็วที่สุด:** ดู log บนคอนโซลก่อน — `[artwork] zone z1 engine=... chars=...`
 บอกทาง ①②③④ ครบอยู่แล้วต่อโซน ส่วน `[N8N→OCR] POST ...` คือหลักฐานว่ายิงจริง.
 ถ้า log หายไปทั้งคู่ = request ไม่เคยถึง pipeline (ดูฝั่ง route/สิทธิ์แทน).
+
+---
+
+## 🔎 Artwork — คุณภาพการอ่านข้อความ (OCR) และ `verify_ocr.py`
+
+สองอาการที่ทำให้ **ผลตรวจผิดแบบเงียบ** (ไม่ error, การ์ดขึ้นปกติ, แต่ข้อความที่เอาไปเทียบเป็นขยะ)
+วัดจากไฟล์จริง 11 ไฟล์ในโฟลเดอร์ `D:\Digital 2026\Vision-Defect\TEST` แล้วแก้ทั้งคู่.
+
+### ① โซนถูกเรนเดอร์เล็กเกินไป → OCR อ่านไม่ออก (`OCR_CROP_MIN_SIDE`)
+
+`zone_crop_jpg()` (ภาพในการ์ด) มี `CROP_MIN_SIDE=1200` มานานแล้ว แต่ **`ocr.read_zone()`
+ซึ่งเป็นตัวที่อ่านข้อความจริง กลับไม่มีขั้นต่ำเลย** — เรนเดอร์ที่ `OCR_DPI=450` ตรง ๆ.
+artwork ที่ถูกย่อลงหน้า A4 (เช่น `A4-TUG5311`) ตัวหนังสือจึงเหลือ ~9px แล้ว **recall ตกเหลือ 1.2%**.
+
+**เส้นโค้ง "ความสูงบรรทัดเป็นพิกเซล → recall" (วัดจริง ไม่ใช่ประมาณ):**
+
+| ความสูงบรรทัดใน crop | 9.0 px | 12.4 px | 17.2 px | 22.1 px | 31.0 px |
+|---|---|---|---|---|---|
+| recall | **1.2%** | 23.2% | 93.9% | 98.5% | 100% |
+
+หน้าผาอยู่ระหว่าง 12–17px → `verify_ocr.MIN_LINE_PX = 15.0` เป็นเกณฑ์เตือน.
+แก้ด้วย `_render_for_ocr()`: ถ้าเป็น **PDF** และด้านยาวของ crop < `OCR_CROP_MIN_SIDE` (1200)
+ให้ **เรนเดอร์ใหม่ที่ DPI สูงขึ้น** (เพดาน `OCR_DPI_MAX_FACTOR=4.0` เท่า) — ยืนยันบนสถานีแล้ว
+`--dpi 1600` ได้ **97.6%** จากไฟล์เดียวกันที่เคยได้ 1.2%.
+- ⚠️ **ภาพ raster (ภาพถ่าย/PNG) ห้ามขยาย** — `if not doc.is_pdf: return crop`. การ upscale
+  พิกเซลที่ไม่มีข้อมูลเพิ่มไม่ช่วยอะไร (ซ้ำรอยกับดัก "ย่อภาพ raster ลงคือหายนะ" ในหัวข้อกรอบแดง).
+  ฝั่งกรอบแดงมี `_upscale_for_ocr()` แยกของตัวเองอยู่แล้ว — คนละชั้น อย่าสับสน.
+- ตั้ง `ARTWORK_OCR_CROP_MIN_SIDE=0` = ปิด กลับพฤติกรรมเดิม 100%.
+
+### ② text layer มีจริงแต่พัง → เชื่อเต็ม 100% (`PDFTEXT_GARBLED_CHECK`)
+
+ทาง ② ในตาราง N8N คืนค่า `engine="pdf-text"`, **`conf=1.0` โดยไม่เคยตรวจสอบเลย** —
+ถ้า PDF ฝัง encoding มาเสีย (คำออกมาเป็น `A1b2C3`-style ปนเลขกลางคำ) ระบบจะเอา *ขยะ*
+ไปเทียบใน MISMATCH/SPELL ด้วย**ความมั่นใจสูงสุด** = ละเมิดกฎเหล็กข้อ 2 เต็ม ๆ.
+
+`ocr.text_looks_garbled()` นับ token ยาวที่ "มีทั้งเลขและตัวอักษร **และมีเลขอยู่กลางคำ**"
+(`_malformed`) — เกิน `PDFTEXT_GARBLED_RATIO` (0.30) ของ token ทั้งหมด = ปฏิเสธ text layer
+แล้ว **ตกไปใช้ OCR แทน** (ทาง ⑥). ถ้าไม่มี OCR backend → คืนข้อความพร้อม `error` flag
+⇒ กลายเป็น **UNREADABLE** ไม่ใช่ "ผ่าน".
+- **`PDFTEXT_GARBLED_MIN_TOKENS = 8` คือหัวใจกันเดา** — ต่ำกว่านี้ไม่ตัดสิน. วัดจริง:
+  จับได้ **28/29** เคสเสีย, **false positive 0/35** เคสดี. ถ้าลดเลข token ลง FP จะโผล่ทันที
+  เพราะโซนสั้น ๆ อย่างรหัสงาน (`AWN202500022003`) หน้าตาเหมือน token ผิดรูปพอดี.
+- ตั้ง `ARTWORK_PDFTEXT_GARBLED_CHECK=0` = ปิด กลับพฤติกรรมเดิม 100%.
+- **⛔ ไอเดียที่ทดสอบแล้ว "ปฏิเสธ": ใช้ ToUnicode CMap เป็นตัวชี้วัด** — ฟังดูถูกหลักการ
+  (ไม่มี ToUnicode = ถอดตัวอักษรกลับไม่ได้) แต่ไฟล์ Cosma ตัวจริง **0/14 ฟอนต์มี ToUnicode
+  ทั้งที่ extract ข้อความออกมาถูกเป๊ะ** ⇒ ใช้ตัดสินไม่ได้เลย. อย่าเสียเวลาทำซ้ำ.
+
+### `verify_ocr.py` — ตาข่ายนิรภัยของ OCR (คู่กับ `verify_onnx.py`/`verify_openvino.py`)
+
+`py -3.9 verify_ocr.py <ไฟล์.pdf|โฟลเดอร์> [--dpi 450] [--engines pdf-text,tesseract,n8n] [--verbose]`
+**อ่านอย่างเดียว ไม่เขียนอะไรลง `data/` เลย.** 4 ชั้น:
+1. **TRIAGE** — ไฟล์นี้มี text layer *ใช้ได้จริง* ไหม + คิด % ของหน้าที่ถูกปกคลุม
+   (แบนเนอร์ "✅ ไฟล์นี้มี text layer" บนหน้าเว็บเป็น **ระดับหน้า** แต่การตัดสินจริงเป็น **ระดับโซน**
+   → ยืนยันแล้วบน `AWN202500022003`: มีข้อความ 18 ตัว = แค่รหัสงาน, coverage 0%).
+2. **GROUND TRUTH** — recall/precision เทียบ text layer ของ PDF (เกณฑ์ `MIN_RECALL`/
+   `MIN_PRECISION` = 0.95).
+3. **NO-TEXT PROBE** — ยิงโซนว่าง/กราฟิกล้วน: อะไรที่คืนมา = hallucination
+   (`MAX_PHANTOM_CHARS=3`). ผลจริง: **Tesseract ไม่เคยหลอน 0/36**.
+4. **SELF-CONSISTENCY** — อ่านโซนเดิมที่ 2 DPI (`DPI_B_FACTOR=0.7`) ต้องตรงกัน ≥ `MIN_SELF_AGREE` (0.80).
+
+**exit code: `0`=ผ่าน · `1`=ไม่ผ่าน · `2`=รันไม่ได้ · `3`=สรุปไม่ได้ (ไม่มี ground truth)**
+- **⚠️ `3` แยกจาก `0` โดยตั้งใจ** — เคยเขียนให้พิมพ์ "ผ่านทุก engine" ทั้งที่ไม่มีเฉลยให้เทียบ
+  สักตัว = คำตอบที่ผิดแบบมั่นใจ (กฎเหล็กข้อ 2). เช่นเดียวกับที่เคยพิมพ์ "ผ่าน" ทั้งที่ n8n
+  error ทุก call → ตอนนี้มี verdict **แยกรายเครื่องยนต์** + `ok/err/skipped` ต่อ engine.
+- ⚠️ **normalizer ต้องเป็นกลางกับทุกภาษา** — เดิมตัด diacritic เฉพาะช่วง Latin-1 ⇒ เช็ก/ฮังการี/
+  โปแลนด์ถูกหักคะแนนฟรี รายงาน 94.6% ทั้งที่ของจริง 99.8%. ตอนนี้ใช้ NFKD + ตัด combining mark.
+
+**ค่าตั้ง OCR ทุกตัวอยู่ใน `pipeline._ocr_fingerprint()`** (เข้า cache key ของแท็บแปล) —
+เพิ่มค่าใหม่แล้วต้องใส่ที่นี่ด้วย ไม่งั้นแก้ค่าแล้วผลไม่เปลี่ยน (ดูทาง ⑤ ในตาราง N8N).
 
 ---
 
@@ -531,8 +606,9 @@ timeout = Gemini ช้า/โควตา · 413 = payload เกิน) ③ �
 - HW สถานี: **i7-1165G7** (4C/8T, 15W, AVX-512), 16GB DDR4 (single-channel), Iris Xe, Win10 Pro, Python 3.9.13.
 - inference bestX (seg): **iGPU (OpenVINO) ≈ 45-50ms/เฟรม (~20-22 FPS)** = ตัวจริงปัจจุบัน;
   ONNX CPU ≈ 280ms (~2.7-3 FPS) = ชั้น fallback; PyTorch ≈ 315ms = fallback สุดท้าย.
-- Repo: `iceamonwat09/digital_vision2026`. Dev branch ปัจจุบัน: `claude/login-registration-feature-2ndkn9`
-  (ก่อนหน้า: `claude/artwork-ui-layout-1lnwgt`). **ห้าม push ไป main**.
+- Repo: `iceamonwat09/digital_vision2026`. Dev branch ปัจจุบัน: `claude/artwork-multi-zone-errors-k8linm`
+  (ก่อนหน้า: `claude/login-registration-feature-2ndkn9`, `claude/artwork-ui-layout-1lnwgt`).
+  **ห้าม push ไป main**.
 - SQL Server: 172.32.0.50/VisionIQ. Defect log ผ่าน `sp_log_defect` (เก็บภาพ base64).
 - **N8N รันบนเครื่องสถานีเอง** → default ของ `N8N_OCR_WEBHOOK_URL` (`config.py`) และ
   `N8N_TRANSLATE_WEBHOOK_URL` (`artwork_check/config.py`) ชี้ `http://127.0.0.1:5678/...`.
@@ -541,12 +617,14 @@ timeout = Gemini ช้า/โควตา · 413 = payload เกิน) ③ �
   ถ้า N8N ผูกเฉพาะ IPv4 จะต่อไม่ติดโดยไม่มี error ที่อ่านออก. ย้ายเครื่องเมื่อไรตั้ง env ทับได้
   ไม่ต้องแก้โค้ด. ⚠️ **IP `172.32.201.106` ที่เหลือใน `generate_cert.py`/README = IP ของสถานีเอง
   สำหรับใบรับรอง HTTPS ห้ามเปลี่ยนเป็น 127.0.0.1** ไม่งั้นเครื่องอื่นเปิดเว็บไม่ได้.
-- Tests: `pytest tests/` — 378 ตัว (artwork/label/barcode/auth — **ไม่ครอบคลุม camera/live loop**).
-  เพิ่มล่าสุด: `tests/test_auth_registration.py` 39 ตัว (ปุ่มลงทะเบียนหน้า login),
+- Tests: `pytest tests/` — 406 ตัว (artwork/label/barcode/auth — **ไม่ครอบคลุม camera/live loop**).
+  เพิ่มล่าสุด: `tests/test_artwork_ocr_quality.py` 15 ตัว (crop ขั้นต่ำ + text layer ที่เสีย),
+  `tests/test_artwork_ocr_cache.py` 13 ตัว (cache ของแท็บแปลต้องหลุดเมื่อค่าตั้ง OCR เปลี่ยน),
+  `tests/test_auth_registration.py` 39 ตัว (ปุ่มลงทะเบียนหน้า login),
   `tests/test_artwork_ownership.py` 30 ตัว (สิทธิ์เห็นประวัติ + ชื่อผู้ตรวจ).
   ⚠️ `tests/test_inspection_golden.py` **fail 5 ตัวอยู่แล้ว** (pre-existing, `NameError: FieldResult`
   ในโมดูล Label Paper) — ไม่เกี่ยวกับ artwork. ยืนยันด้วย `git stash` ก่อนโทษการแก้ของตัวเอง.
-- CONFIG_VERSION ปัจจุบัน: **`2026.08.14-auth-self-register`** (เช็คที่ footer ว่ารันโค้ดใหม่จริง).
+- CONFIG_VERSION ปัจจุบัน: **`2026.08.14-aw-ocr-sync`** (เช็คที่ footer ว่ารันโค้ดใหม่จริง).
 
 ---
 
@@ -560,6 +638,8 @@ timeout = Gemini ช้า/โควตา · 413 = payload เกิน) ③ �
 - [ ] แตะ JS ที่อ้าง element ใหม่ → **เพิ่ม element ใน `templates/` แล้วหรือยัง**?
       (`$("id")` ที่ไม่มีจริงจะเงียบ ไม่ error — ฟีเจอร์หายไปเฉยๆ)
 - [ ] ค่าคงที่ที่ใช้ทั้ง Python และ JS แก้ครบสองฝั่งหรือยัง? (เช่น `zones.HL_*` ↔ `HL_*`)
+- [ ] เพิ่มค่าตั้งที่เปลี่ยน **ผลการอ่านข้อความ** → ใส่ใน `pipeline._ocr_fingerprint()` แล้วหรือยัง?
+      (ไม่ใส่ = cache แท็บ "ข้อความ + คำแปล" ไม่หลุด แก้ค่าแล้วผลไม่เปลี่ยนแบบเงียบ)
 - [ ] bump `CONFIG_VERSION` ถ้าผู้ใช้ต้อง verify?
 - [ ] ถ้าแตะชั้นที่ "ชี้จุดให้คนดู" — เคสไม่มั่นใจ **ไม่แสดง** แทนที่จะเดา? (กฎเหล็ก 2)
 - [ ] dependency ใหม่เป็น optional + auto-fallback? (ไม่มี = ฟีเจอร์หาย ไม่ใช่ระบบพัง)
