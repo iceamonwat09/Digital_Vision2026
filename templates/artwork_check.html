@@ -101,6 +101,9 @@
   .aw-toolbar input[type=range] { width:130px; vertical-align:middle; }
   .aw-tb-pct   { min-width:38px; font-weight:700; color:#0d47a1; text-align:right; }
   .aw-btn-sm   { padding:3px 9px; font-size:12px; line-height:1.4; }
+  /* คำอธิบายย่อยในปุ่ม (เช่น "อยู่ระหว่างการทดสอบ") — จางกว่าตัวปุ่ม ไม่แย่งสายตาปุ่มหลัก */
+  .aw-btn-note { font-size:11px; font-weight:400; color:#90a4ae; margin-left:2px; }
+  .aw-btn:disabled .aw-btn-note { color:#eceff1; }
   .aw-pan-hint { color:#90a4ae; font-size:11.5px; margin-left:auto; white-space:nowrap; }
   /* เส้นแบ่งบาง ๆ ระหว่างกลุ่มปุ่ม — อ่านง่ายขึ้นโดยไม่รกตา */
   .aw-doc-tabs { position:relative; padding-right:12px; }
@@ -370,7 +373,11 @@
         <button id="awRedetect" class="aw-btn" disabled>↻ เสนอโซนใหม่</button>
         <button id="awPairAuto" class="aw-btn" disabled
                 title="วาดกรอบบนไฟล์หลักให้ครบก่อน แล้วกดปุ่มนี้ ระบบจะหาบล็อกเดียวกันบนไฟล์อ้างอิงแล้วสร้างกรอบคู่ให้อัตโนมัติ (ต้องแนบไฟล์อ้างอิงก่อน)">🔗 หากรอบคู่อัตโนมัติ</button>
-        <button id="awInspect" class="aw-btn aw-btn-primary" disabled>ส่งตรวจสอบ →</button>
+        <button id="awTranslateMain" class="aw-btn aw-btn-primary" disabled
+                title="อ่านข้อความในโซน ตรวจการสะกด และแปลเป็นอังกฤษ — เปิดแท็บ “ข้อความ + คำแปล” ให้อัตโนมัติ">📖 แปลภาษา →</button>
+        <button id="awInspect" class="aw-btn" disabled
+                title="ตรวจครบทุกชั้น (เทียบ panel/กลุ่ม/ไฟล์อ้างอิง) — ฟีเจอร์นี้อยู่ระหว่างการทดสอบ">ส่งตรวจสอบ →
+          <span class="aw-btn-note">(อยู่ระหว่างการทดสอบ)</span></button>
       </div>
 
       <div class="aw-row" style="margin-top:6px;">
