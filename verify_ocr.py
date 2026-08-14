@@ -465,9 +465,29 @@ def layer_groundtruth(ad, zones, engines, dpi, verbose):
                 eng.name,
                 hit / float(len(truth_w)) * 100.0,
                 (len(got_w) - len(extra)) / float(max(1, len(got_w))) * 100.0)
-            if verbose and missed:
-                line += "\n        %s อ่านตก: %s" % (
-                    eng.name, " ".join(missed[:8]))
+            if verbose and (missed or extra):
+                # แสดงทั้งสองฝั่ง: "เฉลยว่า" กับ "engine อ่านได้"
+                # เพราะเมื่อเฉลย (text layer ของ PDF) เสียเอง การพิมพ์แต่
+                # ฝั่งเฉลยจะทำให้สรุปผิดว่า engine อ่านไม่ออก
+                line += "\n        %s | เฉลยว่า : %s" % (
+                    eng.name, " ".join(missed[:6]) or "-")
+                line += "\n        %s | อ่านได้ : %s" % (
+                    " " * len(eng.name), " ".join(extra[:6]) or "-")
+        # เฉลยจาก text layer อาจเสียเอง (ฟอนต์ subset ที่แมปอักขระผิด) —
+        # อาการ: recall/precision ตกพร้อมกันทั้งที่ภาพใหญ่พอ และคำใน "เฉลย"
+        # ไม่เป็นคำในภาษาใดเลย. ตรวจแบบไม่เดา: นับคำเฉลยที่ยาว >=8 ตัวและ
+        # มีทั้งตัวเลขและตัวอักษรปนกัน ซึ่งแทบไม่เกิดกับข้อความฉลากจริง
+        odd = [w for w in truth_w
+               if len(w) >= 8 and any(c.isdigit() for c in w)
+               and any(c.isalpha() for c in w)]
+        if odd and len(odd) >= max(2, int(len(truth_w) * 0.02)):
+            line += ("\n        [?] เฉลยจาก text layer มีคำผิดรูป %d คำ "
+                     "(เช่น %s)" % (len(odd), " ".join(odd[:3])))
+            line += ("\n            ฟอนต์ subset อาจแมปอักขระผิด -> "
+                     "เฉลยเชื่อไม่ได้ ให้ดูบรรทัด 'อ่านได้' ด้วย --verbose")
+            res.setdefault("_suspect_truth", 0)
+            res["_suspect_truth"] += 1
+
         if too_small:
             line += ("\n        [!] ตัวอักษรสูงราว %.1f px (ต่ำกว่าเกณฑ์ %.0f) "
                      "— ภาพเล็กเกินไป ไม่ใช่ engine อ่านไม่ออก"
