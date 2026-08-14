@@ -436,15 +436,22 @@ Label Paper / Live / Dashboard / `/api/defects` ไม่ถูกแตะ แ�
 - **`_resolve_backend()` auto-เลือก `n8n` เมื่อ `OCR_BACKEND` ว่างและมี URL** ⇒ การตั้ง env
   `OCR_BACKEND=stub`/`vertex` ทับ จะปิดการยิงทั้งระบบแบบเงียบ ๆ (ไม่ error, ได้ข้อความ stub).
 
-**เครื่องมือ:** `py -3.9 diagnose_n8n_ocr.py [<inspection-id>] [--no-ping|--ping-only]`
-— อ่านอย่างเดียว ไม่แตะ report/cache/verdict. ทำ 3 อย่าง:
+**เครื่องมือ:** `py -3.9 diagnose_n8n_ocr.py [<inspection-id>] [--no-ping|--ping-only|--scan]`
+— อ่านอย่างเดียว ไม่แตะ report/cache/verdict. ทำ 4 อย่าง:
 ① พิมพ์ config ที่ตัดสินใจจริง (backend ที่ resolve ได้, URL ทั้ง OCR+translate, เตือนเมื่อ
 host สองตัวไม่ตรงกัน / ใช้ `localhost` / ใช้ **Test URL** `/webhook-test/` ที่ตายนอกโหมด
 listen) ② ยิงภาพ JPEG เล็ก ๆ ผ่าน `ocr_n8n.ocr_image()` = เส้นทางเดียวกับของจริง แล้วแปล
 error ให้ (connection refused = N8N ไม่ได้รัน · 404 = workflow ไม่ได้ Activate/path ผิด ·
 timeout = Gemini ช้า/โควตา · 413 = payload เกิน) ③ ไล่ทีละโซนของการตรวจจริง **โดยไม่เรียก OCR**
 บอกว่าโซนไหน "จะยิง" โซนไหนไม่ยิงเพราะข้อไหนใน 5 ทาง พร้อมเทียบกับ `engine` ที่บันทึกไว้ใน
-`report.json` และเช็คสถานะ cache ทาง ⑤.
+`report.json` และเช็คสถานะ cache ทาง ⑤ ④ **`--scan` กวาดทุกการตรวจ** หาไฟล์ที่
+"น่าจะได้ text แต่ยังยิง OCR" — เคสที่ต้องจับคือโซนที่มีข้อความ **1..11 ตัว**
+(ต่ำกว่า `EMBEDDED_TEXT_MIN_CHARS`) = ทิ้งข้อความจริงไปเดาด้วย OCR ทั้งที่โซนแค่ลากคาบเกี่ยว;
+โซนที่ได้ 0 ตัว = outline/กราฟิกจริง ยิง OCR ถูกแล้ว.
+
+**⚠️ การตัดสินเป็น "รายโซน" ไม่ใช่ "รายไฟล์"** — `embedded_text(bbox)` อ่านเฉพาะในกรอบโซน
+⇒ ไฟล์ที่มี text layer เต็มหน้ายังมีโซนที่ยิง OCR ได้ (โซนวางบนโลโก้/ภาพถ่ายที่ไม่มีตัวอักษร
+เป็น text) และไฟล์ outline ทั้งไฟล์จะยิงทุกโซน.
 
 **ลำดับการไล่ที่เร็วที่สุด:** ดู log บนคอนโซลก่อน — `[artwork] zone z1 engine=... chars=...`
 บอกทาง ①②③④ ครบอยู่แล้วต่อโซน ส่วน `[N8N→OCR] POST ...` คือหลักฐานว่ายิงจริง.

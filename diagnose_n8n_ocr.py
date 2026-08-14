@@ -17,6 +17,8 @@
     py -3.9 diagnose_n8n_ocr.py <inspection_id>  # ระบุรายการเอง
     py -3.9 diagnose_n8n_ocr.py --no-ping        # ไม่ยิงภาพทดสอบไป N8N
     py -3.9 diagnose_n8n_ocr.py --ping-only      # เช็คแค่ว่า webhook ตอบไหม
+    py -3.9 diagnose_n8n_ocr.py --scan --no-ping # กวาดทุกการตรวจ: ไฟล์ไหน
+                                                 # มี text layer แต่ยังยิง OCR
 
 ไม่แก้ไขข้อมูลใดๆ — อ่านอย่างเดียว (ไม่แตะ report.json / cache / verdict)
 """
@@ -273,10 +275,98 @@ def replay(rec_id: str) -> int:
     return 0
 
 
+# ── ④ กวาดทุกการตรวจ: ไฟล์ไหน "น่าจะเป็น text แต่ยังส่ง OCR" ──────────
+def scan(limit: int = 200) -> int:
+    """ตอบคำถาม 'มีไฟล์อื่นอีกไหมที่มี text layer แต่เรายังยิง OCR'.
+
+    เคสที่ต้องจับคือ **โซนที่มีข้อความใน text layer แต่ไม่ถึงเกณฑ์**
+    (1..EMBEDDED_TEXT_MIN_CHARS-1 ตัว) → ระบบทิ้งข้อความจริงแล้วไปเดาด้วย OCR.
+    ส่วนโซนที่ได้ 0 ตัวคือ outline/กราฟิกจริง — ยิง OCR ถูกต้องแล้ว.
+    """
+    from artwork_check import config as acfg
+    from artwork_check import pipeline, report
+    from artwork_check.pdf_ingest import ArtworkDocument
+
+    print()
+    print(SEP)
+    print("④ กวาดทุกการตรวจ — ไฟล์ไหนมี text layer แต่ยังยิง OCR")
+    print(SEP)
+
+    recs = report.list_inspections(limit=limit)
+    if not recs:
+        print("  ไม่พบรายการตรวจ")
+        return 0
+
+    suspects = []
+    for rec in recs:
+        rid = rec["id"]
+        rep = report.load_report(rid)
+        if not rep or not rep.get("zones"):
+            continue
+        d = report.inspection_dir(rid)
+        docs, page_chars = {}, {}
+        n_post = n_pdf = n_partial = 0
+        worst = 0
+        for z in rep["zones"]:
+            if z.get("type") == "ignore":
+                continue
+            which = "b" if z.get("doc", "a") == "b" else "a"
+            if which not in docs:
+                try:
+                    base = "source" if which == "a" else "source_b"
+                    doc = ArtworkDocument(pipeline._find_source(d, base))
+                    docs[which] = doc
+                    page_chars[which] = len(doc.embedded_text())
+                except Exception:
+                    docs[which] = None
+                    page_chars[which] = 0
+            doc = docs[which]
+            if doc is None:
+                continue
+            try:
+                n = len(doc.embedded_text(z["bbox"]))
+            except Exception:
+                continue
+            if n >= acfg.EMBEDDED_TEXT_MIN_CHARS:
+                n_pdf += 1
+            else:
+                n_post += 1
+                if n > 0:
+                    n_partial += 1
+                    worst = max(worst, n)
+
+        if not (n_pdf or n_post):
+            continue
+        pc = max(page_chars.values()) if page_chars else 0
+        flag = ""
+        if n_partial:
+            flag = f"  ⚠ {n_partial} โซนมีข้อความ 1-{worst} ตัว (ต่ำกว่าเกณฑ์)"
+            suspects.append(rid)
+        elif pc >= acfg.EMBEDDED_TEXT_MIN_CHARS and n_post:
+            flag = "  ⚠ หน้ามี text layer แต่บางโซนไม่มีเลย (โซนอยู่บนกราฟิก?)"
+            suspects.append(rid)
+        print(f"  {rid}  {_fmt(rep.get('filename',''), 34):34} "
+              f"หน้า={pc:6} ตัว · pdf-text={n_pdf:3} · ยิง OCR={n_post:3}{flag}")
+
+    print()
+    if suspects:
+        print(f"  รายการที่ควรดูต่อ ({len(suspects)}): "
+              + ", ".join(suspects[:10]))
+        print("  → รัน `py -3.9 diagnose_n8n_ocr.py <id> --no-ping` ดูรายโซน")
+        print("  → ถ้าเป็นเคส 'มีข้อความแต่ไม่ถึงเกณฑ์' แปลว่าโซนคาบเกี่ยว "
+              "ข้อความจริงนิดเดียว: ลากโซนให้ครอบข้อความให้ครบ จะได้ text layer "
+              "ที่แม่นแทนการเดาด้วย OCR")
+    else:
+        print("  ✓ ไม่พบรายการที่ 'มี text layer แต่ถูกส่งไป OCR' — "
+              "ไฟล์ที่ยิง OCR คือไฟล์ outline/ภาพถ่ายจริง")
+    return 0
+
+
 def main() -> int:
     args = sys.argv[1:]
     no_ping = "--no-ping" in args
     ping_only = "--ping-only" in args
+    do_scan = "--scan" in args
     args = [a for a in args if not a.startswith("--")]
 
     try:
@@ -290,6 +380,8 @@ def main() -> int:
         ping(cfg["url"])
     if ping_only:
         return 0
+    if do_scan:
+        return scan()
 
     if args:
         rec_id = args[0]
