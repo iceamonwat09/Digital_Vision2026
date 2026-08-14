@@ -51,9 +51,13 @@
       : "❌ FAIL — พบความผิดที่ต้องแก้";
 
     let html = '<div class="aw-verdict ' + vClass + '">' + vText + "</div>";
+    // ผู้ตรวจ = เจ้าของบันทึก (server แนบมาจาก owner.json). บันทึกเก่าที่ไม่มี
+    // เจ้าของจะได้ค่าว่าง → ไม่ขึ้นบรรทัดนี้ ดีกว่าโชว์ "ไม่ทราบ" ให้สับสน
     html += '<div style="font-size:12px;color:#78909c;margin-top:4px;">' +
       esc(rep.filename) + (rep.brand ? " · แบรนด์ " + esc(rep.brand) : "") +
-      " · ใช้เวลา " + esc(rep.elapsed_s) + " วินาที · " + esc(rep.created_at) + "</div>";
+      " · ใช้เวลา " + esc(rep.elapsed_s) + " วินาที · " + esc(rep.created_at) +
+      (rep.owner ? ' · <span title="ผู้อัปโหลด/ผู้ตรวจ">👤 ' + esc(rep.owner) +
+                   "</span>" : "") + "</div>";
 
     html += '<div class="aw-summary">';
     Object.keys(CLASS_LABELS).forEach((cls) => {
