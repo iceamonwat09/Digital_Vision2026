@@ -132,6 +132,11 @@
 .pw-rules li.ok { color: var(--success); }
 .pw-rules li.no { color: var(--gray-400); }
 
+/* `display: flex/grid` above beats the HTML `hidden` attribute, so both blocks
+   stayed on screen before anything was typed (an empty grey bar under the
+   password box on /login). Restore what `hidden` is supposed to mean. */
+.pw-strength[hidden], .pw-rules[hidden] { display: none; }
+
 .field-row {
     display: flex;
     align-items: center;
@@ -188,6 +193,34 @@
     animation: auth-spin .7s linear infinite;
 }
 @keyframes auth-spin { to { transform: rotate(360deg); } }
+
+.auth-ok {
+    background: #E8F6EE;
+    border: 1px solid #B7E0C8;
+    color: var(--success);
+    border-radius: 9px;
+    padding: 10px 12px;
+    font-size: .85rem;
+    margin-bottom: 14px;
+}
+
+/* "ยังไม่มีบัญชี? ลงทะเบียน" — sits under the sign-in button on /login */
+.auth-alt {
+    text-align: center;
+    margin: 16px 0 0;
+    font-size: .86rem;
+    color: var(--gray-600);
+}
+.link-btn {
+    background: none;
+    border: none;
+    padding: 0;
+    font: inherit;
+    font-weight: 600;
+    color: var(--blue);
+    cursor: pointer;
+}
+.link-btn:hover { text-decoration: underline; }
 
 .auth-foot {
     text-align: center;

@@ -45,6 +45,25 @@ COOKIE_REFRESH = os.getenv("AUTH_COOKIE_REFRESH", "vq_refresh")
 COOKIE_SECURE = _env_bool("AUTH_COOKIE_SECURE", False)
 COOKIE_SAMESITE = os.getenv("AUTH_COOKIE_SAMESITE", "Lax")
 
+# ── Self-service registration (ปุ่ม "ลงทะเบียน" บนหน้า /login) ─────────
+# New accounts always land on REGISTER_ROLE — the sign-up form has no role
+# selector, and the backend ignores any role sent by the client. What that role
+# may actually open is decided by its permissions in the DB (แก้ได้จากหน้า
+# "จัดการผู้ใช้") — registration never grants a permission by itself.
+# Kill switch: AUTH_REGISTER_ENABLED=0 hides the button AND rejects the API.
+REGISTER_ENABLED = _env_bool("AUTH_REGISTER_ENABLED", True)
+REGISTER_ROLE = os.getenv("AUTH_REGISTER_ROLE", "Viewer").strip() or "Viewer"
+# Only company addresses may self-register (comma separated; empty = any).
+REGISTER_EMAIL_DOMAINS = tuple(
+    d.strip().lower()
+    for d in os.getenv("AUTH_REGISTER_EMAIL_DOMAINS", "thaiunion.com").split(",")
+    if d.strip()
+)
+# Per-IP sign-ups allowed per hour (0 = unlimited).
+REGISTER_MAX_PER_IP_HOUR = int(os.getenv("AUTH_REGISTER_MAX_PER_IP_HOUR", "5"))
+# Mirrors AuthUsers.Username NVARCHAR(64) in Connection_sql/auth_schema.sql.
+USERNAME_MAX_LEN = 64
+
 # ── Account lockout (temporary) ───────────────────────────────────────
 MAX_FAILED = int(os.getenv("AUTH_MAX_FAILED", "5"))
 LOCK_MINUTES = int(os.getenv("AUTH_LOCK_MINUTES", "15"))

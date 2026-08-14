@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 _PUBLIC_PATHS = (
     "/login",
     "/api/auth/login",
+    "/api/auth/register",
     "/api/auth/refresh",
     "/api/auth/logout",
     "/api/auth/policy",

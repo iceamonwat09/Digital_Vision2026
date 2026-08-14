@@ -103,6 +103,33 @@ python -m auth.seed_admin --username admin --password 'Str0ng!Pass'
 | `AUTH_MAX_FAILED` | `5` | ล็อกบัญชีหลังกรอกผิดกี่ครั้ง |
 | `AUTH_LOCK_MINUTES` | `15` | ระยะเวลาล็อกชั่วคราว (นาที) |
 | `AUTH_PASSWORD_MIN_LEN` | `8` | ความยาวรหัสผ่านขั้นต่ำ |
+| `AUTH_REGISTER_ENABLED` | `1` (เปิด) | ปุ่ม **“ลงทะเบียน”** บนหน้า `/login` — ตั้ง `0` = ซ่อนปุ่ม **และ** API ตอบ 403 |
+| `AUTH_REGISTER_ROLE` | `Viewer` | role ที่บัญชีสมัครเองจะได้ (ฝั่ง client เลือกไม่ได้) |
+| `AUTH_REGISTER_EMAIL_DOMAINS` | `thaiunion.com` | โดเมนอีเมลที่สมัครได้ (คั่นด้วย comma; ว่าง = ทุกโดเมน) |
+| `AUTH_REGISTER_MAX_PER_IP_HOUR` | `5` | จำกัดจำนวนการสมัครต่อ IP ต่อชั่วโมง (`0` = ไม่จำกัด) |
+
+---
+
+## ลงทะเบียนด้วยตนเอง (`/login` → ปุ่ม “ลงทะเบียน”)
+
+ฟอร์มเดียวกับ “เพิ่มผู้ใช้ใหม่” ของแอดมิน แต่ตัด **ชื่อผู้ใช้** และ **บทบาท (role)** ออก:
+
+- **ชื่อผู้ใช้ = อีเมล** (ไม่มีช่องให้กรอก) — เก็บเป็น **ตัวพิมพ์เล็กเสมอ** จึงพิมพ์เล็ก/ใหญ่
+  ตอนสมัครหรือตอนล็อกอินก็ได้ และไม่มีทางเกิด 2 บัญชีจากอีเมลเดียวกัน
+- **role ถูก fix ที่ฝั่งเซิร์ฟเวอร์** เป็น `AUTH_REGISTER_ROLE` (`Viewer`) — ถ้า client
+  ยัด `{"role": "Admin"}` มาใน body จะถูก **ละทิ้ง** (ไม่ใช่ error) จึงยกระดับสิทธิ์ไม่ได้
+- **อีเมลต้องอยู่บนโดเมนที่อนุญาต** เทียบแบบ **ตรงทั้งโดเมนเท่านั้น** →
+  `x@mail.thaiunion.com` (subdomain) และ `x@evil-thaiunion.com` (โดเมนหลอก) **ไม่ผ่าน**
+- **รหัสผ่านใช้ policy เดียวกับทั้งระบบ** (`auth/passwords.py`) — ตรวจซ้ำที่เซิร์ฟเวอร์เสมอ
+- **บัญชีใหม่ใช้งานได้ทันที** (`IsActive=1`) — ถ้าต้องการให้แอดมินอนุมัติก่อน ให้ปิดปุ่มนี้
+  แล้วให้แอดมินเป็นคนสร้างบัญชีที่ `/admin/users` แทน
+- **สมัครแล้วเห็นอะไรได้บ้าง = สิทธิ์ของ role นั้น** ล้วน ๆ — แก้ได้ที่การ์ด “บทบาทและสิทธิ์
+  การใช้งาน” ใน `/admin/users` เช่นติ๊กเหลือแค่ *ตรวจ Artwork* ให้ `Viewer`
+  **การลงทะเบียนไม่เคยให้สิทธิ์เพิ่มด้วยตัวเอง**
+- บันทึก audit เป็น action `self_register` ในตาราง `AuthAdminAudit`
+- กันสแปม: จำกัดตาม IP (`AUTH_REGISTER_MAX_PER_IP_HOUR`, นับเฉพาะคำขอที่ฟอร์แมตถูก)
+- ⚠️ ข้อความ “อีเมลนี้ถูกใช้งานแล้ว” **บอกได้ว่าอีเมลไหนมีบัญชีอยู่** (ต่างจากหน้า login
+  ที่จงใจใช้ข้อความกลาง) — ยอมแลกเพื่อให้ผู้ใช้ไม่งง และจำกัดวงด้วยโดเมนบริษัทอยู่แล้ว
 
 ---
 
@@ -112,6 +139,7 @@ python -m auth.seed_admin --username admin --password 'Str0ng!Pass'
 |---|---|---|
 | `GET /login` | public | หน้า login |
 | `POST /api/auth/login` | public | เข้าสู่ระบบ → ตั้ง httpOnly cookie |
+| `POST /api/auth/register` | public | ลงทะเบียนเอง (role fix, username = email) |
 | `POST /api/auth/logout` | public | ล้าง cookie |
 | `POST /api/auth/refresh` | public (ใช้ refresh cookie) | ขอ access token ใหม่ |
 | `GET /api/auth/me` | login | ข้อมูล user + permissions ปัจจุบัน |
