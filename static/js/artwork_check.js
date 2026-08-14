@@ -509,8 +509,8 @@
   }
   function setBusy(b) {
     busy = b;
-    ["awInspect", "awAddZone", "awClearZones", "awRedetect", "awPairAuto",
-     "awTemplateLoad", "awTemplateSave", "awRefToggle"].forEach((id) => {
+    ["awInspect", "awTranslateMain", "awAddZone", "awClearZones", "awRedetect",
+     "awPairAuto", "awTemplateLoad", "awTemplateSave", "awRefToggle"].forEach((id) => {
       $(id).disabled = b || !inspectionId;
     });
     fileInputB.disabled = b;
@@ -553,7 +553,7 @@
       $("awStageBox").classList.remove("is-empty");
       setBusy(false);
       resultBox.innerHTML = '<div class="aw-empty">กด "↻ เสนอโซนใหม่" ให้ระบบเสนอโซน ' +
-        'หรือ "+ เพิ่มโซน" วาดเอง แล้วกด "ส่งตรวจสอบ"</div>';
+        'หรือ "+ เพิ่มโซน" วาดเอง แล้วกด "📖 แปลภาษา"</div>';
       if (fileInputB.files[0]) await uploadRef(false);
 
       const warns = [];
@@ -1356,7 +1356,9 @@
   resultTabs.querySelectorAll(".aw-tab").forEach((b) =>
     b.addEventListener("click", () => switchTab(b.dataset.awtab)));
 
-  $("awTranslateBtn").addEventListener("click", async () => {
+  // งานแปลตัวจริง — ใช้ร่วมกันระหว่างปุ่มหลัก (แถวเครื่องมือ) กับปุ่มในแท็บข้อความ
+  // ทั้งสองปุ่มต้องล็อกพร้อมกัน ไม่งั้นกดซ้ำจากอีกปุ่มระหว่างกำลังแปลได้
+  async function runTranslate() {
     if (!inspectionId) return;
     // ยังไม่มีโซน (ยังไม่ได้กดเสนอ/วาด) → บอกตรงๆ แทน error จาก server
     if (!zones.length && !(await api("/api/artwork/" + inspectionId + "/report")
@@ -1366,7 +1368,9 @@
       return;
     }
     const btn = $("awTranslateBtn");
+    const mainBtn = $("awTranslateMain");
     btn.disabled = true;
+    if (mainBtn) mainBtn.disabled = true;
     textMsg.innerHTML = '<span class="aw-spin"></span>กำลังสร้างตารางและแปล…';
     try {
       // Send the current zones + brand so the server can OCR on the fly when
@@ -1390,7 +1394,22 @@
       textMsg.textContent = "ทำงานไม่สำเร็จ: " + e.message;
     } finally {
       btn.disabled = false;
+      // ปุ่มหลักอยู่ในแถวเครื่องมือที่ setBusy() คุมอยู่ด้วย — คืนสถานะตามจริง
+      // ไม่ใช่ปลดล็อกดื้อๆ (ไม่งั้นกดได้ทั้งที่ยังไม่มีไฟล์/กำลังตรวจอยู่)
+      if (mainBtn) mainBtn.disabled = busy || !inspectionId;
     }
+  }
+
+  $("awTranslateBtn").addEventListener("click", runTranslate);
+
+  // ปุ่มหลักในแถวเครื่องมือ (อยู่ก่อน "ส่งตรวจสอบ"): เปิดแท็บ "ข้อความ + คำแปล"
+  // + เลื่อนจอลงมาที่ผลลัพธ์ให้เอง แบบเดียวกับปุ่มส่งตรวจสอบ ผู้ใช้ไม่ต้องกดเอง
+  $("awTranslateMain").addEventListener("click", async () => {
+    if (!inspectionId || busy) return;
+    showTabs(true);
+    switchTab("text");
+    scrollToResults();
+    await runTranslate();
   });
 
   onlyIssuesCb.addEventListener("change", () => {
