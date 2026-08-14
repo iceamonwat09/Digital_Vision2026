@@ -252,6 +252,13 @@
                         </div>
                     </div>
                     <button id="snapShutter" class="btn btn-primary btn-block snap-shutter">📸 ถ่าย</button>
+                    <!-- ถ่ายรัว: เก็บหลายเฟรมรวดเดียวแล้ววัดความคมทีละใบ
+                         ใช้ตอบว่า "จับทันและนิ่งพอไหม" ด้วยตัวเลข ไม่ใช่ความรู้สึก -->
+                    <button id="snapBurst" class="btn btn-secondary btn-block snap-shutter"
+                            style="margin-top:8px">🎞️ ถ่ายรัว 10 ภาพ</button>
+                    <p class="control-hint" id="snapBurstHint" style="margin-top:6px">
+                        กดครั้งเดียวขณะของเคลื่อนผ่าน — ระบบเก็บเฟรมติดกันเองแล้วบอกว่าใบไหนคมที่สุด
+                    </p>
                 </div>
                 <!-- สถานะ 2: ผลการตรวจ -->
                 <div id="snapResultPanel" style="display:none">
@@ -265,6 +272,12 @@
                         <dt>Line / Plant</dt><dd id="snapLine">—</dd>
                     </dl>
                     <button id="snapRetake" class="btn btn-primary btn-block">📷 ถ่ายใหม่</button>
+                </div>
+                <!-- สถานะ 3: ผลถ่ายรัว (แถบภาพ + ตัวเลขความคมต่อใบ) -->
+                <div id="snapBurstPanel" style="display:none">
+                    <div id="snapBurstSummary" class="snap-verdict">—</div>
+                    <div id="snapBurstStrip" class="burst-strip"></div>
+                    <button id="snapBurstAgain" class="btn btn-primary btn-block">🎞️ ถ่ายรัวอีกครั้ง</button>
                 </div>
             </div>
         </div>
@@ -355,7 +368,38 @@
     }
     .cam-ctrl-hint { font-size: 11px; color: #94a3b8; margin-top: 6px; }
     .snap-info-pane .btn { margin-top: auto; }
-    #snapLivePanel, #snapResultPanel { display: flex; flex-direction: column; flex: 1; }
+    #snapLivePanel, #snapResultPanel, #snapBurstPanel { display: flex; flex-direction: column; flex: 1; }
+    /* The 56px .snap-verdict is sized for a single OK/NG word. The burst header
+       is a sentence plus four stats, so it gets a readable size instead — the
+       strip below it is the part that deserves the space. */
+    .snap-verdict.burst-summary {
+        font-size: 19px; letter-spacing: 0; padding: 10px 12px; line-height: 1.4;
+    }
+    /* Burst result strip: one card per captured frame, scrollable inside the
+       info pane so a 30-frame burst never stretches the modal. */
+    .burst-strip {
+        flex: 1; overflow-y: auto; margin-top: 12px; padding-right: 4px;
+        display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; align-content: start;
+    }
+    .burst-item {
+        border: 2px solid #e2e8f0; border-radius: 8px; padding: 4px;
+        cursor: pointer; background: #fff;
+    }
+    .burst-item:hover { border-color: #94a3b8; }
+    .burst-item-best { border-color: #2563eb; background: #eff6ff; }
+    .burst-item img { width: 100%; display: block; border-radius: 4px; }
+    .burst-meta {
+        display: flex; align-items: center; gap: 4px; margin-top: 4px;
+        font-size: 11px; color: #64748b;
+    }
+    .burst-no { font-weight: 700; color: #334155; }
+    .burst-t { margin-left: auto; }
+    .burst-badge { padding: 1px 5px; border-radius: 4px; font-weight: 700; }
+    .burst-badge.ok { background: #e6f7ea; color: #1b8a3a; }
+    .burst-badge.ng { background: #fdeaea; color: #d12626; }
+    .burst-bar { height: 4px; background: #e2e8f0; border-radius: 2px; margin-top: 4px; }
+    .burst-bar i { display: block; height: 100%; background: #2563eb; border-radius: 2px; }
+    .burst-sharp { font-size: 10px; color: #94a3b8; margin-top: 2px; }
     .snap-aim-hint { color: #475569; font-size: 15px; line-height: 1.6; text-align: center; margin: 6px 0 0; }
     .snap-q-label { display:block; font-size:13px; color:#64748b; margin: 14px 0 4px; }
     .snap-quality { width:100%; }
@@ -1192,6 +1236,11 @@
     const snapImage       = document.getElementById('snapImage');
     const snapLivePanel   = document.getElementById('snapLivePanel');
     const snapResultPanel = document.getElementById('snapResultPanel');
+    const snapBurst        = document.getElementById('snapBurst');
+    const snapBurstPanel   = document.getElementById('snapBurstPanel');
+    const snapBurstStrip   = document.getElementById('snapBurstStrip');
+    const snapBurstSummary = document.getElementById('snapBurstSummary');
+    const snapBurstAgain   = document.getElementById('snapBurstAgain');
     const snapShutter     = document.getElementById('snapShutter');
     const snapQuality     = document.getElementById('snapQuality');
     const snapImgsz       = document.getElementById('snapImgsz');
@@ -1241,6 +1290,7 @@
             snapViewfinder.style.display = '';
         }
         snapResultPanel.style.display = 'none';
+        if (snapBurstPanel) snapBurstPanel.style.display = 'none';
         snapLivePanel.style.display = 'flex';
     }
     function showResultState() {
@@ -1248,7 +1298,16 @@
         snapVideoLocal.style.display = 'none';
         snapImage.style.display = '';
         snapLivePanel.style.display = 'none';
+        if (snapBurstPanel) snapBurstPanel.style.display = 'none';
         snapResultPanel.style.display = 'flex';
+    }
+    // Burst keeps the viewfinder visible (the big pane still shows the camera)
+    // and puts the captured strip in the info pane, so the operator can line the
+    // next pass up without closing anything.
+    function showBurstState() {
+        snapLivePanel.style.display = 'none';
+        snapResultPanel.style.display = 'none';
+        snapBurstPanel.style.display = 'flex';
     }
 
     // Map the quality preset to getUserMedia resolution constraints (STREAM mode).
@@ -1441,6 +1500,89 @@
     }
 
     snapBtn.addEventListener('click', openSnapshot);
+    // ── Burst test ─────────────────────────────────────
+    // One press captures N consecutive frames server-side. Pressing the shutter
+    // N times by hand measures the OPERATOR's reaction time, not the camera's
+    // ability to catch a moving can — this measures the camera.
+    function pressBurst() {
+        if (currentSource === 'stream') {
+            alert('ถ่ายรัวใช้ได้กับกล้องที่ต่อกับเครื่องแม่ข่าย (USB/RTSP/Hikrobot) เท่านั้น');
+            return;
+        }
+        snapBurst.disabled = true;
+        snapBurstAgain.disabled = true;
+        const oldText = snapBurst.textContent;
+        snapBurst.textContent = '⏳ กำลังเก็บภาพ…';
+        fetch('/api/snapshot/burst', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ imgsz: parseInt(snapImgsz.value, 10) })
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.status === 'error') { alert(data.message); return; }
+            renderBurst(data);
+            showBurstState();
+        })
+        .catch(err => { console.error('Burst error:', err); alert('ถ่ายรัวไม่สำเร็จ'); })
+        .finally(() => {
+            snapBurst.disabled = false;
+            snapBurstAgain.disabled = false;
+            snapBurst.textContent = oldText;
+        });
+    }
+
+    function renderBurst(data) {
+        const shots = data.shots || [];
+        // Sharpness is only meaningful RELATIVE to the other frames in the same
+        // burst (it depends on scene content), so the bar is scaled to the best
+        // frame of this burst rather than to an absolute threshold.
+        const best = Math.max.apply(null, shots.map(s => s.sharpness).concat([1]));
+        snapBurstSummary.className = 'snap-verdict burst-summary ' +
+            (data.ng_count > 0 ? 'ng' : 'ok');
+        snapBurstSummary.innerHTML =
+            'ได้ภาพ ' + data.captured + '/' + data.requested + ' ใบ · NG ' + data.ng_count + ' ใบ' +
+            '<div style="font-size:13px;font-weight:400;margin-top:6px;line-height:1.7">' +
+            'อัตราจับภาพจริง <b>' + (data.capture_fps != null ? data.capture_fps : '?') + ' fps</b>' +
+            ' · เก็บครบใน ' + data.grab_ms + ' ms<br>' +
+            'ตรวจเฉลี่ย ' + data.avg_infer_ms + ' ms/ใบ (imgsz ' + data.infer_imgsz + ')' +
+            ' · ภาพ ' + data.capture_size + '<br>' +
+            'ใบที่คมที่สุด: <b>#' + (data.sharpest_index + 1) + '</b>' +
+            '</div>';
+
+        snapBurstStrip.innerHTML = '';
+        shots.forEach(s => {
+            const card = document.createElement('div');
+            card.className = 'burst-item' +
+                (s.index === data.sharpest_index ? ' burst-item-best' : '');
+            const pct = Math.round(s.sharpness / best * 100);
+            card.innerHTML =
+                '<img src="' + s.image + '" alt="ภาพที่ ' + (s.index + 1) + '">' +
+                '<div class="burst-meta">' +
+                  '<span class="burst-no">#' + (s.index + 1) + '</span>' +
+                  '<span class="burst-badge ' + (s.verdict === 'ng' ? 'ng' : 'ok') + '">' +
+                    (s.verdict === 'ng' ? 'NG ' + s.dent_count : 'OK') + '</span>' +
+                  '<span class="burst-t">+' + s.t_ms + ' ms</span>' +
+                '</div>' +
+                '<div class="burst-bar"><i style="width:' + pct + '%"></i></div>' +
+                // ★ marks the winner the server picked, so exactly one card
+                // carries it even when two frames score identically.
+                '<div class="burst-sharp">ความคม ' + s.sharpness +
+                    (s.index === data.sharpest_index ? ' ★' : '') + '</div>';
+            // Click a thumbnail to blow it up in the main pane.
+            card.addEventListener('click', () => {
+                snapImage.src = s.image;
+                snapViewfinder.style.display = 'none';
+                snapVideoLocal.style.display = 'none';
+                snapImage.style.display = '';
+            });
+            snapBurstStrip.appendChild(card);
+        });
+    }
+
+    snapBurst.addEventListener('click', pressBurst);
+    snapBurstAgain.addEventListener('click', () => { showLiveState(); pressBurst(); });
+
     snapShutter.addEventListener('click', pressShutter);
     document.getElementById('snapRetake').addEventListener('click', showLiveState);
     document.getElementById('snapClose').addEventListener('click', closeSnapshot);

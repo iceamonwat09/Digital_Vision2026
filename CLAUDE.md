@@ -248,6 +248,31 @@ FOV = เส้นผ่านศูนย์กลางฝา × 1.4):**
 
 ---
 
+## 🎞️ ถ่ายรัว (burst) — เครื่องมือวัด "จับทันและนิ่งพอไหม"
+
+ปุ่ม **"🎞️ ถ่ายรัว 10 ภาพ"** ในป็อปอัป "ถ่ายรูปตรวจ" → `POST /api/snapshot/burst`
+กดครั้งเดียวเก็บเฟรมติดกัน N ใบ แล้ววัด **ความคม + verdict + เวลาห่างจริง** ต่อใบ.
+
+**เหตุผลที่ต้องมี:** กดชัตเตอร์มือ 10 ครั้ง = วัด**เวลาตอบสนองของคนกด** ไม่ใช่วัดว่ากล้อง
+จับของที่เคลื่อนที่ทันไหม. burst วัดกล้องจริง ๆ และให้**ตัวเลข**แทนความรู้สึก.
+
+- **`_collect_burst()` เก็บให้ครบก่อน แล้วค่อย infer** — ถ้า infer คั่นกลาง (~400ms ที่ imgsz 1280)
+  จะพลาดช่วงที่ของวิ่งผ่านไปเกือบหมด. นี่คือหัวใจของการออกแบบ ห้ามสลับลำดับ.
+- ใช้ **`viewfinder_seq`** กันเก็บเฟรมเดิมซ้ำ (กล้องค้าง = ได้น้อยใบ ไม่ใช่ใบเดิม N ครั้ง)
+  และเช็ค `SNAPSHOT_MAX_FRAME_AGE_S` เหมือนชัตเตอร์เดี่ยว (กฎเหล็ก 2: ไม่ตัดสินจากภาพเก่า)
+- **ความคมใช้ `_frame_sharpness()` ตัวเดิมของ Frame Capture** (variance of Laplacian) — ไม่เขียนใหม่
+- **แถบความคมเทียบกันเองในชุดนั้น** ไม่ใช่ค่าสัมบูรณ์ (ค่าขึ้นกับเนื้อภาพ) · ★ ผูกกับ
+  `sharpest_index` จาก server เพื่อให้มีดาวใบเดียวเสมอแม้คะแนนเท่ากัน
+- **display-only 100%** — ไม่แตะการนับ ไม่เขียน DB (มีเทสต์ `test_burst_does_not_touch_counters`)
+- Config: `BURST_COUNT=10` · `BURST_MAX_COUNT=30` · `BURST_TIMEOUT_S=6.0` · `BURST_THUMB_W=420`
+- ⚠️ **กิน RAM ชั่วคราว = N x ขนาดเฟรม** (10 x 2448x2048x3 ≈ 150 MB บน MV-CS050-10GC)
+- เทสต์: `tests/test_snapshot_burst.py` 8 ตัว (กล้องปลอมสลับเฟรมคม/เบลอ + detector ปลอม)
+
+**⚠️ ตัวเลขที่ต้องอ่านให้เป็น:** ถ้าทุกใบใน burst คมเท่ากันหมดแต่**ค่าต่ำ** = เบลอทั้งชุด
+(exposure ยาวไป ไม่ใช่จังหวะกดผิด). ถ้าคมบางใบ = จังหวะ/ตำแหน่งเป็นตัวปัญหา.
+
+---
+
 ## 🏗️ สถาปัตยกรรมสำคัญ (app.py)
 
 - **Live USB/RTSP** = 2 thread: `capture_loop` (อ่านกล้อง → `latest_raw_frame`) +
@@ -563,12 +588,12 @@ Label Paper / Live / Dashboard / `/api/defects` ไม่ถูกแตะ แ�
 - Repo: `iceamonwat09/digital_vision2026`. Dev branch ปัจจุบัน: `claude/hikrobot-lan-camera-integration-psg74g`
   (ก่อนหน้า: `claude/artwork-ui-layout-1lnwgt`). **ห้าม push ไป main**.
 - SQL Server: 172.32.0.50/VisionIQ. Defect log ผ่าน `sp_log_defect` (เก็บภาพ base64).
-- Tests: `pytest tests/` — **371 ตัว** (artwork/label/barcode/กล้อง Hikrobot —
+- Tests: `pytest tests/` — **379 ตัว** (artwork/label/barcode/กล้อง Hikrobot —
   **ยังไม่ครอบคลุม camera.py/live loop ของ USB**).
   ก่อนหน้า: `tests/test_artwork_ownership.py` 26 ตัว (สิทธิ์เห็นประวัติ artwork).
   เพิ่มล่าสุด: `tests/test_hik_camera.py` **36 ตัว** (กล้อง Hikrobot GigE — ใช้ fake MVS SDK
   จึงรันได้โดยไม่ต้องมีกล้อง; 3 ตัวที่ import `app` จะ skip ถ้าไม่มี ultralytics/pyodbc).
-  **baseline ที่วัดจริง ส.ค. 2026: ก่อนแก้ 310 passed / หลังแก้ 343 passed — fail 5 ตัวเท่าเดิม.**
+  **baseline ที่วัดจริง ส.ค. 2026: ก่อนแก้ 310 passed / หลังแก้ 343 passed (+8 ตัวของ burst ที่ skip ถ้าไม่มี ultralytics) — fail 5 ตัวเท่าเดิม.**
   ⚠️ `tests/test_inspection_golden.py` **fail 5 ตัวอยู่แล้ว** (pre-existing, `NameError: FieldResult`
   ในโมดูล Label Paper) — ไม่เกี่ยวกับ artwork. ยืนยันด้วย `git stash` ก่อนโทษการแก้ของตัวเอง.
 - CONFIG_VERSION ปัจจุบัน: **`2026.08.13-hik-gige-snapshot`** (เช็คที่ footer ว่ารันโค้ดใหม่จริง).

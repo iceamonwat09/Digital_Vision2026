@@ -1328,6 +1328,126 @@ def api_snapshot():
         return jsonify({"status": "error", "message": f"ถ่ายรูปไม่สำเร็จ: {e}"}), 500
 
 
+def _collect_burst(count, timeout_s):
+    """
+    Grab ``count`` CONSECUTIVE distinct viewfinder frames as fast as the camera
+    delivers them, and nothing else.
+
+    Deliberately does no inference here: a can passing the lens is only in frame
+    for a moment, and running the model between grabs (~400ms at imgsz 1280)
+    would skip most of that window. Capture first, judge afterwards.
+
+    Distinctness is tracked with viewfinder_seq, so a stalled camera yields
+    fewer frames instead of the same frame N times. Returns
+    (frames, timestamps) where timestamps are time.monotonic() at publish.
+    """
+    frames, stamps = [], []
+    last_seq = -1
+    deadline = time.time() + timeout_s
+    while len(frames) < count and time.time() < deadline:
+        with vf_lock:
+            seq = viewfinder_seq
+            fresh = (viewfinder_frame is not None
+                     and (time.monotonic() - viewfinder_frame_ts) <= config.SNAPSHOT_MAX_FRAME_AGE_S)
+            frame = viewfinder_frame.copy() if (fresh and seq != last_seq) else None
+            ts = viewfinder_frame_ts
+        if frame is not None:
+            last_seq = seq
+            frames.append(frame)
+            stamps.append(ts)
+        else:
+            time.sleep(0.002)      # short: we are racing the camera, not idling
+    return frames, stamps
+
+
+@app.route('/api/snapshot/burst', methods=['POST'])
+def api_snapshot_burst():
+    """
+    Burst test: capture N frames back-to-back, then score and inspect each one.
+
+    Answers the question "did we catch it, and was it sharp enough?" with
+    numbers instead of impressions — pressing the shutter by hand N times cannot
+    measure that, because the interval is the operator's reaction time, not the
+    camera's. Per frame it returns the verdict, the dent count and a sharpness
+    score (variance of Laplacian, the same measure Frame Capture already uses),
+    plus the real interval between frames.
+
+    Display/diagnostic only: it does NOT touch the counters or write to the DB.
+    """
+    if detector is None or detector.model is None:
+        return jsonify({"status": "error", "message": "ยังไม่ได้โหลดโมเดล"}), 400
+    if not viewfinder_active:
+        return jsonify({"status": "error",
+                        "message": "กรุณาเปิดโหมดถ่ายรูป (viewfinder) ก่อนถ่ายรัว"}), 409
+
+    data = request.get_json(silent=True) or {}
+    try:
+        count = int(data.get("count", config.BURST_COUNT))
+    except (TypeError, ValueError):
+        count = config.BURST_COUNT
+    count = max(1, min(config.BURST_MAX_COUNT, count))
+    imgsz = _snapshot_imgsz(data.get("imgsz"))
+
+    try:
+        t0 = time.perf_counter()
+        frames, stamps = _collect_burst(count, config.BURST_TIMEOUT_S)
+        grab_ms = round((time.perf_counter() - t0) * 1000.0, 1)
+        if not frames:
+            return jsonify({
+                "status": "error",
+                "message": "ไม่ได้ภาพเลย — กล้องไม่ส่งเฟรมใหม่ (ค้าง/สายหลุด) ลองใหม่อีกครั้ง"
+            }), 500
+
+        shots = []
+        infer_total = 0.0
+        for i, (frame, ts) in enumerate(zip(frames, stamps)):
+            sharp = _frame_sharpness(frame)
+            t1 = time.perf_counter()
+            detections = detector.detect(frame, imgsz=imgsz)
+            infer_ms = (time.perf_counter() - t1) * 1000.0
+            infer_total += infer_ms
+
+            dents = [d for d in detections if d["class_name"] not in _NON_DEFECT_CLASSES]
+            disp, disp_dets = _scale_for_display(frame, detections, config.BURST_THUMB_W)
+            ok, buf = cv2.imencode('.jpg', detector.draw_detections(disp, disp_dets), _JPEG_PARAMS)
+            shots.append({
+                "index": i,
+                "verdict": "ng" if dents else "ok",
+                "dent_count": len(dents),
+                "max_confidence": round(max((d["confidence"] for d in dents), default=0.0), 2),
+                "sharpness": round(sharp, 1),
+                # ms since the first frame of the burst — shows the real capture
+                # cadence, which is what decides whether a moving can is caught.
+                "t_ms": round((ts - stamps[0]) * 1000.0, 1),
+                "infer_ms": round(infer_ms, 1),
+                "image": ("data:image/jpeg;base64," +
+                          base64.b64encode(buf.tobytes()).decode("ascii")) if ok else None,
+            })
+
+        sharpest = max(shots, key=lambda s: s["sharpness"])
+        span = stamps[-1] - stamps[0]
+        cap_h, cap_w = frames[0].shape[:2]
+        return jsonify({
+            "status": "ok",
+            "shots": shots,
+            "requested": count,
+            "captured": len(frames),
+            "grab_ms": grab_ms,
+            # Effective capture rate over the burst — compare against the camera's
+            # configured frame rate to see if the link is keeping up.
+            "capture_fps": round((len(frames) - 1) / span, 1) if span > 0 else None,
+            "sharpest_index": sharpest["index"],
+            "ng_count": sum(1 for s in shots if s["verdict"] == "ng"),
+            "avg_infer_ms": round(infer_total / len(shots), 1),
+            "infer_imgsz": imgsz,
+            "capture_size": f"{cap_w}x{cap_h}",
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        })
+    except Exception as e:
+        logger.error(f"Burst snapshot failed: {e}", exc_info=True)
+        return jsonify({"status": "error", "message": f"ถ่ายรัวไม่สำเร็จ: {e}"}), 500
+
+
 @app.route('/api/stream/snapshot', methods=['POST'])
 def api_stream_snapshot():
     """
