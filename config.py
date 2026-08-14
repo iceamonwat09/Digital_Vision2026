@@ -9,7 +9,7 @@ import os
 # print it on startup and confirm it is actually executing the new code.
 # NOTE: shown on the navbar badge too — keep it short (<= ~28 chars) or it
 # gets ellipsized there (full value always visible in the footer / hover).
-CONFIG_VERSION = "2026.08.13-aw-hl-rowproof"
+CONFIG_VERSION = "2026.08.14-aw-owner-name"
 
 # ====================
 # CAMERA CONFIGURATION
@@ -365,9 +365,14 @@ OCR_BACKEND = os.getenv("OCR_BACKEND", "").strip().lower()
 # The workflow must respond with JSON of shape:
 #   { "text": "<full text>", "blocks": [ {"text": "...", "bbox": [x,y,w,h], "conf": 0.9}, ... ] }
 # `blocks` is optional — when missing, only line-level text comparison is possible.
+# N8N ย้ายมารันบนเครื่องสถานีเองแล้ว จึงชี้ 127.0.0.1 (ไม่ผ่านเน็ตเวิร์ก =
+# ไม่พังเวลา IP เครื่องเปลี่ยน/ไฟร์วอลล์ปิด). ใช้ 127.0.0.1 ไม่ใช่ "localhost"
+# เพราะบน Windows ชื่อ localhost จะ resolve เป็น ::1 (IPv6) ก่อน — ถ้า N8N
+# ผูกเฉพาะ IPv4 จะต่อไม่ติดแบบไม่มี error ที่อ่านออก.
+# ถ้าย้าย N8N กลับไปเครื่องอื่น ตั้ง env N8N_OCR_WEBHOOK_URL ทับได้เลย.
 N8N_OCR_WEBHOOK_URL = os.getenv(
     "N8N_OCR_WEBHOOK_URL",
-    "http://172.32.201.106:5678/webhook/artwork-ocr",
+    "http://127.0.0.1:5678/webhook/artwork-ocr",
 ).strip()
 N8N_OCR_TIMEOUT_S = float(os.getenv("N8N_OCR_TIMEOUT_S", "60"))
 

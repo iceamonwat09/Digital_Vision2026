@@ -313,3 +313,39 @@ def test_http_flag_off_restores_shared_history(app, store, monkeypatch):
     c = _as(app, BOB)
     assert c.get(f"/api/artwork/{rec}/report").status_code == 200
     assert c.get("/api/artwork/history").get_json()["scope"] == "all"
+
+
+# ── ชื่อผู้ตรวจต้องติดไปกับรายงานด้วย (ไม่ใช่แค่ในตารางประวัติ) ────────
+
+def test_http_report_carries_owner_name(app, store):
+    rec = _make(store, "20260811-090300-aaaaaa",
+                {"user_id": "1", "username": "alice"})
+    body = _as(app, ALICE).get(f"/api/artwork/{rec}/report").get_json()
+    assert body["owner"] == "alice"
+
+
+def test_http_admin_sees_owner_name_of_other_user(app, store):
+    """admin เปิดงานของคนอื่นต้องเห็นว่าเป็นของใคร (นี่คือประโยชน์หลัก)"""
+    rec = _make(store, "20260811-090301-bbbbbb",
+                {"user_id": "2", "username": "bob"})
+    body = _as(app, ADMIN).get(f"/api/artwork/{rec}/report").get_json()
+    assert body["owner"] == "bob"
+
+
+def test_http_legacy_report_has_empty_owner(app, store):
+    """บันทึกเก่าที่ไม่มีเจ้าของ → ค่าว่าง (UI จะไม่แสดงบรรทัดผู้ตรวจ)
+    ต้องไม่พังและต้องไม่เดาชื่อ"""
+    rec = _make(store, "20260811-090302-cccccc")
+    body = _as(app, ADMIN).get(f"/api/artwork/{rec}/report").get_json()
+    assert body["owner"] == ""
+
+
+def test_report_response_does_not_touch_stored_file(app, store):
+    """แนบ owner เฉพาะตอนตอบ — report.json บนดิสก์ต้องไม่ถูกแก้
+    (แหล่งความจริงของเจ้าของคือ owner.json ไฟล์เดียว)"""
+    import json as _json
+    rec = _make(store, "20260811-090303-aaaaaa",
+                {"user_id": "1", "username": "alice"})
+    _as(app, ALICE).get(f"/api/artwork/{rec}/report")
+    on_disk = _json.loads((store / rec / "report.json").read_text(encoding="utf-8"))
+    assert "owner" not in on_disk

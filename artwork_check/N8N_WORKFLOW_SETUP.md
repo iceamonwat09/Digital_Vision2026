@@ -9,7 +9,8 @@
 
 > ตัวแปร env ฝั่งแอป: `N8N_OCR_WEBHOOK_URL` (OCR) และ
 > `N8N_TRANSLATE_WEBHOOK_URL` (แปล) — ค่า default ชี้ไปเครื่องคุณ
-> `http://172.32.201.106:5678/...` อยู่แล้ว
+> `http://127.0.0.1:5678/...` อยู่แล้ว (N8N รันบนเครื่องสถานีเอง —
+> ถ้าย้ายไปเครื่องอื่นให้ตั้ง env ทับ ไม่ต้องแก้โค้ด)
 
 ---
 
@@ -249,7 +250,7 @@ parse แล้วปลายทางต้องถูกตามไปด�
 ## ทดสอบเร็ว (bash / curl)
 
 ```bash
-curl -s -X POST "http://172.32.201.106:5678/webhook/artwork-translate" \
+curl -s -X POST "http://127.0.0.1:5678/webhook/artwork-translate" \
   -H "Content-Type: application/json" \
   -d '{"lines":["نوع السمك : كاتسوانوس بيلاميس","Net Weight: 200 gm","16785"]}' \
   | python3 -m json.tool
@@ -278,7 +279,7 @@ GNU curl — ใช้วิธีนี้แทนจะชัวร์กว�
 ```powershell
 $body = @{ lines = @("نوع السمك : كاتسوانوس بيلاميس", "Net Weight: 200 gm", "16785") } | ConvertTo-Json
 $res = Invoke-RestMethod -Method Post `
-  -Uri "http://172.32.201.106:5678/webhook/artwork-translate" `
+  -Uri "http://127.0.0.1:5678/webhook/artwork-translate" `
   -ContentType "application/json; charset=utf-8" `
   -Body ([System.Text.Encoding]::UTF8.GetBytes($body))
 $res | ConvertTo-Json -Depth 10
