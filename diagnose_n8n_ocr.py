@@ -1,7 +1,8 @@
 """
 วินิจฉัย "ทำไมบางเคสไม่มีการยิง HTTP ไป N8N Artwork OCR" — สำหรับรันบนสถานี
 
-โหมด Artwork มี **5 ทางที่ระบบจะ "ไม่ยิง" webhook เลย** (ไม่ใช่บั๊กทั้งหมด —
+โหมด Artwork มี **5 ทางที่ระบบจะ "ไม่ยิง" webhook เลย** และ **1 ทางที่ยิง
+ทั้งที่มี text layer** (ไม่ใช่บั๊กทั้งหมด —
 บางทางคือพฤติกรรมที่ถูกต้อง) สคริปต์นี้เดินเส้นทางเดียวกับ
 ``artwork_check.ocr.read_zone()`` แบบ **ไม่เรียก OCR จริง** แล้วบอกว่า
 โซนไหนจะยิง / โซนไหนไม่ยิงเพราะอะไร:
@@ -12,6 +13,9 @@
   3. backend ไม่เปิด (``OCR_BACKEND`` ชี้ไปที่อื่น / URL ว่าง) → engine "none"
   4. crop ว่าง (bbox ตัดออกนอกหน้า)   → engine "none"
   5. cache ``ocr_only.json`` ของแท็บ "ข้อความ + คำแปล" ยัง valid → ใช้ผลเดิม
+  6. **(กลับด้านกับข้อ 2)** text layer มีข้อความพอ แต่เป็นคำผิดรูป (ฟอนต์
+     subset แมปอักขระผิด) → ระบบปฏิเสธแล้ว **ยิง OCR แทน**
+     ปิดได้ด้วย ``ARTWORK_PDFTEXT_GARBLED_CHECK=0``
 
     py -3.9 diagnose_n8n_ocr.py                  # ใช้การตรวจล่าสุด + ยิงทดสอบ
     py -3.9 diagnose_n8n_ocr.py <inspection_id>  # ระบุรายการเอง
@@ -62,12 +66,32 @@ def show_config() -> dict:
     print(f"  backend ที่ใช้จริง                  : {backend!r}")
     print(f"  N8N_OCR_WEBHOOK_URL                : {appcfg.N8N_OCR_WEBHOOK_URL!r}")
     print(f"  N8N_OCR_TIMEOUT_S                  : {appcfg.N8N_OCR_TIMEOUT_S}")
+    print(f"  N8N_OCR_RETRIES                    : {appcfg.N8N_OCR_RETRIES}"
+          + ("   ← 0 = ไม่ลองซ้ำ (พฤติกรรมเดิม)" if not appcfg.N8N_OCR_RETRIES
+             else "   ← ลองซ้ำเฉพาะ ต่อไม่ติด/timeout/5xx"))
+    print(f"  N8N_OCR_STRICT_RESPONSE            : {appcfg.N8N_OCR_STRICT_RESPONSE}"
+          + ("   ← ปฏิเสธคำตอบที่เป็นหน้า HTML"
+             if appcfg.N8N_OCR_STRICT_RESPONSE
+             else "   ← ปิด = เชื่อทุกอย่างที่ webhook ตอบ (เสี่ยง)"))
     print(f"  N8N_TRANSLATE_WEBHOOK_URL          : {acfg.N8N_TRANSLATE_WEBHOOK_URL!r}")
     print(f"  ocr.is_ocr_available()             : {vertex_client.is_enabled()}")
     print(f"  ARTWORK_EMBEDDED_MIN_CHARS         : {acfg.EMBEDDED_TEXT_MIN_CHARS}"
           "   ← เกินนี้ = ใช้ text layer ไม่ยิง OCR")
     print(f"  ARTWORK_OCR_DPI                    : {acfg.OCR_DPI}")
     print(f"  ARTWORK_OCR_CROP_MAX_SIDE          : {acfg.OCR_CROP_MAX_SIDE}")
+    print(f"  ARTWORK_OCR_CROP_MIN_SIDE          : {acfg.OCR_CROP_MIN_SIDE}"
+          + ("   ← 0 = ปิด (โซนเล็กจะอ่านไม่ออก)" if not acfg.OCR_CROP_MIN_SIDE
+             else "   ← PDF: โซนเล็กกว่านี้จะเรนเดอร์ใหม่ DPI สูงขึ้น"))
+    print(f"  ARTWORK_OCR_DPI_MAX_FACTOR         : {acfg.OCR_DPI_MAX_FACTOR}"
+          f"   (เพดาน = {int(acfg.OCR_DPI * acfg.OCR_DPI_MAX_FACTOR)} DPI)")
+    print(f"  ARTWORK_PDFTEXT_GARBLED_CHECK      : {acfg.PDFTEXT_GARBLED_CHECK}"
+          + ("   ← ทาง ⑥: text layer ที่ผิดรูปจะถูกปฏิเสธแล้วยิง OCR แทน"
+             if acfg.PDFTEXT_GARBLED_CHECK
+             else "   ← ปิด = เชื่อ text layer เต็ม 100% แม้จะเสีย"))
+    if acfg.PDFTEXT_GARBLED_CHECK:
+        print(f"    └ min_tokens={acfg.PDFTEXT_GARBLED_MIN_TOKENS} "
+              f"ratio={acfg.PDFTEXT_GARBLED_RATIO}"
+              "   (ต่ำกว่า min_tokens = ไม่ตัดสิน)")
 
     print()
     if backend != "n8n":
@@ -145,6 +169,21 @@ def ping(url: str) -> bool:
             print("  → ดู execution log ฝั่ง n8n ประกอบ")
         return False
 
+    # คำตอบ "ไม่ error" ยังไม่พอ — ต้องดูว่ารูปแบบตรงสัญญาไหม เพราะคำตอบ
+    # ที่ผิดรูปจะกลายเป็น "ข้อความบนฉลาก" แบบเงียบ ๆ (ดู docs/N8N_OCR_PROMPT.md)
+    warn = res.get("warning")
+    if warn:
+        print(f"\n  ⚠ {warn}")
+        print("    → workflow ควรคืน JSON {\"text\": ..., \"blocks\": [...]} ล้วน")
+        print("      ดูรูปแบบที่ถูกต้องใน docs/N8N_OCR_PROMPT.md")
+    txt = (res.get("text") or "")
+    if "DIAGNOSE" not in txt.upper() and "12345" not in txt:
+        print("\n  ⚠ ภาพทดสอบมีคำว่า 'DIAGNOSE 12345' แต่ผลที่ได้ไม่มีคำนี้")
+        print("    → OCR อ่านไม่ออก หรือ prompt สั่งให้ทำอย่างอื่น (แปล/สรุป)")
+        print("      ดู prompt ที่แนะนำใน docs/N8N_OCR_PROMPT.md")
+    elif not warn:
+        print("\n  ✓ อ่านภาพทดสอบได้ถูกต้อง (เจอ 'DIAGNOSE 12345')")
+
     print("\n  ✓ webhook ตอบกลับปกติ → ปัญหาไม่ได้อยู่ที่ 'ยิงแล้วพัง' "
           "แต่อยู่ที่ 'ไม่ได้ยิง' (ดูข้อ ③)")
     return True
@@ -153,6 +192,7 @@ def ping(url: str) -> bool:
 # ── ③ ไล่ทีละโซนของการตรวจจริง (ไม่เรียก OCR) ─────────────────────────
 def replay(rec_id: str) -> int:
     from artwork_check import config as acfg
+    from artwork_check import ocr as aocr
     from artwork_check import pipeline, report
     from artwork_check.pdf_ingest import ArtworkDocument
     from inspectors import vertex_client
@@ -177,7 +217,8 @@ def replay(rec_id: str) -> int:
     enabled = vertex_client.is_enabled()
     recorded = {r["zone_id"]: r for r in (rep or {}).get("ocr", [])}
     docs = {}
-    tally = {"post": 0, "pdf-text": 0, "ignore": 0, "off": 0, "empty": 0}
+    tally = {"post": 0, "pdf-text": 0, "ignore": 0, "off": 0, "empty": 0,
+             "garbled": 0}
 
     for z in zone_list:
         zid, kind = z["id"], z.get("type", "")
@@ -207,7 +248,15 @@ def replay(rec_id: str) -> int:
             emb = ""
             print(f"  {zid:6} doc={which}  (อ่าน text layer ไม่ได้: {e})")
 
-        if len(emb) >= acfg.EMBEDDED_TEXT_MIN_CHARS:
+        # ทางที่ 6 — text layer มีข้อความ "พอ" แต่ใช้ไม่ได้ (ฟอนต์ subset
+        # แมปอักขระผิด) ⇒ ระบบ **ปฏิเสธ text layer แล้วยิง OCR แทน** ซึ่ง
+        # กลับด้านกับทางที่ 2. ต้องแยกให้เห็น ไม่งั้นอ่านผลแล้วงงว่าทำไม
+        # ไฟล์ที่ "มี text layer" ถึงยังยิง OCR
+        garbled = (len(emb) >= acfg.EMBEDDED_TEXT_MIN_CHARS
+                   and acfg.PDFTEXT_GARBLED_CHECK
+                   and aocr.text_looks_garbled(emb))
+
+        if len(emb) >= acfg.EMBEDDED_TEXT_MIN_CHARS and not garbled:
             tally["pdf-text"] += 1
             print(f"  {zid:6} doc={which}  ไม่ยิง — มี text layer {len(emb)} ตัวอักษร "
                   f"(≥ {acfg.EMBEDDED_TEXT_MIN_CHARS}) → engine=pdf-text ✓ ปกติ"
@@ -222,8 +271,10 @@ def replay(rec_id: str) -> int:
             continue
 
         try:
-            crop = doc.render_zone(z["bbox"], dpi=acfg.OCR_DPI,
-                                   max_side=acfg.OCR_CROP_MAX_SIDE)
+            # ใช้ฟังก์ชันเดียวกับ production — ไม่ใช่ render_zone ตรง ๆ —
+            # ไม่งั้นขนาด crop ที่รายงานจะไม่ตรงกับที่ส่งไปจริง หลังจากมี
+            # การเพิ่ม DPI ให้โซนเล็ก (OCR_CROP_MIN_SIDE)
+            crop = aocr._render_for_ocr(doc, z["bbox"])
         except Exception as e:
             print(f"  {zid:6} doc={which}  ไม่ยิง — render โซนไม่ได้ (bbox ผิด/"
                   f"หลุดหน้า): {e}")
@@ -236,16 +287,29 @@ def replay(rec_id: str) -> int:
                   f"→ engine=none   [รายงานเดิม: {was}]")
             continue
 
-        tally["post"] += 1
         h, w = crop.shape[:2]
-        print(f"  {zid:6} doc={which}  **จะยิง HTTP** — text layer {len(emb)} ตัว "
-              f"(< {acfg.EMBEDDED_TEXT_MIN_CHARS}), crop {w}x{h}px"
-              f"   [รายงานเดิม: {was}]")
+        if garbled:
+            # ทางที่ 6 — ยิงทั้งที่ "มี" text layer เพราะข้อความใช้ไม่ได้
+            tally["garbled"] += 1
+            print(f"  {zid:6} doc={which}  **จะยิง HTTP ทั้งที่มี text layer** — "
+                  f"ข้อความ {len(emb)} ตัวเป็นคำผิดรูป (ฟอนต์แมปอักขระผิด), "
+                  f"crop {w}x{h}px   [รายงานเดิม: {was}]")
+            print(f"         ที่อ่านได้จาก PDF: "
+                  f"{_fmt(emb.replace(chr(10), ' | '), 52)!r}")
+            print("         → ถอยไปอ่านจากภาพแทน "
+                  "(ปิดด้วย ARTWORK_PDFTEXT_GARBLED_CHECK=0)")
+        else:
+            tally["post"] += 1
+            print(f"  {zid:6} doc={which}  **จะยิง HTTP** — text layer {len(emb)} ตัว "
+                  f"(< {acfg.EMBEDDED_TEXT_MIN_CHARS}), crop {w}x{h}px"
+                  f"   [รายงานเดิม: {was}]")
 
     print()
-    print(f"  สรุป: จะยิง {tally['post']} โซน · ไม่ยิงเพราะ text layer "
-          f"{tally['pdf-text']} · ignore {tally['ignore']} · backend ปิด "
-          f"{tally['off']} · crop ว่าง {tally['empty']}")
+    print(f"  สรุป: จะยิง {tally['post'] + tally['garbled']} โซน "
+          f"(ในนั้นเป็นโซนที่ text layer เสีย {tally['garbled']}) · "
+          f"ไม่ยิงเพราะ text layer {tally['pdf-text']} · "
+          f"ignore {tally['ignore']} · backend ปิด {tally['off']} · "
+          f"crop ว่าง {tally['empty']}")
 
     # cache ของแท็บแปล — ทางที่ 5
     cache_p = os.path.join(d, pipeline._OCR_ONLY_CACHE)
@@ -268,7 +332,7 @@ def replay(rec_id: str) -> int:
         else:
             print("    stale (โซน/auto-rotate เปลี่ยน) → จะ OCR ใหม่")
 
-    if tally["post"] == 0:
+    if tally["post"] + tally["garbled"] == 0:
         print()
         print("  ⇒ การตรวจนี้ **ไม่ควรมี HTTP ไป N8N เลย** ตามการตั้งค่าปัจจุบัน "
               "— ไม่ใช่บั๊กที่ตัวเชื่อมต่อ")
@@ -284,6 +348,7 @@ def scan(limit: int = 200) -> int:
     ส่วนโซนที่ได้ 0 ตัวคือ outline/กราฟิกจริง — ยิง OCR ถูกต้องแล้ว.
     """
     from artwork_check import config as acfg
+    from artwork_check import ocr as aocr
     from artwork_check import pipeline, report
     from artwork_check.pdf_ingest import ArtworkDocument
 
@@ -305,7 +370,7 @@ def scan(limit: int = 200) -> int:
             continue
         d = report.inspection_dir(rid)
         docs, page_chars = {}, {}
-        n_post = n_pdf = n_partial = 0
+        n_post = n_pdf = n_partial = n_garbled = 0
         worst = 0
         for z in rep["zones"]:
             if z.get("type") == "ignore":
@@ -324,10 +389,18 @@ def scan(limit: int = 200) -> int:
             if doc is None:
                 continue
             try:
-                n = len(doc.embedded_text(z["bbox"]))
+                emb = doc.embedded_text(z["bbox"])
+                n = len(emb)
             except Exception:
                 continue
-            if n >= acfg.EMBEDDED_TEXT_MIN_CHARS:
+            # ทางที่ 6: มีข้อความพอ แต่เป็นคำผิดรูป -> ระบบยิง OCR แทน
+            # ต้องนับแยก ไม่งั้นตัวเลข pdf-text จะเกินจริง
+            if (n >= acfg.EMBEDDED_TEXT_MIN_CHARS
+                    and acfg.PDFTEXT_GARBLED_CHECK
+                    and aocr.text_looks_garbled(emb)):
+                n_garbled += 1
+                n_post += 1
+            elif n >= acfg.EMBEDDED_TEXT_MIN_CHARS:
                 n_pdf += 1
             else:
                 n_post += 1
@@ -339,7 +412,11 @@ def scan(limit: int = 200) -> int:
             continue
         pc = max(page_chars.values()) if page_chars else 0
         flag = ""
-        if n_partial:
+        if n_garbled:
+            flag = (f"  ⚠ {n_garbled} โซน text layer เสีย (ฟอนต์แมปอักขระผิด) "
+                    "→ ถอยไป OCR")
+            suspects.append(rid)
+        elif n_partial:
             flag = f"  ⚠ {n_partial} โซนมีข้อความ 1-{worst} ตัว (ต่ำกว่าเกณฑ์)"
             suspects.append(rid)
         elif pc >= acfg.EMBEDDED_TEXT_MIN_CHARS and n_post:

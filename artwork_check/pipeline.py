@@ -254,6 +254,10 @@ def run_inspection(rec_id: str, zone_list: List[dict],
         "elapsed_s": round(time.time() - t0, 2),
         "spell_layer_available": checks.spell_layer_available(),
         "ocr_available": ocr.is_ocr_available(),
+        # ชั้นไหน "ได้ทำงานจริง" กับงานใบนี้ — advisory ล้วน คำนวณ *หลัง*
+        # ได้ defects แล้ว จึงไม่มีทางกระทบ verdict/การนับ. ต้องมีเพราะ
+        # PASS ไม่ได้แปลว่าตรวจครบ (ดู checks.check_coverage)
+        "coverage": checks.check_coverage(zone_list, ocr_results),
     }
     if zones_b:
         # Cross-file compare was used — the report page shows both docs.
@@ -273,15 +277,41 @@ def run_inspection(rec_id: str, zone_list: List[dict],
 _OCR_ONLY_CACHE = "ocr_only.json"
 
 
+def _ocr_fingerprint() -> dict:
+    """ค่าตั้งทุกตัวที่ "เปลี่ยนแล้วข้อความที่ OCR อ่านได้จะเปลี่ยน".
+
+    ต้องอยู่ใน cache key ด้วย ไม่ใช่แค่ layout ของโซน — ไม่งั้นการแก้ค่า
+    เหล่านี้ (หรือ deploy โค้ดที่แก้เส้นทางอ่าน) จะไม่ทำให้ cache หลุด แล้ว
+    แท็บ "ข้อความ + คำแปล" จะเสิร์ฟข้อความเก่าต่อไปเรื่อย ๆ ทั้งที่ระบบ
+    อ่านได้ดีขึ้นแล้ว — เงียบและหาสาเหตุยากมาก.
+
+    เคสจริงที่ทำให้ต้องเพิ่ม: การเปิด OCR_CROP_MIN_SIDE ทำให้ไฟล์ที่ถูกย่อ
+    ลง A4 อ่านได้จาก 1.2% เป็น 97.6% แต่งานที่เคยกดแปลไปแล้วจะยังได้ข้อความ
+    ชุดเก่า เพราะ layout โซนไม่ได้เปลี่ยน.
+    """
+    return {
+        "dpi": config.OCR_DPI,
+        "max_side": config.OCR_CROP_MAX_SIDE,
+        "min_side": config.OCR_CROP_MIN_SIDE,
+        "dpi_max_factor": config.OCR_DPI_MAX_FACTOR,
+        "embed_min": config.EMBEDDED_TEXT_MIN_CHARS,
+        "garbled": bool(config.PDFTEXT_GARBLED_CHECK),
+        "garbled_tokens": config.PDFTEXT_GARBLED_MIN_TOKENS,
+        "garbled_ratio": config.PDFTEXT_GARBLED_RATIO,
+    }
+
+
 def _zones_signature(zone_list: List[dict], auto_rotate: bool = False) -> str:
-    """Stable hash of the zone layout (id/type/group/bbox/doc/rotate) plus
-    the page auto-rotate flag, so a repeated translate request reuses the
-    cached OCR only when nothing that changes the OCR input has changed."""
+    """Stable hash of the zone layout (id/type/group/bbox/doc/rotate), the
+    page auto-rotate flag, AND the OCR settings that decide what the text
+    acquisition step will produce — so a repeated translate request reuses
+    the cached OCR only when nothing that changes the OCR input has changed."""
     sig = [{k: z.get(k) for k in ("id", "type", "group", "bbox", "doc",
                                   "rotate")}
            for z in zone_list]
     return hashlib.sha1(
-        json.dumps({"z": sig, "auto": bool(auto_rotate)},
+        json.dumps({"z": sig, "auto": bool(auto_rotate),
+                    "ocr": _ocr_fingerprint()},
                    sort_keys=True, ensure_ascii=False).encode("utf-8")
     ).hexdigest()
 

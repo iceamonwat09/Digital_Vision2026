@@ -71,3 +71,6 @@ data/auth/
 
 # TLS certs for HTTPS (self-signed, generated per machine via generate_cert.py)
 certs/
+
+# ชุดไฟล์ artwork สำหรับ verify_ocr.py — เป็นงานลูกค้า ไม่ควรขึ้น repo
+TEST/

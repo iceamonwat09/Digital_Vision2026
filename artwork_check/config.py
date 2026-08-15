@@ -30,6 +30,27 @@ OCR_DPI = int(os.getenv("ARTWORK_OCR_DPI", "450"))
 # Hard cap on a single OCR crop (pixels, longest side) so N8N webhook
 # payloads stay under typical body-size limits.
 OCR_CROP_MAX_SIDE = int(os.getenv("ARTWORK_OCR_CROP_MAX_SIDE", "3000"))
+# ── ขนาดขั้นต่ำของ crop ที่ "ส่งไป OCR" ───────────────────────────────
+# เดิม ocr.read_zone() เรนเดอร์ที่ OCR_DPI คงที่ มีแต่เพดานบน (MAX_SIDE)
+# ไม่มีพื้นล่าง ต่างจาก pipeline.zone_crop_jpg() ที่มี CROP_MIN_SIDE อยู่แล้ว
+# ⇒ ภาพที่ "คนเห็น" บนการ์ด คมกว่าภาพที่ "OCR ได้รับ".
+#
+# ผลของช่องว่างนี้วัดได้จริง: artwork ที่ถูกย่อลง A4 (proof แบบที่โรงพิมพ์
+# ส่งมาเป็นส่วนใหญ่) ทำให้บล็อก 253 คำเรนเดอร์ได้แค่ 231x337 px = ตัวอักษร
+# สูง ~9 px แล้ว OCR อ่านได้ 1.2%. เรนเดอร์ใหม่ให้ด้านยาวถึง 1200 px
+# (ตัวอักษร ~31 px) อ่านได้ 97.6% — เนื้อหาเดียวกัน engine เดียวกัน.
+#
+#   สูงตัวอักษร  9.0 px -> recall  1.2%     22.1 px -> 98.5%
+#               12.4 px -> recall 23.2%     31.0 px -> 100%
+#               17.2 px -> recall 93.9%
+#
+# ใช้ค่าเดียวกับ CROP_MIN_SIDE (1200) เพราะเป็นค่าที่ repo พิสูจน์มาแล้ว
+# และวัดซ้ำในรอบนี้ว่าให้ผลเต็ม. ตั้ง 0 = ปิด = พฤติกรรมเดิมเป๊ะ (rollback).
+# ⚠ เฉพาะ PDF เท่านั้น — ไฟล์ภาพไม่มีรายละเอียดเพิ่มให้ดึง การขยายจะได้
+#   แค่ภาพเบลอ จึงไม่ทำ (เหมือนที่ zone_crop_jpg ทำเฉพาะ is_pdf).
+OCR_CROP_MIN_SIDE = int(os.getenv("ARTWORK_OCR_CROP_MIN_SIDE", "1200"))
+# เพดานการคูณ DPI กันเรนเดอร์หนักเกินไปบนโซนจิ๋ว (เท่ากับ zone_crop_jpg)
+OCR_DPI_MAX_FACTOR = float(os.getenv("ARTWORK_OCR_DPI_MAX_FACTOR", "4.0"))
 
 # ── Embedded PDF text ────────────────────────────────────────────────
 # When a zone contains at least this many embedded-text characters the
@@ -37,6 +58,31 @@ OCR_CROP_MAX_SIDE = int(os.getenv("ARTWORK_OCR_CROP_MAX_SIDE", "3000"))
 # Outlined artwork (the common case) has no text layer and falls back
 # to OCR automatically.
 EMBEDDED_TEXT_MIN_CHARS = int(os.getenv("ARTWORK_EMBEDDED_MIN_CHARS", "12"))
+# ── ด่านคุณภาพของ text layer (ไม่ใช่แค่ปริมาณ) ────────────────────────
+# EMBEDDED_TEXT_MIN_CHARS วัดแค่ว่า "มีข้อความกี่ตัว" แต่ไม่ได้ถามว่า
+# "ข้อความนั้นใช้ได้ไหม". ไฟล์จริงที่เจอ: artwork ที่ถูกย่อ/แปลงมา ฟอนต์
+# subset แมปอักขระผิด ทำให้ get_text() คืนสิ่งที่หน้าตาเป็นคำแต่ไม่ใช่คำ
+# ("PR3374Y0KOI", "8YCGOQMUWIQVEOKEPEVIXGISKLAD", "340CKOVE") — แล้วชั้น
+# pdf-text ก็ส่งต่อด้วย conf 1.0 โดยไม่มีการตรวจสอบใด ๆ ⇒ ข้อความมั่วไหล
+# เข้าชั้นตัดสิน PASS/FAIL ด้วยความมั่นใจสูงสุด (ผิดกฎเหล็กข้อ 2 ตรง ๆ).
+#
+# เปิดไว้ = ถ้าจับได้ว่าเสีย ให้ตกไปใช้ OCR แทน (ซึ่งอ่านภาพจริง) และถ้า
+# ไม่มี OCR ให้ติดธง error เพื่อให้กลายเป็น UNREADABLE = ขอให้คนดู.
+# ตั้ง 0 = ปิด = พฤติกรรมเดิมเป๊ะ (rollback).
+PDFTEXT_GARBLED_CHECK = os.getenv(
+    "ARTWORK_PDFTEXT_GARBLED_CHECK", "1").strip().lower() not in ("0", "false", "")
+# เกณฑ์ตัดสิน "เสีย" — วัดจากไฟล์จริง 35 บล็อก (5 ไฟล์) เทียบกับบล็อกเดียว
+# กันที่จำลองการเสียแบบ glyph-index mapping 29 บล็อก:
+#     min_long=8  -> ฟ้องผิด 0/35   จับได้ 28/29
+#     min_long=20 -> ฟ้องผิด 0/35   จับได้ 14/29
+# ค่า ratio 0.20/0.30/0.40 ให้ผลเท่ากันทุกค่า = สองกลุ่มแยกกันขาด ไม่ใช่
+# เส้นบาง ๆ ที่ต้องจูน. ต้องมีคำยาวอย่างน้อย min_long คำจึงจะตัดสิน —
+# กันรหัสงานพิมพ์ ("5K00D111N000000301", "TUG-15974R04-0-M") ที่มีรูปแบบ
+# คล้ายกันแต่มีไม่กี่คำต่อแถบ.
+PDFTEXT_GARBLED_MIN_TOKENS = int(
+    os.getenv("ARTWORK_PDFTEXT_GARBLED_MIN_TOKENS", "8"))
+PDFTEXT_GARBLED_RATIO = float(
+    os.getenv("ARTWORK_PDFTEXT_GARBLED_RATIO", "0.30"))
 
 # ── Checks ───────────────────────────────────────────────────────────
 # Languages tried by the dictionary layer. A word passes if it is valid

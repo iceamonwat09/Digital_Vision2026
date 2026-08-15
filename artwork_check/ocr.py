@@ -17,6 +17,7 @@ exactly the defects this mode exists to catch.
 from __future__ import annotations
 
 import logging
+import re
 from typing import List
 
 from inspectors import vertex_client   # read-only reuse of the dispatcher
@@ -30,6 +31,47 @@ logger = logging.getLogger(__name__)
 
 def is_ocr_available() -> bool:
     return vertex_client.is_enabled()
+
+
+# ── ด่านคุณภาพของ PDF text layer ─────────────────────────────────────
+_TOKEN_RE = re.compile(r"\S+")
+_STRIP = ".,;:()[]{}%/\\\"'“”‘’«»"
+
+
+def _long_tokens(text: str, min_len: int = 8) -> List[str]:
+    toks = (t.strip(_STRIP) for t in _TOKEN_RE.findall(text))
+    return [t for t in toks if len(t) >= min_len]
+
+
+def _malformed(tok: str) -> bool:
+    """คำที่ "ผิดรูป": ยาวพอ และมีตัวเลขแทรกอยู่กลางคำที่เป็นตัวอักษร.
+
+    ฉลากจริงมีคำปนตัวเลขเยอะ แต่ตัวเลขจะอยู่ท้ายคำหรือแยกเป็นคำของตัวเอง
+    ("B12", "OMEGA-3", "170G", "E1520") ส่วนข้อความที่ฟอนต์แมปอักขระผิดจะได้
+    ตัวเลขโผล่กลางคำยาว ๆ ("PR3374Y0KOI", "ROL12SSAL").
+    """
+    if not (any(c.isdigit() for c in tok) and any(c.isalpha() for c in tok)):
+        return False
+    head = tok.rstrip("0123456789")
+    # ตัวเลขอยู่ท้ายล้วน = รหัส/สารเติมแต่งปกติ ไม่ใช่คำเสีย
+    return bool(head) and any(c.isdigit() for c in head)
+
+
+def text_looks_garbled(text: str,
+                       min_tokens: int = None,
+                       ratio: float = None) -> bool:
+    """True เมื่อข้อความจาก text layer หน้าตาเหมือน "ฟอนต์แมปอักขระผิด".
+
+    ตัดสินเฉพาะบล็อกที่มีคำยาวมากพอ (``min_tokens``) — แถบรหัสงานพิมพ์มีคำ
+    แบบนั้นไม่กี่คำจึงไม่ถูกตัดสิน. วัดกับไฟล์จริง 35 บล็อก: ฟ้องผิด 0.
+    """
+    mt = config.PDFTEXT_GARBLED_MIN_TOKENS if min_tokens is None else min_tokens
+    rt = config.PDFTEXT_GARBLED_RATIO if ratio is None else ratio
+    toks = _long_tokens(text)
+    if len(toks) < max(1, mt):
+        return False
+    bad = sum(1 for t in toks if _malformed(t))
+    return (bad / float(len(toks))) >= rt
 
 
 def read_zone(doc: ArtworkDocument, zone: dict,
@@ -53,19 +95,33 @@ def read_zone(doc: ArtworkDocument, zone: dict,
     bbox = zone["bbox"]
 
     embedded = doc.embedded_text(bbox)
+    garbled = ""
     if len(embedded) >= config.EMBEDDED_TEXT_MIN_CHARS:
-        return {"zone_id": zone["id"], "text": embedded,
-                "engine": "pdf-text", "conf": 1.0, "rotate": 0}
+        if config.PDFTEXT_GARBLED_CHECK and text_looks_garbled(embedded):
+            # text layer มีข้อความ "พอ" แต่ใช้ไม่ได้ (ฟอนต์แมปอักขระผิด).
+            # ห้ามส่งต่อด้วย conf 1.0 — ตกไปอ่านจากภาพจริงแทน.
+            garbled = ("text layer ของโซนนี้อ่านออกมาเป็นคำผิดรูป "
+                       "(ฟอนต์ในไฟล์แมปอักขระผิด) จึงไม่ใช้ค่าจาก PDF")
+            logger.warning("[artwork] zone %s: text layer garbled (%d chars) "
+                           "-> fall back to OCR", zone["id"], len(embedded))
+        else:
+            return {"zone_id": zone["id"], "text": embedded,
+                    "engine": "pdf-text", "conf": 1.0, "rotate": 0}
 
     if not vertex_client.is_enabled():
+        if garbled:
+            # ไม่มี OCR ให้ถอยไปใช้ — คืนข้อความเดิมพร้อมธง error เพื่อให้
+            # กลายเป็น UNREADABLE (ขอให้คนดู) แทนที่จะเงียบว่าถูกต้อง
+            return {"zone_id": zone["id"], "text": embedded,
+                    "engine": "pdf-text", "conf": None, "rotate": 0,
+                    "error": garbled + " และไม่มี OCR backend ให้ใช้แทน"}
         return {"zone_id": zone["id"], "text": "", "engine": "none",
                 "conf": None, "rotate": 0,
                 "error": "ไม่ได้ตั้งค่า OCR backend (N8N_OCR_WEBHOOK_URL) "
                          "และไฟล์นี้ไม่มี text layer"}
 
-    crop = doc.render_zone(bbox, dpi=config.OCR_DPI,
-                           max_side=config.OCR_CROP_MAX_SIDE)
-    if crop.size == 0:
+    crop = _render_for_ocr(doc, bbox)
+    if crop is None or crop.size == 0:
         return {"zone_id": zone["id"], "text": "", "engine": "none",
                 "conf": None, "rotate": 0,
                 "error": "โซนว่าง (bbox ตัดออกนอกหน้า)"}
@@ -98,7 +154,48 @@ def read_zone(doc: ArtworkDocument, zone: dict,
         out["error"] = str(result["error"])
     if result.get("stub"):
         out["error"] = out.get("error") or "OCR backend ตอบกลับเป็น stub"
+    if result.get("warning"):
+        # backend อ่านสำเร็จ "ในทางเทคนิค" แต่รูปแบบคำตอบไม่ตรงสัญญา
+        # (เช่นไม่ใช่ JSON) ⇒ ข้อความอาจปนขยะ. ไม่ทำให้โซนตกเป็น error
+        # เพราะบาง workflow ตั้งให้คืน plain text จริง ๆ — แต่ต้องให้
+        # ผู้ตรวจเห็น ไม่ใช่ทิ้งไปเงียบ ๆ อย่างที่เคยเป็น
+        out["note"] = " · ".join(
+            x for x in (out.get("note"), str(result["warning"])) if x)
+    if garbled:
+        # บอกไว้ในผลว่าทำไมโซนนี้ไม่ได้ใช้ text layer ทั้งที่ไฟล์มี —
+        # ไม่ใช่ error (OCR อ่านสำเร็จ) แต่ผู้ตรวจควรรู้.
+        # ต่อท้าย ไม่ทับ — โซนหนึ่งเจอได้ทั้งสองอย่างพร้อมกัน
+        out["note"] = " · ".join(x for x in (garbled, out.get("note")) if x)
     return out
+
+
+def _render_for_ocr(doc: ArtworkDocument, bbox):
+    """เรนเดอร์โซนสำหรับส่ง OCR — เหมือนเดิมทุกอย่าง ยกเว้นเพิ่ม DPI ให้โซน
+    ที่เรนเดอร์ออกมาเล็กเกินกว่า OCR จะอ่านได้ (ตรรกะเดียวกับที่
+    ``pipeline.zone_crop_jpg`` ใช้กับภาพบนการ์ดอยู่แล้ว).
+
+    ``OCR_CROP_MIN_SIDE = 0`` = ปิด = เส้นทางเดิมเป๊ะ.
+    """
+    crop = doc.render_zone(bbox, dpi=config.OCR_DPI,
+                           max_side=config.OCR_CROP_MAX_SIDE)
+    min_side = config.OCR_CROP_MIN_SIDE
+    if not min_side or crop is None or crop.size == 0:
+        return crop
+    # ภาพ raster ไม่มีรายละเอียดเพิ่มให้ดึง — ขยายได้แค่ความเบลอ
+    if not getattr(doc, "is_pdf", False):
+        return crop
+    longest = max(crop.shape[:2])
+    if longest >= min_side:
+        return crop
+    factor = min(config.OCR_DPI_MAX_FACTOR, min_side / float(longest))
+    bigger = doc.render_zone(bbox, dpi=int(config.OCR_DPI * factor),
+                             max_side=config.OCR_CROP_MAX_SIDE)
+    if bigger is None or bigger.size == 0:
+        return crop
+    logger.info("[artwork] zone crop %dx%d เล็กเกินไป -> เรนเดอร์ใหม่ที่ "
+                "DPI x%.1f ได้ %dx%d", crop.shape[1], crop.shape[0], factor,
+                bigger.shape[1], bigger.shape[0])
+    return bigger
 
 
 def read_all_zones(doc: ArtworkDocument, zones: List[dict],

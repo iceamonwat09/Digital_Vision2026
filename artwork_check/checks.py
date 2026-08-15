@@ -790,6 +790,95 @@ def check_readability(zones: List[dict], ocr_results: List[dict],
     return defects
 
 
+# ── Coverage: ชั้นไหน "ได้ทำงานจริง" กับงานใบนี้ ──────────────────────
+
+def check_coverage(zones: List[dict], ocr_results: List[dict]) -> dict:
+    """รายงานว่าชั้นตรวจแต่ละชั้น **ได้ทำงานกับงานใบนี้จริงหรือไม่**.
+
+    ทำไมต้องมี: ผลลัพธ์ "PASS" ไม่ได้แปลว่าตรวจครบ — ชั้นเทียบข้ามแผง
+    (MISMATCH_PANELS) จะทำงานก็ต่อเมื่อมีโซนอย่างน้อย 2 โซนที่ ``group``
+    ตรงกันและอ่านข้อความออกทั้งคู่. ผู้ใช้ที่ลากหลายโซนบนไฟล์เดียวจะได้
+    group อัตโนมัติคนละตัว (A, B, C, …) ⇒ ชั้นนี้ **ไม่เคยทำงานเลย** แล้ว
+    รายงานก็ยังขึ้น ✅ PASS เงียบ ๆ. วัดจากเคสจำลองตามงานจริง: ความต่าง
+    อย่างน้ำหนักสุทธิ / ประเทศผู้ผลิต / วันหมดอายุ **ไม่มีชั้นไหนจับได้เลย**
+    ถ้าไม่มีการเทียบข้ามแผง (0 defect ทั้งที่ของจริงต่างกัน).
+
+    **ห้ามแก้ด้วยการบังคับให้ทุกโซนอยู่ group เดียวกัน** — วัดแล้วเช่นกัน:
+    โซนคนละเนื้อหา (ส่วนผสม/ที่อยู่/วันหมดอายุ) ที่ถูกจับรวมกลุ่มเดียว
+    ให้ defect ปลอม 6 รายการทันที. ทางที่ถูกคือ **บอกความจริง** ว่าชั้นนี้
+    ไม่ได้ทำงาน แล้วให้คนตัดสินใจว่าจะจัดกลุ่มหรือไม่.
+
+    คืน dict ที่ปลอดภัยกับ JSON ล้วน — **advisory 100%** ไม่แตะ defects
+    ไม่แตะ verdict ไม่แตะการนับ.
+    """
+    texts = {r["zone_id"]: (r.get("text") or "") for r in ocr_results}
+    active = [z for z in zones if z.get("type") != "ignore"]
+    panels = [z for z in active if z.get("type") in ("panel", "header")]
+    zooms = [z for z in active if z.get("type") == "zoom"]
+
+    def readable(z):
+        return bool(texts.get(z["id"], "").strip())
+
+    # กลุ่มที่ "เทียบได้จริง" = มี panel ที่อ่านออก ≥ 2 โซนใน group เดียวกัน
+    by_group: Dict[str, List[dict]] = {}
+    for z in panels:
+        g = z.get("group") or ""
+        if g:
+            by_group.setdefault(g, []).append(z)
+    votable = {g: m for g, m in by_group.items()
+               if len([z for z in m if readable(z)]) >= 2}
+    # กลุ่มที่ตั้งไว้ตรงกันแล้ว แต่ยังเทียบไม่ได้เพราะอ่านข้อความไม่ออก
+    grouped_unreadable = sorted(
+        g for g, m in by_group.items()
+        if len(m) >= 2 and len([z for z in m if readable(z)]) < 2)
+
+    if votable:
+        cross = {"ran": True, "reason": "ok",
+                 "groups": sorted(votable),
+                 "zones": sum(len(m) for m in votable.values())}
+    elif len(panels) < 2:
+        cross = {"ran": False, "reason": "single_zone", "groups": [],
+                 "zones": 0}
+    elif grouped_unreadable:
+        cross = {"ran": False, "reason": "group_unreadable",
+                 "groups": grouped_unreadable, "zones": 0}
+    else:
+        cross = {"ran": False, "reason": "no_shared_group", "groups": [],
+                 "zones": 0}
+
+    # zoom: ``check_group_consistency`` เรียก ``_check_zooms`` เมื่อกลุ่มนั้น
+    # มี zoom **และ** มี panel ที่อ่านออกอย่างน้อย 1 โซน — สะท้อนเงื่อนไข
+    # เดียวกันเป๊ะ ไม่ประมาณ ไม่งั้นรายงาน coverage เองจะกลายเป็นคำตอบที่ผิด
+    zoom_groups = sorted({
+        g for g in by_group
+        if any((z.get("group") or "") == g for z in zooms)
+        and any(readable(z) for z in by_group[g])
+    })
+    if zoom_groups:
+        zoom = {"ran": True, "reason": "ok", "zones": len(zooms),
+                "groups": zoom_groups}
+    else:
+        zoom = {"ran": False, "zones": len(zooms), "groups": [],
+                "reason": "no_zoom_zone" if not zooms else "no_panel_in_group"}
+
+    n_read = len([z for z in active if readable(z)])
+    spell_ok = bool(spell_layer_available())
+    return {
+        "cross_panel": cross,
+        "zoom": zoom,
+        # ชั้นที่ทำงานทุกโซนอยู่แล้ว — รายงานไว้ให้เห็นภาพรวมว่ามีกี่โซนที่
+        # มีข้อความให้ตรวจจริง (โซนที่อ่านไม่ออกจะขึ้น UNREADABLE อยู่แล้ว)
+        "numbers": {"ran": n_read > 0, "zones": n_read,
+                    "reason": "ok" if n_read else "no_readable_zone"},
+        "spelling": {"ran": spell_ok and n_read > 0, "zones": n_read,
+                     "reason": ("ok" if spell_ok and n_read
+                                else ("spellchecker_missing" if not spell_ok
+                                      else "no_readable_zone"))},
+        "zones_total": len(active),
+        "zones_readable": n_read,
+    }
+
+
 # ── Orchestrator ──────────────────────────────────────────────────────
 
 def run_all_checks(zones: List[dict], ocr_results: List[dict],

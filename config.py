@@ -9,7 +9,7 @@ import os
 # print it on startup and confirm it is actually executing the new code.
 # NOTE: shown on the navbar badge too — keep it short (<= ~28 chars) or it
 # gets ellipsized there (full value always visible in the footer / hover).
-CONFIG_VERSION = "2026.08.14-auth-self-register"
+CONFIG_VERSION = "2026.08.15-n8n-parse"
 
 # ====================
 # CAMERA CONFIGURATION
@@ -375,6 +375,24 @@ N8N_OCR_WEBHOOK_URL = os.getenv(
     "http://127.0.0.1:5678/webhook/artwork-ocr",
 ).strip()
 N8N_OCR_TIMEOUT_S = float(os.getenv("N8N_OCR_TIMEOUT_S", "60"))
+
+# ── ความทนทานของการยิง OCR (Artwork + Label ใช้ร่วมกัน) ──────────────
+# ลองซ้ำเฉพาะความล้มเหลว "ชั่วคราว": ต่อไม่ติด / timeout / HTTP 5xx.
+# ไม่ลองซ้ำกับ 404 (workflow ไม่ได้ Activate) หรือ 413 (payload ใหญ่ไป)
+# เพราะยิงกี่ครั้งก็ผลเดิม เสียเวลาผู้ตรวจเปล่า.
+# 0 = ปิด = พฤติกรรมเดิมเป๊ะ (ยิงครั้งเดียว).
+N8N_OCR_RETRIES = int(os.getenv("N8N_OCR_RETRIES", "1"))
+N8N_OCR_RETRY_WAIT_S = float(os.getenv("N8N_OCR_RETRY_WAIT_S", "1.5"))
+
+# ปฏิเสธคำตอบที่ "ไม่ใช่ผล OCR แน่ ๆ" แทนที่จะเอาไปใช้เป็นข้อความ.
+# เคสจริงที่ต้องกัน: N8N/reverse-proxy คืน **หน้า HTML** (workflow ไม่ได้
+# Activate, path ผิด) แล้วโค้ดเดิมเอา "<!DOCTYPE html><title>Error..."
+# ไปเทียบใน MISMATCH/SPELL เหมือนเป็นข้อความบนฉลาก = ที่มาของ "ตัวอักษร
+# แปลก ๆ ที่ของจริงไม่มี". เกณฑ์แคบมาก (content-type html หรือขึ้นต้นด้วย
+# แท็ก HTML) จึงแทบไม่มีทาง false positive.
+# 0 = ปิด = พฤติกรรมเดิม (เชื่อทุกอย่างที่ webhook ตอบกลับ).
+N8N_OCR_STRICT_RESPONSE = os.getenv(
+    "N8N_OCR_STRICT_RESPONSE", "1").strip().lower() not in ("0", "false", "")
 
 # ====================
 # LABEL PAPER — VISUAL DIFF (Gemini compares 2 images)

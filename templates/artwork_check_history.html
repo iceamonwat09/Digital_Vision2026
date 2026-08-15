@@ -32,6 +32,27 @@
   .aw-v-pass   { background:#e8f5e9; color:#2e7d32; }
   .aw-v-review { background:#fff8e1; color:#ef6c00; }
   .aw-v-fail   { background:#ffebee; color:#c62828; }
+  /* "ตรวจอะไรไปบ้าง" — ต้องตรงกับ .aw-cov* ใน artwork_check.html
+     (หน้านี้ใช้ window.awRenderReport ตัวเดียวกัน แต่ CSS แยกไฟล์กัน
+     แก้ข้างเดียว = แถบนี้จะโผล่แบบไม่มีกรอบบนหน้าประวัติ) */
+  .aw-cov { margin-top:10px; border:1px solid #e3e7ec; border-radius:6px;
+            background:#f8fafc; padding:8px 12px; font-size:12.5px; }
+  .aw-cov.warn { background:#fff8e1; border-color:#ffe0a3; }
+  .aw-cov-head { font-weight:700; color:#37474f; margin-bottom:6px; }
+  .aw-cov.warn .aw-cov-head { color:#7a5200; }
+  .aw-cov-rows { display:grid; gap:3px; }
+  .aw-cov-row { display:flex; gap:8px; align-items:baseline; line-height:1.5; }
+  .aw-cov-dot { flex:0 0 auto; }
+  .aw-cov-name { flex:0 0 170px; color:#37474f; }
+  .aw-cov-why { color:#607d8b; }
+  .aw-cov-row.off .aw-cov-name { color:#8d6e00; font-weight:600; }
+  .aw-cov-row.off .aw-cov-why  { color:#8d6e00; }
+  .aw-cov-fix { margin:0 0 4px 26px; color:#5d4037; font-size:11.5px; }
+  /* เหตุผลระดับโซนในรายการ "ข้อความ OCR ต่อโซน" — ต้องตรงกับ
+     .aw-note ใน artwork_check.html (หน้านี้ใช้ renderReport ตัวเดียวกัน) */
+  .aw-note { background:#fff3e0; border-left:4px solid #fb8c00; padding:8px 12px; border-radius:4px;
+             font-size:13px; color:#6d4c00; margin-bottom:10px; }
+
   .aw-summary { display:flex; flex-wrap:wrap; gap:8px; margin:12px 0; }
   .aw-sumcard { flex:1 1 130px; min-width:130px; background:#f8fafc; border:1px solid #e3e7ec;
                 border-radius:6px; padding:8px 10px; font-size:12px; color:#37474f; }
