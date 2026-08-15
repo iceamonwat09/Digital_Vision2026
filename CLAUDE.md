@@ -565,6 +565,58 @@ artwork ที่ถูกย่อลงหน้า A4 (เช่น `A4-TUG53
 
 ---
 
+## 🧩 Artwork — "PASS ไม่ได้แปลว่าตรวจครบ" (`coverage`)
+
+**จุดบอด QC ที่ใหญ่ที่สุดของโหมดนี้** — ผู้ใช้ลากหลายโซนบนไฟล์เดียวแล้วกดส่งตรวจ
+ได้ ✅ PASS **ทั้งที่ชั้นเทียบข้ามแผงไม่เคยทำงานเลย**.
+
+**กลไก:** `checks.check_group_consistency()` เทียบเฉพาะโซนที่ **`group` ตรงกัน** และ
+`_vote_panels` จะรันก็ต่อเมื่อ `len(readable) >= 2` ในกลุ่มนั้น. แต่โซนที่ลากใหม่ได้
+`group` **คนละตัว** เสมอ (`nextGroupLetter()` ใน JS ↔ `zones.seq_group()` ฝั่ง Python:
+A, B, C, …) ⇒ ทุกกลุ่มมีสมาชิก 1 ตัว ⇒ **`MISMATCH_PANELS`/`MISMATCH_ZOOM` ไม่มีทางฟ้อง**.
+
+วัดจริงด้วย `run_inspection()` (PDF 3 แผง แผงกลางน้ำหนักผิด 185 vs 170):
+
+| การตั้งกลุ่ม | verdict | defect |
+|---|---|---|
+| A/B/C (ค่าเริ่มต้นที่ผู้ใช้ได้) | **PASS** | **0 — พลาดทั้งที่ของจริงต่างกัน** |
+| A/A/A (ตั้งเอง) | FAIL | 1 (`MISMATCH_PANELS`) |
+
+ความต่างที่ **ไม่มีชั้นไหนจับได้เลย** ถ้าไม่มีการเทียบข้ามแผง (วัดจากเคสจำลองตามงานจริง):
+น้ำหนักสุทธิ · ประเทศผู้ผลิต · วันหมดอายุ (บาร์โค้ดรอดเพราะ `NUMBER_FAIL` เช็ค check digit).
+
+**⛔ ทางแก้ที่ห้ามทำ: ให้ทุกโซนอยู่กลุ่มเดียวกันโดยอัตโนมัติ** — วัดแล้วเช่นกัน:
+โซนคนละเนื้อหา (ส่วนผสม / ที่อยู่ / วันหมดอายุ) ที่ถูกจับรวมกลุ่ม ให้ **defect ปลอม 6 รายการ**
+ทันที. การจัดกลุ่มอัตโนมัติแบบ sequential เป็น **การตัดสินใจที่อนุมัติไว้แล้ว 2026-07-20**
+(แทน size-cluster heuristic ที่จับคู่ผิดเงียบ ๆ) — มันถูกต้องสำหรับ **การเทียบข้ามไฟล์**
+(โซนลำดับเดียวกันของไฟล์ a/b ได้ตัวอักษรตรงกันเอง). ปัญหาอยู่ที่ **ไฟล์เดียว** เท่านั้น.
+มีเทสต์ `test_forcing_one_group_creates_false_defects` กันไม่ให้ใครมาแก้ผิดทาง.
+
+**ทางแก้ที่ใช้: บอกความจริงว่าตรวจอะไรไปบ้าง** (advisory 100% — ไม่แตะ defects/verdict/การนับ)
+
+- **`checks.check_coverage(zones, ocr_results)`** → `report.json["coverage"]` — คำนวณ
+  **หลัง** ได้ defects แล้ว. คืนต่อชั้น: `ran` + `reason` + `groups`. เหตุผลที่แยกกันชัด
+  เพราะ **วิธีแก้คนละอย่าง**: `single_zone` (ไม่ต้องทำอะไร) · `no_shared_group` (ตั้งกลุ่ม) ·
+  `group_unreadable` (ลากโซนใหม่) · `spellchecker_missing` (ลง pip).
+- **เงื่อนไขต้องสะท้อน `check_group_consistency` เป๊ะ ไม่ใช่ประมาณ** — `header` นับเป็น panel,
+  `ignore` ไม่นับ, group ว่างไม่ใช่ "กลุ่มเดียวกัน", zoom ต้องมี panel ที่อ่านออกใน **กลุ่มเดียวกัน**.
+  พิสูจน์ด้วย brute force **3,072 ชุด**: ไม่มีเคสที่ coverage บอก "ไม่ได้ทำงาน" แล้วชั้นนั้นฟ้องจริง.
+  > ⚠️ ถ้าแก้เงื่อนไขใน `check_group_consistency` **ต้องแก้ `check_coverage` ด้วย** —
+  > รายงาน coverage ที่ผิดคือ "คำตอบที่ผิดแบบมั่นใจ" ตรงตัว (กฎเหล็ก 2) แย่กว่าไม่มีเลย.
+- **UI 2 จุด** (เหมือนแพตเทิร์นของ `hl_risk`):
+  - **แถบใต้ผลสรุป** (`coverageHtml()` ใน `artwork_check.js`) — ต้องอยู่ **ติดใต้ verdict**
+    เพราะคนอ่าน PASS แล้วมักเลิกอ่านต่อ. เตือน (พื้นเหลือง) เฉพาะเมื่อชั้นที่ไม่ทำงาน
+    "แก้ได้" — `no_zoom_zone`/`single_zone` ถือว่าปกติ ไม่ทำให้แถบเป็นสีเตือน.
+  - **`renderGroupHint()`** — เตือน **ก่อน** กดส่งตรวจ ตอนจัดโซน (มี panel ≥2 แต่ไม่มี
+    กลุ่มซ้ำเลย). ฝั่ง JS ยังไม่รู้ว่าโซนไหนจะอ่านออก จึงเตือนเฉพาะเคสที่ชัดเจนเท่านั้น.
+- **⚠️ CSS `.aw-cov*` มี 2 ที่** — `artwork_check.html` และ `artwork_check_history.html`
+  (หน้าประวัติใช้ `window.awRenderReport` ตัวเดียวกันแต่ CSS แยกไฟล์). แก้ข้างเดียว =
+  แถบโผล่แบบไม่มีกรอบบนหน้าประวัติ.
+- **รายงานเก่าที่ไม่มี `coverage`** → `coverageHtml()` คืนสตริงว่าง = ไม่แสดงอะไร (ไม่พัง).
+- เทสต์: `tests/test_artwork_coverage.py` **80 ตัว** (รวม parametrize brute force).
+
+---
+
 ## 🖥️ Entrypoints & HTTPS
 
 - **`app.py`** = entrypoint หลัก (ผู้ใช้รัน `py -3.9 app.py`). `threaded=True`. รองรับ HTTPS.
@@ -617,14 +669,15 @@ artwork ที่ถูกย่อลงหน้า A4 (เช่น `A4-TUG53
   ถ้า N8N ผูกเฉพาะ IPv4 จะต่อไม่ติดโดยไม่มี error ที่อ่านออก. ย้ายเครื่องเมื่อไรตั้ง env ทับได้
   ไม่ต้องแก้โค้ด. ⚠️ **IP `172.32.201.106` ที่เหลือใน `generate_cert.py`/README = IP ของสถานีเอง
   สำหรับใบรับรอง HTTPS ห้ามเปลี่ยนเป็น 127.0.0.1** ไม่งั้นเครื่องอื่นเปิดเว็บไม่ได้.
-- Tests: `pytest tests/` — 406 ตัว (artwork/label/barcode/auth — **ไม่ครอบคลุม camera/live loop**).
-  เพิ่มล่าสุด: `tests/test_artwork_ocr_quality.py` 15 ตัว (crop ขั้นต่ำ + text layer ที่เสีย),
+- Tests: `pytest tests/` — 486 ตัว (artwork/label/barcode/auth — **ไม่ครอบคลุม camera/live loop**).
+  เพิ่มล่าสุด: `tests/test_artwork_coverage.py` 80 ตัว (รายงานว่าชั้นไหนได้ตรวจจริง),
+  `tests/test_artwork_ocr_quality.py` 15 ตัว (crop ขั้นต่ำ + text layer ที่เสีย),
   `tests/test_artwork_ocr_cache.py` 13 ตัว (cache ของแท็บแปลต้องหลุดเมื่อค่าตั้ง OCR เปลี่ยน),
   `tests/test_auth_registration.py` 39 ตัว (ปุ่มลงทะเบียนหน้า login),
   `tests/test_artwork_ownership.py` 30 ตัว (สิทธิ์เห็นประวัติ + ชื่อผู้ตรวจ).
   ⚠️ `tests/test_inspection_golden.py` **fail 5 ตัวอยู่แล้ว** (pre-existing, `NameError: FieldResult`
   ในโมดูล Label Paper) — ไม่เกี่ยวกับ artwork. ยืนยันด้วย `git stash` ก่อนโทษการแก้ของตัวเอง.
-- CONFIG_VERSION ปัจจุบัน: **`2026.08.14-aw-ocr-sync`** (เช็คที่ footer ว่ารันโค้ดใหม่จริง).
+- CONFIG_VERSION ปัจจุบัน: **`2026.08.15-aw-coverage`** (เช็คที่ footer ว่ารันโค้ดใหม่จริง).
 
 ---
 

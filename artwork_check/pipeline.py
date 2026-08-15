@@ -254,6 +254,10 @@ def run_inspection(rec_id: str, zone_list: List[dict],
         "elapsed_s": round(time.time() - t0, 2),
         "spell_layer_available": checks.spell_layer_available(),
         "ocr_available": ocr.is_ocr_available(),
+        # ชั้นไหน "ได้ทำงานจริง" กับงานใบนี้ — advisory ล้วน คำนวณ *หลัง*
+        # ได้ defects แล้ว จึงไม่มีทางกระทบ verdict/การนับ. ต้องมีเพราะ
+        # PASS ไม่ได้แปลว่าตรวจครบ (ดู checks.check_coverage)
+        "coverage": checks.check_coverage(zone_list, ocr_results),
     }
     if zones_b:
         # Cross-file compare was used — the report page shows both docs.

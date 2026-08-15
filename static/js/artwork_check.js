@@ -43,6 +43,65 @@
   }
   window.awHlRiskText = hlRiskText;
 
+  // ── "ตรวจอะไรไปบ้าง" — แถบความครอบคลุมใต้ผลสรุป ──────────────────
+  // เหตุผล: ✅ PASS ไม่ได้แปลว่าตรวจครบ. ชั้นเทียบข้ามแผงจะทำงานก็ต่อเมื่อมี
+  // โซน ≥2 โซนที่ "กลุ่ม" ตรงกันและอ่านข้อความออกทั้งคู่ — ผู้ใช้ที่ลากหลาย
+  // โซนบนไฟล์เดียวจะได้กลุ่มอัตโนมัติคนละตัว ⇒ ชั้นนี้ไม่เคยทำงาน แล้วยัง
+  // ขึ้น PASS เงียบ ๆ. ค่ามาจาก checks.check_coverage (server) — advisory
+  // ล้วน ไม่แตะ verdict
+  const COV_WHY = {
+    single_zone: "มีโซนเดียว — ไม่มีอะไรให้เทียบ",
+    no_shared_group: 'ไม่มีโซนใดตั้ง "กลุ่ม" ตรงกันเลย',
+    group_unreadable: "โซนในกลุ่มเดียวกันอ่านข้อความไม่ออก",
+    no_zoom_zone: "ไม่มีโซนชนิด zoom",
+    no_panel_in_group: "โซน zoom ไม่มี panel ในกลุ่มเดียวกันให้เทียบ",
+    spellchecker_missing: "ยังไม่ได้ติดตั้ง pyspellchecker บนเครื่องเซิร์ฟเวอร์",
+    no_readable_zone: "ไม่มีโซนที่อ่านข้อความออก",
+  };
+  const COV_FIX = {
+    no_shared_group: 'โซนที่ควรมีข้อความเหมือนกัน (เช่นแผงเดียวกันที่พิมพ์ซ้ำ ' +
+      'หรือฉบับเก่า/ใหม่) ให้พิมพ์ "กลุ่ม" เป็นตัวเดียวกัน แล้วส่งตรวจใหม่',
+    group_unreadable: "ดูรายการ 'อ่านไม่ชัด' ด้านล่าง แล้วลากโซนให้กระชับ/ใหญ่ขึ้น",
+    spellchecker_missing: "py -3.9 -m pip install pyspellchecker แล้วรีสตาร์ต",
+  };
+  function coverageHtml(cov) {
+    if (!cov) return "";              // รายงานเก่าที่ยังไม่มีข้อมูลนี้
+    const rows = [
+      ["เทียบข้ามแผง/ข้ามไฟล์", cov.cross_panel],
+      ["zoom เทียบกับฉลากจริง", cov.zoom],
+      ["ตัวเลข/บาร์โค้ด", cov.numbers],
+      ["dictionary (คำสะกด)", cov.spelling],
+    ];
+    // ชั้นที่ไม่ได้ทำงานเพราะ "ไม่มีของให้ตรวจ" ไม่ใช่เรื่องน่าเตือน
+    const benign = { no_zoom_zone: 1, single_zone: 1 };
+    const missed = rows.filter((r) => r[1] && !r[1].ran &&
+                                      !benign[r[1].reason]);
+    let h = '<div class="aw-cov' + (missed.length ? " warn" : "") + '">';
+    h += '<div class="aw-cov-head">' +
+      (missed.length ? "⚠️ ตรวจไม่ครบทุกชั้น — ผลด้านบนครอบคลุมเท่าที่ระบุด้านล่าง"
+                     : "ชั้นที่ใช้ตรวจงานใบนี้") + "</div>";
+    h += '<div class="aw-cov-rows">';
+    rows.forEach(([name, c]) => {
+      if (!c) return;
+      const on = !!c.ran;
+      h += '<div class="aw-cov-row' + (on ? "" : " off") + '">' +
+        '<span class="aw-cov-dot">' + (on ? "✅" : "—") + "</span>" +
+        '<span class="aw-cov-name">' + esc(name) + "</span>" +
+        '<span class="aw-cov-why">' +
+        (on ? (c.groups && c.groups.length
+                 ? "ทำงาน (กลุ่ม " + esc(c.groups.join(", ")) + ")"
+                 : "ทำงาน")
+            : "ไม่ได้ทำงาน — " + esc(COV_WHY[c.reason] || c.reason || "")) +
+        "</span></div>";
+      if (!on && COV_FIX[c.reason]) {
+        h += '<div class="aw-cov-fix">↳ ' + esc(COV_FIX[c.reason]) + "</div>";
+      }
+    });
+    h += "</div></div>";
+    return h;
+  }
+  window.awCoverageHtml = coverageHtml;
+
   function renderReport(rep, box) {
     const vClass = rep.verdict === "PASS" ? "aw-v-pass"
       : rep.verdict === "REVIEW" ? "aw-v-review" : "aw-v-fail";
@@ -58,6 +117,9 @@
       " · ใช้เวลา " + esc(rep.elapsed_s) + " วินาที · " + esc(rep.created_at) +
       (rep.owner ? ' · <span title="ผู้อัปโหลด/ผู้ตรวจ">👤 ' + esc(rep.owner) +
                    "</span>" : "") + "</div>";
+
+    // ต้องอยู่ "ติดใต้ผลสรุป" — คนอ่าน PASS แล้วมักเลิกอ่านต่อ
+    html += coverageHtml(rep.coverage);
 
     html += '<div class="aw-summary">';
     Object.keys(CLASS_LABELS).forEach((cls) => {
@@ -854,6 +916,32 @@
       el.addEventListener("dblclick", (ev) => { ev.preventDefault(); snapZone(z); });
     });
     renderProps();
+    renderGroupHint();
+  }
+
+  // เตือน "ก่อน" กดส่งตรวจ ว่าชั้นเทียบข้ามแผงจะไม่ทำงาน — เงื่อนไขต้อง
+  // ตรงกับ checks.check_coverage ฝั่งเซิร์ฟเวอร์ (นับเฉพาะ panel/header
+  // ที่ group ตรงกัน ≥2 โซน). ที่นี่ยังไม่รู้ว่าโซนไหนจะอ่านข้อความออก
+  // จึงเตือนเฉพาะเคสที่ "ชัดเจนว่าไม่มีทางเทียบได้" คือไม่มี group ซ้ำเลย
+  function renderGroupHint() {
+    const el = $("awGroupHint");
+    if (!el) return;
+    const panels = zones.filter((z) => z.type === "panel" || z.type === "header");
+    const count = {};
+    panels.forEach((z) => {
+      const g = z.group || "";
+      if (g) count[g] = (count[g] || 0) + 1;
+    });
+    const paired = Object.keys(count).filter((g) => count[g] >= 2);
+    if (panels.length < 2 || paired.length) { el.style.display = "none"; return; }
+    el.style.display = "";
+    el.innerHTML =
+      '⚠️ <b>โซนทั้ง ' + panels.length + ' โซนอยู่คนละกลุ่ม</b> — ระบบจะ' +
+      '<b>ไม่เทียบข้อความระหว่างโซน</b> ให้ ' +
+      '(ความต่างอย่างน้ำหนักสุทธิ/ประเทศ/วันหมดอายุจะไม่ถูกจับ แล้วผลจะขึ้น PASS)<br>' +
+      'ถ้าโซนเหล่านี้<b>ควรมีข้อความเหมือนกัน</b> (แผงเดียวกันที่พิมพ์ซ้ำ หรือฉบับเก่า/ใหม่) ' +
+      'ให้เลือกโซนแล้วพิมพ์ช่อง <b>"กลุ่ม"</b> ให้เป็นตัวเดียวกัน · ' +
+      'ถ้าเป็นคนละเนื้อหากันอยู่แล้ว (ส่วนผสม/ที่อยู่/บาร์โค้ด) — ไม่ต้องทำอะไร ถูกต้องแล้ว';
   }
 
   // ── snap-to-content: ดับเบิลคลิกโซน → server ขยับกรอบให้พอดีเนื้อหา ──
