@@ -66,6 +66,13 @@ def show_config() -> dict:
     print(f"  backend ที่ใช้จริง                  : {backend!r}")
     print(f"  N8N_OCR_WEBHOOK_URL                : {appcfg.N8N_OCR_WEBHOOK_URL!r}")
     print(f"  N8N_OCR_TIMEOUT_S                  : {appcfg.N8N_OCR_TIMEOUT_S}")
+    print(f"  N8N_OCR_RETRIES                    : {appcfg.N8N_OCR_RETRIES}"
+          + ("   ← 0 = ไม่ลองซ้ำ (พฤติกรรมเดิม)" if not appcfg.N8N_OCR_RETRIES
+             else "   ← ลองซ้ำเฉพาะ ต่อไม่ติด/timeout/5xx"))
+    print(f"  N8N_OCR_STRICT_RESPONSE            : {appcfg.N8N_OCR_STRICT_RESPONSE}"
+          + ("   ← ปฏิเสธคำตอบที่เป็นหน้า HTML"
+             if appcfg.N8N_OCR_STRICT_RESPONSE
+             else "   ← ปิด = เชื่อทุกอย่างที่ webhook ตอบ (เสี่ยง)"))
     print(f"  N8N_TRANSLATE_WEBHOOK_URL          : {acfg.N8N_TRANSLATE_WEBHOOK_URL!r}")
     print(f"  ocr.is_ocr_available()             : {vertex_client.is_enabled()}")
     print(f"  ARTWORK_EMBEDDED_MIN_CHARS         : {acfg.EMBEDDED_TEXT_MIN_CHARS}"
@@ -161,6 +168,21 @@ def ping(url: str) -> bool:
         else:
             print("  → ดู execution log ฝั่ง n8n ประกอบ")
         return False
+
+    # คำตอบ "ไม่ error" ยังไม่พอ — ต้องดูว่ารูปแบบตรงสัญญาไหม เพราะคำตอบ
+    # ที่ผิดรูปจะกลายเป็น "ข้อความบนฉลาก" แบบเงียบ ๆ (ดู docs/N8N_OCR_PROMPT.md)
+    warn = res.get("warning")
+    if warn:
+        print(f"\n  ⚠ {warn}")
+        print("    → workflow ควรคืน JSON {\"text\": ..., \"blocks\": [...]} ล้วน")
+        print("      ดูรูปแบบที่ถูกต้องใน docs/N8N_OCR_PROMPT.md")
+    txt = (res.get("text") or "")
+    if "DIAGNOSE" not in txt.upper() and "12345" not in txt:
+        print("\n  ⚠ ภาพทดสอบมีคำว่า 'DIAGNOSE 12345' แต่ผลที่ได้ไม่มีคำนี้")
+        print("    → OCR อ่านไม่ออก หรือ prompt สั่งให้ทำอย่างอื่น (แปล/สรุป)")
+        print("      ดู prompt ที่แนะนำใน docs/N8N_OCR_PROMPT.md")
+    elif not warn:
+        print("\n  ✓ อ่านภาพทดสอบได้ถูกต้อง (เจอ 'DIAGNOSE 12345')")
 
     print("\n  ✓ webhook ตอบกลับปกติ → ปัญหาไม่ได้อยู่ที่ 'ยิงแล้วพัง' "
           "แต่อยู่ที่ 'ไม่ได้ยิง' (ดูข้อ ③)")

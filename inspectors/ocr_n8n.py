@@ -29,6 +29,8 @@ import base64
 import json
 import logging
 import os
+import re
+import time
 from typing import Optional
 
 import requests
@@ -50,6 +52,35 @@ def _coerce_bbox(raw) -> Optional[list]:
         return [float(v) for v in raw]
     except (TypeError, ValueError):
         return None
+
+
+_FENCE_RE = re.compile(r"^\s*```[a-zA-Z0-9_-]*\s*\n?(.*?)\n?\s*```\s*$", re.S)
+
+
+def _strip_fence(s: str) -> str:
+    """ถอดรั้ว markdown ```json ... ``` ที่ LLM ชอบครอบคำตอบมา.
+
+    ทำไมสำคัญ: Gemini คืน ```json{...}``` บ่อยมาก. เดิม ``resp.json()``
+    พังกับรูปแบบนี้ แล้วโค้ดเอา **ทั้งสตริงรวมรั้ว** ไปใช้เป็น "ข้อความที่
+    OCR อ่านได้" ⇒ คำว่า ``json`` / ``text`` / ``blocks`` และวงเล็บปีกกา
+    หลุดเข้าไปเทียบใน MISMATCH/SPELL = "ตัวอักษรแปลก ๆ ที่ของจริงไม่มี".
+    """
+    m = _FENCE_RE.match(s or "")
+    return m.group(1).strip() if m else (s or "")
+
+
+def _looks_like_html(body: str, ctype: str = "") -> bool:
+    """หน้า error ของ N8N/reverse-proxy — ไม่ใช่ผล OCR แน่นอน.
+
+    เกณฑ์ตั้งให้แคบไว้ก่อน (content-type ระบุชัด หรือขึ้นต้นด้วยแท็ก HTML)
+    เพราะการตัดสินผิดว่า "ไม่ใช่ข้อความ" จะทำให้โซนที่อ่านได้จริงกลายเป็น
+    UNREADABLE ฟรี ๆ.
+    """
+    if "html" in (ctype or "").lower():
+        return True
+    head = (body or "").lstrip()[:200].lower()
+    return head.startswith("<!doctype") or head.startswith("<html") or (
+        "<body" in head and "<" == head[:1])
 
 
 def _normalize_blocks(raw_blocks) -> list:
@@ -107,43 +138,93 @@ def ocr_image(image_bytes: bytes,
     logger.info("OCR request: %s  image=%.1fKB  timeout=%.0fs",
                 target, size_kb, t)
 
-    try:
-        resp = requests.post(target, data={"image_b64": image_b64}, timeout=t)
-        resp.raise_for_status()
-        print(f"[N8N→OCR] ← HTTP {resp.status_code}  ({len(resp.content)} bytes)")
-    except requests.RequestException as e:
-        print(f"[N8N→OCR] ✗ request failed: {e}")
-        return {
-            "text": "",
-            "blocks": [],
-            "stub": True,
-            "engine": "n8n",
-            "error": f"webhook request failed: {e}",
-        }
+    # ลองซ้ำเฉพาะความล้มเหลว "ชั่วคราว" (ต่อไม่ติด / timeout / 5xx) —
+    # ไม่ลองซ้ำกับ 404 (workflow ไม่ active) หรือ 413 (payload ใหญ่ไป)
+    # เพราะยิงกี่ครั้งก็ได้ผลเดิม เสียเวลาผู้ตรวจเปล่า.
+    tries = max(1, int(config.N8N_OCR_RETRIES) + 1)
+    resp = None
+    last_err = None
+    for attempt in range(tries):
+        try:
+            resp = requests.post(target, data={"image_b64": image_b64},
+                                 timeout=t)
+            if resp.status_code >= 500 and attempt < tries - 1:
+                last_err = f"HTTP {resp.status_code}"
+                raise requests.RequestException(last_err)
+            resp.raise_for_status()
+            print(f"[N8N→OCR] ← HTTP {resp.status_code}  ({len(resp.content)} bytes)")
+            break
+        except requests.RequestException as e:
+            last_err = e
+            retriable = (resp is None or resp.status_code >= 500)
+            if attempt < tries - 1 and retriable:
+                wait = config.N8N_OCR_RETRY_WAIT_S * (2 ** attempt)
+                print(f"[N8N→OCR] ↻ ครั้งที่ {attempt + 1}/{tries} ล้มเหลว "
+                      f"({e}) — รอ {wait:.1f}s แล้วลองใหม่")
+                time.sleep(wait)
+                resp = None
+                continue
+            print(f"[N8N→OCR] ✗ request failed: {e}")
+            return {
+                "text": "",
+                "blocks": [],
+                "stub": True,
+                "engine": "n8n",
+                "error": f"webhook request failed: {e}",
+            }
 
     # Workflow may return either a JSON body, or a JSON string nested
     # inside a {"data": "..."} envelope from Gemini. Be permissive.
+    raw = resp.text or ""
     try:
         payload = resp.json()
     except ValueError:
-        return {
-            "text": resp.text or "",
-            "blocks": [],
-            "stub": False,
-            "engine": "n8n",
-            "warning": "response was not JSON; using raw text",
-        }
+        # ① LLM ครอบคำตอบด้วยรั้ว markdown — ถอดแล้วลองใหม่ (เคสที่พบบ่อย
+        #    ที่สุด และเดิมทำให้ ```json{...}``` ทั้งก้อนกลายเป็น "ข้อความ")
+        stripped = _strip_fence(raw)
+        payload = None
+        if stripped and stripped != raw:
+            try:
+                payload = json.loads(stripped)
+            except ValueError:
+                payload = None
+        if payload is None:
+            ctype = resp.headers.get("Content-Type", "")
+            # ② หน้า error ของ N8N/proxy — ห้ามเอาไปเป็นข้อความเด็ดขาด
+            if config.N8N_OCR_STRICT_RESPONSE and _looks_like_html(raw, ctype):
+                head = " ".join(raw.split())[:120]
+                print("[N8N→OCR] ✗ ตอบกลับเป็น HTML ไม่ใช่ผล OCR")
+                return {
+                    "text": "",
+                    "blocks": [],
+                    "stub": True,
+                    "engine": "n8n",
+                    "error": ("N8N ตอบกลับเป็นหน้าเว็บ (HTML) ไม่ใช่ผล OCR "
+                              "— ตรวจว่า workflow ถูก Activate และ path ถูก: "
+                              + head),
+                }
+            # ③ ข้อความล้วนอื่น ๆ — ยังใช้เป็นข้อความเหมือนเดิม (เผื่อ
+            #    workflow ตั้งให้คืน plain text) แต่ติดธงไว้ให้ผู้ตรวจเห็น
+            return {
+                "text": raw,
+                "blocks": [],
+                "stub": False,
+                "engine": "n8n",
+                "warning": ("N8N ตอบกลับไม่ใช่ JSON — ใช้เนื้อหาดิบเป็น"
+                            "ข้อความ ผลตรวจโซนนี้อาจไม่น่าเชื่อถือ"),
+            }
 
     if isinstance(payload, list) and payload:
         payload = payload[0]
 
-    # Gemini sometimes wraps its JSON answer in a string field.
+    # Gemini sometimes wraps its JSON answer in a string field — และสตริง
+    # นั้นก็มักถูกครอบด้วยรั้ว markdown อีกชั้น จึง _strip_fence ก่อนเสมอ
     if isinstance(payload, dict) and "text" not in payload and "blocks" not in payload:
         for key in ("data", "result", "output", "response", "content"):
             inner = payload.get(key)
             if isinstance(inner, str):
                 try:
-                    inner_json = json.loads(inner)
+                    inner_json = json.loads(_strip_fence(inner))
                     if isinstance(inner_json, dict):
                         payload = inner_json
                         break
@@ -152,6 +233,19 @@ def ocr_image(image_bytes: bytes,
             elif isinstance(inner, dict):
                 payload = inner
                 break
+
+    # ชั้นสุดท้าย: บาง workflow ยัด JSON (หรือ JSON ในรั้ว) ไว้ใน "text" เอง
+    # ⇒ ถ้าแกะแล้วเจอ dict ที่มี "text" จริง ให้ใช้ตัวใน ไม่งั้นเครื่องหมาย
+    # ปีกกา/ชื่อคีย์จะกลายเป็นคำในผลตรวจ
+    if isinstance(payload, dict):
+        t = str(payload.get("text", "") or "")
+        if t.lstrip().startswith(("{", "```")):
+            try:
+                inner_json = json.loads(_strip_fence(t))
+            except ValueError:
+                inner_json = None
+            if isinstance(inner_json, dict) and "text" in inner_json:
+                payload = inner_json
 
     text = str(payload.get("text", "") or "") if isinstance(payload, dict) else ""
     blocks = _normalize_blocks(payload.get("blocks")) if isinstance(payload, dict) else []

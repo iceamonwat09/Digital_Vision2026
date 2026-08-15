@@ -154,10 +154,18 @@ def read_zone(doc: ArtworkDocument, zone: dict,
         out["error"] = str(result["error"])
     if result.get("stub"):
         out["error"] = out.get("error") or "OCR backend ตอบกลับเป็น stub"
+    if result.get("warning"):
+        # backend อ่านสำเร็จ "ในทางเทคนิค" แต่รูปแบบคำตอบไม่ตรงสัญญา
+        # (เช่นไม่ใช่ JSON) ⇒ ข้อความอาจปนขยะ. ไม่ทำให้โซนตกเป็น error
+        # เพราะบาง workflow ตั้งให้คืน plain text จริง ๆ — แต่ต้องให้
+        # ผู้ตรวจเห็น ไม่ใช่ทิ้งไปเงียบ ๆ อย่างที่เคยเป็น
+        out["note"] = " · ".join(
+            x for x in (out.get("note"), str(result["warning"])) if x)
     if garbled:
         # บอกไว้ในผลว่าทำไมโซนนี้ไม่ได้ใช้ text layer ทั้งที่ไฟล์มี —
-        # ไม่ใช่ error (OCR อ่านสำเร็จ) แต่ผู้ตรวจควรรู้
-        out["note"] = garbled
+        # ไม่ใช่ error (OCR อ่านสำเร็จ) แต่ผู้ตรวจควรรู้.
+        # ต่อท้าย ไม่ทับ — โซนหนึ่งเจอได้ทั้งสองอย่างพร้อมกัน
+        out["note"] = " · ".join(x for x in (garbled, out.get("note")) if x)
     return out
 
 

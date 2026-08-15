@@ -238,7 +238,13 @@
       html += '<p style="color:#2e7d32;font-size:14px;">ไม่พบข้อความที่น่าสงสัยในทุกชั้นการตรวจ</p>';
     }
 
-    html += "<details><summary>📄 ข้อความ OCR ต่อโซน (ตรวจสอบเอง)</summary>";
+    // เปิดกางไว้เลยถ้ามีโซนที่ "อ่านได้แต่น่าสงสัย" (note) — ผู้ตรวจต้อง
+    // เห็นเหตุผลว่าทำไมข้อความโซนนั้นอาจไม่น่าเชื่อถือ ไม่ใช่ซ่อนไว้ใน
+    // details ที่ต้องกดเปิดเอง. error มีการ์ด UNREADABLE ให้อยู่แล้ว
+    const anyNote = (rep.ocr || []).some((r) => r.note);
+    html += "<details" + (anyNote ? " open" : "") +
+      "><summary>📄 ข้อความ OCR ต่อโซน (ตรวจสอบเอง)" +
+      (anyNote ? " — ⚠️ มีโซนที่ต้องดู" : "") + "</summary>";
     (rep.ocr || []).forEach((r) => {
       const rot = (r.rotate === 90 || r.rotate === 180 || r.rotate === 270)
         ? " · หมุน " + r.rotate + "°" : "";
@@ -247,8 +253,11 @@
       const nbb = (r.blocks && r.blocks.length) || 0;
       const bbTag = " · " + (nbb ? nbb + " bbox ✓" : "0 bbox (ใช้ profile)");
       html += "<b style='font-size:12px;'>" + esc(r.zone_id) + " · engine=" + esc(r.engine) +
-        (r.conf != null ? " · conf=" + esc(r.conf) : "") + esc(rot) + esc(bbTag) + "</b>" +
-        '<pre class="aw-pre">' + esc(r.text || "(ว่าง)") + "</pre>";
+        (r.conf != null ? " · conf=" + esc(r.conf) : "") + esc(rot) + esc(bbTag) + "</b>";
+      // เหตุผลระดับโซน: note = อ่านได้แต่ควรระวัง · error = อ่านไม่ได้
+      if (r.note)  html += '<div class="aw-note">⚠️ ' + esc(r.note) + "</div>";
+      if (r.error) html += '<div class="aw-note">❌ ' + esc(r.error) + "</div>";
+      html += '<pre class="aw-pre">' + esc(r.text || "(ว่าง)") + "</pre>";
     });
     html += "</details>";
 
