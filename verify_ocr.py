@@ -475,6 +475,13 @@ def layer_groundtruth(ad, zones, engines, dpi, verbose):
         for eng in engines:
             try:
                 got = eng.read_counted(img)
+            except LimitReached:
+                # ผู้ใช้สั่งจำกัดโควตาเอง — ไม่ใช่ engine พัง. ต้องแยกให้ชัด
+                # ทั้งข้อความและการนับ ไม่งั้นอ่านรายงานแล้วเข้าใจว่า n8n
+                # ล้มเหลวทุกโซน (เจอจริงบนสถานี: ไฟล์ 3-5 ขึ้น "ERROR" ล้วน
+                # ทั้งที่แค่ครบเพดาน --n8n-limit ตั้งแต่ไฟล์แรก)
+                line += "  %s: ข้าม(ครบเพดาน --n8n-limit)" % eng.name
+                continue
             except Exception as e:
                 res[eng.name]["errors"].append("โซน %d: %s" % (i, e))
                 line += "  %s: ERROR" % eng.name
@@ -551,6 +558,9 @@ def layer_notext(ad, zones, engines, dpi, kind):
         for eng in engines:
             try:
                 got = eng.read_counted(img)
+            except LimitReached:
+                line += "  %s: ข้าม(ครบเพดาน --n8n-limit)" % eng.name
+                continue
             except Exception as e:
                 line += "  %s: ERROR(%s)" % (eng.name, str(e)[:24])
                 continue
@@ -584,6 +594,9 @@ def layer_consistency(ad, zones, engines, dpi_a, dpi_b):
             try:
                 wa = _words(eng.read_counted(a))
                 wb = _words(eng.read_counted(b))
+            except LimitReached:
+                line += "  %s: ข้าม(ครบเพดาน --n8n-limit)" % eng.name
+                continue
             except Exception as e:
                 line += "  %s: ERROR(%s)" % (eng.name, str(e)[:20])
                 continue
