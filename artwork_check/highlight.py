@@ -500,7 +500,12 @@ _PSM_ORDER = (11, 3)
 # list per (crop content, lang, psm) so the 2nd..Nth defect of a zone is
 # nearly free. Small bound — these lists are a few KB each.
 _WORDS_CACHE: "OrderedDict" = OrderedDict()
-_WORDS_CACHE_MAX = 12
+# 48 ไม่ใช่ 12: key = (รูป, lang, psm) และ _PSM_ORDER=(11, 3) ⇒ **หนึ่งโซน
+# กินได้ถึง 2 ช่อง**. งานจริงที่มี defect กระจาย 8-10 โซน จึงเต็ม 12 ช่อง
+# ตั้งแต่โซนที่ 6 แล้ว evict ทิ้ง ⇒ การ์ดใบท้าย ๆ ต้อง OCR ซ้ำทั้งที่เพิ่ง
+# อ่านไปเมื่อครู่. แต่ละรายการเป็นลิสต์ (คำ, กล่อง) ไม่กี่ KB ⇒ 48 ช่อง
+# ยังอยู่ในระดับหลักร้อย KB
+_WORDS_CACHE_MAX = 48
 # Flask runs threaded and the browser fetches several defect crops of the
 # same zone at once, so this cache IS touched concurrently. Without the
 # lock the eviction (`next(iter(...))`) can raise "dictionary changed size
