@@ -24,7 +24,7 @@
 ## 📍 สถานะปัจจุบัน — อ่านก่อนเริ่มงานต่อ (อัปเดต 17 ส.ค. 2026)
 
 **Branch: `claude/artwork-multi-zone-errors-k8linm`** (ห้าม push main) ·
-**CONFIG_VERSION: `2026.08.16-aw-ux`** · **pytest: 529 ผ่าน / 5 fail (pre-existing)**
+**CONFIG_VERSION: `2026.08.16-aw-ux`** · **pytest: 548 ผ่าน / 5 fail (pre-existing)**
 
 ### โจทย์ตั้งต้นของรอบนี้
 ผู้ใช้ถามว่า *"ถ้าผู้ใช้จริงวาดหลายโซนแล้วส่งตรวจ จะเจอความผิดพลาดอะไรบ้าง"* และ
@@ -623,6 +623,19 @@ timeout = Gemini ช้า/โควตา · 413 = payload เกิน) ③ �
   `DIAGNOSE 12345`; ถ้าผลที่ได้ไม่มีคำนี้ = prompt สั่งให้ทำอย่างอื่น (แปล/สรุป) ซึ่งเป็น
   ความผิดพลาดที่เดิมมองไม่เห็นเลยเพราะ HTTP 200.
 
+**⚠️ "โซนเดียวพัง = การตรวจทั้งใบล่ม" — เจอตอนทดสอบเชิงโจมตี (17 ส.ค. 2026):**
+`read_zone()` เรียก `vertex_client.ocr_image()` **โดยไม่มี try/except ครอบ** ⇒ ถ้า
+backend โยน exception ผู้ตรวจได้ HTTP 500 แทนรายงาน — **ไม่ได้อะไรเลยแม้แต่โซนที่อ่านสำเร็จ**.
+ไล่ยิงคำตอบเพี้ยน 21 แบบผ่าน `ocr_image()` พบ 2 ทางที่หลุดจริง:
+- **`"conf": "high"`** (LLM คืน conf เป็นคำ) → `float()` เปลือยโยน `ValueError`
+- **`requests.post` โยนสิ่งที่ไม่ใช่ `RequestException`** (URL ผิดรูป → `ValueError`)
+
+แก้ครบแล้ว: `_normalize_blocks` แปลง conf แบบกันพัง · `ocr_image` ดัก `Exception` กว้าง
+(แต่ **ลองซ้ำเฉพาะ `RequestException`** — `ValueError` ยิงกี่ครั้งก็ผลเดิม) · `read_zone`
+ครอบ try/except แล้วแปลงเป็น **UNREADABLE เฉพาะโซนนั้น** · `text_looks_garbled(None)`
+ไม่โยนแล้ว · `_strip_fence` ถอดรั้วซ้อนได้ 3 ชั้น.
+เทสต์ล็อกไว้ใน `test_n8n_ocr_response.py` + `test_artwork_ocr_quality.py`.
+
 **⛔ ชั้นที่โค้ดฝั่งเราแก้ไม่ได้: LLM เดาคำที่ไม่มีในภาพ (hallucination).** ถ้า Gemini คืนคำ
 ที่ดูสมเหตุสมผลแต่ไม่มีบนฉลาก ไม่มีทางแยกออกจากคำจริง — ต้องแก้ที่ **prompt ใน N8N**
 เท่านั้น. prompt ที่แนะนำ + เหตุผลรายบรรทัด + วิธียืนยันอยู่ใน **`docs/N8N_OCR_PROMPT.md`**
@@ -827,7 +840,7 @@ A, B, C, …) ⇒ ทุกกลุ่มมีสมาชิก 1 ตัว �
   ถ้า N8N ผูกเฉพาะ IPv4 จะต่อไม่ติดโดยไม่มี error ที่อ่านออก. ย้ายเครื่องเมื่อไรตั้ง env ทับได้
   ไม่ต้องแก้โค้ด. ⚠️ **IP `172.32.201.106` ที่เหลือใน `generate_cert.py`/README = IP ของสถานีเอง
   สำหรับใบรับรอง HTTPS ห้ามเปลี่ยนเป็น 127.0.0.1** ไม่งั้นเครื่องอื่นเปิดเว็บไม่ได้.
-- Tests: `pytest tests/` — 534 ตัว (artwork/label/barcode/auth — **ไม่ครอบคลุม camera/live loop**).
+- Tests: `pytest tests/` — 553 ตัว (artwork/label/barcode/auth — **ไม่ครอบคลุม camera/live loop**).
   เพิ่มล่าสุด: `tests/test_artwork_report_css.py` 13 ตัว (CSS ของ renderReport ต้องครบทั้ง 2 หน้า),
   `tests/test_n8n_ocr_response.py` 35 ตัว (แกะคำตอบ N8N + ปฏิเสธ HTML + retry),
   `tests/test_artwork_coverage.py` 80 ตัว (รายงานว่าชั้นไหนได้ตรวจจริง),
