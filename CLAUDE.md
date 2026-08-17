@@ -21,6 +21,92 @@
 
 ---
 
+## 📍 สถานะปัจจุบัน — อ่านก่อนเริ่มงานต่อ (อัปเดต 17 ส.ค. 2026)
+
+**Branch: `claude/artwork-multi-zone-errors-k8linm`** (ห้าม push main) ·
+**CONFIG_VERSION: `2026.08.16-aw-ux`** · **pytest: 529 ผ่าน / 5 fail (pre-existing)**
+
+### โจทย์ตั้งต้นของรอบนี้
+ผู้ใช้ถามว่า *"ถ้าผู้ใช้จริงวาดหลายโซนแล้วส่งตรวจ จะเจอความผิดพลาดอะไรบ้าง"* และ
+*"ทำไมมีตัวอักษรแปลก ๆ โผล่มาทั้งที่ของจริงไม่มี"* → ไล่แล้วเจอ **3 จุดบอดที่ทำให้ผลตรวจ
+ผิดแบบเงียบ** (ไม่ error, การ์ดขึ้นปกติ, แต่ผลใช้ไม่ได้) — แก้ครบแล้วทั้ง 3:
+
+| # | จุดบอด | แก้ที่ | หัวข้อละเอียด |
+|---|---|---|---|
+| 1 | โซนเล็กถูกเรนเดอร์เล็กเกินไป → OCR อ่านไม่ออก (recall 1.2%) | `OCR_CROP_MIN_SIDE` | 🔎 คุณภาพการอ่าน |
+| 2 | text layer เสียแต่เชื่อ `conf=1.0` | `PDFTEXT_GARBLED_CHECK` | 🔎 คุณภาพการอ่าน |
+| 3 | **PASS ทั้งที่ชั้นเทียบข้ามแผงไม่เคยทำงาน** | `checks.check_coverage()` | 🧩 PASS ไม่ได้แปลว่าตรวจครบ |
+| + | Gemini ครอบ ```` ```json ```` / N8N คืนหน้า HTML → ขยะกลายเป็น "ข้อความบนฉลาก" | `ocr_n8n._strip_fence` / `_looks_like_html` | 🔌 N8N |
+
+### ✅ ทำเสร็จแล้ว (เรียงตาม commit)
+| commit | เรื่อง |
+|---|---|
+| `7b5cf61` | OCR: เพิ่ม DPI ให้โซนเล็ก + ไม่เชื่อ text layer ที่เสีย |
+| `810deef` | merge `origin/main` (login/ลงทะเบียน + ปุ่มแปลหลัก + N8N → 127.0.0.1) |
+| `21c1b8b` | `_ocr_fingerprint()` เข้า cache key + `diagnose_n8n_ocr` รู้จัก "ทางที่ 6" |
+| `e39a29e` | **`coverage`** — รายงานว่าชั้นไหนได้ตรวจจริง + เตือนตอนจัดโซน |
+| `d460924` | **N8N**: ถอดรั้ว markdown · ปฏิเสธหน้า HTML · retry · `docs/N8N_OCR_PROMPT.md` |
+| `20e3af1` | `verify_ocr`: เรนเดอร์ให้ตรง production + `--layers` |
+| `008ca38` | `verify_ocr`: "ครบโควตา" ต้องไม่แสดงเป็น ERROR |
+| `5d2f91a` | UX: verdict ตรง coverage · พอดีทั้งหน้า · วาดต่อเนื่อง · autosave โซน |
+
+### 🔜 แผนถัดไปที่ผู้ใช้ยืนยันแล้ว: **pixel diff เทียบฉบับเก่า/ใหม่**
+ผู้ใช้ตอบว่า **"เก็บไว้เป็นแผนถัดไป"** (มีไฟล์ฉบับที่อนุมัติแล้ว) — ยังไม่เริ่มเขียนโค้ด.
+สิ่งที่ **ทดลองไว้แล้ว** (สคริปต์ทดลองอยู่ใน scratchpad ไม่ได้ commit) :
+- เรนเดอร์ PDF 2 ฉบับที่ DPI เดียวกันแล้ว `absdiff` → **deterministic 0 พิกเซล**
+  (false positive 0) · จับความต่างเล็กถึง **0.8pt** ได้ · ~0.29 วิ/หน้า ที่ 300 DPI
+- **ข้อจำกัดที่ต้องแก้ก่อนใช้จริง: ขนาดหน้าต้องเท่ากัน** — ย่อ/ขยายแบบ naive แล้ว
+  เทียบได้ **370 บริเวณปลอม** ⇒ ต้อง align/normalize (หรือบังคับให้สองไฟล์เป็น
+  หน้าขนาดเดียวกัน) ก่อนเสมอ
+- จุดแข็ง: ไม่ง้อ OCR / ไม่ง้อภาษา / ไม่ง้อการลากโซน และจับได้มากกว่าข้อความ
+  (ฟอนต์เปลี่ยน สีเพี้ยน โลโก้ขยับ แท่งบาร์โค้ดเปลี่ยน)
+- ต้องเป็น **โหมดใหม่แยก** ไม่ใช่แทนที่ของเดิม และ **advisory ก่อน** (กฎเหล็กข้อ 1)
+
+### ⚠️ กติกาที่รอบนี้ยึด และรอบหน้าต้องยึดต่อ
+- ทุกอย่างที่เพิ่มเป็น **advisory 100%** — ไม่แตะ `defects` / `verdict` / การนับ / DB
+- flag ใหม่ทุกตัว **ปิดแล้วได้พฤติกรรมเดิมเป๊ะ** (พิสูจน์ด้วย md5 ของ crop และเทสต์)
+- **ไม่แตะโหมด** Live / RTSP / STREAM / Snapshot / Label เลยแม้แต่บรรทัดเดียว
+
+---
+
+## 🧪 วิธีทดสอบ UI จริงบนเครื่อง dev (ไม่มี ultralytics/กล้อง)
+
+`app.py` import `ultralytics` → เครื่อง dev ที่ไม่มี torch รันไม่ได้. แต่โหมด Artwork
+เป็น blueprint แยก จึงยกมารันเดี่ยวได้ **โดยใช้ template/static/route ตัวจริง**:
+
+```python
+# scratchpad/aw_server.py
+import sys; sys.path.insert(0, "/path/to/Digital_Vision2026")
+from flask import Flask
+from artwork_check.routes import artwork_bp
+import config as appcfg
+ROOT = "/path/to/Digital_Vision2026"
+app = Flask(__name__, template_folder=ROOT+"/templates", static_folder=ROOT+"/static")
+@app.context_processor
+def _ctx():                      # base.html ต้องการตัวแปรพวกนี้
+    return {"config_version": appcfg.CONFIG_VERSION, "current_user": None,
+            "auth_enabled": False, "has_perm": lambda *a, **k: True}
+app.register_blueprint(artwork_bp)
+app.run(host="127.0.0.1", port=5990, threaded=True)
+```
+แล้วขับด้วย Playwright + Chromium ที่มีอยู่ในเครื่อง
+(`executable_path="/opt/pw-browsers/chromium-1194/chrome-linux/chrome"`).
+
+**กับดักที่เจอตอนเขียนเทสต์ (อย่าเสียเวลาซ้ำ):**
+1. **`template_folder` ต้องเป็น path เต็ม** — Flask หา template จากโฟลเดอร์ของสคริปต์
+   ไม่ใช่ `os.chdir()`.
+2. **ต้อง stub `has_perm`** ไม่งั้น `base.html` โยน `UndefinedError`.
+3. **รอภาพโหลดจริงก่อนวัด** — `wait_for_selector` ไม่พอ ต้อง
+   `wait_for_function("i.complete && i.naturalWidth>0")` ไม่งั้นวัดขนาดได้ค่าเก่า.
+4. **ต้อง `scroll_into_view_if_needed()` ก่อนลากเมาส์** — กล่องภาพสูงกว่าจอ พิกัดที่
+   คำนวณจาก `bounding_box()` อาจติดลบ (อยู่นอก viewport) แล้ว mousedown ตกน้ำเงียบ ๆ
+   (เสียเวลาไล่หาสาเหตุนานเพราะไม่มี error อะไรเลย).
+5. **404 `/favicon.ico` เป็นเรื่องปกติ** — โปรเจกต์ไม่เคยมีไฟล์นี้ ไม่ใช่บั๊กใหม่.
+6. ล้าง `data/artwork_check/inspections/2026*` หลังทดสอบ (อยู่ใน `.gitignore` git
+   จึงไม่เตือน แต่ค้างไว้จะไปโผล่ในหน้าประวัติของผู้ใช้).
+
+---
+
 ## 🧠 โมเดล (สำคัญมาก — เคยพลาดตรงนี้)
 
 - **`best.pt`** = YOLOv8 **detection** ธรรมดา (3M params). classes: `dented`, `good`. โหมด can_dent default.
@@ -669,9 +755,17 @@ A, B, C, …) ⇒ ทุกกลุ่มมีสมาชิก 1 ตัว �
     "แก้ได้" — `no_zoom_zone`/`single_zone` ถือว่าปกติ ไม่ทำให้แถบเป็นสีเตือน.
   - **`renderGroupHint()`** — เตือน **ก่อน** กดส่งตรวจ ตอนจัดโซน (มี panel ≥2 แต่ไม่มี
     กลุ่มซ้ำเลย). ฝั่ง JS ยังไม่รู้ว่าโซนไหนจะอ่านออก จึงเตือนเฉพาะเคสที่ชัดเจนเท่านั้น.
-- **⚠️ CSS `.aw-cov*` มี 2 ที่** — `artwork_check.html` และ `artwork_check_history.html`
-  (หน้าประวัติใช้ `window.awRenderReport` ตัวเดียวกันแต่ CSS แยกไฟล์). แก้ข้างเดียว =
-  แถบโผล่แบบไม่มีกรอบบนหน้าประวัติ.
+- **⚠️ CSS ของ `renderReport` มี 2 ที่เสมอ** — `artwork_check.html` และ
+  `artwork_check_history.html` (หน้าประวัติเรียก `window.awRenderReport` **ตัวเดียวกัน**
+  แต่ CSS อยู่คนละ `{% block extra_css %}`). แก้ข้างเดียว = กล่องนั้นโผล่แบบไม่มีกรอบ
+  บนหน้าประวัติ **โดยไม่มี error ให้เห็น**.
+  > เกิดจริงมาแล้ว **3 คลาส**: `.aw-cov*` (ตอนเพิ่ม coverage) · `.aw-hl-warn` และ
+  > `.aw-img-*` (หลุดมานานก่อนหน้านั้น — **รูป preview บนหน้าประวัติกางเป็น 4475px
+  > ไม่มี `max-height` ไม่มีกรอบ ไม่เรียงคู่** จับได้ตอนไล่ตรวจรวบยอด 17 ส.ค.).
+  > ตอนนี้มี **`tests/test_artwork_report_css.py` (13 ตัว)** ไล่คลาสทุกตัวที่
+  > `renderReport()` พ่นออกมาแล้วยืนยันว่ามีกฎครบทั้งสองหน้า **และกฎตรงกันเป๊ะ**
+  > (ยกเว้นที่ตั้งใจให้ต่างใน `ALLOW`) + เช็คว่า guard `if (!$("awFile")) return;`
+  > ยังอยู่หลัง `window.aw*` ทุกตัว (ถ้า guard เลื่อนไปก่อน หน้าประวัติจะเรียกไม่ได้).
 - **รายงานเก่าที่ไม่มี `coverage`** → `coverageHtml()` คืนสตริงว่าง = ไม่แสดงอะไร (ไม่พัง).
 - **ข้อความ verdict เปลี่ยนตาม coverage**: PASS ที่มีชั้นขาด → **"✅ PASS — ไม่พบประเด็น
   ในชั้นที่ตรวจ"** (เดิม "ไม่พบประเด็น" เฉย ๆ = พูดเกินจริง). ทั้งแถบและหัวเรื่องคิดจาก
@@ -733,8 +827,9 @@ A, B, C, …) ⇒ ทุกกลุ่มมีสมาชิก 1 ตัว �
   ถ้า N8N ผูกเฉพาะ IPv4 จะต่อไม่ติดโดยไม่มี error ที่อ่านออก. ย้ายเครื่องเมื่อไรตั้ง env ทับได้
   ไม่ต้องแก้โค้ด. ⚠️ **IP `172.32.201.106` ที่เหลือใน `generate_cert.py`/README = IP ของสถานีเอง
   สำหรับใบรับรอง HTTPS ห้ามเปลี่ยนเป็น 127.0.0.1** ไม่งั้นเครื่องอื่นเปิดเว็บไม่ได้.
-- Tests: `pytest tests/` — 521 ตัว (artwork/label/barcode/auth — **ไม่ครอบคลุม camera/live loop**).
-  เพิ่มล่าสุด: `tests/test_n8n_ocr_response.py` 35 ตัว (แกะคำตอบ N8N + ปฏิเสธ HTML + retry),
+- Tests: `pytest tests/` — 534 ตัว (artwork/label/barcode/auth — **ไม่ครอบคลุม camera/live loop**).
+  เพิ่มล่าสุด: `tests/test_artwork_report_css.py` 13 ตัว (CSS ของ renderReport ต้องครบทั้ง 2 หน้า),
+  `tests/test_n8n_ocr_response.py` 35 ตัว (แกะคำตอบ N8N + ปฏิเสธ HTML + retry),
   `tests/test_artwork_coverage.py` 80 ตัว (รายงานว่าชั้นไหนได้ตรวจจริง),
   `tests/test_artwork_ocr_quality.py` 15 ตัว (crop ขั้นต่ำ + text layer ที่เสีย),
   `tests/test_artwork_ocr_cache.py` 13 ตัว (cache ของแท็บแปลต้องหลุดเมื่อค่าตั้ง OCR เปลี่ยน),
@@ -755,7 +850,10 @@ A, B, C, …) ⇒ ทุกกลุ่มมีสมาชิก 1 ตัว �
       (แตะ JS ด้วย → `node --check static/js/<ไฟล์>.js`)
 - [ ] แตะ JS ที่อ้าง element ใหม่ → **เพิ่ม element ใน `templates/` แล้วหรือยัง**?
       (`$("id")` ที่ไม่มีจริงจะเงียบ ไม่ error — ฟีเจอร์หายไปเฉยๆ)
-- [ ] ค่าคงที่ที่ใช้ทั้ง Python และ JS แก้ครบสองฝั่งหรือยัง? (เช่น `zones.HL_*` ↔ `HL_*`)
+- [ ] ค่าคงที่ที่ใช้ทั้ง Python และ JS แก้ครบสองฝั่งหรือยัง? (เช่น `zones.HL_*` ↔ `HL_*`,
+      `ZOOM_MIN` ↔ `min=` ของ `#awZoomRange`)
+- [ ] เพิ่มคลาส CSS ใน `renderReport()` → **ใส่ครบทั้ง `artwork_check.html` และ
+      `artwork_check_history.html` แล้วหรือยัง?** (`pytest tests/test_artwork_report_css.py`)
 - [ ] เพิ่มค่าตั้งที่เปลี่ยน **ผลการอ่านข้อความ** → ใส่ใน `pipeline._ocr_fingerprint()` แล้วหรือยัง?
       (ไม่ใส่ = cache แท็บ "ข้อความ + คำแปล" ไม่หลุด แก้ค่าแล้วผลไม่เปลี่ยนแบบเงียบ)
 - [ ] bump `CONFIG_VERSION` ถ้าผู้ใช้ต้อง verify?
