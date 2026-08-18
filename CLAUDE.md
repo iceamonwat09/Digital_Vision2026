@@ -67,6 +67,38 @@
 - flag ใหม่ทุกตัว **ปิดแล้วได้พฤติกรรมเดิมเป๊ะ** (พิสูจน์ด้วย md5 ของ crop และเทสต์)
 - **ไม่แตะโหมด** Live / RTSP / STREAM / Snapshot / Label เลยแม้แต่บรรทัดเดียว
 
+### ✅ ผลทดสอบซ้ำแบบอิสระ (18 ส.ค. 2026, branch `claude/artwork-mode-station-testing-llsrp0`)
+
+ทดสอบ **บน container Linux + Chromium จริง** (ไม่ใช่สถานี Windows) โดยรัน `app.py`
+ตัวจริงพร้อม stub `ultralytics`/`pyodbc` — ดูวิธีในหัวข้อ "🧪 วิธีทดสอบ UI จริง" ด้านล่าง.
+ทั้ง 6 ข้อผ่านหมด **วัดจาก DOM/สีจริง ไม่ใช่การอ่านโค้ด**:
+
+| # | สิ่งที่วัด | ผลที่ได้จริง |
+|---|---|---|
+| 1 | 3 โซนคนละกลุ่ม → แถบเตือน | `aw-cov warn`, `rgb(255,248,225)` = เหลือง, "ไม่มีโซนใดตั้ง กลุ่ม ตรงกันเลย" |
+| 2 | ตั้ง 2 โซนเป็นกลุ่ม `A` | แถบเทา `rgb(248,250,252)` + "ทำงาน (กลุ่ม A)" + จับ `MISMATCH_PANELS` 2 (170 vs 185 g) |
+| 3 | verdict ตาม coverage | มีชั้นขาด → "✅ PASS — **ไม่พบประเด็นในชั้นที่ตรวจ**" · ไม่มีชั้นขาด → "✅ PASS — ไม่พบประเด็น" |
+| 4 | autosave + F5 | แถบเขียว `rgb(232,245,233)` "💾 พบงานที่ค้างไว้ — 3 โซน" · กู้คืนได้ครบ **ทั้ง id และกลุ่ม** (`z1[A] z2[A] z3[C]`) · "ทิ้ง" ล้าง localStorage แล้วไม่เสนออีก |
+| 5 | หน้าประวัติ | `.aw-img-pair` = `grid 551px 551px`, การ์ดมีกรอบ, `scrollWidth == innerWidth` (ไม่ล้นจอ), แถบ coverage แสดงครบ |
+| 6 | ปุ่มซูม + วาดต่อเนื่อง | พอดีความกว้าง 86% (ยังล้นแนวตั้ง) · **พอดีทั้งหน้า 63% (ไม่ล้นทั้งสองแกน)** · ติ๊กแล้วลากรวด 3 โซนโดยกดปุ่มครั้งเดียว · Esc ออกได้ · ไม่ติ๊ก = พฤติกรรมเดิมเป๊ะ |
+| + | **N8N ล่ม 1 โซน ไม่ล้มทั้งใบ** (`e45fff0`) | โซนพื้นที่ว่างยิง N8N ที่ต่อไม่ติด → `UNREADABLE` 1 รายการ **แต่ชั้นเทียบข้ามแผงยังทำงานและรายงานออกครบ** |
+
+`diagnose_n8n_ocr.py --ping-only` แสดง `N8N_OCR_RETRIES` / `N8N_OCR_STRICT_RESPONSE`
+ครบ และ retry ทำงานถูกต้อง (ต่อไม่ติด → ลองซ้ำ 1 ครั้ง แล้วรายงานสาเหตุตรงจุด).
+pytest: **539 ผ่าน / 9 skipped / 5 fail** (5 ตัวเดิมของ Label Paper `NameError: FieldResult`).
+ระหว่างทดสอบทั้งหมด **ไม่มี HTTP 500 และไม่มี JS error** (404 เดียวคือ `/favicon.ico` ตามปกติ).
+
+**⚠️ ทดสอบที่นี่ไม่ได้ ต้องทำบนสถานี:** ยิง N8N จริง (`--ping-only` ข้อ ②) ·
+`verify_ocr.py --layers probe` กับโฟลเดอร์ `TEST` · ทุกโหมดที่ใช้กล้อง/SQL Server.
+
+### 🔀 กับดัก branch: `main` **ไม่มี** 5 commit สุดท้ายของรอบที่แล้ว
+PR #37 ถูก merge ตอน branch อยู่ที่ `d460924` ⇒ `origin/main` (`90430b7`) ยังเป็น
+**`CONFIG_VERSION = 2026.08.15-n8n-parse`** และ **ไม่มี** `20e3af1` `008ca38` `5d2f91a`
+`a99d31f` `e45fff0` (verify_ocr `--layers` · UX 4 ตัว · CSS หน้าประวัติ · กันโซนเดียวล้มทั้งใบ).
+⇒ **ถ้าสถานี `git pull` จาก `main` แล้ว footer จะขึ้น `2026.08.15-n8n-parse` ตลอด
+ไม่ว่ารีสตาร์ตกี่รอบ** — ต้อง checkout branch ที่มีงานจริง (`claude/artwork-multi-zone-errors-k8linm`
+หรือ `claude/artwork-mode-station-testing-llsrp0` ซึ่ง merge ไว้แล้ว) หรือรอ merge เข้า main.
+
 ---
 
 ## 🧪 วิธีทดสอบ UI จริงบนเครื่อง dev (ไม่มี ultralytics/กล้อง)
@@ -91,6 +123,17 @@ app.run(host="127.0.0.1", port=5990, threaded=True)
 ```
 แล้วขับด้วย Playwright + Chromium ที่มีอยู่ในเครื่อง
 (`executable_path="/opt/pw-browsers/chromium-1194/chrome-linux/chrome"`).
+
+**อีกท่าที่ตรงกับ production มากกว่า (ใช้ในรอบทดสอบ 18 ส.ค.):** รัน `app.py` **ตัวจริง**
+โดย stub เฉพาะแพ็กเกจที่เครื่อง dev ไม่มี แทนที่จะยก blueprint มารันเดี่ยว —
+ได้ทดสอบ `base.html`/context processor/ลำดับการลงทะเบียน blueprint ตัวจริงไปด้วย:
+```bash
+mkdir -p stubs                      # ultralytics.py = class YOLO ที่ raise, pyodbc.py = connect() ที่ raise
+PYTHONPATH=stubs AUTH_ENABLED=0 FLASK_PORT=5000 python3 app.py
+```
+`load_model()` / `Database` มี fallback อยู่แล้ว จึงได้แค่ log ERROR แล้วเว็บขึ้นปกติ
+(โหมด Artwork ไม่แตะทั้งสองอย่าง). `AUTH_ENABLED=0` เพราะ auth ต้องใช้ SQL Server จริง.
+⚠️ ไม่มี cert ⇒ `USE_HTTPS=True` จะ fallback เป็น HTTP เอง (ตามโค้ดใน `app.py`) — ปกติ.
 
 **กับดักที่เจอตอนเขียนเทสต์ (อย่าเสียเวลาซ้ำ):**
 1. **`template_folder` ต้องเป็น path เต็ม** — Flask หา template จากโฟลเดอร์ของสคริปต์
