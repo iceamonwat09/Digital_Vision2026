@@ -111,6 +111,29 @@ exit `0`/`1`/`2`. **พิสูจน์แล้วว่าจับของ
 > `text_looks_garbled` จะไม่ยอมตัดสินเลย แล้วทั้งเคสดี/เคสเสียได้ `False` เหมือนกัน =
 > ผ่านแบบไร้ความหมาย (มีข้อเช็คกันไว้ในสคริปต์แล้ว).
 
+### 🏭 ผลรันบนสถานีจริง (18 ส.ค. 2026, Python 3.9.13, `f6602a4`)
+
+`py -3.9 verify_artwork_features.py --n8n` → **ผ่าน 57 / ไม่ผ่าน 0** ·
+footer/`CONFIG_VERSION` = `2026.08.16-aw-ux` · commit ครบ 10 ตัว · `pyspellchecker` มี.
+**N8N ทำงานถูกต้อง**: ยิงจริง HTTP 200, อ่านภาพทดสอบได้ (`DIAGNOSE 12345`),
+และ **คืน `blocks` พร้อม bbox 2 ก้อน**.
+
+**⚠️ ข้อเดียวที่ยังเปิดอยู่ — tesseract binary ยังไม่ได้ติดตั้งบนสถานี**
+(`pytesseract` รายงาน *"tesseract is not installed or it's not in your PATH"*).
+ไม่ใช่จุดบอด QC (ผลตรวจ PASS/FAIL เท่าเดิมทุกอย่าง) แต่ทำให้ **กรอบแดงหายไปมากกว่าที่คิด**
+เพราะชั้น ③ ต้องใช้ Tesseract "พิสูจน์" bbox ของ LLM:
+`_verify_boxes(..., require_positive=True)` มี `except: return [] if require_positive`
+⇒ **ไม่มี Tesseract = bbox ของ Gemini ถูกทิ้งทุกครั้ง** แม้ N8N จะคืน bbox มาให้แล้วก็ตาม.
+
+| ไฟล์ | ชั้นที่ใช้ได้ตอนนี้ | กรอบแดง |
+|---|---|---|
+| PDF ที่มี text layer | ① PDF word box | ✅ ขึ้นปกติ |
+| PDF outline / ภาพถ่าย | ② ไม่มี · ③ ถูกทิ้งเพราะพิสูจน์ไม่ได้ | ❌ **ไม่ขึ้นเลย** |
+
+แก้ด้วยการติดตั้ง UB-Mannheim installer + `py -3.9 -m pip install pytesseract`
+(+ `ARTWORK_HIGHLIGHT_TESS_LANG=eng+ara` ถ้ามีฉลากอาหรับ) — `_find_tesseract_cmd()`
+หา exe เองไม่ต้องตั้ง PATH.
+
 ### 🔀 กับดัก branch: `main` **ไม่มี** 5 commit สุดท้ายของรอบที่แล้ว
 PR #37 ถูก merge ตอน branch อยู่ที่ `d460924` ⇒ `origin/main` (`90430b7`) ยังเป็น
 **`CONFIG_VERSION = 2026.08.15-n8n-parse`** และ **ไม่มี** `20e3af1` `008ca38` `5d2f91a`
