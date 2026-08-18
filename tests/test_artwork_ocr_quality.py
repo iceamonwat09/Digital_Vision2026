@@ -170,3 +170,54 @@ def test_garbled_without_ocr_backend_is_flagged_unreadable(monkeypatch):
 def test_short_text_is_never_judged():
     """ข้อความสั้นกว่าเกณฑ์ต้องไม่ถูกตัดสินว่าเสีย (กันรหัสงานพิมพ์)."""
     assert ocr.text_looks_garbled("PR3374Y0KOI ROL12SSAL") is False
+
+
+# ── กันพัง: โซนเดียวพังต้องไม่ล้มการตรวจทั้งใบ ───────────────────────
+
+def test_garbled_check_accepts_none():
+    """``text_looks_garbled(None)`` เคยโยน TypeError."""
+    from artwork_check import ocr as aocr
+    assert aocr.text_looks_garbled(None) is False
+    assert aocr.text_looks_garbled("") is False
+
+
+def test_backend_exception_becomes_unreadable_zone(monkeypatch):
+    """backend โยน exception → โซนนั้นเป็น UNREADABLE ไม่ใช่การตรวจล่มทั้งใบ
+    (read_zone ไม่เคยมี try/except ครอบ ⇒ เดิมได้ HTTP 500 แทนรายงาน)."""
+    import numpy as np
+    from artwork_check import ocr as aocr
+
+    class Doc:
+        is_pdf = False
+        def embedded_text(self, bbox): return ""
+        def render_zone(self, bbox, dpi=None, max_side=None):
+            return np.zeros((80, 240, 3), np.uint8)
+
+    monkeypatch.setattr(aocr.vertex_client, "is_enabled", lambda: True)
+
+    def boom(*a, **k):
+        raise RuntimeError("backend ระเบิด")
+    monkeypatch.setattr(aocr.vertex_client, "ocr_image", boom)
+
+    out = aocr.read_zone(Doc(), {"id": "z1", "type": "panel",
+                                 "bbox": [0.1, 0.1, 0.3, 0.2]})
+    assert out["zone_id"] == "z1"
+    assert out["error"] and "backend ระเบิด" in out["error"]
+    assert out["text"] == ""
+
+
+def test_backend_returning_non_dict_is_handled(monkeypatch):
+    import numpy as np
+    from artwork_check import ocr as aocr
+
+    class Doc:
+        is_pdf = False
+        def embedded_text(self, bbox): return ""
+        def render_zone(self, bbox, dpi=None, max_side=None):
+            return np.zeros((80, 240, 3), np.uint8)
+
+    monkeypatch.setattr(aocr.vertex_client, "is_enabled", lambda: True)
+    monkeypatch.setattr(aocr.vertex_client, "ocr_image", lambda *a, **k: "ขยะ")
+    out = aocr.read_zone(Doc(), {"id": "z1", "type": "panel",
+                                 "bbox": [0.1, 0.1, 0.3, 0.2]})
+    assert out["error"] and out["text"] == ""

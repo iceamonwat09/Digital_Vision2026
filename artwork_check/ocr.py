@@ -67,6 +67,8 @@ def text_looks_garbled(text: str,
     """
     mt = config.PDFTEXT_GARBLED_MIN_TOKENS if min_tokens is None else min_tokens
     rt = config.PDFTEXT_GARBLED_RATIO if ratio is None else ratio
+    if not text:                      # None / "" — กันพังแทนที่จะเชื่อว่าเป็น str
+        return False
     toks = _long_tokens(text)
     if len(toks) < max(1, mt):
         return False
@@ -130,7 +132,22 @@ def read_zone(doc: ArtworkDocument, zone: dict,
     if angle:
         crop = apply_rotation(crop, angle)
 
-    result = vertex_client.ocr_image(encode_jpg(crop))
+    # ⚠️ โซนเดียวพังต้องไม่ล้มการตรวจทั้งใบ — ``ocr_image`` สัญญาว่า
+    # "Never raises" แต่ backend อื่น/``encode_jpg`` ยังโยนได้ ถ้าปล่อยหลุด
+    # ขึ้นไปจะได้ HTTP 500 แทนรายงาน ⇒ ผู้ตรวจไม่ได้อะไรเลยแม้แต่โซนที่
+    # อ่านสำเร็จ. แปลงเป็น UNREADABLE เฉพาะโซนนั้นแทน (กฎเหล็กข้อ 2:
+    # บอกว่าอ่านไม่ได้ ดีกว่าไม่บอกอะไรเลย)
+    try:
+        result = vertex_client.ocr_image(encode_jpg(crop))
+    except Exception as e:                       # pragma: no cover - กันพังล้วน
+        logger.exception("[artwork] zone %s: OCR backend ล้มเหลว", zone["id"])
+        return {"zone_id": zone["id"], "text": "", "engine": "none",
+                "conf": None, "rotate": angle,
+                "error": "เรียก OCR backend ไม่สำเร็จ: %s" % e}
+    if not isinstance(result, dict):
+        return {"zone_id": zone["id"], "text": "", "engine": "none",
+                "conf": None, "rotate": angle,
+                "error": "OCR backend คืนค่าผิดรูป (%s)" % type(result).__name__}
     blocks = result.get("blocks") or []
     out = {
         "zone_id": zone["id"],

@@ -260,6 +260,17 @@
   .aw-tab-active { color:#0d47a1; border-bottom-color:#1976d2; }
 
   /* text + translation table */
+  /* แถบกู้คืนงานที่ค้าง (autosave) */
+  .aw-restore { background:#e8f5e9; border-left:4px solid #2e7d32; color:#1b5e20;
+                padding:8px 12px; border-radius:4px; font-size:13px;
+                margin-bottom:10px; display:flex; align-items:center;
+                gap:8px; flex-wrap:wrap; }
+
+  /* แท็บแปล = ตัวช่วย ไม่ใช่ผลตรวจ QC — ต้องบอกก่อนตาราง เพราะคอลัมน์
+     "สถานะ"/🤖 หน้าตาเหมือนผลตรวจจนเข้าใจผิดได้ */
+  .aw-textnote { background:#e3f2fd; border-left:4px solid #1976d2; color:#0d47a1;
+                 padding:8px 12px; border-radius:4px; font-size:12.5px;
+                 line-height:1.6; margin-bottom:10px; }
   .aw-textbar { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; }
   .aw-textfilter { font-size:13px; color:#555; cursor:pointer; }
   .aw-textmsg { font-size:12px; color:#78909c; margin:8px 0; min-height:16px; }
@@ -316,6 +327,11 @@
     <div class="aw-panel">
       <h3>① อัปโหลดไฟล์และจัดโซน</h3>
 
+      <!-- กู้คืนโซนที่ค้างไว้ (autosave) — ขึ้นเฉพาะเมื่อมีของค้างและงานนั้น
+           ยังเปิดได้จริง. ต้องกดยืนยัน ไม่กู้เอง (โซนของงานคนละใบมาวางทับ
+           แบบเงียบ ๆ อันตรายกว่าการลากใหม่) -->
+      <div id="awRestore" class="aw-restore" style="display:none;"></div>
+
       <div class="aw-row">
         <div style="flex:2; min-width:200px;">
           <label class="aw-label">ไฟล์ Artwork (PDF / PNG / JPG)</label>
@@ -361,12 +377,14 @@
         </span>
         <span class="aw-tb-group">
           <span class="aw-tb-label">🔍 ซูม</span>
-          <input id="awZoomRange" type="range" min="30" max="300" value="100"
+          <input id="awZoomRange" type="range" min="10" max="300" value="100"
                  title="ดับเบิลคลิกเพื่อกลับ 100%">
           <span id="awZoomLabel" class="aw-tb-pct">100%</span>
           <button id="awZoomReset" class="aw-btn aw-btn-sm">↺ 100%</button>
           <button id="awZoomFit" class="aw-btn aw-btn-sm"
                   title="ย่อ/ขยายให้ภาพพอดีความกว้างของช่องมอง (ไม่เปลี่ยนพิกัดโซน)">⤢ พอดีความกว้าง</button>
+          <button id="awZoomFitPage" class="aw-btn aw-btn-sm"
+                  title="ย่อให้เห็นทั้งแผ่นในครั้งเดียว — พอดีทั้งกว้างและสูง (ไม่เปลี่ยนพิกัดโซน)">⛶ พอดีทั้งหน้า</button>
         </span>
         <span class="aw-pan-hint">✋ ลากบนพื้นที่ว่างเพื่อเลื่อนภาพ (หรือกดล้อเมาส์ลาก)</span>
       </div>
@@ -399,6 +417,14 @@
       <!-- เตือนก่อนกดส่ง: ไม่มีโซนใดตั้ง "กลุ่ม" ตรงกัน ⇒ ชั้นเทียบข้ามแผง
            จะไม่ทำงาน แล้วผลจะขึ้น PASS โดยที่ยังไม่เคยเทียบอะไรเลย -->
       <div id="awGroupHint" class="aw-warn" style="display:none;"></div>
+
+      <div class="aw-row" style="margin-top:6px;">
+        <label class="aw-rotate-mode" title="ติ๊กแล้วกด &quot;+ เพิ่มโซน&quot; หนึ่งครั้ง จะลากวาดได้เรื่อย ๆ ไม่ต้องกดปุ่มใหม่ทุกโซน (กด Esc หรือคลิกเปล่าเพื่อออก)">
+          <input type="checkbox" id="awDrawContinuous"> ✏️ วาดต่อเนื่อง
+        </label>
+        <span class="aw-rotate-hint" style="font-size:12px;color:#78909c;">
+          ไม่ติ๊ก = วาดได้ครั้งละ 1 โซน (เหมือนเดิม)</span>
+      </div>
 
       <div class="aw-row" style="margin-top:6px;">
         <label class="aw-rotate-mode" title="เปิด = ระบบตรวจโซนแนวตั้งแล้วหมุนให้ก่อน OCR (คลิก ↻ ที่มุมโซนเพื่อแซงรายโซน)">
@@ -474,6 +500,16 @@
       </div>
 
       <div id="awTextTab" style="display:none;">
+        <!-- แท็บนี้อ่านข้อความ + เทียบ dictionary + ให้ AI ช่วยดู = ตัวช่วย
+             ไม่ใช่ผลตรวจ QC. ตารางมีคอลัมน์ "สถานะ" กับ 🤖 ซึ่งหน้าตาเหมือน
+             ผลตรวจมาก — ถ้าไม่บอก ผู้ใช้จะกดแปลแล้วเข้าใจว่าตรวจเสร็จแล้ว
+             ทั้งที่ยังไม่มีการเทียบข้ามแผง/ตัวเลข/บาร์โค้ดเลย -->
+        <div class="aw-textnote">
+          ℹ️ แท็บนี้เป็น <b>ตัวช่วยอ่าน/แปล</b> — ไม่ใช่ผลตรวจ QC
+          และ<b>ไม่มีการเทียบข้ามแผง ตัวเลข หรือบาร์โค้ด</b>.
+          ผลตรวจจริงต้องกด <b>“ส่งตรวจสอบ →”</b> ที่กล่องจัดโซนด้านบน ·
+          คอลัมน์ 🤖 เป็นความเห็นของ AI ใช้ตัดสินแทนคนไม่ได้
+        </div>
         <div class="aw-textbar">
           <button id="awTranslateBtn" class="aw-btn aw-btn-primary">📖 แปล / อธิบาย (EN)</button>
           <label class="aw-textfilter"><input type="checkbox" id="awTextOnlyIssues"> เฉพาะบรรทัดที่น่าสงสัย</label>
