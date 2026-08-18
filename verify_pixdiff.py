@@ -78,6 +78,21 @@ def _make_pdf(path, net=170, shift_pt=0.0, page_w=842, page_h=595,
     doc.close()
 
 
+def _make_panel(path, page_w, page_h, at=(60, 80), net=170):
+    """ฉลาก 1 แผงขนาดจริงเท่ากันเสมอ วางบนหน้าขนาดใดก็ได้ ที่ตำแหน่งใดก็ได้
+    — จำลองเคสจริง 'งานเดียวกันคนละ layout' (A4 proof vs แผ่นพิมพ์ใหญ่)"""
+    doc = fitz.open()
+    page = doc.new_page(width=page_w, height=page_h)
+    x0, y0 = at
+    page.draw_rect(fitz.Rect(x0, y0, x0 + 220, y0 + 140),
+                   color=(0, 0, 0), width=1)
+    for i, t in enumerate(_LINES):
+        page.insert_text((x0 + 10, y0 + 20 + i * 15), t.format(net=net),
+                         fontsize=8, fontname="helv")
+    doc.save(path)
+    doc.close()
+
+
 def _fmt(res):
     if res["status"] != pixdiff.OK:
         return "ไม่เทียบ (%s)" % res["reason"]
@@ -181,7 +196,45 @@ def selftest(dpi: int) -> int:
                 "เคสไม่เทียบต้องไม่มีผลลัพธ์หลอกออกมา",
                 got="regions=%d diff_px=%d" % (len(r["regions"]), r["diff_px"]))
 
-        print("\n⑤ เสถียร — รันซ้ำต้องได้เลขเดิมเป๊ะ (deterministic)")
+        print("\n⑤ โหมดโซน — เทียบได้แม้หน้าคนละขนาด (เคสจริงที่พบบ่อยที่สุด)")
+        # จำลองเคสจริง: แผงเดียวกันวางบน A4 กับบนแผ่นใหญ่คนละตำแหน่ง
+        small = os.path.join(tmp, "panel_a4.pdf")
+        big = os.path.join(tmp, "panel_big.pdf")
+        big_edit = os.path.join(tmp, "panel_big_edit.pdf")
+        _make_panel(small, page_w=842, page_h=595, at=(60, 80))
+        _make_panel(big, page_w=2148, page_h=1290, at=(900, 700))
+        _make_panel(big_edit, page_w=2148, page_h=1290, at=(900, 700), net=185)
+
+        # โซนครอบแผงเดียวกันบนสองหน้า (สัดส่วนต่างกันเพราะหน้าคนละขนาด)
+        z_small = [55 / 842.0, 60 / 595.0, 230 / 842.0, 150 / 595.0]
+        z_big = [890 / 2148.0, 680 / 1290.0, 240 / 2148.0, 160 / 1290.0]
+
+        r = pixdiff.compare_zone(small, z_small, big, z_big, dpi=dpi)
+        s.check(r["status"] == pixdiff.OK and r["region_count"] == 0,
+                "แผงเดียวกันบนหน้า A4 vs แผ่นใหญ่ → เทียบได้ และไม่มีความต่างปลอม",
+                got="%s · คะแนนจับคู่ %.3f · เนื้อหาขยับ %s mm"
+                    % (_fmt(r), r.get("match_score", 0), r.get("shift_mm")),
+                why="นี่คือเคสที่โหมดทั้งหน้าทำไม่ได้ (ขนาดหน้าไม่เท่ากัน)")
+
+        r = pixdiff.compare_zone(small, z_small, big_edit, z_big, dpi=dpi)
+        s.check(r["status"] == pixdiff.OK and r["region_count"] >= 1,
+                "แผงเดียวกันแต่ตัวเลขเปลี่ยน → จับได้ทั้งที่หน้าคนละขนาด",
+                got=_fmt(r))
+        if r["status"] == pixdiff.OK and r["regions"]:
+            s.check(r["region_count"] <= 2,
+                    "ยังชี้เป็นบริเวณเดียว ไม่แตกเป็นเศษ",
+                    got="%d บริเวณ" % r["region_count"])
+
+        r = pixdiff.compare_zone(small, z_small, big, [0.05, 0.05, 0.1, 0.1],
+                                 dpi=dpi)
+        s.check(r["status"] == pixdiff.SKIPPED and r["reason"] in
+                ("align_failed", "zone_too_different", "zone_empty",
+                 "zone_blank"),
+                "ลากโซนผิดที่ (พื้นที่ว่าง) → ไม่รายงาน แทนที่จะชี้มั่ว",
+                got="%s — %s" % (r["reason"], r.get("message", "")[:90]),
+                why="กฎเหล็กข้อ 2: ไม่มั่นใจ ไม่แสดง ดีกว่าชี้ผิดจุด")
+
+        print("\n⑥ เสถียร — รันซ้ำต้องได้เลขเดิมเป๊ะ (deterministic)")
         r1 = pixdiff.compare_files(base, digit, dpi=dpi)
         r2 = pixdiff.compare_files(base, digit, dpi=dpi)
         s.check(r1["diff_px"] == r2["diff_px"]
@@ -199,9 +252,61 @@ def selftest(dpi: int) -> int:
     return 1 if s.fail else 0
 
 
+def _auto_zone(new_path, old_path, dpi):
+    """หา 'กรอบที่มีหมึก' ของทั้งสองไฟล์ แล้วบอกว่าเนื้อหาขนาดจริงเท่ากันไหม.
+
+    นี่คือคำถามที่ตัดสินว่าเทียบรายโซนได้หรือไม่ เมื่อหน้าคนละขนาด
+    """
+    ba, wa, ha = pixdiff.content_bbox(new_path)
+    bb, wb, hb = pixdiff.content_bbox(old_path)
+    print("  เนื้อหา (กรอบที่มีหมึก) — ใหม่: %s mm · เก่า: %s mm"
+          % ("%.0fx%.0f" % (wa, ha) if ba else "?",
+             "%.0fx%.0f" % (wb, hb) if bb else "?"))
+    if not ba or not bb:
+        print("  ⚠ หากรอบเนื้อหาไม่ได้ (หน้าว่าง?)")
+        return None, None
+    if wb and hb:
+        rw, rh = wa / wb, ha / hb
+        if abs(rw - 1) > 0.02 or abs(rh - 1) > 0.02:
+            print("  ⚠ เนื้อหาขนาดจริงไม่เท่ากัน (อัตราส่วน %.3f x %.3f) — "
+                  "ไฟล์หนึ่งถูกย่อ/ขยาย" % (rw, rh))
+            print("    เทียบพิกเซลจะไม่ตรงจนกว่าจะจัดสเกลให้เท่ากันก่อน")
+        else:
+            print("  ✓ เนื้อหาขนาดจริงเท่ากัน (ต่าง < 2%) — เทียบรายโซนได้")
+    return ba, bb
+
+
 def compare_one(new_path: str, old_path: str, dpi: int, save_dir: str = "",
-                verbose: bool = False) -> dict:
+                verbose: bool = False, zone_a=None, zone_b=None,
+                auto_zone: bool = False) -> dict:
     t0 = time.time()
+    if auto_zone or (zone_a and zone_b):
+        print("\n" + "-" * 72)
+        print("ใหม่: %s" % os.path.basename(new_path))
+        print("เก่า: %s" % os.path.basename(old_path))
+        if auto_zone:
+            zone_a, zone_b = _auto_zone(new_path, old_path, dpi)
+            if not zone_a:
+                return {"status": pixdiff.SKIPPED, "reason": "zone_empty",
+                        "message": "หากรอบเนื้อหาไม่ได้", "regions": [],
+                        "diff_px": 0, "region_count": 0}
+        res = pixdiff.compare_zone(new_path, zone_a, old_path, zone_b, dpi=dpi)
+        res["elapsed_s"] = round(time.time() - t0, 2)
+        if res["status"] != pixdiff.OK:
+            print("  ⚠ ไม่เทียบ — %s" % (res.get("message") or res["reason"]))
+            return res
+        print("  จับคู่ตำแหน่งได้ (คะแนน %.3f) · เนื้อหาขยับ %s mm · โซน %s mm"
+              % (res.get("match_score", 0), res.get("shift_mm"),
+                 res.get("zone_size_mm")))
+        print("  ผล: %s  (%.2f วิ)" % (_fmt(res), res["elapsed_s"]))
+        for i, r in enumerate(res["regions"][:10 if verbose else 5], 1):
+            x, y, w, h = r["px"]
+            print("   %2d) %5d px  ที่ (%d,%d) ขนาด %dx%d"
+                  % (i, r["area_px"], x, y, w, h))
+        if res["region_count"] == 0:
+            print("  ✅ ไม่พบความต่างในโซนนี้")
+        return res
+
     res = pixdiff.compare_files(new_path, old_path, dpi=dpi)
     res["elapsed_s"] = round(time.time() - t0, 2)
 
@@ -248,6 +353,13 @@ def main() -> int:
     ap.add_argument("--dpi", type=int, default=pixdiff.PIXDIFF_DPI)
     ap.add_argument("--save-dir", default="",
                     help="เขียนภาพผล (กรอบส้ม) ลงโฟลเดอร์นี้")
+    ap.add_argument("--auto-zone", action="store_true",
+                    help="เทียบเฉพาะ 'กรอบที่มีหมึก' ของแต่ละไฟล์ แทนทั้งหน้า "
+                         "— ใช้เมื่อหน้าสองไฟล์คนละขนาด (ไม่ต้องรู้พิกัดโซน)")
+    ap.add_argument("--zone-a", default="",
+                    help="โซนของไฟล์ใหม่ เป็นสัดส่วน x,y,w,h เช่น 0.05,0.1,0.4,0.3")
+    ap.add_argument("--zone-b", default="",
+                    help="โซนของไฟล์อ้างอิง เป็นสัดส่วน x,y,w,h")
     ap.add_argument("--verbose", action="store_true")
     args = ap.parse_args()
 
@@ -291,11 +403,38 @@ def main() -> int:
             print("\nไม่พบไฟล์ชื่อตรงกันในสองโฟลเดอร์")
             return 2
 
+    def _parse_zone(txt, name):
+        if not txt:
+            return None
+        parts = [p.strip() for p in txt.replace(" ", "").split(",")]
+        if len(parts) != 4:
+            print("\n✗ %s ต้องเป็น x,y,w,h (สัดส่วน 0..1) เช่น 0.05,0.1,0.4,0.3"
+                  % name)
+            return "bad"
+        try:
+            return [float(v) for v in parts]
+        except ValueError:
+            print("\n✗ %s มีค่าที่ไม่ใช่ตัวเลข: %s" % (name, txt))
+            return "bad"
+
+    za = _parse_zone(args.zone_a, "--zone-a")
+    zb = _parse_zone(args.zone_b, "--zone-b")
+    if za == "bad" or zb == "bad":
+        return 2
+    if bool(za) != bool(zb):
+        print("\n✗ ต้องระบุทั้ง --zone-a และ --zone-b คู่กัน "
+              "(หรือใช้ --auto-zone ให้ระบบหากรอบเนื้อหาเอง)")
+        return 2
+
     if pairs:
-        print("\n%d คู่ที่จะเทียบ" % len(pairs))
+        print("\n%d คู่ที่จะเทียบ%s" % (
+            len(pairs),
+            " (โหมดโซน: กรอบเนื้อหาอัตโนมัติ)" if args.auto_zone else
+            " (โหมดโซน: พิกัดที่ระบุ)" if za else ""))
         n_diff = n_skip = 0
         for a, b in pairs:
-            res = compare_one(a, b, args.dpi, args.save_dir, args.verbose)
+            res = compare_one(a, b, args.dpi, args.save_dir, args.verbose,
+                              zone_a=za, zone_b=zb, auto_zone=args.auto_zone)
             if res["status"] != pixdiff.OK:
                 n_skip += 1
             elif res["region_count"]:

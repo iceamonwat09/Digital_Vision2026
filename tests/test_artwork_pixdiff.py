@@ -269,6 +269,133 @@ def test_draw_regions_does_not_touch_the_original():
     assert not np.array_equal(out, before)
 
 
+# ── โหมดโซน: เทียบแผงที่จับคู่กัน แม้หน้าคนละขนาด ───────────────────
+def make_panel(path, page_w, page_h, at=(60, 80), net=170):
+    """ฉลากแผงเดียว ขนาดจริงเท่ากันเสมอ วางบนหน้าขนาดใดก็ได้ ตำแหน่งใดก็ได้"""
+    doc = fitz.open()
+    page = doc.new_page(width=page_w, height=page_h)
+    x0, y0 = at
+    page.draw_rect(fitz.Rect(x0, y0, x0 + 220, y0 + 140), color=(0, 0, 0), width=1)
+    for i, t in enumerate(LINES):
+        page.insert_text((x0 + 10, y0 + 20 + i * 15), t.format(net=net),
+                         fontsize=8, fontname="helv")
+    doc.save(str(path))
+    doc.close()
+
+
+ZONE_SMALL = [55 / 842.0, 60 / 595.0, 230 / 842.0, 150 / 595.0]
+ZONE_BIG = [890 / 2148.0, 680 / 1290.0, 240 / 2148.0, 160 / 1290.0]
+
+
+@pytest.fixture
+def panels(tmp_path):
+    small = tmp_path / "a4.pdf"
+    big = tmp_path / "big.pdf"
+    make_panel(small, 842, 595, at=(60, 80))
+    make_panel(big, 2148, 1290, at=(900, 700))
+    return small, big
+
+
+def test_zone_compare_works_across_different_page_sizes(panels):
+    """เคสจริงที่พบบ่อยที่สุด: งานเดียวกันบน A4 proof กับแผ่นพิมพ์ใหญ่
+    — โหมดทั้งหน้าทำไม่ได้เลย (ขนาดหน้าไม่เท่ากัน)"""
+    small, big = panels
+    res = pixdiff.compare_zone(str(small), ZONE_SMALL, str(big), ZONE_BIG)
+    assert res["status"] == pixdiff.OK
+    assert res["region_count"] == 0, res["regions"]
+
+
+def test_zone_compare_finds_the_edit(tmp_path, panels):
+    small, _big = panels
+    edited = tmp_path / "big_edit.pdf"
+    make_panel(edited, 2148, 1290, at=(900, 700), net=185)
+    res = pixdiff.compare_zone(str(small), ZONE_SMALL, str(edited), ZONE_BIG)
+    assert res["status"] == pixdiff.OK
+    assert res["region_count"] >= 1
+
+
+def test_zone_compare_reports_shift_instead_of_hiding_it(panels):
+    """การเลื่อนที่ align ออกไปต้องรายงานกลับ ไม่ใช่ซ่อน"""
+    small, big = panels
+    res = pixdiff.compare_zone(str(small), ZONE_SMALL, str(big), ZONE_BIG)
+    assert "shift_mm" in res and len(res["shift_mm"]) == 2
+    assert "match_score" in res and res["match_score"] > pixdiff.MIN_MATCH_CONF
+
+
+def test_zone_on_blank_area_refuses_instead_of_guessing(panels):
+    small, big = panels
+    res = pixdiff.compare_zone(str(small), ZONE_SMALL, str(big),
+                               [0.02, 0.02, 0.08, 0.08])
+    assert res["status"] == pixdiff.SKIPPED
+    assert res["reason"] in ("align_failed", "zone_too_different",
+                             "zone_empty", "zone_blank")
+    assert res["regions"] == []
+
+
+def test_blank_zone_never_reports_no_difference(panels):
+    """โซนว่าง vs โซนว่าง เคยขึ้น 'ไม่พบความต่าง' ทั้งที่ไม่ได้ตรวจอะไรเลย —
+    template สีขาวล้วนจับคู่ได้คะแนนเต็มกับพื้นที่ขาวที่ไหนก็ได้.
+    นี่คือความมั่นใจปลอมที่อันตรายที่สุดของชั้นนี้"""
+    small, big = panels
+    res = pixdiff.compare_zone(str(small), [0.75, 0.75, 0.2, 0.2],
+                               str(big), [0.02, 0.02, 0.1, 0.1])
+    assert res["status"] == pixdiff.SKIPPED
+    assert res["reason"] == "zone_blank"
+    assert "หมึก" in res["message"]
+
+
+def test_zone_compare_needs_pdf(tmp_path, panels):
+    small, _ = panels
+    png = tmp_path / "x.png"
+    cv2.imwrite(str(png), np.full((50, 50, 3), 255, np.uint8))
+    res = pixdiff.compare_zone(str(small), ZONE_SMALL, str(png), ZONE_BIG)
+    assert res["reason"] == "not_pdf"
+
+
+def test_zone_compare_missing_file(panels):
+    small, _ = panels
+    res = pixdiff.compare_zone(str(small), ZONE_SMALL, "ไม่มี.pdf", ZONE_BIG)
+    assert res["reason"] == "file_not_found"
+
+
+def test_content_bbox_reports_real_mm_size(panels):
+    """ขนาดจริงของ 'กรอบที่มีหมึก' ต้องเท่ากันแม้หน้าคนละขนาด — นี่คือค่าที่
+    ใช้ตอบว่าไฟล์ไหนถูกย่อ"""
+    small, big = panels
+    _b1, w1, h1 = pixdiff.content_bbox(str(small))
+    _b2, w2, h2 = pixdiff.content_bbox(str(big))
+    assert w1 == pytest.approx(w2, rel=0.03)
+    assert h1 == pytest.approx(h2, rel=0.03)
+
+
+# ── ความคลาดระดับพิกเซล: จำเป็นกับโหมดโซน ห้ามใช้กับโหมดทั้งหน้า ────
+def test_one_pixel_shift_is_noise_with_tolerance_but_real_without():
+    a = np.full((120, 120, 3), 255, np.uint8)
+    a[40:60, 40:80] = 0
+    b = np.roll(a, 1, axis=1)                  # เลื่อน 1 พิกเซล
+    strict = pixdiff.compare_images(a, b, tolerance_px=0)
+    tolerant = pixdiff.compare_images(a, b, tolerance_px=1)
+    assert strict["diff_px"] > 0               # โหมดทั้งหน้า: ถือว่าต่าง
+    assert tolerant["region_count"] == 0       # โหมดโซน: ถือว่าเป็น noise
+
+
+def test_tolerance_does_not_hide_a_real_change():
+    a = np.full((120, 120, 3), 255, np.uint8)
+    b = a.copy()
+    b[40:60, 40:80] = 0                        # บล็อกดำโผล่มาใหม่ทั้งก้อน
+    res = pixdiff.compare_images(a, b, tolerance_px=1)
+    assert res["region_count"] == 1
+
+
+def test_tolerant_compare_is_symmetric():
+    a = np.full((120, 120, 3), 255, np.uint8)
+    a[40:60, 40:80] = 0
+    b = np.roll(a, 1, axis=0)
+    r1 = pixdiff.compare_images(a, b, tolerance_px=1)
+    r2 = pixdiff.compare_images(b, a, tolerance_px=1)
+    assert r1["diff_px"] == r2["diff_px"]
+
+
 def test_reason_text_is_human_readable():
     assert "ขนาดหน้า" in pixdiff.reason_text("page_size_mismatch")
     assert pixdiff.reason_text("something_new") == "something_new"

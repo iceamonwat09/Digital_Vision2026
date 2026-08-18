@@ -55,6 +55,23 @@ MAX_REGIONS = 200            # เพดานจำนวนบริเวณ�
 # ทั้งหน้าเลื่อน / จัดเลย์เอาต์ใหม่ ⇒ รายงาน 500 กรอบไปก็ไม่มีใครไล่ไหว
 MAX_DIFF_RATIO = 0.20
 
+# ── โหมดโซน (เทียบเฉพาะแผงที่จับคู่กัน) ─────────────────────────────
+# วัดจากไฟล์จริง: 2 ใน 3 คู่เทียบทั้งหน้าไม่ได้ (ขนาดหน้าต่างกัน / จัด layout
+# ใหม่) — โหมดโซนคือทางเดียวที่ใช้ได้กับงานจริงส่วนใหญ่.
+#
+# ⚠️ ต่างจากโหมดทั้งหน้าตรงที่ **ต้อง align ก่อนเทียบ**: ผู้ใช้ลากโซนด้วยมือ
+# ขอบสองฝั่งไม่มีทางตรงกันเป๊ะ ถ้าเทียบดิบ ๆ จะได้ false positive เต็มไปหมด.
+# การเลื่อนที่ align ออกไป **ไม่ได้ถูกซ่อน** — คืนมาในฟิลด์ ``shift_mm``
+# ให้ผู้ตรวจเห็นว่าเนื้อหาขยับไปเท่าไร
+ZONE_ALIGN_MARGIN_MM = 6.0   # ขยายกรอบฝั่งอ้างอิงเพื่อให้มีที่ให้เลื่อนหา
+MIN_MATCH_CONF = 0.55        # คะแนนจับคู่ต่ำกว่านี้ = ไม่มั่นใจ → ไม่รายงาน
+MAX_ZONE_DIFF_RATIO = 0.35   # โซนต่างเกินนี้ = คนละเนื้อหา ไม่ใช่การแก้ไข
+# ยอมให้เนื้อหาคลาดกันได้กี่พิกเซลก่อนนับว่า "ต่าง" — จำเป็นเฉพาะโหมดโซน
+# เพราะ align ได้ละเอียดแค่ระดับพิกเซล แต่ของจริงคลาดกันเป็นเศษพิกเซล
+ZONE_TOLERANCE_PX = 1
+# โซนที่มีหมึกน้อยกว่านี้ = ไม่มีอะไรให้เทียบ (ดู zone_blank)
+MIN_INK_RATIO = 0.002
+
 # สถานะที่คืนได้ — ผู้เรียกต้องแยก "เทียบแล้วไม่ต่าง" ออกจาก "เทียบไม่ได้"
 OK = "ok"
 SKIPPED = "skipped"
@@ -76,6 +93,18 @@ _REASON_TEXT = {
         "หรือเนื้อหาทั้งหน้าเลื่อน/จัดใหม่ จึงไม่รายงานรายบริเวณ",
     "file_not_found":
         "ไม่พบไฟล์",
+    "align_failed":
+        "จับคู่ตำแหน่งเนื้อหาในสองโซนไม่ได้ — อาจเป็นคนละเนื้อหา หรือโซนที่ลาก "
+        "ครอบคนละส่วนกัน (ไม่รายงานดีกว่าชี้ผิดที่)",
+    "zone_too_different":
+        "เนื้อหาในโซนต่างกันมากเกินกว่าจะเป็นการแก้ไข — น่าจะเป็นคนละแผง",
+    "zone_empty":
+        "โซนที่ลากอยู่นอกหน้า หรือเล็กเกินกว่าจะเทียบได้",
+    "zone_blank":
+        "โซนแทบไม่มีเนื้อหาให้เทียบ (พื้นที่ว่าง) — การบอกว่า 'ไม่พบความต่าง' "
+        "จากพื้นที่ว่างคือความมั่นใจปลอม",
+    "not_pdf":
+        "โหมดเทียบรายโซนรองรับเฉพาะ PDF (ต้องรู้ขนาดจริงเป็นมิลลิเมตร)",
 }
 
 
@@ -120,11 +149,37 @@ def _skip(reason: str, **extra) -> dict:
     return out
 
 
+def _diff_mask(a, b, threshold: int, tolerance_px: int):
+    """แผนที่พิกเซลที่ "ต่างจริง".
+
+    ``tolerance_px = 0`` → เทียบตรง ๆ (ใช้กับโหมดทั้งหน้า ซึ่งสองไฟล์
+    เรนเดอร์ลงกริดเดียวกัน จึงต้องเป๊ะได้).
+
+    ``tolerance_px = n`` → พิกเซลจะนับว่าต่างก็ต่อเมื่อ **ไม่มีพิกเซลใดใน
+    รัศมี n** ของอีกฝั่งที่ใกล้เคียงกันเลย. จำเป็นกับโหมดโซน เพราะแผง
+    เดียวกันบนหน้าคนละขนาดจะตกลงบน "เศษส่วนพิกเซล" คนละค่า ⇒ ขอบตัวอักษร
+    ทุกตัวต่างกันนิดเดียวทั้งแผง (วัดได้ 13 บริเวณปลอมจากการเลื่อน < 1px).
+    ทำสองทางแล้วเอาค่ามากสุด เพื่อไม่ให้ผลขึ้นกับว่าไฟล์ไหนเป็น a หรือ b.
+    """
+    if tolerance_px <= 0:
+        return (cv2.absdiff(a, b).max(axis=2) >= threshold).astype(np.uint8) * 255
+    k = cv2.getStructuringElement(cv2.MORPH_RECT,
+                                  (2 * tolerance_px + 1, 2 * tolerance_px + 1))
+    ai, bi = a.astype(np.int16), b.astype(np.int16)
+    a_min, a_max = cv2.erode(a, k).astype(np.int16), cv2.dilate(a, k).astype(np.int16)
+    b_min, b_max = cv2.erode(b, k).astype(np.int16), cv2.dilate(b, k).astype(np.int16)
+    d1 = np.maximum(ai - b_max, b_min - ai)
+    d2 = np.maximum(bi - a_max, a_min - bi)
+    d = np.maximum(d1, d2).max(axis=2)
+    return (d >= threshold).astype(np.uint8) * 255
+
+
 def compare_images(img_a, img_b,
                    threshold: int = DIFF_THRESHOLD,
                    min_region_px: int = MIN_REGION_PX,
                    merge_radius_px: int = MERGE_RADIUS_PX,
-                   max_regions: int = MAX_REGIONS) -> dict:
+                   max_regions: int = MAX_REGIONS,
+                   tolerance_px: int = 0) -> dict:
     """เทียบภาพ BGR สองภาพที่ **ขนาดเท่ากันแล้ว** → บริเวณที่ต่าง.
 
     คืน dict: ``status`` · ``regions`` (bbox เป็นสัดส่วน 0..1 ของหน้า +
@@ -144,8 +199,7 @@ def compare_images(img_a, img_b,
 
     # ต่างกันมากสุดในสามช่องสี = ไวกับสีเพี้ยนที่ความสว่างเท่าเดิม
     # (เทียบ grayscale อย่างเดียวจะมองไม่เห็นแดง↔เขียวที่ luminance ใกล้กัน)
-    delta = cv2.absdiff(a, b).max(axis=2)
-    mask = (delta >= threshold).astype(np.uint8) * 255
+    mask = _diff_mask(a, b, threshold, tolerance_px)
     diff_px = int(np.count_nonzero(mask))
 
     # ต่างกันทั้งใบ = ไม่ใช่ "การแก้ฉลาก" — รายงานรายบริเวณไปก็ไร้ประโยชน์
@@ -204,6 +258,7 @@ def compare_images(img_a, img_b,
         "truncated": truncated,
         "diff_px": diff_px,
         "diff_ratio": round(diff_px / float(w * h), 8),
+        "tolerance_px": int(tolerance_px),
     }
 
 
@@ -279,6 +334,178 @@ def _render(path: str, dpi: int, page_index: int = 0):
     if img is None:
         raise ValueError("อ่านไฟล์ภาพไม่ได้: %s" % path)
     return img
+
+
+# ── โหมดโซน: เทียบเฉพาะแผงที่จับคู่กัน ───────────────────────────────
+def render_zone_mm(path: str, bbox, dpi: int, page_index: int = 0,
+                   margin_mm: float = 0.0):
+    """เรนเดอร์โซน (bbox เป็นสัดส่วน 0..1 ของหน้า) ที่ **สเกลจริงตาม mm**.
+
+    หัวใจของโหมดโซน: สองไฟล์ที่หน้าคนละขนาดจะให้ภาพที่ ``mm ต่อพิกเซล``
+    เท่ากันเสมอเมื่อเรนเดอร์ที่ DPI เดียวกัน ⇒ ฉลากขนาดจริงเท่ากันจะได้ภาพ
+    ขนาดพิกเซลเท่ากัน แม้จะวางอยู่บนหน้า A4 กับหน้า 758mm ก็ตาม.
+    """
+    if fitz is None:
+        raise RuntimeError("PyMuPDF (fitz) is not installed")
+    x, y, w, h = [float(v) for v in bbox]
+    with fitz.open(path) as doc:
+        page = doc[page_index]
+        r = page.rect
+        mpp = 25.4 / dpi                      # มิลลิเมตรต่อพิกเซล
+        pad_pt = margin_mm / 25.4 * 72.0
+        clip = fitz.Rect(
+            max(r.x0, r.x0 + x * r.width - pad_pt),
+            max(r.y0, r.y0 + y * r.height - pad_pt),
+            min(r.x1, r.x0 + (x + w) * r.width + pad_pt),
+            min(r.y1, r.y0 + (y + h) * r.height + pad_pt))
+        if clip.width <= 1 or clip.height <= 1:
+            return None, 0.0
+        zoom = dpi / 72.0
+        pix = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom), clip=clip,
+                              alpha=False)
+        img = np.frombuffer(pix.samples, dtype=np.uint8)
+        img = img.reshape(pix.height, pix.width, pix.n)
+        img = (cv2.cvtColor(img, cv2.COLOR_RGB2BGR) if pix.n == 3
+               else cv2.cvtColor(img, cv2.COLOR_GRAY2BGR))
+        return img, mpp
+
+
+def content_bbox(path: str, page_index: int = 0, dpi: int = 72,
+                 white_thresh: int = 245):
+    """กรอบที่มี "หมึก" จริงบนหน้า → (bbox สัดส่วน, กว้าง mm, สูง mm).
+
+    ใช้ตอบคำถามที่สำคัญที่สุดของการเทียบสองไฟล์ที่หน้าคนละขนาด:
+    *เนื้อหาข้างในเป็นขนาดจริงเท่ากันไหม* (ถ้าเท่า = วางคนละที่บนแผ่นคนละ
+    ขนาด เทียบรายโซนได้เลย · ถ้าไม่เท่า = ไฟล์หนึ่งถูกย่อ ต้องจัดการก่อน).
+    """
+    size = page_size_mm(path, page_index)
+    if not size:
+        return None, 0.0, 0.0
+    try:
+        img = _render(path, dpi, page_index)
+    except Exception:                          # pragma: no cover
+        return None, 0.0, 0.0
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    ink = (gray < white_thresh).astype(np.uint8)
+    if not np.count_nonzero(ink):
+        return None, 0.0, 0.0
+    x, y, w, h = cv2.boundingRect(ink)
+    ih, iw = gray.shape[:2]
+    bbox = [x / float(iw), y / float(ih), w / float(iw), h / float(ih)]
+    return ([round(float(v), 5) for v in bbox],
+            round(bbox[2] * size[0], 1), round(bbox[3] * size[1], 1))
+
+
+def _ink_ratio(img) -> float:
+    """สัดส่วนพิกเซลที่ "มีหมึก" (ไม่ใช่พื้นขาว) ในภาพ"""
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    return float(np.count_nonzero(gray < 245)) / float(gray.size or 1)
+
+
+def _locate(template, haystack):
+    """หา template ใน haystack → (dx, dy, score). ใช้ NCC ซึ่งทนต่อความ
+    ต่างของความสว่าง/คอนทราสต์เล็กน้อยจากการ export คนละรอบ."""
+    th, tw = template.shape[:2]
+    hh, hw = haystack.shape[:2]
+    if th > hh or tw > hw:
+        return None
+    g_t = cv2.cvtColor(template, cv2.COLOR_BGR2GRAY)
+    g_h = cv2.cvtColor(haystack, cv2.COLOR_BGR2GRAY)
+    res = cv2.matchTemplate(g_h, g_t, cv2.TM_CCOEFF_NORMED)
+    _minv, maxv, _minl, maxl = cv2.minMaxLoc(res)
+    return int(maxl[0]), int(maxl[1]), float(maxv)
+
+
+def compare_zone(path_a: str, bbox_a, path_b: str, bbox_b,
+                 dpi: int = PIXDIFF_DPI,
+                 page_index: int = 0,
+                 margin_mm: float = ZONE_ALIGN_MARGIN_MM,
+                 min_conf: float = MIN_MATCH_CONF,
+                 **kw) -> dict:
+    """เทียบ **โซนต่อโซน** ระหว่างสองไฟล์ที่หน้าคนละขนาดก็ได้.
+
+    a = ฉบับใหม่ · b = ฉบับอ้างอิง. ``bbox_*`` เป็นสัดส่วน 0..1 ของหน้า
+    ไฟล์ตัวเอง (คนละค่ากันได้ เพราะแผงอาจอยู่คนละตำแหน่งบนหน้า).
+
+    ขั้นตอน: เรนเดอร์ทั้งสองที่สเกล mm เดียวกัน → หาตำแหน่งที่ตรงกันที่สุด
+    (align เฉพาะการเลื่อน ไม่ยืด/บิดภาพ) → เทียบเฉพาะส่วนที่ซ้อนทับ.
+    การเลื่อนที่พบรายงานกลับใน ``shift_mm`` — ไม่ซ่อนจากผู้ตรวจ.
+    """
+    missing = [p for p in (path_a, path_b) if not os.path.isfile(p)]
+    if missing:
+        return _skip("file_not_found", missing=missing,
+                     message="ไม่พบไฟล์: %s" % " · ".join(missing))
+    if not (path_a.lower().endswith(".pdf") and path_b.lower().endswith(".pdf")):
+        return _skip("not_pdf")
+    if fitz is None:
+        return _skip("no_fitz")
+
+    try:
+        img_a, mpp = render_zone_mm(path_a, bbox_a, dpi, page_index)
+        # ฝั่งอ้างอิงเรนเดอร์เผื่อขอบ เพื่อให้มีที่ให้ align เลื่อนหา
+        img_b, _ = render_zone_mm(path_b, bbox_b, dpi, page_index,
+                                  margin_mm=margin_mm)
+    except Exception as e:                    # pragma: no cover
+        return _skip("render_failed",
+                     message="%s (%s)" % (reason_text("render_failed"), e))
+    if img_a is None or img_b is None or img_a.size == 0 or img_b.size == 0:
+        return _skip("zone_empty")
+
+    # ⚠️ โซนว่างเทียบกับโซนว่าง = "ไม่พบความต่าง" ทั้งที่ไม่ได้ตรวจอะไรเลย
+    # (template ที่เป็นสีขาวล้วนจับคู่ได้คะแนนเต็มกับพื้นที่ขาวที่ไหนก็ได้)
+    # นี่คือความมั่นใจปลอมแบบที่กฎเหล็กข้อ 2 ห้ามไว้ตรง ๆ
+    ink_a, ink_b = _ink_ratio(img_a), _ink_ratio(img_b)
+    if min(ink_a, ink_b) < MIN_INK_RATIO:
+        return _skip("zone_blank",
+                     ink_ratio=[round(ink_a, 5), round(ink_b, 5)],
+                     message="%s (มีหมึก %.2f%% และ %.2f%% ของโซน)"
+                             % (reason_text("zone_blank"),
+                                ink_a * 100, ink_b * 100))
+
+    # โซนที่เล็กกว่าเป็น template — ทนต่อการที่ผู้ใช้ลากสองฝั่งไม่เท่ากัน
+    swapped = False
+    tpl, hay = img_a, img_b
+    if tpl.shape[0] > hay.shape[0] or tpl.shape[1] > hay.shape[1]:
+        tpl, hay = img_b, img_a
+        swapped = True
+
+    found = _locate(tpl, hay)
+    if not found:
+        return _skip("align_failed",
+                     message="%s (ขนาดโซนสองฝั่งต่างกันมากเกินไป)"
+                             % reason_text("align_failed"))
+    dx, dy, score = found
+    if score < min_conf:
+        return _skip("align_failed",
+                     match_score=round(score, 4),
+                     message="%s (คะแนนจับคู่ %.2f ต่ำกว่าเกณฑ์ %.2f)"
+                             % (reason_text("align_failed"), score, min_conf))
+
+    th, tw = tpl.shape[:2]
+    win = hay[dy:dy + th, dx:dx + tw]
+    a_img, b_img = (win, tpl) if swapped else (tpl, win)
+
+    kw.setdefault("tolerance_px", ZONE_TOLERANCE_PX)
+    out = compare_images(a_img, b_img, **kw)
+    if out["status"] == OK and out["diff_ratio"] > MAX_ZONE_DIFF_RATIO:
+        out = _skip("zone_too_different",
+                    message="%s (ต่างกัน %.1f%% ของโซน)"
+                            % (reason_text("zone_too_different"),
+                               out["diff_ratio"] * 100),
+                    diff_px=out["diff_px"], diff_ratio=out["diff_ratio"])
+
+    # ระยะที่เนื้อหาขยับ (เทียบกับจุดที่คาดว่าจะตรงกันพอดี = ขอบเผื่อ)
+    pad_px = int(round(margin_mm / mpp)) if mpp else 0
+    off_x, off_y = (dx - pad_px), (dy - pad_px)
+    if swapped:
+        off_x, off_y = -off_x, -off_y
+    out["match_score"] = round(score, 4)
+    out["shift_px"] = [int(off_x), int(off_y)]
+    out["shift_mm"] = [round(off_x * mpp, 2), round(off_y * mpp, 2)]
+    out["mm_per_px"] = round(mpp, 5)
+    out["dpi"] = dpi
+    out["zone_size_mm"] = [round(tw * mpp, 1), round(th * mpp, 1)]
+    return out
 
 
 # ── ภาพประกอบผล (display-only) ───────────────────────────────────────
