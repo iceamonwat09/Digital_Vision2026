@@ -105,6 +105,10 @@ _REASON_TEXT = {
         "จากพื้นที่ว่างคือความมั่นใจปลอม",
     "not_pdf":
         "โหมดเทียบรายโซนรองรับเฉพาะ PDF (ต้องรู้ขนาดจริงเป็นมิลลิเมตร)",
+    "scale_mismatch":
+        "เนื้อหาในสองโซนขนาดจริงไม่เท่ากัน (ไฟล์หนึ่งถูกย่อ/ขยาย) — "
+        "วัดแล้วว่าเพี้ยนแค่ 0.2% ก็ทำให้เกิดบริเวณต่างปลอมนับร้อย "
+        "และไม่มีเกณฑ์ใดกรองออกได้โดยไม่ทิ้งความต่างจริงไปด้วย",
 }
 
 
@@ -396,10 +400,57 @@ def content_bbox(path: str, page_index: int = 0, dpi: int = 72,
             round(bbox[2] * size[0], 1), round(bbox[3] * size[1], 1))
 
 
+def normalize_scale(img_a, img_b, scale_hint: float = 0.0):
+    """ย่อภาพที่ใหญ่กว่าให้เท่าภาพที่เล็กกว่า (ใช้เมื่อไฟล์หนึ่งเป็นฉบับย่อ).
+
+    ⚠️ การ resample ทำให้เกิด noise เพิ่มเสมอ — ต้องวัดก่อนใช้จริงว่าคุ้มไหม
+    (ดูโหมด ``--noise-scan`` ของ verify_pixdiff.py). คืน ``(a, b, scale)``
+    """
+    ha, wa = img_a.shape[:2]
+    hb, wb = img_b.shape[:2]
+    if (wa, ha) == (wb, hb):
+        return img_a, img_b, 1.0
+    if wa * ha > wb * hb:                     # a ใหญ่กว่า → ย่อ a
+        scale = float(wb) / wa
+        return cv2.resize(img_a, (wb, hb), interpolation=cv2.INTER_AREA), img_b, scale
+    scale = float(wa) / wb
+    return img_a, cv2.resize(img_b, (wa, ha), interpolation=cv2.INTER_AREA), scale
+
+
 def _ink_ratio(img) -> float:
     """สัดส่วนพิกเซลที่ "มีหมึก" (ไม่ใช่พื้นขาว) ในภาพ"""
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     return float(np.count_nonzero(gray < 245)) / float(gray.size or 1)
+
+
+def _ink_extent(img, edge_margin: int = 2):
+    """ขนาด (กว้าง, สูง) ของกรอบที่มีหมึก — คืน ``(0, 0)`` เมื่อ **วัดไม่ได้**.
+
+    ⚠️ คืน (0,0) ถ้าหมึกไปชนขอบภาพ เพราะแปลว่าเนื้อหา **ถูกขอบโซนตัด** ⇒
+    ขนาดที่วัดได้เป็นขนาดของ "ส่วนที่เหลืออยู่" ไม่ใช่ขนาดจริงของเนื้อหา.
+    เคยพลาดตรงนี้มาแล้ว: โซนที่ลากชิดขอบแผงพอดีทำให้อ่านสเกลได้ 0.93 เท่า
+    ทั้งที่สองฝั่งสเกลเท่ากันเป๊ะ แล้วระบบปฏิเสธการเทียบทั้งที่เทียบได้.
+    """
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    ink = (gray < 245).astype(np.uint8)
+    if not np.count_nonzero(ink):
+        return 0, 0
+    x, y, w, h = cv2.boundingRect(ink)
+    ih, iw = gray.shape[:2]
+    if (x <= edge_margin or y <= edge_margin
+            or x + w >= iw - edge_margin or y + h >= ih - edge_margin):
+        return 0, 0                            # ถูกตัด — วัดสเกลจากตรงนี้ไม่ได้
+    return int(w), int(h)
+
+
+def scale_allowance(zone_px: int, tolerance_px: int = ZONE_TOLERANCE_PX) -> float:
+    """ความคลาดของสเกลที่ยอมได้ = ระยะที่ขอบไกลสุดเลื่อนไม่เกิน tolerance.
+
+    วัดจากไฟล์จริงแล้ว (``pixdiff_noise_scan.py``): สเกลเพี้ยนแค่ **0.2%**
+    ทำให้เกิดบริเวณปลอม 54-239 บริเวณ และ **ไม่มีค่า min_region ใดกรองออกได้
+    โดยไม่ทิ้งความต่างจริงไปด้วย** ⇒ ต้องปฏิเสธตั้งแต่ต้น ไม่ใช่กรองทีหลัง.
+    """
+    return float(tolerance_px) / float(max(1, zone_px))
 
 
 def _locate(template, haystack):
@@ -461,6 +512,22 @@ def compare_zone(path_a: str, bbox_a, path_b: str, bbox_b,
                      message="%s (มีหมึก %.2f%% และ %.2f%% ของโซน)"
                              % (reason_text("zone_blank"),
                                 ink_a * 100, ink_b * 100))
+
+    # ⚠️ ด่านสเกล — ต้องอยู่ **ก่อน** การจับคู่ตำแหน่ง เพราะการ align แก้ได้
+    # แค่การเลื่อน ไม่ได้แก้การย่อ/ขยาย. เนื้อหาที่สเกลต่างกันจะคลาดสะสม
+    # มากขึ้นเรื่อย ๆ ตามระยะ ⇒ ขอบโซนเพี้ยนเกิน tolerance เสมอ
+    ew_a, eh_a = _ink_extent(img_a)
+    ew_b, eh_b = _ink_extent(img_b)
+    if ew_a and ew_b and eh_a and eh_b:
+        rw, rh = ew_a / float(ew_b), eh_a / float(eh_b)
+        allow = scale_allowance(max(ew_a, eh_a))
+        if abs(rw - 1) > allow or abs(rh - 1) > allow:
+            return _skip("scale_mismatch",
+                         scale_ratio=[round(rw, 4), round(rh, 4)],
+                         scale_allowance=round(allow, 5),
+                         message="%s (วัดได้ %.3f x %.3f เท่า · ยอมได้ ±%.3f%%)"
+                                 % (reason_text("scale_mismatch"), rw, rh,
+                                    allow * 100))
 
     # โซนที่เล็กกว่าเป็น template — ทนต่อการที่ผู้ใช้ลากสองฝั่งไม่เท่ากัน
     swapped = False

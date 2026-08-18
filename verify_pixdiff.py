@@ -267,12 +267,18 @@ def _auto_zone(new_path, old_path, dpi):
         return None, None
     if wb and hb:
         rw, rh = wa / wb, ha / hb
-        if abs(rw - 1) > 0.02 or abs(rh - 1) > 0.02:
-            print("  ⚠ เนื้อหาขนาดจริงไม่เท่ากัน (อัตราส่วน %.3f x %.3f) — "
-                  "ไฟล์หนึ่งถูกย่อ/ขยาย" % (rw, rh))
-            print("    เทียบพิกเซลจะไม่ตรงจนกว่าจะจัดสเกลให้เท่ากันก่อน")
-        else:
-            print("  ✓ เนื้อหาขนาดจริงเท่ากัน (ต่าง < 2%) — เทียบรายโซนได้")
+        # เกณฑ์คิดจากพิกเซลจริง ไม่ใช่เลขกลม ๆ — โซนยิ่งใหญ่ยิ่งทนสเกลเพี้ยน
+        # ได้น้อย (วัดแล้ว: เพี้ยน 0.2% = บริเวณปลอมนับร้อย กรองไม่ออก)
+        zone_px = max(wa, ha) / 25.4 * dpi
+        allow = pixdiff.scale_allowance(int(zone_px))
+        if abs(rw - 1) > allow or abs(rh - 1) > allow:
+            print("  ⚠ เนื้อหาขนาดจริงไม่เท่ากัน (อัตราส่วน %.3f x %.3f · "
+                  "ยอมได้ ±%.3f%%) — ไฟล์หนึ่งถูกย่อ/ขยาย" % (rw, rh, allow * 100))
+            print("    ⇒ เทียบพิกเซลไม่ได้ และ **กรองทีหลังไม่ได้ด้วย** "
+                  "(วัดแล้ว: เพี้ยน 0.2% ให้บริเวณปลอม 54-239 จุด)")
+            return None, None
+        print("  ✓ เนื้อหาขนาดจริงเท่ากัน (ต่าง %.3f%% · ยอมได้ %.3f%%) — "
+              "เทียบรายโซนได้" % (abs(rw - 1) * 100, allow * 100))
     return ba, bb
 
 
@@ -287,9 +293,9 @@ def compare_one(new_path: str, old_path: str, dpi: int, save_dir: str = "",
         if auto_zone:
             zone_a, zone_b = _auto_zone(new_path, old_path, dpi)
             if not zone_a:
-                return {"status": pixdiff.SKIPPED, "reason": "zone_empty",
-                        "message": "หากรอบเนื้อหาไม่ได้", "regions": [],
-                        "diff_px": 0, "region_count": 0}
+                return {"status": pixdiff.SKIPPED, "reason": "scale_mismatch",
+                        "message": "เนื้อหาขนาดจริงไม่เท่ากัน หรือหากรอบเนื้อหาไม่ได้",
+                        "regions": [], "diff_px": 0, "region_count": 0}
         res = pixdiff.compare_zone(new_path, zone_a, old_path, zone_b, dpi=dpi)
         res["elapsed_s"] = round(time.time() - t0, 2)
         if res["status"] != pixdiff.OK:

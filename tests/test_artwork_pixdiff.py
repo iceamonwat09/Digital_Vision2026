@@ -358,6 +358,49 @@ def test_zone_compare_missing_file(panels):
     assert res["reason"] == "file_not_found"
 
 
+def test_scaled_content_is_refused_not_filtered(tmp_path, panels):
+    """วัดจากไฟล์จริงแล้ว: สเกลเพี้ยนแค่ 0.2% ทำให้เกิดบริเวณปลอม 54-239 จุด
+    และไม่มีค่า min_region ใดกรองออกได้โดยไม่ทิ้งความต่างจริง ⇒ ต้องปฏิเสธ"""
+    small, _big = panels
+    shrunk = tmp_path / "shrunk.pdf"
+    # แผงเดียวกันแต่ย่อลง 8% แล้ววางให้ไม่ชนขอบโซน
+    doc = fitz.open()
+    page = doc.new_page(width=2148, height=1290)
+    x0, y0, k = 900, 700, 0.92
+    page.draw_rect(fitz.Rect(x0, y0, x0 + 220 * k, y0 + 140 * k),
+                   color=(0, 0, 0), width=1)
+    for i, t in enumerate(LINES):
+        page.insert_text((x0 + 10 * k, y0 + (20 + i * 15) * k),
+                         t.format(net=170), fontsize=8 * k, fontname="helv")
+    doc.save(str(shrunk))
+    doc.close()
+
+    res = pixdiff.compare_zone(str(small), ZONE_SMALL, str(shrunk),
+                               [880 / 2148.0, 690 / 1290.0,
+                                260 / 2148.0, 170 / 1290.0])
+    assert res["status"] == pixdiff.SKIPPED
+    assert res["reason"] in ("scale_mismatch", "align_failed")
+    assert res["regions"] == []
+
+
+def test_scale_allowance_shrinks_as_the_zone_grows():
+    """โซนยิ่งใหญ่ ยิ่งทนสเกลเพี้ยนได้น้อย — เพราะความคลาดสะสมตามระยะ"""
+    assert pixdiff.scale_allowance(400) > pixdiff.scale_allowance(4000)
+    # โซน 800px กับ tolerance 1px → ยอมได้ราว 0.125%
+    assert pixdiff.scale_allowance(800, 1) == pytest.approx(0.00125, rel=0.01)
+
+
+def test_ink_extent_refuses_to_measure_when_clipped():
+    """หมึกที่ชนขอบภาพ = เนื้อหาถูกตัด → วัดสเกลจากตรงนี้ไม่ได้
+    (เคยทำให้ระบบปฏิเสธการเทียบทั้งที่สเกลเท่ากันเป๊ะ)"""
+    img = np.full((100, 100, 3), 255, np.uint8)
+    img[30:70, 30:70] = 0                      # อยู่กลาง ไม่ชนขอบ
+    assert pixdiff._ink_extent(img) == (40, 40)
+    img2 = np.full((100, 100, 3), 255, np.uint8)
+    img2[0:70, 30:70] = 0                      # ชนขอบบน
+    assert pixdiff._ink_extent(img2) == (0, 0)
+
+
 def test_content_bbox_reports_real_mm_size(panels):
     """ขนาดจริงของ 'กรอบที่มีหมึก' ต้องเท่ากันแม้หน้าคนละขนาด — นี่คือค่าที่
     ใช้ตอบว่าไฟล์ไหนถูกย่อ"""
