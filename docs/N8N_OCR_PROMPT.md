@@ -127,6 +127,64 @@ py -3.9 verify_ocr.py --files "D:\Digital 2026\Vision-Defect\TEST" --engines n8n
 
 ---
 
+## 5.1 เทียบกับ Code node ที่ใช้อยู่บนสถานี (ตรวจ 18 ส.ค. 2026)
+
+โหนด **"Code in JavaScript2"** (validate input + build Gemini request) ที่ใช้อยู่
+**ใช้งานได้ ไม่ต้องรื้อ** — ตรงกับสัญญาฝั่ง Python ทุกข้อสำคัญ:
+
+| สิ่งที่ตรวจ | สถานะ |
+|---|---|
+| อ่าน `$json.body.image_b64` | ✅ ตรงกับที่ `ocr_n8n.ocr_image` ส่ง (form-urlencoded) |
+| `temperature: 0` | ✅ จำเป็นกับ QC (วัดซ้ำได้) |
+| `responseMimeType` + `responseSchema` | ✅ **ดีกว่าใช้ prompt อย่างเดียว** — บังคับ JSON ตั้งแต่ต้นทาง จึงแทบไม่เจอรั้ว ` ```json ` |
+| "DO NOT correct spelling … transcribe the misspelling exactly" | ✅ ข้อที่ห้ามพลาด มีแล้ว |
+| "DO NOT translate" | ✅ |
+| คีย์ `text` / `blocks` / `engine` | ✅ ตรงสัญญา (`engine` จะไปโผล่ในรายงานต่อโซน) |
+| ตรวจ magic bytes → `mimeType` | ✅ ดีกว่าเดา `image/jpeg` |
+
+**3 จุดที่ควรแก้** (เล็กน้อย ไม่กระทบของเดิม):
+
+1. **บอก convention ของ `bbox` ให้ชัด** — prompt ปัจจุบันเขียนแค่ `[x, y, w, h]`
+   ไม่ได้บอกหน่วย. ฝั่ง Python เดาให้ได้ (`highlight._infer_scale` แยก 0..1 /
+   0..1000 / pixel ต่อโซน) แต่ **กรอบแดงที่ชี้ผิดแถวเคยเกิดจริงบนสถานี** จึงควร
+   ระบุตรง ๆ แล้วเติมประโยคปิดท้าย:
+   > `bbox uses PIXEL coordinates of the image you were given, origin at the top-left corner. "blocks" is optional — omit it entirely rather than guessing coordinates. Wrong coordinates are worse than no coordinates.`
+
+2. **เปลี่ยน "อ่านไม่ชัด → เดาเท่าที่ได้แล้วลด conf" เป็น "ข้ามไปเลย"** —
+   ปัจจุบันเขียนว่า *"transcribe what you can and lower the confidence for that
+   block"* ซึ่งฟังดูปลอดภัยแต่**ไม่ปลอดภัยจริง** เพราะฝั่ง Python ใช้ `conf` แบบนี้:
+   - `ocr._mean_conf(blocks)` = **ค่าเฉลี่ยทั้งโซน** → `checks.check_readability`
+     ฟ้อง UNREADABLE เมื่อ **เฉลี่ย < 0.5**
+   - ⇒ คำที่เดามา 1-2 คำ (conf 0.3) ปนกับคำดี 20 คำ (conf 0.95) → เฉลี่ยยังสูง
+     **คำที่เดาก็ยังไหลเข้าไปเทียบใน MISMATCH/SPELL อยู่ดี** (ไม่มีการกรองรายคำ)
+   - ⇒ กลับกัน ถ้า Gemini ใส่ conf ต่ำหลายบล็อก **ทั้งโซน**ที่อ่านได้ดีจะกลายเป็น
+     UNREADABLE ทั้งที่ข้อความถูก
+   ใช้ข้อความของหัวข้อ 3 แทน: *"If a region is blurred, cut off, or unreadable,
+   omit it. Returning nothing is correct; inventing plausible text is a failure."*
+
+3. **ทาง `valid === false` ต้องตอบเป็น HTTP error ไม่ใช่ 200** — ตอนนี้ถ้า base64
+   เสีย/ภาพใหญ่เกิน โหนดคืน `{valid:false, error:"..."}`; ถ้า workflow ตอบ **200**
+   พร้อม JSON ก้อนนี้ ฝั่ง Python จะเห็นแค่ "ไม่มีคีย์ text" → `text=""` →
+   โซนนั้นขึ้น **UNREADABLE ว่า "OCR ไม่พบข้อความ"** ซึ่ง**บอกสาเหตุผิด**
+   (`ocr_n8n` ไม่ได้อ่านคีย์ `error` จาก payload — อ่านเฉพาะ `text`/`blocks`/`engine`).
+   ⇒ ให้โหนดถัดไปตอบ **HTTP 400** พร้อมข้อความ error (อย่าใช้ 5xx เพราะจะโดน retry
+   ฟรี 1 รอบ) แล้วผู้ตรวจจะเห็นสาเหตุจริงบนการ์ด
+
+**ℹ️ ข้อสังเกตเพิ่ม (ยังไม่ต้องแก้ ถ้ายังไม่เจออาการ):**
+- `maxOutputTokens: 16384` — โซนที่ข้อความเยอะมาก (ตารางโภชนาการหลายภาษา) อาจถูกตัด
+  กลางคัน ⇒ JSON ไม่ครบ ⇒ ฝั่ง Python แกะไม่ออก แล้วตกไปทาง "plain text + ธงเตือน".
+  **อาการที่สังเกตได้:** โซนนั้นมี `note` เตือนใน "ข้อความ OCR ต่อโซน" และข้อความจบกลางคำ
+  → ถ้าเจอให้เพิ่มค่านี้
+- `blocks` ที่ไม่มี `bbox` จะถูกทิ้งจากชั้นกรอบแดง (`read_zone` กรอง `if b.get("bbox")`)
+  — ไม่กระทบผลตรวจ QC เลย
+- `thinkingConfig.thinkingBudget: 0` ใช้ได้กับงานถอดความ — ถ้าเปลี่ยนรุ่นโมเดลแล้ว
+  โหนดขึ้น error ให้ลบ 2 บรรทัดนี้ตามคอมเมนต์ที่เขียนไว้แล้ว
+
+**ยืนยันหลังแก้:** `py -3.9 verify_artwork_features.py --n8n`
+(ต้องได้ `✓ อ่านภาพทดสอบได้ถูกต้อง (เจอ 'DIAGNOSE 12345')`)
+
+---
+
 ## 6. ค่าตั้งฝั่ง Python ที่เกี่ยวข้อง (`config.py`)
 
 | ค่า | default | ความหมาย |

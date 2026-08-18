@@ -91,6 +91,26 @@ pytest: **539 ผ่าน / 9 skipped / 5 fail** (5 ตัวเดิมขอ
 **⚠️ ทดสอบที่นี่ไม่ได้ ต้องทำบนสถานี:** ยิง N8N จริง (`--ping-only` ข้อ ②) ·
 `verify_ocr.py --layers probe` กับโฟลเดอร์ `TEST` · ทุกโหมดที่ใช้กล้อง/SQL Server.
 
+### 🧰 `verify_artwork_features.py` — "เครื่องนี้พร้อมใช้งานจริงไหม" (รันบนสถานีได้เลย)
+
+`py -3.9 verify_artwork_features.py [--n8n] [--only B,C] [--verbose]` — **อ่านอย่างเดียว**
+(ชั้น B ใช้ temp dir ไม่แตะ `data/`), ไม่ต้องมีกล้อง/SQL Server/เบราว์เซอร์.
+ต่างจาก `pytest` ตรงที่ตอบว่า *เครื่องที่จะใช้งานจริงพร้อมไหม* — วัดจากโค้ดบนดิสก์,
+คอนฟิกที่ resolve ได้จริง, แพ็กเกจที่ติดตั้งจริง และเรียก `pipeline.run_inspection` ตัวจริง.
+6 ชั้น: **A** commit ครบ 10 ตัว + flag ใหม่ 4 ตัว + `pyspellchecker` (จุดบอด QC ถ้าไม่มี) ·
+**B** coverage/MISMATCH_PANELS/verdict จาก PDF 3 แผงที่สร้างสด + จำลอง backend ระเบิด ·
+**C** แกะคำตอบ N8N 10 แบบผ่าน **mock HTTP server ในเครื่อง** (ยิงผ่าน `requests` จริง
+รวม retry 500 / ไม่ retry 404 / URL ผิดรูป) · **D** text layer เสีย + เพิ่ม DPI โซนเล็ก ·
+**E** ของที่ "พังเงียบ": CSS ครบ 2 template, `ZOOM_MIN`↔`min=`, `HL_*`, `GROUP_LETTERS`,
+id ที่ JS อ้าง, ตำแหน่ง guard · **F** ยิง N8N จริง (`--n8n`).
+exit `0`/`1`/`2`. **พิสูจน์แล้วว่าจับของจริงได้** ไม่ใช่ผ่านอย่างเดียว: รันบน worktree
+ที่ `d460924` (ก่อนงาน UX) → **ไม่ผ่าน 8 ข้อ** ตรงจุด (commit ขาด, CSS หน้าประวัติ,
+`#awZoomFitPage`/`#awDrawContinuous`/`#awRestore` หาย, ข้อความ verdict, autosave) ·
+รันด้วย `N8N_OCR_STRICT_RESPONSE=0` → จับได้ว่าหน้า HTML จะถูกใช้เป็นข้อความ.
+> ⚠️ ตัวอย่างข้อความในชั้น D ต้องมี **คำยาว ≥ 8 ตัวอักษร อย่างน้อย 8 คำ** ไม่งั้น
+> `text_looks_garbled` จะไม่ยอมตัดสินเลย แล้วทั้งเคสดี/เคสเสียได้ `False` เหมือนกัน =
+> ผ่านแบบไร้ความหมาย (มีข้อเช็คกันไว้ในสคริปต์แล้ว).
+
 ### 🔀 กับดัก branch: `main` **ไม่มี** 5 commit สุดท้ายของรอบที่แล้ว
 PR #37 ถูก merge ตอน branch อยู่ที่ `d460924` ⇒ `origin/main` (`90430b7`) ยังเป็น
 **`CONFIG_VERSION = 2026.08.15-n8n-parse`** และ **ไม่มี** `20e3af1` `008ca38` `5d2f91a`
