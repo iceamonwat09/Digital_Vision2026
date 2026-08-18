@@ -145,6 +145,23 @@ def test_whole_page_shift_is_refused_not_reported_as_500_regions():
     assert res["diff_ratio"] > pixdiff.MAX_DIFF_RATIO   # ยังบอกตัวเลขจริง
 
 
+def test_missing_file_says_so_instead_of_blaming_the_pdf(tmp_path):
+    """path ผิดคือสาเหตุที่พบบ่อยที่สุด — ถ้ารายงานเป็น 'เรนเดอร์ไม่สำเร็จ'
+    ผู้ใช้จะไปไล่ปัญหาที่ตัวไฟล์ PDF แทนที่จะแก้ชื่อไฟล์"""
+    a = tmp_path / "a.pdf"
+    make_pdf(a)
+    res = pixdiff.compare_files(str(a), str(tmp_path / "ไม่มีอยู่จริง.pdf"))
+    assert res["status"] == pixdiff.SKIPPED
+    assert res["reason"] == "file_not_found"
+    assert "ไม่มีอยู่จริง.pdf" in res["message"]
+
+
+def test_both_files_missing_are_all_listed(tmp_path):
+    res = pixdiff.compare_files(str(tmp_path / "x.pdf"), str(tmp_path / "y.pdf"))
+    assert res["reason"] == "file_not_found"
+    assert len(res["missing"]) == 2
+
+
 def test_pdf_vs_image_is_skipped(tmp_path):
     pdf = tmp_path / "a.pdf"
     png = tmp_path / "b.png"

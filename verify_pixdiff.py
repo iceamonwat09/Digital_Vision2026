@@ -269,6 +269,17 @@ def main() -> int:
 
     pairs = []
     if args.pair:
+        # เช็คก่อนเริ่ม — ชื่อไฟล์ผิดคือสาเหตุที่พบบ่อยที่สุด และถ้าปล่อยให้
+        # ไปโผล่เป็น "เรนเดอร์ไม่สำเร็จ" ผู้ใช้จะไปไล่ปัญหาที่ตัว PDF แทน
+        missing = [p for p in args.pair if not os.path.isfile(p)]
+        if missing:
+            print("\n✗ ไม่พบไฟล์:")
+            for p in missing:
+                print("    %s" % p)
+            print("\n  • ใส่ path ให้ครบ เช่น \"D:\\Digital 2026\\...\\ฉบับใหม่.pdf\"")
+            print("  • ชื่อไฟล์ที่มีช่องว่างต้องอยู่ในเครื่องหมายคำพูด")
+            print("  • ดูชื่อไฟล์จริงในโฟลเดอร์: dir *.pdf")
+            return 2
         pairs.append((args.pair[0], args.pair[1]))
     if args.new_dir and args.old_dir:
         for name in sorted(os.listdir(args.new_dir)):

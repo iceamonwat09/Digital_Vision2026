@@ -25,6 +25,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from typing import List, Optional, Tuple
 
 import cv2
@@ -73,6 +74,8 @@ _REASON_TEXT = {
     "too_different":
         "ต่างกันมากเกินกว่าจะเป็นการแก้ไขฉลาก — น่าจะเป็นคนละงาน "
         "หรือเนื้อหาทั้งหน้าเลื่อน/จัดใหม่ จึงไม่รายงานรายบริเวณ",
+    "file_not_found":
+        "ไม่พบไฟล์",
 }
 
 
@@ -213,6 +216,14 @@ def compare_files(path_a: str, path_b: str,
     เช็คขนาดหน้าก่อนเสมอ — ไม่เท่ากัน = ``status="skipped"`` พร้อมเหตุผล
     และตัวเลขขนาดจริงของทั้งสองไฟล์ (ไม่พยายาม align/ย่อขยายให้).
     """
+    # ⚠️ เช็ค "มีไฟล์จริงไหม" ก่อนเสมอ — ไม่งั้นไฟล์ที่พิมพ์ชื่อผิด/ไม่มีอยู่
+    # จะไปโผล่เป็น "เรนเดอร์ไม่สำเร็จ" ซึ่งชี้สาเหตุผิด แล้วผู้ใช้ไปไล่หา
+    # ปัญหาที่ตัว PDF ทั้งที่แค่ path ผิด
+    missing = [p for p in (path_a, path_b) if not os.path.isfile(p)]
+    if missing:
+        return _skip("file_not_found", missing=missing,
+                     message="ไม่พบไฟล์: %s" % " · ".join(missing))
+
     a_pdf = path_a.lower().endswith(".pdf")
     b_pdf = path_b.lower().endswith(".pdf")
     if a_pdf != b_pdf:
