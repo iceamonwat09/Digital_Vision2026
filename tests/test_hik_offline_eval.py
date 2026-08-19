@@ -162,3 +162,28 @@ def test_json_output_has_per_frame_rows(folder, tmp_path):
     assert len(data["frames"]) == 6
     assert data["runs"] == [2, 2]
     assert any(r["defects"] for r in data["frames"])
+
+
+def test_belt_speed_and_motion_blur(folder, capsys):
+    """
+    เติมตัวเลข P0 ของแผน §12 จากภาพจริง: อัตราใบ/วิ + pitch → ความเร็วสายพาน →
+    exposure สูงสุดที่เบลอไม่เกินเกณฑ์ และเบลอจริงที่ exposure ที่ใช้ถ่าย
+    """
+    d = folder(("cccccccc" + "ee") * 5)                # ~6.9 ใบ/วิ ที่ 69 fps
+    code = _run_with([d, "--fps", "69", "--pitch-mm", "100",
+                      "--exposure-us", "5000", "--live-ms", "50"])
+    out = capsys.readouterr().out
+    assert "ความเร็วสายพาน" in out
+    # 6.9 ใบ/วิ × 100 mm = ~690 mm/s ⇒ exposure สูงสุดที่เบลอ ≤0.2 mm ≈ 290 µs
+    assert "mm/s" in out and "exposure สูงสุด" in out
+    assert "เบลอ" in out
+    assert "ภาพเบลอจากการเคลื่อนที่" in out            # 5000 µs = เบลอ ~3.4 mm ⇒ ต้องฟ้อง
+    assert code == 1
+
+
+def test_no_blur_warning_when_exposure_is_short_enough(folder, capsys):
+    d = folder(("cccccccc" + "ee") * 5)
+    _run_with([d, "--fps", "69", "--pitch-mm", "100", "--exposure-us", "200"])
+    out = capsys.readouterr().out
+    assert "✅ ที่ exposure 200 µs" in out
+    assert "ภาพเบลอจากการเคลื่อนที่" not in out

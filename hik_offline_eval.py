@@ -73,6 +73,12 @@ def main():
     ap.add_argument("--gap", type=int, default=2,
                     help="เฟรมว่างติดกันกี่เฟรมจึงถือว่าเป็นใบใหม่ (ค่าเริ่มต้น 2)")
     ap.add_argument("--save-dir", help="เซฟภาพที่พบรอยบุบพร้อมกรอบไว้ดูด้วยตา")
+    ap.add_argument("--pitch-mm", type=float, default=None,
+                    help="ระยะห่างระหว่างกระป๋องบนสายพาน (mm) — ใช้คำนวณความเร็วสายพาน")
+    ap.add_argument("--exposure-us", type=float, default=None,
+                    help="exposure ที่ใช้ตอนถ่าย (µs) — ใช้คำนวณระยะเบลอจากการเคลื่อนที่")
+    ap.add_argument("--blur-limit-mm", type=float, default=0.2,
+                    help="ระยะเบลอสูงสุดที่ยอมรับได้ (mm) — ค่าเริ่มต้น 0.2 ตามแผน §3")
     ap.add_argument("--live-ms", type=float, default=None,
                     help="เวลา inference ต่อเฟรมตอนรันสดจริง (ms) — ค่าเริ่มต้นใช้ค่าที่วัดได้"
                          "จากการรันนี้ ซึ่งจะตรงก็ต่อเมื่อรันบนเครื่องเดียวกับที่ใช้งาน")
@@ -157,6 +163,8 @@ def main():
     print("   เวลา/เฟรม        : p50 %.0f ms · p95 %.0f ms · รวม %.1f วินาที"
           % (p50, p95, time.time() - t_all))
 
+    notes = []
+
     head("③ จัดกลุ่มเป็น 'ใบ' (เฟรมที่ติดกัน = ใบเดียวกัน)")
     # นี่คือหัวใจ: บอกว่าตอนถ่ายจริงได้ "กี่เฟรมต่อใบ" ซึ่งเป็นตัวชี้ว่าโหมด
     # free-running มีโอกาสเห็นกระป๋องทันหรือไม่ — วัดจากภาพจริง ไม่ใช่คำนวณจากทฤษฎี
@@ -192,6 +200,30 @@ def main():
             print("   อัตราที่วัดได้       : **%.1f ใบ/วินาที** (คาบ %.0f ms/ใบ)"
                   % (rate, 1000.0 / rate if rate else 0))
 
+    # ── ③ⓑ ความเร็วสายพาน + ระยะเบลอ (เติมตัวเลข P0 ที่แผน §12 ยังว่างอยู่) ──
+    if args.fps and runs and args.pitch_mm:
+        span_s = len(ok_rows) / float(args.fps)
+        rate = len(runs) / span_s if span_s > 0 else 0
+        if rate > 0:
+            speed_mm_s = rate * args.pitch_mm
+            print("\n   🏃 ความเร็วสายพาน (จาก %.1f ใบ/วิ × pitch %.0f mm) = "
+                  "**%.0f mm/s (%.2f m/s)**" % (rate, args.pitch_mm, speed_mm_s, speed_mm_s / 1000.0))
+            max_exp_us = (args.blur_limit_mm / speed_mm_s) * 1e6 if speed_mm_s else 0
+            print("      exposure สูงสุดที่เบลอไม่เกิน %.2f mm = **%.0f µs**"
+                  % (args.blur_limit_mm, max_exp_us))
+            if args.exposure_us:
+                blur_mm = speed_mm_s * (args.exposure_us / 1e6)
+                mark = "✅" if blur_mm <= args.blur_limit_mm else "❌"
+                print("      %s ที่ exposure %.0f µs ที่ใช้จริง ⇒ เบลอ **%.2f mm**"
+                      % (mark, args.exposure_us, blur_mm))
+                if blur_mm > args.blur_limit_mm:
+                    notes.append(
+                        "ภาพเบลอจากการเคลื่อนที่ %.2f mm (เกินเกณฑ์ %.2f mm) ที่ exposure %.0f µs — "
+                        "ต้องลด exposure ลงเหลือ ≤%.0f µs ซึ่งต้องเพิ่มไฟราว %.0f เท่า "
+                        "(รายละเอียดใน §6 ของแผน)"
+                        % (blur_mm, args.blur_limit_mm, args.exposure_us, max_exp_us,
+                           args.exposure_us / max_exp_us if max_exp_us else 0))
+
     head("④ รันสดจะตามทันไหม (คิดจากเวลาที่วัดได้จริง)")
     # ⚠️ ค่านี้ต้องเป็น "เวลาตอนรันสด" ไม่ใช่เวลาตอนวัดออฟไลน์เสมอไป —
     #    ถ้าเอาไฟล์ไปวัดบนเครื่องอื่น (แรงกว่า/ช้ากว่า) ข้อสรุปจะผิด จึงเปิดให้ระบุเองได้
@@ -205,7 +237,6 @@ def main():
     print("   ตรรกะนับของโหมด live ต้องเห็น 'เฟรมว่าง' ติดกัน %d ครั้งจึงถือว่าใบผ่านไป"
           % reset_frames)
     print("   ⇒ ต้องมีช่องว่างระหว่างใบอย่างน้อย ~%.0f ms" % gap_needed_ms)
-    notes = []
     if args.fps and runs:
         span_s = len(ok_rows) / float(args.fps)
         rate = len(runs) / span_s if span_s > 0 else 0
