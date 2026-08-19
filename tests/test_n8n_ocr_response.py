@@ -214,3 +214,52 @@ def test_strip_fence(raw, want):
 ])
 def test_looks_like_html(body, ctype, want):
     assert ocr_n8n._looks_like_html(body, ctype) is want
+
+
+# ── กันพัง: ocr_image ต้อง "Never raises" จริง ๆ ─────────────────────
+# ทดสอบเชิงโจมตีแล้วพบ 2 ทางที่ **การตรวจทั้งใบล่ม** เพราะคำตอบเพี้ยนโซนเดียว
+# (read_zone ไม่มี try/except ครอบตอนนั้น) — ล็อกไว้ไม่ให้ถอยกลับ
+
+@pytest.mark.parametrize("body", [
+    '{"text":"X","blocks":[{"text":"a","bbox":[1,2,3,4],"conf":"high"}]}',
+    '{"text":"X","blocks":[{"text":"a","bbox":[1,2,3,4],"conf":"0.9?"}]}',
+    '{"text":"X","blocks":[{"text":"a","bbox":[1,2,3,4],"conf":null}]}',
+    '{"text":"X","blocks":[{"text":"a","bbox":"ไม่ใช่ list"}]}',
+    '{"text":"X","blocks":"ไม่ใช่ list"}',
+    '{"text":"X","blocks":[1,2,3]}',
+    '{"text":null}', '{"text":["a","b"]}', "null", "42", "[]", '["a"]', "",
+])
+def test_malformed_payload_never_raises(monkeypatch, body):
+    r = call(monkeypatch, body)
+    assert isinstance(r, dict)
+    assert isinstance(r.get("text", ""), str)
+    assert isinstance(r.get("blocks", []), list)
+
+
+def test_non_request_exception_is_caught(monkeypatch):
+    """requests.post โยน ValueError ได้เมื่อ URL ผิดรูป — ต้องไม่หลุดขึ้นไป."""
+    def boom(*a, **k):
+        raise ValueError("bad url")
+    monkeypatch.setattr(ocr_n8n.requests, "post", boom)
+    monkeypatch.setattr(config, "N8N_OCR_RETRIES", 1)
+    r = ocr_n8n.ocr_image(b"\xff\xd8\xffJPEG", url="http://x/w", timeout=1)
+    assert r["error"] and r["stub"] is True
+
+
+def test_non_request_exception_is_not_retried(monkeypatch):
+    """ValueError ไม่ใช่ความล้มเหลวชั่วคราว — ยิงซ้ำก็ผลเดิม."""
+    calls = {"n": 0}
+
+    def boom(*a, **k):
+        calls["n"] += 1
+        raise ValueError("bad url")
+    monkeypatch.setattr(ocr_n8n.requests, "post", boom)
+    monkeypatch.setattr(config, "N8N_OCR_RETRIES", 3)
+    ocr_n8n.ocr_image(b"\xff\xd8\xffJPEG", url="http://x/w", timeout=1)
+    assert calls["n"] == 1
+
+
+def test_nested_fences_are_stripped(monkeypatch):
+    r = call(monkeypatch, '```json\n```json\n{"text":"%s"}\n```\n```' % WANT,
+             "text/plain")
+    assert r["text"] == WANT

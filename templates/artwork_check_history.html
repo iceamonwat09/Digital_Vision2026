@@ -48,10 +48,53 @@
   .aw-cov-row.off .aw-cov-name { color:#8d6e00; font-weight:600; }
   .aw-cov-row.off .aw-cov-why  { color:#8d6e00; }
   .aw-cov-fix { margin:0 0 4px 26px; color:#5d4037; font-size:11.5px; }
+  /* ── เทียบภาพเก่า/ใหม่ระดับพิกเซล (advisory) ─────────────────────
+     ⚠️ ต้องมีครบทั้ง artwork_check.html และ artwork_check_history.html
+     เพราะหน้าประวัติเรียก window.awPixdiffHtml ตัวเดียวกัน */
+  .aw-pd { margin-top:10px; border:1px solid #e3e7ec; border-radius:6px;
+           background:#f8fafc; padding:8px 12px; font-size:12.5px; }
+  .aw-pd.hit { background:#fff8e1; border-color:#ffe0a3; }
+  .aw-pd-head { font-weight:700; color:#37474f; margin-bottom:4px; }
+  .aw-pd.hit .aw-pd-head { color:#7a5200; }
+  .aw-pd-note { color:#607d8b; font-size:11.5px; line-height:1.5; margin-bottom:6px; }
+  .aw-pd-rows { display:grid; gap:3px; }
+  .aw-pd-row { display:flex; gap:8px; align-items:baseline; line-height:1.5; }
+  .aw-pd-dot { flex:0 0 auto; }
+  .aw-pd-name { flex:0 0 200px; color:#37474f; }
+  .aw-pd-why { color:#607d8b; }
+  .aw-pd-row.diff .aw-pd-name { color:#8d6e00; font-weight:600; }
+  .aw-pd-row.diff .aw-pd-why { color:#8d6e00; }
+  .aw-pd-row.off .aw-pd-name { color:#90a4ae; }
+  .aw-pd-fix { margin:0 0 4px 26px; color:#5d4037; font-size:11.5px; }
+  .aw-pd-img { margin:4px 0 10px 26px; }
+  .aw-pd-img img { display:block; max-width:100%; max-height:420px;
+                   object-fit:contain; border:1px solid #cfd8dc; border-radius:4px;
+                   background:#fafafa; cursor:zoom-in; }
   /* เหตุผลระดับโซนในรายการ "ข้อความ OCR ต่อโซน" — ต้องตรงกับ
      .aw-note ใน artwork_check.html (หน้านี้ใช้ renderReport ตัวเดียวกัน) */
   .aw-note { background:#fff3e0; border-left:4px solid #fb8c00; padding:8px 12px; border-radius:4px;
              font-size:13px; color:#6d4c00; margin-bottom:10px; }
+  /* คำเตือน "โซนนี้ชี้ตำแหน่งคำไม่ได้" ในการ์ด defect — renderReport พ่นคลาสนี้
+     ออกมาเหมือนกันทั้งสองหน้า ถ้าหน้านี้ไม่มีกฎ ข้อความจะโผล่แบบไม่มีกรอบ
+     (เทสต์ test_artwork_report_css.py กันไม่ให้ลืมอีก) */
+  .aw-hl-warn { margin-top:8px; padding:6px 8px; font-size:12px; line-height:1.55;
+                background:#fff8e1; border:1px solid #ffe0a3; border-radius:4px; color:#7a5200; }
+
+  /* คู่รูป "ต้นฉบับ + ผลตรวจ" — renderReport พ่นคลาสเดียวกันทั้งสองหน้า.
+     ⚠️ ก่อนหน้านี้หน้านี้ไม่มีกฎเลย ⇒ รูปกางตามขนาดจริง (วัดได้ 4475px!)
+     ไม่มี max-height ไม่มีกรอบ ไม่เรียงคู่ — เลย์เอาต์หน้าประวัติพังเงียบ ๆ */
+  .aw-img-pair   { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:10px;
+                   max-width:1500px; }
+  @media (max-width:700px) { .aw-img-pair { grid-template-columns:1fr; } }
+  .aw-img-card   { border:1px solid #cfd8dc; border-radius:6px; overflow:hidden; }
+  .aw-img-label  { background:#f0f4f8; padding:4px 10px; font-size:11px; font-weight:600;
+                   color:#546e7a; text-transform:uppercase; letter-spacing:.4px;
+                   border-bottom:1px solid #cfd8dc; display:flex; align-items:center; gap:6px; }
+  .aw-img-label.overlay-label { background:#fff3e0; color:#8d4f00; border-bottom-color:#ffe0b2; }
+  .aw-img-label.ref-label { background:#e0f2f1; color:#00695c; border-bottom-color:#b2dfdb; }
+  .aw-img-card img { display:block; width:100%; max-height:440px; object-fit:contain;
+                     cursor:zoom-in; transition:opacity .15s; background:#fafafa; }
+  .aw-img-card img:hover { opacity:.88; }
 
   .aw-summary { display:flex; flex-wrap:wrap; gap:8px; margin:12px 0; }
   .aw-sumcard { flex:1 1 130px; min-width:130px; background:#f8fafc; border:1px solid #e3e7ec;
@@ -71,7 +114,9 @@
   .aw-overlay-box { margin-top:10px; border:1px solid #cfd8dc; border-radius:6px; overflow:auto; max-height:520px; }
   .aw-overlay-box img { display:block; width:100%; }
   details > summary { cursor:pointer; color:#1976d2; margin-top:10px; }
-  pre.aw-pre { background:#263238; color:#cfd8dc; padding:10px; border-radius:6px; max-height:240px; overflow:auto; white-space:pre-wrap; font-size:12px; }
+  /* font-family ต้องมีเหมือนหน้าตรวจ — ข้อความ OCR เป็นรหัส/ตัวเลขที่อ่านง่าย
+     กว่ามากเมื่อความกว้างตัวอักษรเท่ากัน (เดิมหน้านี้ตกไป ได้ฟอนต์ธรรมดา) */
+  pre.aw-pre { background:#263238; color:#cfd8dc; padding:10px; border-radius:6px; max-height:240px; overflow:auto; white-space:pre-wrap; font-size:12px; font-family:var(--font-mono,ui-monospace,Menlo,monospace); }
 </style>
 {% endblock %}
 

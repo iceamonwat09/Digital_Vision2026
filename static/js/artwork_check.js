@@ -64,6 +64,15 @@
     group_unreadable: "ดูรายการ 'อ่านไม่ชัด' ด้านล่าง แล้วลากโซนให้กระชับ/ใหญ่ขึ้น",
     spellchecker_missing: "py -3.9 -m pip install pyspellchecker แล้วรีสตาร์ต",
   };
+  // ชั้นที่ "ไม่ได้ทำงานและแก้ได้" — ใช้ทั้งกับแถบ coverage และข้อความ verdict
+  // ต้องคิดจากที่เดียวกัน ไม่งั้นแถบเตือนแต่หัวเรื่องบอกว่าไม่พบประเด็น
+  function coverageGaps(cov) {
+    if (!cov) return [];
+    const benign = { no_zoom_zone: 1, single_zone: 1 };
+    return [cov.cross_panel, cov.zoom, cov.numbers, cov.spelling]
+      .filter((c) => c && !c.ran && !benign[c.reason]);
+  }
+
   function coverageHtml(cov) {
     if (!cov) return "";              // รายงานเก่าที่ยังไม่มีข้อมูลนี้
     const rows = [
@@ -72,10 +81,9 @@
       ["ตัวเลข/บาร์โค้ด", cov.numbers],
       ["dictionary (คำสะกด)", cov.spelling],
     ];
-    // ชั้นที่ไม่ได้ทำงานเพราะ "ไม่มีของให้ตรวจ" ไม่ใช่เรื่องน่าเตือน
-    const benign = { no_zoom_zone: 1, single_zone: 1 };
-    const missed = rows.filter((r) => r[1] && !r[1].ran &&
-                                      !benign[r[1].reason]);
+    // ชั้นที่ไม่ได้ทำงานเพราะ "ไม่มีของให้ตรวจ" ไม่ใช่เรื่องน่าเตือน —
+    // ใช้ coverageGaps() ตัวเดียวกับที่ข้อความ verdict ใช้ ห้ามคิดซ้ำสองที่
+    const missed = coverageGaps(cov);
     let h = '<div class="aw-cov' + (missed.length ? " warn" : "") + '">';
     h += '<div class="aw-cov-head">' +
       (missed.length ? "⚠️ ตรวจไม่ครบทุกชั้น — ผลด้านบนครอบคลุมเท่าที่ระบุด้านล่าง"
@@ -102,10 +110,87 @@
   }
   window.awCoverageHtml = coverageHtml;
 
+  // ── เทียบภาพเก่า/ใหม่ระดับพิกเซล (advisory ล้วน) ──────────────────
+  // ⚠️ "พบความต่าง" ไม่เท่ากับ "ผิด" — ฉบับใหม่ที่แก้ตามแผนก็ขึ้นความต่าง
+  // เป็นปกติ. หน้าที่ของชั้นนี้คือไม่ให้ความต่างหลุดสายตา ไม่ใช่ตัดสินถูกผิด
+  const PD_WHY = {
+    no_pair: "ไม่มีโซนคู่ในไฟล์อ้างอิง",
+    page_size_mismatch: "ขนาดหน้าสองไฟล์ไม่เท่ากัน",
+    scale_mismatch: "เนื้อหาถูกย่อ/ขยาย — สเกลไม่ตรงกัน",
+    align_failed: "จับคู่ตำแหน่งไม่ได้ — อาจเป็นคนละแผง",
+    zone_blank: "โซนแทบไม่มีเนื้อหาให้เทียบ",
+    zone_too_different: "ต่างกันมากเกินกว่าจะเป็นการแก้ไข",
+    too_different: "ต่างกันทั้งใบ",
+    zone_empty: "โซนอยู่นอกหน้า/เล็กเกินไป",
+    not_pdf: "รองรับเฉพาะ PDF",
+    file_not_found: "ไม่พบไฟล์",
+    render_failed: "เรนเดอร์ไม่สำเร็จ",
+  };
+
+  function pixdiffHtml(pd, recId) {
+    if (!pd || pd.status === "no_ref") {
+      return pd ? '<div class="aw-pd"><div class="aw-pd-head">🔍 เทียบภาพเก่า/ใหม่</div>' +
+        '<div class="aw-pd-note">' + esc(pd.message || "") + "</div></div>" : "";
+    }
+    const zs = pd.zones || [];
+    const hit = zs.filter((z) => z.status === "ok" && z.region_count > 0);
+    const clean = zs.filter((z) => z.status === "ok" && !z.region_count);
+    const skip = zs.filter((z) => z.status !== "ok");
+    let h = '<div class="aw-pd' + (hit.length ? " hit" : "") + '">';
+    h += '<div class="aw-pd-head">🔍 เทียบภาพเก่า/ใหม่ระดับพิกเซล — ' +
+      (hit.length ? "พบความต่าง " + hit.length + " โซน"
+                  : "ไม่พบความต่างในโซนที่เทียบได้") + "</div>";
+    h += '<div class="aw-pd-note">เทียบได้ ' + zs.length + " โซน · " +
+      "ไม่พบความต่าง " + clean.length + " · เทียบไม่ได้ " + skip.length +
+      " · ที่ " + esc(pd.dpi) + " DPI · ใช้เวลา " + esc(pd.elapsed_s) + " วินาที<br>" +
+      "<b>ชั้นนี้เป็นข้อมูลประกอบเท่านั้น</b> — ไม่กระทบผล PASS/FAIL ด้านบน " +
+      "และ “พบความต่าง” ไม่ได้แปลว่าผิด (ฉบับใหม่ที่แก้ตามแผนก็ขึ้นความต่าง)</div>";
+    h += '<div class="aw-pd-rows">';
+    zs.forEach((z) => {
+      const ok = z.status === "ok";
+      const diff = ok && z.region_count > 0;
+      h += '<div class="aw-pd-row' + (diff ? " diff" : ok ? "" : " off") + '">';
+      h += '<span class="aw-pd-dot">' + (diff ? "⚠️" : ok ? "✅" : "—") + "</span>";
+      h += '<span class="aw-pd-name">' + esc(z.label || z.zone_id) +
+        (z.group ? " · กลุ่ม " + esc(z.group) : "") + "</span>";
+      if (ok) {
+        h += '<span class="aw-pd-why">' +
+          (diff ? "ต่าง " + z.region_count + " บริเวณ (" + z.diff_px + " พิกเซล)"
+                : "ไม่พบความต่าง") +
+          (z.shift_mm ? " · เนื้อหาขยับ " + z.shift_mm[0] + "," + z.shift_mm[1] + " mm" : "") +
+          "</span>";
+      } else {
+        h += '<span class="aw-pd-why">ไม่ได้เทียบ — ' +
+          esc(PD_WHY[z.reason] || z.reason || "") + "</span>";
+      }
+      h += "</div>";
+      if (!ok && z.message) {
+        h += '<div class="aw-pd-fix">↳ ' + esc(z.message) + "</div>";
+      }
+      if (diff && recId) {
+        const u = "/api/artwork/" + esc(recId) + "/pixdiff.png?zid=" +
+          encodeURIComponent(z.zone_id) + "&t=" + Date.now();
+        h += '<div class="aw-pd-img"><img src="' + u + '" class="aw-zoomable"' +
+          ' data-src="' + u + '" data-caption="' + esc(z.label || z.zone_id) +
+          ' — กรอบส้ม = บริเวณที่ต่างจากฉบับอ้างอิง" alt="pixdiff" ' +
+          'loading="lazy" decoding="async"></div>';
+      }
+    });
+    h += "</div></div>";
+    return h;
+  }
+  window.awPixdiffHtml = pixdiffHtml;
+
   function renderReport(rep, box) {
     const vClass = rep.verdict === "PASS" ? "aw-v-pass"
       : rep.verdict === "REVIEW" ? "aw-v-review" : "aw-v-fail";
-    const vText = rep.verdict === "PASS" ? "✅ PASS — ไม่พบประเด็น"
+    // ⚠️ "ไม่พบประเด็น" พูดเกินจริงเมื่อมีชั้นที่ไม่เคยทำงาน — ผู้ใช้อ่าน
+    // แล้วเข้าใจว่าตรวจครบ. เปลี่ยนเฉพาะ "ข้อความ" ไม่แตะค่า verdict
+    // (rep.verdict ยังเป็น PASS เหมือนเดิม สี/การนับ/ประวัติไม่กระทบ)
+    const gaps = coverageGaps(rep.coverage);
+    const vText = rep.verdict === "PASS"
+        ? (gaps.length ? "✅ PASS — ไม่พบประเด็นในชั้นที่ตรวจ"
+                       : "✅ PASS — ไม่พบประเด็น")
       : rep.verdict === "REVIEW" ? "🟡 REVIEW — มีจุดให้คนยืนยัน"
       : "❌ FAIL — พบความผิดที่ต้องแก้";
 
@@ -120,6 +205,9 @@
 
     // ต้องอยู่ "ติดใต้ผลสรุป" — คนอ่าน PASS แล้วมักเลิกอ่านต่อ
     html += coverageHtml(rep.coverage);
+    // ผลเทียบพิกเซลครั้งล่าสุด (ถ้าเคยกด) — advisory ล้วน อยู่ใต้ coverage
+    // เพื่อไม่ให้ปนกับผล PASS/FAIL ด้านบน. รายงานเก่าไม่มีคีย์นี้ = ไม่แสดง
+    html += pixdiffHtml(rep.pixdiff, rep.id);
 
     html += '<div class="aw-summary">';
     Object.keys(CLASS_LABELS).forEach((cls) => {
@@ -206,11 +294,13 @@
             '<div class="aw-img-card">' +
               '<div class="aw-img-label overlay-label">⚠ ' + esc(labelA) + '</div>' +
               '<img src="' + esc(cropA) + '" alt="' + esc(labelA) + '"' +
+                ' loading="lazy" decoding="async"' +
                 ' class="aw-zoomable" data-src="' + esc(cropA) + '" data-caption="' + esc(labelA) + '">' +
             '</div>' +
             '<div class="aw-img-card">' +
               '<div class="aw-img-label">📋 ' + esc(labelB) + '</div>' +
               '<img src="' + esc(cropB) + '" alt="' + esc(labelB) + '"' +
+                ' loading="lazy" decoding="async"' +
                 ' class="aw-zoomable" data-src="' + esc(cropB) + '" data-caption="' + esc(labelB) + '">' +
             '</div>' +
           '</div>';
@@ -221,6 +311,7 @@
           const caption = docTag(z) + d.zone_id + (z.label ? " · " + z.label : "");
           html += '<div style="margin-top:8px;">' +
             '<img src="' + esc(cropUrl) + '" alt="crop"' +
+              ' loading="lazy" decoding="async"' +
               ' class="aw-zoomable" data-src="' + esc(cropUrl) + '" data-caption="' + esc(caption) + '"' +
               ' style="max-width:100%;border-radius:4px;cursor:zoom-in;">' +
           '</div>';
@@ -581,10 +672,116 @@
   function setBusy(b) {
     busy = b;
     ["awInspect", "awTranslateMain", "awAddZone", "awClearZones", "awRedetect",
-     "awPairAuto", "awTemplateLoad", "awTemplateSave", "awRefToggle"].forEach((id) => {
+     "awPairAuto", "awTemplateLoad", "awTemplateSave", "awRefToggle",
+     "awPixdiff"].forEach((id) => {
       $(id).disabled = b || !inspectionId;
     });
     fileInputB.disabled = b;
+  }
+
+  // ── autosave โซนลง localStorage (กันงานหายตอนรีเฟรช/ปิดแท็บ) ───────
+  // เดิม: รีเฟรชหน้า = โซนที่ลากไว้ทั้งหมดหายเกลี้ยง ต้องอัปโหลดใหม่แล้วลากใหม่
+  // ⚠️ **ไม่กู้คืนเงียบ ๆ** — ขึ้นแถบให้กดยืนยันก่อนเสมอ. การเอาโซนของงาน
+  //    ก่อนหน้ามาวางทับโดยที่ผู้ใช้ไม่รู้ตัว อันตรายกว่าการให้ลากใหม่มาก
+  //    (ผู้ตรวจอาจส่งตรวจด้วยโซนของงานคนละใบโดยไม่รู้)
+  const SESS_KEY = "aw.session.v1";
+  const SESS_MAX_AGE_MS = 7 * 24 * 3600 * 1000;
+  let sessSaveTimer = null;
+
+  function saveSession() {
+    if (!inspectionId) return;
+    try {
+      localStorage.setItem(SESS_KEY, JSON.stringify({
+        id: inspectionId,
+        zones: zones,
+        docMeta: { a: docMeta.a, b: docMeta.b },
+        refAttached: refAttached,
+        autoRotate: !!($("awAutoRotate") || {}).checked,
+        brand: ($("awBrand") || {}).value || "",
+        savedAt: Date.now(),
+      }));
+    } catch (e) { /* โควตาเต็ม/โหมดส่วนตัว = ข้ามไป ไม่ทำให้หน้าพัง */ }
+  }
+  function saveSessionSoon() {
+    clearTimeout(sessSaveTimer);
+    sessSaveTimer = setTimeout(saveSession, 400);
+  }
+  function clearSession() {
+    try { localStorage.removeItem(SESS_KEY); } catch (e) { /* noop */ }
+  }
+  function readSession() {
+    try {
+      const raw = localStorage.getItem(SESS_KEY);
+      if (!raw) return null;
+      const s = JSON.parse(raw);
+      if (!s || !s.id || !Array.isArray(s.zones) || !s.zones.length) return null;
+      if (!s.docMeta || !s.docMeta.a) return null;
+      if (Date.now() - (s.savedAt || 0) > SESS_MAX_AGE_MS) return null;
+      return s;
+    } catch (e) { return null; }
+  }
+
+  // ยืนยันกับ server ว่างานนั้นยังอยู่จริงและผู้ใช้คนนี้ยังเปิดได้
+  // (ไฟล์ถูกลบ / เป็นของคนอื่น / คนละเครื่อง → ห้ามเสนอกู้คืน)
+  function sessionStillValid(s) {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => resolve(true);
+      img.onerror = () => resolve(false);
+      img.src = "/api/artwork/" + encodeURIComponent(s.id) +
+                "/preview.png?probe=" + Date.now();
+    });
+  }
+
+  function restoreSession(s) {
+    inspectionId = s.id;
+    zones = s.zones;
+    selectedId = null;
+    cancelDraw();
+    // url ของ preview ต้องสร้างใหม่ (ของเดิมมี timestamp เก่าติดมา)
+    docMeta.a = Object.assign({}, s.docMeta.a, {
+      url: "/api/artwork/" + s.id + "/preview.png?t=" + Date.now() });
+    docMeta.b = s.docMeta.b
+      ? Object.assign({}, s.docMeta.b, {
+          url: "/api/artwork/" + s.id + "/preview_b.png?t=" + Date.now() })
+      : null;
+    refAttached = !!s.refAttached && !!docMeta.b;
+    if ($("awAutoRotate")) $("awAutoRotate").checked = !!s.autoRotate;
+    if ($("awBrand") && s.brand) $("awBrand").value = s.brand;
+    showTabs(true);
+    switchTab("result");
+    resetTextTab();
+    showDoc("a");
+    stage.style.display = "inline-block";
+    stageEmpty.style.display = "none";
+    $("awZoomBar").style.display = "";
+    $("awStageBox").classList.remove("is-empty");
+    updateDocTabs();
+    setBusy(false);
+    resultBox.innerHTML = '<div class="aw-empty">กู้คืนโซนที่ค้างไว้แล้ว ' +
+      "— ตรวจทานตำแหน่งโซนอีกครั้งก่อนกด “ส่งตรวจสอบ”</div>";
+  }
+
+  async function offerRestore() {
+    const bar = $("awRestore");
+    const s = readSession();
+    if (!bar || !s) return;
+    if (!(await sessionStillValid(s))) { clearSession(); return; }
+    const when = new Date(s.savedAt).toLocaleString("th-TH");
+    bar.innerHTML =
+      "💾 พบงานที่ค้างไว้ — <b>" + s.zones.length + " โซน</b> (บันทึกเมื่อ " +
+      esc(when) + ") &nbsp; " +
+      '<button id="awRestoreYes" class="aw-btn aw-btn-sm aw-btn-primary">กู้คืนโซน</button> ' +
+      '<button id="awRestoreNo" class="aw-btn aw-btn-sm">ทิ้ง</button>';
+    bar.style.display = "";
+    $("awRestoreYes").addEventListener("click", () => {
+      bar.style.display = "none";
+      restoreSession(s);
+    });
+    $("awRestoreNo").addEventListener("click", () => {
+      bar.style.display = "none";
+      clearSession();
+    });
   }
 
   // ── upload ─────────────────────────────────────────────────────────
@@ -734,6 +931,11 @@
   });
 
   // ── zoom ───────────────────────────────────────────────────────────
+  // ⚠️ พื้นล่างเดิมคือ 30% ซึ่งทำให้ปุ่ม "พอดีทั้งหน้า" โกหก: A3 ที่ต้องย่อ
+  // เหลือ 26% จะถูก clamp กลับเป็น 30% แล้วภาพยังล้นกล่อง ทั้งที่ปุ่มบอกว่า
+  // "พอดีทั้งหน้า". ลดพื้นเป็น 10% — ต้องตรงกับ min ของ <input range> ใน
+  // template ด้วย ไม่งั้นสไลเดอร์จะค้างคนละค่ากับภาพจริง (กับดักเดิมของไฟล์นี้)
+  const ZOOM_MIN = 10, ZOOM_MAX = 300;
   const zoomRange = $("awZoomRange");
   const zoomLabel = $("awZoomLabel");
 
@@ -771,7 +973,7 @@
     if (!natW) return;
     ev.preventDefault();
     const delta = ev.deltaY > 0 ? -5 : 5;
-    zoomPct = Math.min(300, Math.max(30, zoomPct + delta));
+    zoomPct = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, zoomPct + delta));
     zoomRange.value = zoomPct;
     zoomLabel.textContent = zoomPct + "%";
     applyZoom();
@@ -785,7 +987,7 @@
   // สไลเดอร์จะค้างคนละค่ากับภาพจริงแบบเงียบ ๆ. ไม่แตะสูตรพิกัดใด ๆ —
   // เรียก applyZoom()/renderZones() ชุดเดิมเหมือนสไลเดอร์ทุกประการ
   function setZoom(pct) {
-    zoomPct = Math.min(300, Math.max(30, Math.round(pct)));
+    zoomPct = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Math.round(pct)));
     zoomRange.value = zoomPct;
     zoomLabel.textContent = zoomPct + "%";
     applyZoom();
@@ -798,6 +1000,21 @@
     // scrollbar แนวนอนโผล่ ทั้งที่กดปุ่ม "พอดีความกว้าง"
     if (avail > 0) setZoom(Math.floor(avail / natW * 100));
   });
+
+  // ปุ่ม "⛶ พอดีทั้งหน้า" — พอดีทั้งกว้างและสูง ⇒ เห็นทั้งแผ่นในครั้งเดียว
+  // ("พอดีความกว้าง" ยังเหลือ scroll แนวตั้ง: A3 ที่ 72% = 1786x1263 ใน
+  //  กล่องสูง 840). ใช้ setZoom() ตัวเดียวกัน จึง sync สไลเดอร์/ป้าย % ให้เอง
+  // และไม่แตะสูตรพิกัดโซนเลย. ปัดลงด้วยเหตุผลเดียวกับปุ่มความกว้าง
+  const zoomFitPage = $("awZoomFitPage");
+  if (zoomFitPage) {
+    zoomFitPage.addEventListener("click", () => {
+      if (!natW || !natH || !stageBox) return;
+      const availW = stageBox.clientWidth - 6;
+      const availH = stageBox.clientHeight - 6;
+      if (availW <= 0 || availH <= 0) return;
+      setZoom(Math.floor(Math.min(availW / natW, availH / natH) * 100));
+    });
+  }
 
   // ── ลากด้วยเมาส์เพื่อเลื่อนภาพ (pan) ────────────────────────────
   // เดิมเลื่อนดูภาพได้ทาง scrollbar อย่างเดียว. เพิ่ม 2 ทางที่ "ไม่ชน" กับ
@@ -926,6 +1143,10 @@
     });
     renderProps();
     renderGroupHint();
+    // renderZones() ถูกเรียกทุกครั้งที่โซนเปลี่ยน (เพิ่ม/ลบ/ย้าย/ย่อขยาย/
+    // แก้กลุ่ม) จึงเป็นจุดเดียวที่ครอบคลุมทั้งหมด — debounce กันเขียนถี่
+    // ตอนลากเมาส์
+    saveSessionSoon();
   }
 
   // เตือน "ก่อน" กดส่งตรวจ ว่าชั้นเทียบข้ามแผงจะไม่ทำงาน — เงื่อนไขต้อง
@@ -1142,11 +1363,18 @@
   let drawMode = false;       // ปุ่มถูกกด รอผู้ใช้ลากกรอบ
   let draw = null;            // {x0, y0, el} ระหว่างกำลังลาก
 
+  // opt-in: ไม่ติ๊ก = พฤติกรรมเดิม (วาด 1 โซนแล้วออกจากโหมด)
+  function keepDrawing() {
+    const c = $("awDrawContinuous");
+    return !!(c && c.checked);
+  }
+
   function setDrawMode(on) {
     drawMode = !!on;
     addZoneBtn.classList.toggle("aw-btn-drawing", drawMode);
     addZoneBtn.textContent = drawMode
-      ? "✏️ ลากกรอบบนภาพ… (Esc ยกเลิก)"
+      ? (keepDrawing() ? "✏️ ลากกรอบได้เรื่อย ๆ… (Esc ออก)"
+                       : "✏️ ลากกรอบบนภาพ… (Esc ยกเลิก)")
       : "+ เพิ่มโซน (ลากวาดบนภาพ)";
     stage.style.cursor = drawMode ? "crosshair" : "";
   }
@@ -1200,7 +1428,12 @@
     const q = drawRect(ev);
     draw.el.remove();
     draw = null;
-    setDrawMode(false);
+    // โหมดวาดต่อเนื่อง (opt-in) — ค้างโหมดวาดไว้ให้ลากโซนถัดไปได้ทันที
+    // ไม่ต้องกดปุ่มใหม่ทุกครั้ง. ไม่ติ๊ก = ปิดโหมดหลังวาด 1 โซน = เดิมเป๊ะ.
+    // "คลิกเฉย ๆ" (กรอบจิ๋ว) ให้ปิดโหมดเสมอ — เป็นทางออกจากโหมดโดยไม่ต้อง
+    // หา Esc และกันไม่ให้ผู้ใช้ติดอยู่ในโหมดวาดแบบงง ๆ
+    const keep = keepDrawing() && q.w >= 8 && q.h >= 8;
+    setDrawMode(keep);
     if (q.w < 8 || q.h < 8) return;   // คลิกเฉยๆ/กรอบจิ๋ว = ยกเลิก
     const W = dispW(), H = dispH();
     // โซนใหม่เป็นของไฟล์ที่ stage กำลังแสดง — id ฝั่งอ้างอิงขึ้นต้น b กันชน
@@ -1392,6 +1625,48 @@
   });
 
   // ── inspect ────────────────────────────────────────────────────────
+  // ── เทียบภาพเก่า/ใหม่ (advisory) — ต้องกดเอง ไม่วิ่งตอนส่งตรวจสอบ ──
+  $("awPixdiff").addEventListener("click", async () => {
+    if (!inspectionId || busy) return;
+    if (!refAttached) {
+      alert("ต้องแนบ 🅱 ไฟล์อ้างอิง (ฉบับเก่า/ที่อนุมัติแล้ว) ก่อน — " +
+            'กดปุ่ม "เทียบกับไฟล์อ้างอิง" ด้านบนเพื่อแนบไฟล์');
+      return;
+    }
+    const ga = new Set(zones.filter((z) => docOfZone(z) === "a" && z.group)
+                            .map((z) => z.group));
+    const gb = new Set(zones.filter((z) => docOfZone(z) === "b" && z.group)
+                            .map((z) => z.group));
+    if (![...ga].some((g) => gb.has(g))) {
+      alert("ยังไม่มีโซนคู่ที่ตั้ง “กลุ่ม” ตรงกันระหว่างสองไฟล์\n\n" +
+            "ให้ลากโซนบนไฟล์หลักและไฟล์อ้างอิงให้ครอบแผงเดียวกัน " +
+            'แล้วตั้งช่อง "กลุ่ม" ให้เป็นตัวเดียวกัน (หรือกด "🔗 หากรอบคู่อัตโนมัติ")');
+      return;
+    }
+    setBusy(true);
+    resultBox.innerHTML =
+      '<div class="aw-empty"><span class="aw-spin"></span>' +
+      "กำลังเทียบภาพระดับพิกเซล — ไฟล์ใหญ่อาจใช้เวลาหลายวินาที…</div>";
+    showTabs(true);
+    switchTab("result");
+    try {
+      const pd = await api("/api/artwork/" + inspectionId + "/pixdiff", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ zones: zones }),
+      });
+      resultBox.innerHTML = pixdiffHtml(pd, inspectionId);
+      resultBox.querySelectorAll(".aw-zoomable").forEach(wireZoomable);
+      scrollToResults();
+    } catch (e) {
+      resultBox.innerHTML = '<div class="aw-empty">เทียบภาพไม่สำเร็จ: ' +
+        esc(e.message) + "</div>";
+      scrollToResults();
+    } finally {
+      setBusy(false);
+    }
+  });
+
   $("awInspect").addEventListener("click", async () => {
     if (!inspectionId || busy) return;
     if (!zones.length) { alert("ต้องมีอย่างน้อย 1 โซน"); return; }
@@ -1558,4 +1833,6 @@
   // ── init ───────────────────────────────────────────────────────────
   refreshTemplates();
   refreshBrands();
+  // เสนอกู้คืนงานที่ค้าง (ถ้ามี) — ไม่กู้เอง ต้องกดยืนยัน
+  offerRestore();
 })();

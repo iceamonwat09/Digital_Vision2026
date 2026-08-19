@@ -34,6 +34,7 @@ PDF ที่ยังมี text layer ให้ "เฉลยฟรี": ข�
     py -3.9 verify_ocr.py --files a.pdf --engines tesseract ^
                           --tess-lang eng+ara+tha+chi_tra
     py -3.9 verify_ocr.py --files a.pdf --engines tesseract,n8n --n8n-limit 12
+    py -3.9 verify_ocr.py --files TEST --engines n8n --layers probe --n8n-limit 20
 
   หมายเหตุ: PDF text layer ไม่ใช่ "engine" ที่เลือกได้ — มันคือ *เฉลย*
   ที่ใช้วัด engine อื่น จึงถูกใช้อัตโนมัติเสมอเมื่อไฟล์นั้นมี
@@ -377,10 +378,35 @@ def zones_graphic(page, want):
 
 # ── การเรนเดอร์ (ตรงกับ production ทุกขั้น) ─────────────────────────────
 
+MIN_SIDE_ON = True          # ตั้ง False ด้วย --no-min-side (วัดเส้นทางดิบ)
+
+
 def render(ad, bbox, dpi):
+    """เรนเดอร์โซนให้ **ตรงกับที่ ``ocr.read_zone()`` ทำจริง** ทุกขั้น.
+
+    ⚠️ เคยพลาดตรงนี้มาแล้ว: หลังเพิ่ม ``OCR_CROP_MIN_SIDE`` ให้ production
+    เพิ่ม DPI กับโซนเล็ก ฟังก์ชันนี้ยังเรนเดอร์ที่ ``--dpi`` แบน ๆ อยู่
+    ⇒ ตาข่ายนิรภัยวัด "เส้นทางเก่า" แล้วรายงานว่า production อ่านไม่ออก
+    ทั้งที่ของจริงอ่านได้ (เจอบนสถานีกับไฟล์ Cosma: ตัวอักษร 9.1px ที่
+    production ขยายเป็น ~32px ไปแล้ว). **เครื่องมือวัดที่วัดผิดทางแย่กว่า
+    ไม่มีเครื่องมือ** — ถ้าแก้เส้นทางเรนเดอร์ของ production ต้องแก้ที่นี่ด้วย.
+    """
     crop = ad.render_zone(bbox, dpi=dpi, max_side=aw_config.OCR_CROP_MAX_SIDE)
     if crop is None or crop.size == 0:
         return None
+    # ── ขั้นเดียวกับ ocr._render_for_ocr(): PDF ที่โซนเล็กกว่าเกณฑ์ให้
+    #    เรนเดอร์ใหม่ที่ DPI สูงขึ้น (ภาพ raster ห้ามขยาย — ไม่มีข้อมูลเพิ่ม)
+    min_side = aw_config.OCR_CROP_MIN_SIDE if MIN_SIDE_ON else 0
+    if min_side and getattr(ad, "is_pdf", False):
+        longest = max(crop.shape[:2])
+        if longest < min_side:
+            factor = min(aw_config.OCR_DPI_MAX_FACTOR,
+                         min_side / float(longest))
+            bigger = ad.render_zone(bbox, dpi=int(dpi * factor),
+                                    max_side=aw_config.OCR_CROP_MAX_SIDE)
+            if bigger is not None and bigger.size and \
+                    max(bigger.shape[:2]) > longest:
+                crop = bigger
     # production เข้ารหัส JPEG q92 ก่อนส่ง OCR — ต้องผ่านขั้นนี้ด้วย ไม่งั้น
     # ตัวเลขจะดีเกินจริง (ไม่มี artifact ของการบีบอัด)
     jpg = encode_jpg(crop, quality=92)
@@ -449,6 +475,13 @@ def layer_groundtruth(ad, zones, engines, dpi, verbose):
         for eng in engines:
             try:
                 got = eng.read_counted(img)
+            except LimitReached:
+                # ผู้ใช้สั่งจำกัดโควตาเอง — ไม่ใช่ engine พัง. ต้องแยกให้ชัด
+                # ทั้งข้อความและการนับ ไม่งั้นอ่านรายงานแล้วเข้าใจว่า n8n
+                # ล้มเหลวทุกโซน (เจอจริงบนสถานี: ไฟล์ 3-5 ขึ้น "ERROR" ล้วน
+                # ทั้งที่แค่ครบเพดาน --n8n-limit ตั้งแต่ไฟล์แรก)
+                line += "  %s: ข้าม(ครบเพดาน --n8n-limit)" % eng.name
+                continue
             except Exception as e:
                 res[eng.name]["errors"].append("โซน %d: %s" % (i, e))
                 line += "  %s: ERROR" % eng.name
@@ -492,10 +525,19 @@ def layer_groundtruth(ad, zones, engines, dpi, verbose):
             line += ("\n        [!] ตัวอักษรสูงราว %.1f px (ต่ำกว่าเกณฑ์ %.0f) "
                      "— ภาพเล็กเกินไป ไม่ใช่ engine อ่านไม่ออก"
                      % (line_px, MIN_LINE_PX))
-            line += ("\n            ลอง --dpi %d  (หรือแก้ที่ต้นทาง: "
-                     "ocr.read_zone ไม่มีการเพิ่ม DPI ให้โซนเล็ก"
+            line += ("\n            ลอง --dpi %d"
                      % int(dpi * (MIN_LINE_PX * 1.6 / max(1.0, line_px))))
-            line += "\n            ต่างจาก zone_crop_jpg ที่มี CROP_MIN_SIDE)"
+            if not MIN_SIDE_ON:
+                line += ("\n            (กำลังรันด้วย --no-min-side = ปิดการ"
+                         "เพิ่ม DPI ที่ production ใช้จริง — ลองรันใหม่โดย"
+                         "ไม่ใส่ flag นี้)")
+            elif not aw_config.OCR_CROP_MIN_SIDE:
+                line += ("\n            (ARTWORK_OCR_CROP_MIN_SIDE=0 = ปิดการ"
+                         "เพิ่ม DPI ให้โซนเล็ก — ตั้งเป็น 1200 จะช่วยเคสนี้)")
+            else:
+                line += ("\n            (เพิ่ม DPI อัตโนมัติทำงานแล้วแต่ยังไม่พอ "
+                         "— เพดานคือ ARTWORK_OCR_DPI_MAX_FACTOR=%.1f เท่า)"
+                         % aw_config.OCR_DPI_MAX_FACTOR)
             res.setdefault("_small_zones", 0)
             res["_small_zones"] = res.get("_small_zones", 0) + 1
         print(line)
@@ -516,6 +558,9 @@ def layer_notext(ad, zones, engines, dpi, kind):
         for eng in engines:
             try:
                 got = eng.read_counted(img)
+            except LimitReached:
+                line += "  %s: ข้าม(ครบเพดาน --n8n-limit)" % eng.name
+                continue
             except Exception as e:
                 line += "  %s: ERROR(%s)" % (eng.name, str(e)[:24])
                 continue
@@ -549,6 +594,9 @@ def layer_consistency(ad, zones, engines, dpi_a, dpi_b):
             try:
                 wa = _words(eng.read_counted(a))
                 wb = _words(eng.read_counted(b))
+            except LimitReached:
+                line += "  %s: ข้าม(ครบเพดาน --n8n-limit)" % eng.name
+                continue
             except Exception as e:
                 line += "  %s: ERROR(%s)" % (eng.name, str(e)[:20])
                 continue
@@ -593,6 +641,14 @@ def main():
                     help="DPI ที่ใช้เรนเดอร์โซน (ค่าเริ่มต้น = ARTWORK_OCR_DPI)")
     ap.add_argument("--zones", type=int, default=8,
                     help="จำนวนโซนข้อความสูงสุดต่อไฟล์")
+    ap.add_argument("--layers", default="all",
+                    help="ชั้นที่จะรัน คั่นด้วย comma: truth,probe,consistency "
+                         "(ค่าเริ่มต้น all). มีประโยชน์กับ --engines n8n ที่มี"
+                         "โควตาจำกัด เช่น --layers probe จะทุ่มโควตาทั้งหมด"
+                         "ไปกับการจับ hallucination และกระจายได้ทั่วทุกไฟล์")
+    ap.add_argument("--no-min-side", action="store_true",
+                    help="ปิดการเพิ่ม DPI ให้โซนเล็ก (ARTWORK_OCR_CROP_MIN_SIDE) "
+                         "= วัดเส้นทางดิบ ไม่ใช่ที่ production ใช้จริง")
     ap.add_argument("--min-chars", type=int, default=80,
                     help="ขนาดขั้นต่ำของ text block ที่นับเป็นโซนทดสอบ")
     ap.add_argument("--probe-zones", type=int, default=3,
@@ -610,6 +666,21 @@ def main():
                     help="แสดงคำที่อ่านตกด้วย")
     ap.add_argument("--out", default="", help="เขียนผลเป็น JSON ไฟล์นี้")
     args = ap.parse_args()
+
+    global MIN_SIDE_ON
+    MIN_SIDE_ON = not args.no_min_side
+
+    want = {s.strip().lower() for s in args.layers.split(",") if s.strip()}
+    if "all" in want or not want:
+        want = {"truth", "probe", "consistency"}
+    unknown = want - {"truth", "probe", "consistency"}
+    if unknown:
+        print("!! --layers ไม่รู้จัก: %s (ใช้ได้: truth, probe, consistency, all)"
+              % ", ".join(sorted(unknown)))
+        return 2
+    run_truth = "truth" in want
+    run_probe = "probe" in want
+    run_consistency = "consistency" in want and not args.skip_consistency
 
     paths = []
     for pat in args.files:
@@ -726,7 +797,9 @@ def main():
         frec = {"file": name, "triage": tri}
 
         gt_zones = zones_with_text(page, args.min_chars, args.zones)
-        if gt_zones:
+        if gt_zones and not run_truth:
+            print("[2] GROUND TRUTH  ข้าม (--layers)")
+        elif gt_zones:
             print("[2] GROUND TRUTH  %d โซน (เฉลยจาก text layer)"
                   % len(gt_zones))
             g = layer_groundtruth(ad, gt_zones, usable, args.dpi, args.verbose)
@@ -746,7 +819,9 @@ def main():
             # เติมด้วยโซนภาพ/โลโก้ ได้เฉพาะไฟล์ที่มี text layer จริง
             probes += zones_graphic(page, args.probe_zones - len(probes))
             kindname = "ว่าง/ภาพ"
-        if probes:
+        if probes and not run_probe:
+            print("[3] NO-TEXT PROBE  ข้าม (--layers)")
+        elif probes:
             print("[3] NO-TEXT PROBE  %d โซนที่ไม่มีข้อความ "
                   "(สิ่งที่คืนกลับมา = แต่งขึ้นทั้งหมด)" % len(probes))
             n = layer_notext(ad, probes, usable, args.dpi, kindname)
@@ -757,7 +832,7 @@ def main():
         else:
             print("[3] NO-TEXT PROBE  ข้าม — หาพื้นที่ว่างในหน้านี้ไม่ได้")
 
-        if not args.skip_consistency:
+        if run_consistency:
             cz = gt_zones if gt_zones else []
             if not cz:
                 # ไฟล์ outline: ใช้โซนที่ระบบเสนอเอง = โซนแบบที่ผู้ใช้เจอจริง
@@ -899,11 +974,19 @@ def main():
         for nm, why in failed:
             print("   - %s : %s" % (nm, " · ".join(why)))
     elif not measured:
-        print("ผล: สรุปไม่ได้ — ไม่มีไฟล์ไหนมี text layer ให้ใช้เป็นเฉลย")
-        print("   recall/precision วัดไม่ได้ จึง **ไม่ถือว่าผ่าน**")
-        print("   ทางออก: ใส่ไฟล์ที่ยังมี text layer อย่างน้อย 1 ไฟล์เข้าไปด้วย")
-        print("           (artwork ก่อน outline / ไฟล์ต้นฉบับจากกราฟิก)")
-        print("           แล้วผลที่ได้จะใช้เป็นตัวแทนของ engine บนงานชุดนี้ได้")
+        if not run_truth:
+            # อย่าบอกว่า "ไม่มีไฟล์ไหนมี text layer" ทั้งที่ผู้ใช้เป็นคนสั่ง
+            # ข้ามเอง — เหตุผลที่ผิดคือคำตอบที่ผิดแบบมั่นใจ (กฎเหล็ก 2)
+            print("ผล: สรุปไม่ได้ — ข้ามชั้น GROUND TRUTH ไปตาม --layers")
+            print("   ชั้นที่รันไปให้ข้อมูลได้ แต่ recall/precision วัดไม่ได้")
+            print("   จึง **ไม่ถือว่าผ่าน** (ดูตัวเลข 'โซนที่แต่งขึ้น' ประกอบได้)")
+            print("   ถ้าต้องการคำตัดสิน: รันใหม่โดยไม่ใส่ --layers")
+        else:
+            print("ผล: สรุปไม่ได้ — ไม่มีไฟล์ไหนมี text layer ให้ใช้เป็นเฉลย")
+            print("   recall/precision วัดไม่ได้ จึง **ไม่ถือว่าผ่าน**")
+            print("   ทางออก: ใส่ไฟล์ที่ยังมี text layer อย่างน้อย 1 ไฟล์เข้าไปด้วย")
+            print("           (artwork ก่อน outline / ไฟล์ต้นฉบับจากกราฟิก)")
+            print("           แล้วผลที่ได้จะใช้เป็นตัวแทนของ engine บนงานชุดนี้ได้")
     else:
         ok_names = [e.name for e in usable
                     if e.ok_count and totals[e.name]["gt"] > 0]

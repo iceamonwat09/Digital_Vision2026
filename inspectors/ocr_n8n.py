@@ -64,9 +64,20 @@ def _strip_fence(s: str) -> str:
     พังกับรูปแบบนี้ แล้วโค้ดเอา **ทั้งสตริงรวมรั้ว** ไปใช้เป็น "ข้อความที่
     OCR อ่านได้" ⇒ คำว่า ``json`` / ``text`` / ``blocks`` และวงเล็บปีกกา
     หลุดเข้าไปเทียบใน MISMATCH/SPELL = "ตัวอักษรแปลก ๆ ที่ของจริงไม่มี".
+
+    ถอดซ้ำได้สูงสุด 3 ชั้น — เจอเคสรั้วซ้อนรั้ว (``` ครอบ ```json อีกที)
+    ตอนทดสอบเชิงโจมตี. จำกัดจำนวนรอบไว้กัน input ที่จงใจให้วนไม่รู้จบ.
     """
-    m = _FENCE_RE.match(s or "")
-    return m.group(1).strip() if m else (s or "")
+    out = s or ""
+    for _ in range(3):
+        m = _FENCE_RE.match(out)
+        if not m:
+            break
+        inner = m.group(1).strip()
+        if inner == out:
+            break
+        out = inner
+    return out
 
 
 def _looks_like_html(body: str, ctype: str = "") -> bool:
@@ -93,10 +104,17 @@ def _normalize_blocks(raw_blocks) -> list:
         text = str(b.get("text", "")).strip()
         if not text:
             continue
+        # ⚠️ conf ต้องแปลงแบบกันพัง — LLM คืน "conf": "high" / "0.9?" ได้จริง
+        # และ float() ที่เปลือยจะโยน ValueError ทะลุขึ้นไปถึง read_zone ซึ่ง
+        # **ไม่มี try/except ครอบ** ⇒ การตรวจทั้งใบล่มเพราะคำตอบเพี้ยนโซนเดียว
+        try:
+            conf = float(b.get("conf", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            conf = 0.0
         out.append({
             "text": text,
             "bbox": _coerce_bbox(b.get("bbox")),
-            "conf": float(b.get("conf", 0.0) or 0.0),
+            "conf": conf,
         })
     return out
 
@@ -154,9 +172,14 @@ def ocr_image(image_bytes: bytes,
             resp.raise_for_status()
             print(f"[N8N→OCR] ← HTTP {resp.status_code}  ({len(resp.content)} bytes)")
             break
-        except requests.RequestException as e:
+        # ⚠️ ดัก Exception กว้าง ไม่ใช่แค่ requests.RequestException —
+        # requests.post โยน ValueError/UnicodeError ได้เมื่อ URL ผิดรูป และ
+        # read_zone ไม่มี try/except ครอบ ⇒ การตรวจทั้งใบล่ม. สัญญาของ
+        # ฟังก์ชันนี้คือ "Never raises" ต้องรักษาไว้จริง ๆ
+        except Exception as e:
             last_err = e
-            retriable = (resp is None or resp.status_code >= 500)
+            retriable = (isinstance(e, requests.RequestException)
+                         and (resp is None or resp.status_code >= 500))
             if attempt < tries - 1 and retriable:
                 wait = config.N8N_OCR_RETRY_WAIT_S * (2 ** attempt)
                 print(f"[N8N→OCR] ↻ ครั้งที่ {attempt + 1}/{tries} ล้มเหลว "

@@ -187,6 +187,28 @@
   .aw-cov-row.off .aw-cov-name { color:#8d6e00; font-weight:600; }
   .aw-cov-row.off .aw-cov-why  { color:#8d6e00; }
   .aw-cov-fix { margin:0 0 4px 26px; color:#5d4037; font-size:11.5px; }
+  /* ── เทียบภาพเก่า/ใหม่ระดับพิกเซล (advisory) ─────────────────────
+     ⚠️ ต้องมีครบทั้ง artwork_check.html และ artwork_check_history.html
+     เพราะหน้าประวัติเรียก window.awPixdiffHtml ตัวเดียวกัน */
+  .aw-pd { margin-top:10px; border:1px solid #e3e7ec; border-radius:6px;
+           background:#f8fafc; padding:8px 12px; font-size:12.5px; }
+  .aw-pd.hit { background:#fff8e1; border-color:#ffe0a3; }
+  .aw-pd-head { font-weight:700; color:#37474f; margin-bottom:4px; }
+  .aw-pd.hit .aw-pd-head { color:#7a5200; }
+  .aw-pd-note { color:#607d8b; font-size:11.5px; line-height:1.5; margin-bottom:6px; }
+  .aw-pd-rows { display:grid; gap:3px; }
+  .aw-pd-row { display:flex; gap:8px; align-items:baseline; line-height:1.5; }
+  .aw-pd-dot { flex:0 0 auto; }
+  .aw-pd-name { flex:0 0 200px; color:#37474f; }
+  .aw-pd-why { color:#607d8b; }
+  .aw-pd-row.diff .aw-pd-name { color:#8d6e00; font-weight:600; }
+  .aw-pd-row.diff .aw-pd-why { color:#8d6e00; }
+  .aw-pd-row.off .aw-pd-name { color:#90a4ae; }
+  .aw-pd-fix { margin:0 0 4px 26px; color:#5d4037; font-size:11.5px; }
+  .aw-pd-img { margin:4px 0 10px 26px; }
+  .aw-pd-img img { display:block; max-width:100%; max-height:420px;
+                   object-fit:contain; border:1px solid #cfd8dc; border-radius:4px;
+                   background:#fafafa; cursor:zoom-in; }
 
   .aw-summary { display:flex; flex-wrap:wrap; gap:8px; margin:12px 0; }
   .aw-sumcard { flex:1 1 130px; min-width:130px; background:#f8fafc; border:1px solid #e3e7ec;
@@ -260,6 +282,17 @@
   .aw-tab-active { color:#0d47a1; border-bottom-color:#1976d2; }
 
   /* text + translation table */
+  /* แถบกู้คืนงานที่ค้าง (autosave) */
+  .aw-restore { background:#e8f5e9; border-left:4px solid #2e7d32; color:#1b5e20;
+                padding:8px 12px; border-radius:4px; font-size:13px;
+                margin-bottom:10px; display:flex; align-items:center;
+                gap:8px; flex-wrap:wrap; }
+
+  /* แท็บแปล = ตัวช่วย ไม่ใช่ผลตรวจ QC — ต้องบอกก่อนตาราง เพราะคอลัมน์
+     "สถานะ"/🤖 หน้าตาเหมือนผลตรวจจนเข้าใจผิดได้ */
+  .aw-textnote { background:#e3f2fd; border-left:4px solid #1976d2; color:#0d47a1;
+                 padding:8px 12px; border-radius:4px; font-size:12.5px;
+                 line-height:1.6; margin-bottom:10px; }
   .aw-textbar { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; }
   .aw-textfilter { font-size:13px; color:#555; cursor:pointer; }
   .aw-textmsg { font-size:12px; color:#78909c; margin:8px 0; min-height:16px; }
@@ -316,6 +349,11 @@
     <div class="aw-panel">
       <h3>① อัปโหลดไฟล์และจัดโซน</h3>
 
+      <!-- กู้คืนโซนที่ค้างไว้ (autosave) — ขึ้นเฉพาะเมื่อมีของค้างและงานนั้น
+           ยังเปิดได้จริง. ต้องกดยืนยัน ไม่กู้เอง (โซนของงานคนละใบมาวางทับ
+           แบบเงียบ ๆ อันตรายกว่าการลากใหม่) -->
+      <div id="awRestore" class="aw-restore" style="display:none;"></div>
+
       <div class="aw-row">
         <div style="flex:2; min-width:200px;">
           <label class="aw-label">ไฟล์ Artwork (PDF / PNG / JPG)</label>
@@ -361,12 +399,14 @@
         </span>
         <span class="aw-tb-group">
           <span class="aw-tb-label">🔍 ซูม</span>
-          <input id="awZoomRange" type="range" min="30" max="300" value="100"
+          <input id="awZoomRange" type="range" min="10" max="300" value="100"
                  title="ดับเบิลคลิกเพื่อกลับ 100%">
           <span id="awZoomLabel" class="aw-tb-pct">100%</span>
           <button id="awZoomReset" class="aw-btn aw-btn-sm">↺ 100%</button>
           <button id="awZoomFit" class="aw-btn aw-btn-sm"
                   title="ย่อ/ขยายให้ภาพพอดีความกว้างของช่องมอง (ไม่เปลี่ยนพิกัดโซน)">⤢ พอดีความกว้าง</button>
+          <button id="awZoomFitPage" class="aw-btn aw-btn-sm"
+                  title="ย่อให้เห็นทั้งแผ่นในครั้งเดียว — พอดีทั้งกว้างและสูง (ไม่เปลี่ยนพิกัดโซน)">⛶ พอดีทั้งหน้า</button>
         </span>
         <span class="aw-pan-hint">✋ ลากบนพื้นที่ว่างเพื่อเลื่อนภาพ (หรือกดล้อเมาส์ลาก)</span>
       </div>
@@ -391,6 +431,8 @@
                 title="วาดกรอบบนไฟล์หลักให้ครบก่อน แล้วกดปุ่มนี้ ระบบจะหาบล็อกเดียวกันบนไฟล์อ้างอิงแล้วสร้างกรอบคู่ให้อัตโนมัติ (ต้องแนบไฟล์อ้างอิงก่อน)">🔗 หากรอบคู่อัตโนมัติ</button>
         <button id="awTranslateMain" class="aw-btn aw-btn-primary" disabled
                 title="อ่านข้อความในโซน ตรวจการสะกด และแปลเป็นอังกฤษ — เปิดแท็บ “ข้อความ + คำแปล” ให้อัตโนมัติ">📖 แปลภาษา →</button>
+        <button id="awPixdiff" class="aw-btn" disabled
+                title="เทียบภาพระดับพิกเซลระหว่างไฟล์หลัก (ฉบับใหม่) กับไฟล์อ้างอิง (ฉบับเก่า) — จับได้ทั้งฟอนต์เปลี่ยน สีเพี้ยน โลโก้ขยับ โดยไม่ง้อ OCR · ต้องแนบไฟล์อ้างอิงและตั้ง 'กลุ่ม' ให้ตรงกันก่อน · ไม่กระทบผลตรวจ">🔍 เทียบภาพเก่า/ใหม่</button>
         <button id="awInspect" class="aw-btn" disabled
                 title="ตรวจครบทุกชั้น (เทียบ panel/กลุ่ม/ไฟล์อ้างอิง) — ฟีเจอร์นี้อยู่ระหว่างการทดสอบ">ส่งตรวจสอบ →
           <span class="aw-btn-note">(อยู่ระหว่างการทดสอบ)</span></button>
@@ -399,6 +441,14 @@
       <!-- เตือนก่อนกดส่ง: ไม่มีโซนใดตั้ง "กลุ่ม" ตรงกัน ⇒ ชั้นเทียบข้ามแผง
            จะไม่ทำงาน แล้วผลจะขึ้น PASS โดยที่ยังไม่เคยเทียบอะไรเลย -->
       <div id="awGroupHint" class="aw-warn" style="display:none;"></div>
+
+      <div class="aw-row" style="margin-top:6px;">
+        <label class="aw-rotate-mode" title="ติ๊กแล้วกด &quot;+ เพิ่มโซน&quot; หนึ่งครั้ง จะลากวาดได้เรื่อย ๆ ไม่ต้องกดปุ่มใหม่ทุกโซน (กด Esc หรือคลิกเปล่าเพื่อออก)">
+          <input type="checkbox" id="awDrawContinuous"> ✏️ วาดต่อเนื่อง
+        </label>
+        <span class="aw-rotate-hint" style="font-size:12px;color:#78909c;">
+          ไม่ติ๊ก = วาดได้ครั้งละ 1 โซน (เหมือนเดิม)</span>
+      </div>
 
       <div class="aw-row" style="margin-top:6px;">
         <label class="aw-rotate-mode" title="เปิด = ระบบตรวจโซนแนวตั้งแล้วหมุนให้ก่อน OCR (คลิก ↻ ที่มุมโซนเพื่อแซงรายโซน)">
@@ -474,6 +524,16 @@
       </div>
 
       <div id="awTextTab" style="display:none;">
+        <!-- แท็บนี้อ่านข้อความ + เทียบ dictionary + ให้ AI ช่วยดู = ตัวช่วย
+             ไม่ใช่ผลตรวจ QC. ตารางมีคอลัมน์ "สถานะ" กับ 🤖 ซึ่งหน้าตาเหมือน
+             ผลตรวจมาก — ถ้าไม่บอก ผู้ใช้จะกดแปลแล้วเข้าใจว่าตรวจเสร็จแล้ว
+             ทั้งที่ยังไม่มีการเทียบข้ามแผง/ตัวเลข/บาร์โค้ดเลย -->
+        <div class="aw-textnote">
+          ℹ️ แท็บนี้เป็น <b>ตัวช่วยอ่าน/แปล</b> — ไม่ใช่ผลตรวจ QC
+          และ<b>ไม่มีการเทียบข้ามแผง ตัวเลข หรือบาร์โค้ด</b>.
+          ผลตรวจจริงต้องกด <b>“ส่งตรวจสอบ →”</b> ที่กล่องจัดโซนด้านบน ·
+          คอลัมน์ 🤖 เป็นความเห็นของ AI ใช้ตัดสินแทนคนไม่ได้
+        </div>
         <div class="aw-textbar">
           <button id="awTranslateBtn" class="aw-btn aw-btn-primary">📖 แปล / อธิบาย (EN)</button>
           <label class="aw-textfilter"><input type="checkbox" id="awTextOnlyIssues"> เฉพาะบรรทัดที่น่าสงสัย</label>
