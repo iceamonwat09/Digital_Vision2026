@@ -166,3 +166,30 @@ def test_set_packet_succeeds_when_jumbo_is_on():
                               "max_packet_size": 9000})
     assert "packet=8164 (สำเร็จ)" in out
     assert "การ์ดแลนยังไม่ได้เปิด Jumbo Frame" not in out
+
+
+def test_struct_without_mac_in_gige_info_still_parses():
+    """
+    SDK บนสถานี (MVS ที่มากับ firmware V4.0.42) วาง MAC ไว้บน MV_CC_DEVICE_INFO
+    ชั้นนอก ไม่ใช่ใน stGigEInfo → เดิม AttributeError ทำให้ทั้งแถวกลายเป็น '?'.
+    ตัวปลอมตอนนี้ใช้ layout เดียวกับของจริง ⇒ เทสต์นี้ล็อกว่าอ่านได้ครบ.
+    """
+    code, out = run_fake()
+    assert code == 0, out
+    assert "อ่านข้อมูลจาก struct ของ SDK ไม่ได้" not in out
+    assert "MAC=34:BD:20:54:48:3B" in out
+    assert "172.32.1.253" in out and "172.32.1.9" in out
+
+
+def test_packet_verdict_uses_measured_result_not_the_setting():
+    """
+    ถ้า --set-packet ตั้งได้จริงแล้ววัดได้ 'เฟรมหาย 0' ⇒ ค่าเริ่มต้น 1500 ไม่ใช่
+    'ปัญหาหน้างาน' แต่เป็น 'ค่าที่โค้ดต้องตั้งเองทุกครั้งตอนเปิดกล้อง'.
+    การฟ้องว่าเป็นปัญหาทั้งที่วัดแล้วดี = คำตอบที่ผิดแบบมั่นใจ (กฎเหล็กข้อ 2).
+    """
+    code, out = run_fake(["--set-packet"],
+                         sim={"packet_size": 1500, "optimal_packet_size": 8164,
+                              "max_packet_size": 9000})
+    assert code == 0, out                      # ไม่ใช่ปัญหาที่ต้องแก้อีกต่อไป
+    assert "ต้องตั้งสองค่านี้" in out or "ทุกครั้งตอนเปิดกล้อง" in out
+    assert "เปิด Jumbo Frame (MTU 9000)" not in out

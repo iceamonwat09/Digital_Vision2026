@@ -732,11 +732,19 @@ def enum_devices(mv):
         try:
             if int(info.nTLayerType) == gige_t:
                 g = info.SpecialInfo.stGigEInfo
+                # ⚠️ MAC อยู่คนละชั้นแล้วแต่รุ่น SDK: บนสถานี (MVS ที่มากับ V4.0.42)
+                #    อยู่บน MV_CC_DEVICE_INFO ชั้นนอก ส่วนเอกสารเก่าวางไว้ใน stGigEInfo
+                #    ⇒ ต้องลองทั้งสองที่ ไม่งั้น AttributeError ทำให้ "ทั้งแถว" กลายเป็น "?"
+                mac_hi = getattr(g, "nMacAddrHigh", None)
+                mac_lo = getattr(g, "nMacAddrLow", None)
+                if mac_hi is None or mac_lo is None:
+                    mac_hi = getattr(info, "nMacAddrHigh", 0)
+                    mac_lo = getattr(info, "nMacAddrLow", 0)
                 d.update(kind="GigE", model=_cstr(g.chModelName),
                          serial=_cstr(g.chSerialNumber), version=_cstr(g.chDeviceVersion),
                          user_name=_cstr(g.chUserDefinedName),
-                         ip=_ip(g.nCurrentIp), nic=_ip(g.nNetExport),
-                         mac=_mac(g.nMacAddrHigh, g.nMacAddrLow))
+                         ip=_ip(g.nCurrentIp), nic=_ip(getattr(g, "nNetExport", 0)),
+                         mac=_mac(mac_hi, mac_lo))
             else:
                 u = info.SpecialInfo.stUsb3VInfo
                 d.update(kind="USB3", model=_cstr(u.chModelName),
@@ -928,14 +936,12 @@ def main():
         print("   packet size ที่เหมาะสม: %s" % (opt_ps if opt_ps else "อ่านไม่ได้"))
         report["network"] = {"current_packet_size": cur_ps.cur if cur_ps.ok else None,
                              "optimal_packet_size": opt_ps}
-        if cur_ps.ok and opt_ps:
-            if cur_ps.cur < opt_ps:
-                problems.append(
-                    "packet size = %d แต่ค่าที่เหมาะสมคือ %d ⇒ เปิด Jumbo Frame (MTU 9000) "
-                    "ที่การ์ดแลนแล้วตั้งค่านี้ ไม่งั้น 5MP@24fps จะทำให้ **แพ็กเก็ตหาย/ภาพแหว่ง**"
-                    % (cur_ps.cur, opt_ps))
-            else:
-                print("   ✅ ขนาดแพ็กเก็ตเหมาะสมแล้ว")
+        # ⚠️ ห้ามตัดสินตรงนี้ — ถ้าใช้ --set-packet แล้ววัดได้ "เฟรมหาย 0" แปลว่า
+        #    ค่าเริ่มต้น 1500 ไม่ใช่ "ปัญหาที่ต้องแก้" แต่เป็น "ค่าที่ต้องตั้งเองทุกครั้ง
+        #    ตอนเปิดกล้อง" ซึ่งเป็นข้อกำหนดของโค้ด ไม่ใช่ของหน้างาน. เก็บไว้ตัดสินหลังชั้น ⑤.
+        pkt_low = bool(cur_ps.ok and opt_ps and cur_ps.cur < opt_ps)
+        if cur_ps.ok and opt_ps and not pkt_low:
+            print("   ✅ ขนาดแพ็กเก็ตเหมาะสมแล้ว")
         scpd = cam.get_int("GevSCPD")
         hb = cam.get_int("GevHeartbeatTimeout")
         print("   packet delay (GevSCPD): %s" % scpd)
@@ -962,6 +968,7 @@ def main():
                                 "**การ์ดแลนยังไม่ได้เปิด Jumbo Frame** (ตั้ง Jumbo Packet "
                                 "= 9014 ที่ Device Manager → NIC → Advanced)" % (now.cur, want))
             report["network"]["set_packet_to"] = now.cur if now.ok else None
+            pkt_applied = bool(ok_ps and now.ok and opt_ps and now.cur >= opt_ps)
 
         # ── ④ PARAMS ─────────────────────────────────────
         head("④ PARAMS — ค่าและช่วงที่ตั้งได้จริง (จะกลายเป็น min/max ของ UI โหมดใหม่)")
@@ -1020,6 +1027,20 @@ def main():
                 warns.append("มีเฟรม timeout %d ครั้ง" % r["timeouts"])
             if r["dropped"]:
                 problems.append("เลขเฟรมกระโดด = ภาพหายระหว่างทาง %d เฟรม" % r["dropped"])
+            # ตัดสินเรื่อง packet size ตรงนี้ โดยดู "ผลจริง" ไม่ใช่ดูแค่ตัวเลขค่าตั้ง
+            if pkt_low:
+                if locals().get("pkt_applied") and r["got"] and not r["dropped"]:
+                    warns.append(
+                        "กล้อง/ไดรเวอร์ตั้งต้นที่ packet size %d เสมอ — ตั้งเป็น %d + delay 0 "
+                        "แล้ววัดได้ %.1f fps เฟรมหาย 0 ⇒ **`hik_camera.py` ต้องตั้งสองค่านี้ "
+                        "ทุกครั้งตอนเปิดกล้อง** (ค่านี้ไม่ถูกจำไว้ในกล้อง)"
+                        % (cur_ps.cur, opt_ps, r["fps"] or 0.0))
+                else:
+                    problems.append(
+                        "packet size = %d แต่ค่าที่เหมาะสมคือ %d ⇒ เปิด Jumbo Frame (MTU 9000) "
+                        "ที่การ์ดแลนแล้วตั้งค่านี้ ไม่งั้น 5MP@24fps จะทำให้ "
+                        "**แพ็กเก็ตหาย/ภาพแหว่ง** (ลองยืนยันด้วย --set-packet)"
+                        % (cur_ps.cur, opt_ps))
             if r["mean"] is not None:
                 if r["mean"] < 40:
                     warns.append("ภาพมืด (เฉลี่ย %.0f/255) ที่ exposure %s µs — ต้องเพิ่มไฟ "

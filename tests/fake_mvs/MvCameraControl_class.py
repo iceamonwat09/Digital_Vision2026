@@ -33,7 +33,9 @@ class MV_GIGE_DEVICE_INFO(ctypes.Structure):
         ("chManufacturerSpecificInfo", ctypes.c_ubyte * 48),
         ("chSerialNumber", ctypes.c_ubyte * 16), ("chUserDefinedName", ctypes.c_ubyte * 16),
         ("nNetExport", ctypes.c_uint),
-        ("nMacAddrHigh", ctypes.c_uint), ("nMacAddrLow", ctypes.c_uint),
+        # ⚠️ ตรงกับ SDK ตัวจริงบนสถานี (MVS ที่มากับ firmware V4.0.42):
+        #    **ไม่มี** nMacAddrHigh/nMacAddrLow ตรงนี้ — MAC อยู่บน MV_CC_DEVICE_INFO
+        #    ชั้นนอก. เคยทำให้รายงานขึ้น "?" ทั้งแถวเพราะ AttributeError.
     ]
 
 
@@ -199,8 +201,8 @@ class MvCamera(object):
         _fill(g.chSerialNumber, "DA4994130")
         g.nCurrentIp = (172 << 24) | (32 << 16) | (1 << 8) | 253
         g.nNetExport = (172 << 24) | (32 << 16) | (1 << 8) | 9
-        g.nMacAddrHigh = 0x34BD
-        g.nMacAddrLow = 0x2054483B
+        info.nMacAddrHigh = 0x34BD
+        info.nMacAddrLow = 0x2054483B
         MvCamera._keep = info                      # กัน GC เก็บ struct ที่ยัง cast อยู่
         lst.nDeviceNum = 1
         lst.pDeviceInfo[0] = ctypes.pointer(info)
