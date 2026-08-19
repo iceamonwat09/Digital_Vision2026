@@ -85,6 +85,11 @@ class MVCC_ENUMVALUE(ctypes.Structure):
                 ("nSupportValue", ctypes.c_uint * 64)]
 
 
+class MVCC_STRINGVALUE(ctypes.Structure):
+    _fields_ = [("chCurValue", ctypes.c_char * 256), ("nMaxLength", ctypes.c_int64),
+                ("nReserved", ctypes.c_int * 2)]
+
+
 class MVCC_ENUMENTRY(ctypes.Structure):
     _fields_ = [("nValue", ctypes.c_uint), ("chSymbolic", ctypes.c_ubyte * 64)]
 
@@ -144,6 +149,7 @@ SIM = {
     "lost_frames": 0,
     "drop_every": 0,      # > 0 = ทำให้เลขเฟรมกระโดดทุก ๆ n เฟรม
     "gray_level": 120,    # ความสว่างของภาพปลอม
+    "max_packet_size": 9000,   # เพดานที่ NIC รับได้ (1500 = ยังไม่เปิด Jumbo Frame)
 }
 
 # เทสต์รันสคริปต์เป็น subprocess จึงตั้งค่า SIM ผ่าน env ได้ (JSON)
@@ -164,7 +170,13 @@ class MvCamera(object):
                    "OffsetX": 0, "OffsetY": 0, "BinningHorizontal": 1,
                    "BinningVertical": 1, "PayloadSize": _W * _H,
                    "GevSCPSPacketSize": SIM["packet_size"], "GevSCPD": 0,
-                   "GevHeartbeatTimeout": 3000}
+                   "GevHeartbeatTimeout": 3000,
+                   "GevCurrentIPAddress": (172 << 24) | (32 << 16) | (1 << 8) | 253,
+                   "GevCurrentSubnetMask": (255 << 24) | (255 << 16) | (255 << 8)}
+        self._s = {"DeviceModelName": "MV-CS050-10GC",
+                   "DeviceSerialNumber": "DA4994130",
+                   "DeviceFirmwareVersion": "V4.0.42 231212 1170605",
+                   "DeviceManufacturerName": "Hikrobot"}
         self._f = {"ExposureTime": 2635.0, "Gain": 0.0, "Gamma": 1.0,
                    "AcquisitionFrameRate": 20.1, "ResultingFrameRate": 23.1064,
                    "TriggerDelay": 0.0, "DeviceTemperature": 41.5}
@@ -235,6 +247,10 @@ class MvCamera(object):
                                                             "BinningHorizontal",
                                                             "BinningVertical"):
             return 0x80000107
+        if key == "GevSCPSPacketSize":
+            # NIC ที่ยังไม่เปิด Jumbo Frame จะรับได้แค่ ~1500 — กล้องยอมรับค่าที่ตั้ง
+            # แต่ค่าที่ใช้จริงถูกจำกัด (อาการเดียวกับของจริง)
+            value = min(int(value), int(SIM["max_packet_size"]))
         self._i[key] = int(value)
         return 0
 
@@ -255,6 +271,14 @@ class MvCamera(object):
         if key == "ExposureTime" and not (15.0 <= float(value) <= 40279.0):
             return 0x80000105
         self._f[key] = float(value)
+        return 0
+
+    def MV_CC_GetStringValue(self, key, st):
+        key = key.decode() if isinstance(key, bytes) else key
+        if key not in self._s:
+            return 0x80000107
+        st.chCurValue = self._s[key].encode()
+        st.nMaxLength = 256
         return 0
 
     def MV_CC_GetBoolValue(self, key, out):

@@ -123,3 +123,46 @@ def test_missing_sdk_exits_2_with_instructions(tmp_path):
     assert code == 2
     assert "MvImport" in out and "วิธีแก้" in out
     assert "Traceback" not in out
+
+
+def test_identity_is_read_from_camera_nodes():
+    """
+    ตัวตนกล้องต้องมาจาก **node ของกล้องเอง** ไม่ใช่แค่ struct ของ SDK.
+    (บนสถานีจริง 19 ส.ค. 2026 struct อ่านไม่ออก → รายงานขึ้น '?' ทั้งแถวโดยไม่บอกเหตุผล)
+    """
+    code, out = run_fake()
+    assert code == 0, out
+    assert "รุ่น" in out and "MV-CS050-10GC" in out
+    assert "ซีเรียล" in out and "DA4994130" in out
+
+
+def test_struct_parse_error_is_never_silent(monkeypatch):
+    """ถ้าอ่าน struct ไม่ได้ ต้องพิมพ์เหตุผลออกมา ไม่ใช่ปล่อยให้ขึ้น '?' เฉย ๆ."""
+    src = os.path.join(FAKE_SDK, "MvCameraControl_class.py")
+    text = open(src, encoding="utf-8").read()
+    assert 'd["error"] = "%s: %s"' in open(
+        os.path.join(ROOT, "diagnose_hikrobot.py"), encoding="utf-8").read()
+    assert "อ่านข้อมูลจาก struct ของ SDK ไม่ได้" in open(
+        os.path.join(ROOT, "diagnose_hikrobot.py"), encoding="utf-8").read()
+    assert "SpecialInfo" in text          # ตัวปลอมยังคงรูปแบบเดียวกับของจริง
+
+
+def test_set_packet_flags_nic_without_jumbo_frames():
+    """
+    เคสจริงบนสถานี: packet size ค้างที่ 1500 = ยังไม่ได้เปิด Jumbo Frame.
+    ถ้าสั่งตั้งเป็น 8164 แล้วกล้องยอมรับได้แค่ค่าเดิม ต้องฟ้องว่าเป็นเรื่องของการ์ดแลน.
+    """
+    code, out = run_fake(["--set-packet"],
+                         sim={"packet_size": 1500, "optimal_packet_size": 8164,
+                              "max_packet_size": 1500})
+    assert code == 1
+    assert "การ์ดแลนยังไม่ได้เปิด Jumbo Frame" in out
+
+
+def test_set_packet_succeeds_when_jumbo_is_on():
+    """เปิด Jumbo แล้วต้องตั้งได้จริง และต้องไม่ฟ้องเรื่องการ์ดแลนอีก."""
+    code, out = run_fake(["--set-packet"],
+                         sim={"packet_size": 1500, "optimal_packet_size": 8164,
+                              "max_packet_size": 9000})
+    assert "packet=8164 (สำเร็จ)" in out
+    assert "การ์ดแลนยังไม่ได้เปิด Jumbo Frame" not in out

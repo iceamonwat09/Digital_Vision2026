@@ -155,7 +155,8 @@ class Node(object):
         if not self.ok:
             return "n/a (%s)" % (self.err or "ไม่รองรับ")
         s = self.sym if self.sym is not None else _fmt(self.cur)
-        if self.lo is not None and self.hi is not None:
+        if self.lo is not None and self.hi is not None and \
+                not (self.lo <= -(2 ** 62) or self.hi >= 2 ** 62):
             s += "   [%s .. %s]" % (_fmt(self.lo), _fmt(self.hi))
         return s
 
@@ -224,6 +225,27 @@ class Cam(object):
             if ret == 0:
                 return Node(bool(v.value), sym=("On" if v.value else "Off"), ok=True)
             return Node(ok=False, err="ret=0x%X" % (ret & 0xFFFFFFFF))
+        except Exception as e:
+            return Node(ok=False, err=str(e))
+
+    def get_str(self, key):
+        """อ่าน node ชนิดข้อความ (DeviceModelName ฯลฯ) — ใช้ยืนยันตัวตนกล้องจากตัวกล้องเอง."""
+        mv = self.mv
+        st_cls = getattr(mv, "MVCC_STRINGVALUE", None)
+        if st_cls is None:
+            return Node(ok=False, err="ไม่มี MVCC_STRINGVALUE")
+        try:
+            st = st_cls()
+            ctypes.memset(ctypes.byref(st), 0, ctypes.sizeof(st))
+            ret = self.h.MV_CC_GetStringValue(key, st)
+            if ret != 0:
+                return Node(ok=False, err="ret=0x%X" % (ret & 0xFFFFFFFF))
+            raw = getattr(st, "chCurValue", b"")
+            if isinstance(raw, bytes):
+                txt = raw.split(b"\x00", 1)[0].decode("utf-8", "ignore")
+            else:
+                txt = _cstr(raw)
+            return Node(txt, sym=txt, ok=True)
         except Exception as e:
             return Node(ok=False, err=str(e))
 
@@ -618,6 +640,11 @@ def fps_test(mv, cam, timeout_ms):
             cam.set_int("Height", int(hmax.cur))
         if cam.set_int("BinningHorizontal", 2) and cam.set_int("BinningVertical", 2):
             _measure("binning 2x2")
+        else:
+            # ต้องรายงาน ไม่ใช่หายไปจากตาราง — "ไม่มีแถว" ทำให้คนอ่านนึกว่าลืมวัด
+            rows.append({"case": "binning 2x2", "size": "-", "fps": None,
+                         "resulting": None, "timeouts": "-", "dropped": "-",
+                         "note": "กล้อง/เฟิร์มแวร์นี้ไม่เปิดให้ตั้ง binning"})
     finally:
         for key, node in (("BinningHorizontal", bh0), ("BinningVertical", bv0)):
             if node.ok:
@@ -636,6 +663,49 @@ def fps_test(mv, cam, timeout_ms):
 # ────────────────────────────────────────────────────────────────────
 # ชั้น ② — enumerate
 # ────────────────────────────────────────────────────────────────────
+
+# เป้าหมายความสว่างเฉลี่ยที่ "พอใช้งาน" สำหรับภาพ QC (ไม่มืดจนรายละเอียดจม
+# ไม่สว่างจนล้น). ใช้เป็นตัวหารเพื่อบอกว่าต้องเพิ่มแสงอีกกี่เท่า — เป็นการ
+# ประมาณเชิงเส้น (แสง ∝ exposure) ซึ่งใช้ได้ในช่วงที่ยังไม่ล้นและไม่ติดพื้นดำ.
+TARGET_MEAN = 80.0
+BLUR_LIMIT_US = 200.0
+
+
+def _light_verdict(rows, warns, report):
+    """สรุปว่า 'แสงที่มีอยู่' ห่างจากที่ต้องใช้ที่ ~200 µs กี่เท่า — ตัวเลขเดียวที่ตัดสิน
+    ว่าต้องซื้อไฟหรือยัง (แผน §6 บอกว่าไฟคือตัวตัดสินความสำเร็จอันดับหนึ่ง)."""
+    pts = [(r["us"], r["mean"]) for r in rows
+           if r.get("mean") is not None and r.get("us")]
+    if not pts:
+        return
+    # ใช้จุดที่สว่างที่สุดที่ยังไม่ล้น เพื่อประมาณ "ความสว่างต่อ µs"
+    us, mean = max(pts, key=lambda t: t[1])
+    if mean <= 0.5:
+        warns.append("ทุก exposure ที่ทดสอบให้ภาพมืดเกือบสนิท — วัดอัตราส่วนแสงไม่ได้ "
+                     "(เปิดฝาเลนส์/รูรับแสงหรือยัง?)")
+        return
+    per_us = mean / float(us)
+    predicted = per_us * BLUR_LIMIT_US
+    factor = TARGET_MEAN / predicted if predicted > 0 else None
+    report["light"] = {"measured_us": us, "measured_mean": mean,
+                       "predicted_mean_at_200us": predicted,
+                       "light_factor_needed": factor}
+    print("\n   📐 ประมาณจากตัวเลขข้างบน (แสง ∝ exposure):")
+    print("      · ที่ %.0f µs วัดได้ %.1f/255 ⇒ ที่ %.0f µs จะได้ราว **%.1f/255**"
+          % (us, mean, BLUR_LIMIT_US, predicted))
+    if factor and factor > 1.5:
+        print("      · ต้องเพิ่มแสงอีกราว **%.0f เท่า** จึงจะได้ ~%.0f/255 ที่ %.0f µs"
+              % (factor, TARGET_MEAN, BLUR_LIMIT_US))
+        print("      · ตัวช่วยที่มี (คูณกันได้): เปิดรูรับแสงเลนส์ f/8→f/2.8 ≈ 8 เท่า ·")
+        print("        ไฟ LED เฉพาะทางวางใกล้ชิ้นงาน ≈ 20-50 เท่า · gain 0→24dB = 16 เท่า")
+        print("        (⚠️ gain เป็นทางเลือกสุดท้าย — noise กลืน dent ตื้น ตามแผน §7)")
+        warns.append("แสงที่มีอยู่ห่างจากที่ต้องใช้ที่ %.0f µs ประมาณ %.0f เท่า — "
+                     "ต้องแก้เรื่องไฟ/เลนส์ก่อน ไม่ใช่แก้ที่โมเดล"
+                     % (BLUR_LIMIT_US, factor))
+    else:
+        print("      · ✅ แสงเพียงพอสำหรับ exposure สั้นตามแผนแล้ว")
+
+
 def enum_devices(mv):
     """คืน (list ของ dict, error). แต่ละ dict มี '_info' = struct ตัวจริงไว้เปิดกล้อง."""
     try:
@@ -673,7 +743,9 @@ def enum_devices(mv):
                          serial=_cstr(u.chSerialNumber), version=_cstr(u.chDeviceVersion),
                          user_name=_cstr(u.chUserDefinedName))
         except Exception as e:
-            d["error"] = str(e)
+            # ห้ามปล่อยให้ขึ้น "?" เฉย ๆ — ถ้าโครงสร้างของ SDK รุ่นนี้ไม่ตรงกับที่เราคาด
+            # ต้องบอกออกมา ไม่งั้นผู้ใช้เห็น "?" แล้วเดาไม่ถูกว่าเสียตรงไหน (กฎเหล็กข้อ 2)
+            d["error"] = "%s: %s" % (type(e).__name__, e)
         # เปิดได้ไหม — ถ้า False แปลว่ามีโปรแกรมอื่น (มัก = MVS) จองอยู่
         try:
             acc = getattr(mv, "MV_ACCESS_Exclusive", 1)
@@ -701,6 +773,8 @@ def main():
     ap = argparse.ArgumentParser(
         description="ตรวจความพร้อมกล้อง Hikrobot (MVS SDK) ก่อนเปิดโหมดใหม่ในระบบตรวจ")
     ap.add_argument("--serial", help="ระบุซีเรียลกล้อง (ค่าเริ่มต้น = ตัวแรกที่เจอ)")
+    ap.add_argument("--index", type=int, default=None,
+                    help="เลือกกล้องด้วยลำดับที่เจอ (ใช้เมื่ออ่านซีเรียลจาก SDK ไม่ได้)")
     ap.add_argument("--sdk-path", help="โฟลเดอร์ MvImport (ถ้าติดตั้งไว้ที่อื่น)")
     ap.add_argument("--frames", type=int, default=60, help="จำนวนเฟรมที่จับตอนวัด (default 60)")
     ap.add_argument("--timeout", type=int, default=1000, help="timeout ต่อเฟรม (ms)")
@@ -708,6 +782,10 @@ def main():
     ap.add_argument("--list-only", action="store_true", help="แค่แสดงกล้องที่เจอ ไม่เปิดกล้อง")
     ap.add_argument("--exposure-scan", help="ไล่ค่า exposure (µs) คั่นด้วย comma "
                                             "เช่น 150,200,400,800,1600,2635,5000")
+    ap.add_argument("--set-packet", nargs="?", const="auto", default=None,
+                    metavar="auto|ขนาด",
+                    help="ตั้ง packet size (ค่าเริ่มต้น = ค่าที่เหมาะสม) + packet delay 0 "
+                         "แล้ววัดซ้ำ เพื่อพิสูจน์ว่าแก้เฟรมหายได้จริง (คืนค่าเดิมเมื่อจบ)")
     ap.add_argument("--fps-test", action="store_true",
                     help="วัด fps ที่เต็มเฟรม / ROI ครึ่งกลาง / binning 2x2")
     ap.add_argument("--json", help="เขียนผลเป็นไฟล์ JSON (ไว้แปะกลับมาให้ดู)")
@@ -761,6 +839,9 @@ def main():
     for d in devs:
         mark = "✅" if d.get("accessible") else ("❌" if d.get("accessible") is False else "❔")
         print("%s [%d] %s  SN=%s  (%s)" % (mark, d["index"], d["model"], d["serial"], d["kind"]))
+        if d.get("error"):
+            print("      ⚠️ อ่านข้อมูลจาก struct ของ SDK ไม่ได้: %s" % d["error"])
+            print("         (ไม่กระทบการเปิดกล้อง — จะยืนยันตัวตนจาก node ของกล้องแทนหลังเปิด)")
         print("      firmware=%s%s" % (d["version"],
                                        ("  ชื่อที่ตั้งเอง=%s" % d["user_name"]) if d["user_name"] else ""))
         if d["kind"] == "GigE":
@@ -773,7 +854,15 @@ def main():
                             % d["serial"])
 
     target = None
-    for d in devs:
+    if args.index is not None:
+        for d in devs:
+            if d["index"] == args.index:
+                target = d
+                break
+    if target is None and args.serial and all(x["serial"] in ("?", "") for x in devs):
+        warns.append("อ่านซีเรียลจาก struct ของ SDK ไม่ได้ ⇒ --serial ใช้เลือกกล้องไม่ได้ "
+                     "ให้ใช้ --index แทน")
+    for d in (devs if target is None else []):
         if args.serial:
             if d["serial"] == args.serial:
                 target = d
@@ -805,6 +894,25 @@ def main():
         return 2
     print("✅ เปิดกล้องสำเร็จ")
 
+    # ยืนยันตัวตนจาก "ตัวกล้อง" ไม่ใช่จาก struct ของ SDK — เชื่อถือได้กว่าและใช้ได้
+    # แม้ layout ของ struct จะต่างไปตามรุ่น SDK
+    ident = {}
+    for label, key in (("รุ่น", "DeviceModelName"), ("ซีเรียล", "DeviceSerialNumber"),
+                       ("เฟิร์มแวร์", "DeviceFirmwareVersion"), ("เวอร์ชัน", "DeviceVersion"),
+                       ("ผู้ผลิต", "DeviceManufacturerName"), ("ชื่อที่ตั้งเอง", "DeviceUserID")):
+        node = cam.get_str(key)
+        if node.ok and node.cur:
+            ident[key] = node.cur
+            print("   %-12s: %s" % (label, node.cur))
+    for label, key in (("IP กล้อง", "GevCurrentIPAddress"), ("subnet", "GevCurrentSubnetMask")):
+        node = cam.get_int(key)
+        if node.ok:
+            ident[key] = _ip(node.cur)
+            print("   %-12s: %s" % (label, _ip(node.cur)))
+    report["identity"] = ident
+    if ident.get("DeviceSerialNumber"):
+        report["target_serial"] = ident["DeviceSerialNumber"]
+
     code = 0
     try:
         # ── ③ NETWORK ────────────────────────────────────
@@ -828,8 +936,32 @@ def main():
                     % (cur_ps.cur, opt_ps))
             else:
                 print("   ✅ ขนาดแพ็กเก็ตเหมาะสมแล้ว")
+        scpd = cam.get_int("GevSCPD")
         hb = cam.get_int("GevHeartbeatTimeout")
+        print("   packet delay (GevSCPD): %s" % scpd)
         print("   heartbeat timeout    : %s" % hb)
+        if scpd.ok and scpd.cur > 0:
+            print("   ℹ️  packet delay > 0 = จงใจหน่วงให้ NIC ตามทัน ⇒ **กด fps ลง**")
+            print("      หลังเปิด Jumbo Frame แล้วควรลดค่านี้ลง (0 ถ้าไม่มีเฟรมหาย)")
+        report["network"]["packet_delay"] = scpd.cur if scpd.ok else None
+
+        old_ps, old_pd = cur_ps, scpd
+        if args.set_packet:
+            # opt-in: ตั้งค่าแล้ววัดซ้ำในรันเดียว = พิสูจน์ว่าค่านี้แก้ปัญหาได้จริง
+            # ก่อนจะเอาไปเป็น default ของโหมดใหม่ (ไม่ใช่เชื่อเพราะทฤษฎีบอก)
+            want = opt_ps if args.set_packet == "auto" else int(args.set_packet)
+            print("\n   → ลองตั้ง packet size = %s (คืนค่าเดิมเมื่อจบ)" % want)
+            ok_ps = cam.set_int("GevSCPSPacketSize", want)
+            ok_pd = cam.set_int("GevSCPD", 0)
+            now = cam.get_int("GevSCPSPacketSize")
+            print("      ตั้งได้: packet=%s (%s) · delay=0 (%s)"
+                  % (now.cur if now.ok else "?", "สำเร็จ" if ok_ps else "ไม่สำเร็จ",
+                     "สำเร็จ" if ok_pd else "ไม่สำเร็จ"))
+            if ok_ps and now.ok and now.cur < want:
+                problems.append("กล้องยอมรับ packet size ได้แค่ %d (ขอ %d) — แปลว่า "
+                                "**การ์ดแลนยังไม่ได้เปิด Jumbo Frame** (ตั้ง Jumbo Packet "
+                                "= 9014 ที่ Device Manager → NIC → Advanced)" % (now.cur, want))
+            report["network"]["set_packet_to"] = now.cur if now.ok else None
 
         # ── ④ PARAMS ─────────────────────────────────────
         head("④ PARAMS — ค่าและช่วงที่ตั้งได้จริง (จะกลายเป็น min/max ของ UI โหมดใหม่)")
@@ -926,6 +1058,7 @@ def main():
                 print("\n   อ่านผล: แผน §3 ต้องการ exposure ≤ 165-260 µs เพื่อไม่ให้กระป๋องเบลอ")
                 print("   ที่ 7-12 ใบ/วิ. ถ้าแถวนั้น 'สว่างเฉลี่ย' ต่ำกว่า ~60 = **ไฟไม่พอ**")
                 print("   (เพิ่ม gain แทนไม่ใช่ทางออก — noise จะกลืน dent ตื้น)")
+                _light_verdict(rows, warns, report)
 
         if args.fps_test:
             head("⑥ข FPS TEST — เต็มเฟรม vs ROI vs binning")
@@ -934,15 +1067,22 @@ def main():
             print("   %-16s %-14s %-10s %-12s %s" %
                   ("กรณี", "ขนาด", "fps จริง", "ที่กล้องบอก", "timeout/หาย"))
             for row in rows:
-                print("   %-16s %-14s %-10s %-12s %s/%s" % (
+                print("   %-16s %-14s %-10s %-12s %s/%s%s" % (
                     row["case"], row.get("size") or row.get("set_size") or "-",
                     ("%.2f" % row["fps"]) if row.get("fps") else "-",
                     ("%.2f" % row["resulting"]) if row.get("resulting") else "-",
-                    row.get("timeouts"), row.get("dropped")))
+                    row.get("timeouts"), row.get("dropped"),
+                    ("   ← %s" % row["note"]) if row.get("note") else ""))
             print("\n   ROI/binning คือทางเดียวที่ทำให้ 5MP วิ่งเกิน ~24fps บน GigE ได้")
     finally:
         try:
             stop_grab(cam)
+            # คืนค่าเครือข่ายที่ --set-packet เปลี่ยนไป (สคริปต์นี้ต้องไม่ทิ้งร่องรอย)
+            if args.set_packet:
+                for key, node in (("GevSCPSPacketSize", locals().get("old_ps")),
+                                  ("GevSCPD", locals().get("old_pd"))):
+                    if node is not None and node.ok:
+                        cam.set_int(key, node.cur)
             handle.MV_CC_CloseDevice()
             handle.MV_CC_DestroyHandle()
         except Exception:
