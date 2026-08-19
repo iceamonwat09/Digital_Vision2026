@@ -152,6 +152,8 @@ SIM = {
     "drop_every": 0,      # > 0 = ทำให้เลขเฟรมกระโดดทุก ๆ n เฟรม
     "gray_level": 120,    # ความสว่างของภาพปลอม
     "max_packet_size": 9000,   # เพดานที่ NIC รับได้ (1500 = ยังไม่เปิด Jumbo Frame)
+    "missing_nodes": [],       # ชื่อ node ที่ "เฟิร์มแวร์นี้ไม่มี" (จำลองเคส binning/gamma)
+    "grab_fail": 0,            # > 0 = ทำให้ GetImageBuffer ล้มเหลว n ครั้งแรก
 }
 
 # เทสต์รันสคริปต์เป็น subprocess จึงตั้งค่า SIM ผ่าน env ได้ (JSON)
@@ -235,7 +237,7 @@ class MvCamera(object):
     # -- params --
     def MV_CC_GetIntValueEx(self, key, st):
         key = key.decode() if isinstance(key, bytes) else key
-        if key not in self._i:
+        if key in SIM["missing_nodes"] or key not in self._i:
             return 0x80000107
         st.nCurValue = self._i[key]
         st.nMin, st.nMax, st.nInc = 0, max(self._i[key], _W), 1
@@ -260,7 +262,7 @@ class MvCamera(object):
 
     def MV_CC_GetFloatValue(self, key, st):
         key = key.decode() if isinstance(key, bytes) else key
-        if key not in self._f:
+        if key in SIM["missing_nodes"] or key not in self._f:
             return 0x80000107
         st.fCurValue = self._f[key]
         st.fMin, st.fMax = (15.0, 40279.0) if key == "ExposureTime" else (0.0, 100.0)
@@ -285,14 +287,21 @@ class MvCamera(object):
 
     def MV_CC_GetBoolValue(self, key, out):
         key = key.decode() if isinstance(key, bytes) else key
-        if key not in self._b:
+        if key in SIM["missing_nodes"] or key not in self._b:
             return 0x80000107
         out.value = self._b[key]
         return 0
 
+    def MV_CC_SetBoolValue(self, key, value):
+        key = key.decode() if isinstance(key, bytes) else key
+        if key in SIM["missing_nodes"] or key not in self._b:
+            return 0x80000107
+        self._b[key] = bool(value)
+        return 0
+
     def MV_CC_GetEnumValue(self, key, st):
         key = key.decode() if isinstance(key, bytes) else key
-        if key not in self._e:
+        if key in SIM["missing_nodes"] or key not in self._e:
             return 0x80000107
         st.nCurValue = self._e[key]
         sup = ([PixelType_Gvsp_BayerRG8, PixelType_Gvsp_Mono8, PixelType_Gvsp_BGR8_Packed]
@@ -321,15 +330,24 @@ class MvCamera(object):
     def MV_CC_GetImageBuffer(self, out, timeout):
         if not self._grabbing:
             return 0x80000004
+        if SIM["grab_fail"] > 0:
+            SIM["grab_fail"] -= 1
+            return 0x80000007                        # timeout
         w, h = self._i["Width"], self._i["Height"]
         n = w * h
-        # ภาพปลอม: พื้นเทาตามค่า SIM + แถบสว่างเล็กน้อย (ให้ Laplacian ไม่เป็น 0)
-        buf = (ctypes.c_ubyte * n)()
-        lvl = int(SIM["gray_level"])
-        for y in range(0, h, 8):                     # เขียนบางแถวพอให้เร็ว
-            base = y * w
-            for x in range(0, w, 8):
-                buf[base + x] = min(255, lvl + (40 if (x // 8) % 2 else 0))
+        # ภาพปลอม: สร้าง "ครั้งเดียวต่อขนาด" แล้วใช้ซ้ำ — ถ้าสร้างใหม่ทุกเฟรม
+        # เทสต์ที่รัน pipeline จริงจะช้าจนใช้งานไม่ได้ (2448x2048 = 5 ล้านไบต์/เฟรม)
+        cache = getattr(self, "_frame_cache", None)
+        if cache is None or cache[0] != (w, h, SIM["gray_level"]):
+            buf = (ctypes.c_ubyte * n)()
+            lvl = int(SIM["gray_level"])
+            for y in range(0, h, 16):
+                base = y * w
+                for x in range(0, w, 16):
+                    buf[base + x] = min(255, lvl + (40 if (x // 16) % 2 else 0))
+            self._frame_cache = ((w, h, SIM["gray_level"]), buf)
+            cache = self._frame_cache
+        buf = cache[1]
         self._num += 1
         if SIM["drop_every"] and self._num % SIM["drop_every"] == 0:
             self._num += 1                          # จำลองเฟรมหาย (เลขกระโดด)

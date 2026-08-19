@@ -89,12 +89,17 @@ ROI ครึ่ง **69 fps เฟรมหาย 0**. เครือข่า
 
 | ขั้น | ของที่ส่งมอบ | สถานะ |
 |---|---|---|
-| 1 | **`diagnose_hikrobot.py`** — วัดจากเครื่องจริงก่อนตั้งค่า default | ✅ เสร็จ (รอผลจากสถานี) |
-| 2 | `hik_camera.py` — คลาส `HikCamera` interface เดียวกับ `Camera` (pipeline เดิมไม่ต้องแก้) | ⏳ |
-| 3 | `config.py` — ค่าใหม่ทั้งหมด opt-in + bump `CONFIG_VERSION` | ⏳ |
-| 4 | `app.py` — สาขา `camera_index` ขึ้นต้น `hik:` + route ตั้งค่า/สถานะ/ถ่ายเฟรมเดียว | ⏳ |
-| 5 | `templates/index.html` — แท็บที่ 4 + แผงตั้งค่า + แถบอ่านค่า | ⏳ |
-| 6 | `tests/test_hik_camera.py` + อัปเดต `CLAUDE.md` | ⏳ |
+| 1 | **`diagnose_hikrobot.py`** — วัดจากเครื่องจริงก่อนตั้งค่า default | ✅ เสร็จ + รันบนสถานีแล้ว |
+| 2 | **`hik_camera.py`** — `HikCamera` interface เดียวกับ `Camera` (pipeline เดิมไม่ถูกแก้เลย) | ✅ เสร็จ |
+| 3 | **`config.py`** — ค่าใหม่ opt-in ทั้งหมด + `CONFIG_VERSION = 2026.08.19-hikrobot` | ✅ เสร็จ |
+| 4 | **`app.py`** — สาขา `hik:` + `/api/camera/hik/{scan,params,status,dataset,shot}` | ✅ เสร็จ |
+| 5 | **แท็บที่ 4** ใน `index.html` + `static/js/hik_camera.js` | ✅ เสร็จ |
+| 6 | เทสต์ 51 ตัว (SDK ปลอม) + เอกสาร | ✅ เสร็จ — **เหลือทดสอบกับกล้องจริง** |
+
+**ค่าตั้งต้นของโหมดใหม่ที่มาจากผลวัดโดยตรง:** packet size = `auto` (8164) + delay 0
+ตั้งใหม่ทุกครั้งตอนเปิดกล้อง · pixel format `BayerRG8` แปลงเป็น BGR ด้วยตัวแปลงของ SDK ·
+ย่อเป็นกว้าง 1280 ก่อนเข้า pipeline · exposure ตั้งต้น 5000 µs (ค่าที่ไฟปัจจุบันพอมองเห็น) ·
+ROI สำเร็จรูป เต็ม/ครึ่งกลาง/¼ กลาง (ครึ่งกลาง = 69 fps) · **ไม่มี binning** (เฟิร์มแวร์ไม่เปิดให้)
 
 **ค่าที่จะให้ปรับได้จากหน้าเว็บ:** exposure (µs) · gain (dB) · auto exposure/gain ·
 จำกัด frame rate · white balance · **ROI** (+ปุ่มกลางเฟรม) · pixel format ·
