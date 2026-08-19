@@ -1272,10 +1272,13 @@ class HikCamera(object):
         หลายวินาที เช่นตอนอยู่ในโหมดทริกเกอร์ที่ยังไม่มีสัญญาณเข้ามา) = หน้าเว็บค้าง.
         lock เป็น RLock จึงเรียกซ้อนได้.
         """
-        out = {}
-        if self._io is None:
-            return out
         with self._lock:
+            # ⚠️ ต้องเช็ค _io **ในล็อก** ไม่ใช่ก่อนหน้า: release() ถือล็อกแล้วตั้ง _io = None
+            #    ถ้าเช็คนอกล็อกจะมีช่องให้ผ่านด่านตอนกล้องยังอยู่ แล้วพอได้ล็อกมากล้องถูกปิดไปแล้ว
+            #    → AttributeError ('NoneType' has no attribute ...) ตอนผู้ใช้กด Stop พอดี
+            #    กับจังหวะที่แผงตั้งค่ากำลังอ่านค่าอยู่ (เทสต์ concurrency จับเคสนี้ได้จริง)
+            if self._io is None:
+                return {}
             return self._get_params_locked()
 
     def _get_params_locked(self):
@@ -1422,9 +1425,13 @@ class HikCamera(object):
         ในช่วง Stop→Start ให้อัตโนมัติ (และเริ่มสตรีมกลับมาเสมอแม้มีตัวใดล้มเหลว).
         """
         result = {"applied": {}, "failed": {}, "restarted": False}
-        if not params or self._io is None:
+        if not params:
             return result
         with self._lock:                              # เหตุผลเดียวกับ get_params()
+            if self._io is None:                      # ถูกปิดไประหว่างรอล็อก
+                result["failed"] = {k: {"value": None, "message": "กล้องถูกปิดไปแล้ว"}
+                                    for k in params}
+                return result
             return self._apply_params_locked(params, force_stopped, result)
 
     def _apply_params_locked(self, params, force_stopped, result):
@@ -1551,7 +1558,8 @@ class HikCamera(object):
     def describe(self):
         """ข้อมูลครบชุดสำหรับหน้าเว็บ (อ่านในล็อกเดียว = ค่าที่รายงานเป็นภาพ ณ เวลาเดียวกัน)."""
         with self._lock:
-            return {"identity": self.identity, "params": self._get_params_locked(),
+            params = self._get_params_locked() if self._io is not None else {}
+            return {"identity": self.identity, "params": params,
                     "stats": self.stats(), "source": self.camera_index}
 
 

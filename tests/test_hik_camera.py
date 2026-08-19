@@ -446,24 +446,29 @@ def test_release_while_another_thread_reads_params_is_safe():
     ด้วย handle ที่เพิ่งถูกทำลาย ซึ่งล้มทั้งโปรเซส (ไม่ใช่แค่ exception ของ Python).
     """
     import threading
-    cam = open_cam()
-    errors = []
+    # ทำซ้ำหลายรอบโดยตั้งใจ: เดิมเทสต์รอบเดียวเจอบั๊กแค่ ~30% ของการรัน
+    # (เช็ค _io นอกล็อกแล้วค่อยเข้าล็อก) — เทสต์ที่จับได้บ้างไม่ได้บ้างคือเทสต์ที่ไว้ใจไม่ได้
+    for _ in range(15):
+        cam = open_cam()
+        errors = []
 
-    def reader():
-        try:
-            for _ in range(30):
-                cam.get_params()
-                cam.stats()
-        except Exception as e:                        # noqa: BLE001
-            errors.append(e)
+        def reader():
+            try:
+                for _ in range(40):
+                    cam.get_params()
+                    cam.stats()
+                    cam.describe()
+                    cam.set_params({"exposure_us": 900})
+            except Exception as e:                    # noqa: BLE001
+                errors.append(e)
 
-    t = threading.Thread(target=reader)
-    t.start()
-    cam.release()
-    t.join(timeout=10)
-    assert not t.is_alive()
-    assert errors == [], errors
-    assert cam.is_initialized is False
+        t = threading.Thread(target=reader)
+        t.start()
+        cam.release()
+        t.join(timeout=10)
+        assert not t.is_alive()
+        assert errors == [], errors
+        assert cam.is_initialized is False
 
 
 def test_explicit_sdk_path_wins_over_standard_locations(monkeypatch, tmp_path):
