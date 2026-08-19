@@ -628,14 +628,22 @@ class _DatasetWriter(object):
     ภาพชุดข้อมูลขาดไปบ้างไม่กระทบอะไร ตราบใดที่ "บอกจำนวนที่ทิ้ง" ให้ผู้ใช้เห็น.
     """
 
-    def __init__(self, root, max_frames=2000, jpeg_quality=95):
+    def __init__(self, root, max_frames=2000, jpeg_quality=95, every_n=1,
+                 duration_s=0, min_free_mb=2048):
         self.root = root
         self.max_frames = int(max_frames)
         self.jpeg_quality = int(jpeg_quality)
+        self.every_n = max(1, int(every_n))
+        self.duration_s = float(duration_s or 0)
+        self.min_free_mb = int(min_free_mb)
         self.dir = None
         self.saved = 0
         self.dropped = 0
+        self.bytes = 0
         self.error = None
+        self.finished_reason = None
+        self._seen = 0
+        self._t0 = 0.0
         self._q = queue.Queue(maxsize=8)
         self._stop = threading.Event()
         self._thread = None
@@ -648,20 +656,53 @@ class _DatasetWriter(object):
         except Exception as e:
             self.error = "สร้างโฟลเดอร์ไม่สำเร็จ: %s" % e
             return False
+        free_mb = self._free_mb()
+        if free_mb is not None and free_mb < self.min_free_mb:
+            self.error = ("พื้นที่ว่างเหลือ %d MB (ต้องการอย่างน้อย %d MB) — ไม่เริ่มบันทึก"
+                          % (free_mb, self.min_free_mb))
+            return False
+        self._t0 = time.time()
         self._stop.clear()
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
         return True
 
+    def _free_mb(self):
+        try:
+            import shutil
+            return int(shutil.disk_usage(self.dir or self.root).free / (1024 * 1024))
+        except Exception:
+            return None
+
     def put(self, frame):
-        if self._thread is None or self.saved >= self.max_frames:
+        """
+        รับเฟรมจากเธรดจับภาพ — **ห้ามบล็อกเด็ดขาด** เพราะการจับภาพช้าลง = ผลตรวจเปลี่ยน.
+        เฟรมที่คิวเต็มจะถูกทิ้งแล้วนับไว้ (ผู้ใช้ต้องเห็นตัวเลขนี้ ไม่ใช่หายเงียบ).
+        """
+        if self._thread is None:
+            return
+        self._seen += 1
+        if self.every_n > 1 and (self._seen % self.every_n) != 0:
+            return                                    # เก็บทุก N เฟรม (ลดภาระดิสก์)
+        if self.saved >= self.max_frames:
+            self._finish("ครบจำนวนเฟรมที่ตั้งไว้ (%d)" % self.max_frames)
+            return
+        if self.duration_s and (time.time() - self._t0) >= self.duration_s:
+            self._finish("ครบเวลาที่ตั้งไว้ (%.0f วินาที)" % self.duration_s)
             return
         try:
             self._q.put_nowait(frame)
         except queue.Full:
             self.dropped += 1
 
+    def _finish(self, reason):
+        if self.finished_reason is None:
+            self.finished_reason = reason
+            logger.info("[hik] หยุดเก็บภาพชุดข้อมูล: %s", reason)
+        self._stop.set()
+
     def _run(self):
+        checked = 0
         while not self._stop.is_set():
             try:
                 frame = self._q.get(timeout=0.3)
@@ -671,25 +712,49 @@ class _DatasetWriter(object):
                 continue
             try:
                 path = os.path.join(self.dir, "%05d.jpg" % (self.saved + 1))
-                if cv2.imwrite(path, frame,
-                               [int(cv2.IMWRITE_JPEG_QUALITY), self.jpeg_quality]):
+                ok, buf = cv2.imencode(".jpg", frame,
+                                       [int(cv2.IMWRITE_JPEG_QUALITY), self.jpeg_quality])
+                if ok:
+                    with open(path, "wb") as f:
+                        f.write(buf.tobytes())
                     self.saved += 1
+                    self.bytes += len(buf)
             except Exception as e:                    # ดิสก์เต็ม/สิทธิ์ ⇒ หยุดเงียบไม่ได้
                 self.error = str(e)
                 logger.warning("บันทึกภาพชุดข้อมูลไม่สำเร็จ: %s", e)
-                self._stop.set()
+                self._finish("เขียนไฟล์ไม่สำเร็จ")
+                return
+            # ⚠️ เครื่องนี้เป็นสถานีที่ใช้งานจริง — ห้ามเขียนจนดิสก์เต็ม
+            #    (ที่ ROI ครึ่ง 69 fps ≈ 35 MB/วินาที เต็ม 100 GB ได้ใน ~50 นาที)
+            checked += 1
+            if checked % 20 == 0:
+                free_mb = self._free_mb()
+                if free_mb is not None and free_mb < self.min_free_mb:
+                    self.error = ("พื้นที่ว่างเหลือ %d MB — หยุดบันทึกเพื่อไม่ให้ดิสก์เต็ม"
+                                  % free_mb)
+                    logger.warning("[hik] %s", self.error)
+                    self._finish("พื้นที่ดิสก์ใกล้เต็ม")
+                    return
 
     def stop(self):
         self._stop.set()
         t = self._thread
         self._thread = None
         if t is not None:
-            t.join(timeout=1.0)
+            t.join(timeout=2.0)
 
     def status(self):
+        elapsed = max(1e-6, time.time() - self._t0) if self._t0 else 0.0
+        mb = self.bytes / (1024.0 * 1024.0)
         return {"dir": self.dir, "saved": self.saved, "dropped": self.dropped,
-                "max_frames": self.max_frames, "error": self.error,
-                "active": self._thread is not None}
+                "max_frames": self.max_frames, "every_n": self.every_n,
+                "duration_s": self.duration_s, "error": self.error,
+                "elapsed_s": round(elapsed, 1) if self._t0 else 0,
+                "mb": round(mb, 1), "mb_per_s": round(mb / elapsed, 1) if elapsed else 0,
+                "save_fps": round(self.saved / elapsed, 1) if elapsed else 0,
+                "free_mb": self._free_mb(),
+                "finished_reason": self.finished_reason,
+                "active": self._thread is not None and not self._stop.is_set()}
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -1528,7 +1593,7 @@ class HikCamera(object):
             st["dataset"] = self._dataset.status()
         return st
 
-    def start_dataset(self, root=None, max_frames=None):
+    def start_dataset(self, root=None, max_frames=None, every_n=1, duration_s=0):
         if self._dataset is not None:
             return self._dataset.status()
         root = root or _cfg("HIK_DATASET_DIR") or os.path.join("data", "hik_dataset")
@@ -1537,7 +1602,9 @@ class HikCamera(object):
             root = os.path.join(base, root)
         w = _DatasetWriter(root,
                            max_frames=max_frames or _cfg("HIK_DATASET_MAX_FRAMES", 2000),
-                           jpeg_quality=_cfg("HIK_DATASET_JPEG_QUALITY", 95))
+                           jpeg_quality=_cfg("HIK_DATASET_JPEG_QUALITY", 95),
+                           every_n=every_n, duration_s=duration_s,
+                           min_free_mb=_cfg("HIK_DATASET_MIN_FREE_MB", 2048))
         if not w.start():
             return w.status()
         self._dataset = w

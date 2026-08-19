@@ -124,6 +124,15 @@
                         <input type="checkbox" id="hikDatasetToggle" disabled>
                         💾 เก็บภาพชุดข้อมูล (ความละเอียดเต็ม — ไว้เทรน/ตรวจสอบภายหลัง)
                     </label>
+                    <div class="hik-ds-opts">
+                        <label>นาน <input id="hikDsDuration" type="number" min="0" max="3600" value="60"> วิ</label>
+                        <label>ทุก <input id="hikDsEveryN" type="number" min="1" max="100" value="1"> เฟรม</label>
+                        <label>สูงสุด <input id="hikDsMax" type="number" min="1" max="200000" value="5000"> ภาพ</label>
+                    </div>
+                    <p class="control-hint hik-ds-note">
+                        เก็บที่ <b>อัตรากล้อง</b> (ไม่ขึ้นกับความเร็วโมเดล) — นี่คือวิธีทดสอบกับไลน์จริง:
+                        เก็บภาพทุกใบที่วิ่งผ่าน แล้วเอาไปวัดผลทีหลังด้วย <code>hik_offline_eval.py</code>
+                    </p>
 
                     <div class="hik-shot-row">
                         <select id="hikShotImgsz" class="camera-select hik-imgsz" title="ขนาดภาพที่โมเดลตรวจ">
@@ -323,6 +332,11 @@
     .hik-actions { display: flex; gap: 6px; margin-top: 8px; }
     .hik-check { display: flex; align-items: center; gap: 6px; margin-top: 10px;
                  font-size: 13px; color: #475569; cursor: pointer; }
+    .hik-ds-opts { display: flex; gap: 8px; margin-top: 6px; flex-wrap: wrap;
+                   font-size: 12px; color: #475569; }
+    .hik-ds-opts input { width: 62px; font-size: 12px; padding: 2px 4px;
+                         border: 1px solid #cbd5e1; border-radius: 5px; }
+    .hik-ds-note { text-align: left !important; line-height: 1.5; }
     .hik-shot-row { display: flex; gap: 6px; margin-top: 10px; align-items: center; }
     .hik-imgsz { flex: 0 0 150px; }
     .hik-shot-row .btn { flex: 1; }

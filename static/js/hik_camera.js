@@ -307,22 +307,40 @@
     }
 
     // ── เก็บภาพชุดข้อมูล ───────────────────────────────────
+    function numOf(id, dflt) {
+        var el = $(id);
+        var v = el ? parseInt(el.value, 10) : NaN;
+        return isNaN(v) ? dflt : v;
+    }
+
     function toggleDataset() {
         var el = $('hikDatasetToggle');
         if (!el) { return; }
+        var body = { enabled: el.checked };
+        if (el.checked) {
+            body.duration_s = numOf('hikDsDuration', 60);
+            body.every_n = numOf('hikDsEveryN', 1);
+            body.max_frames = numOf('hikDsMax', 5000);
+        }
         fetch('/api/camera/hik/dataset', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ enabled: el.checked })
+            body: JSON.stringify(body)
         })
             .then(function (r) { return r.json(); })
             .then(function (d) {
                 if (d.status !== 'ok') { throw new Error(d.message || 'สั่งไม่สำเร็จ'); }
-                if (d.enabled && d.dataset && d.dataset.dir) {
-                    setMsg('💾 กำลังเก็บภาพลง ' + d.dataset.dir, 'good');
-                } else if (!d.enabled && d.dataset) {
-                    setMsg('หยุดเก็บภาพแล้ว (บันทึก ' + d.dataset.saved
-                        + ' · ทิ้งเพราะดิสก์ตามไม่ทัน ' + d.dataset.dropped + ')', null);
+                var ds = d.dataset || {};
+                if (d.enabled) {
+                    setMsg('💾 กำลังเก็บภาพลง ' + ds.dir
+                        + (ds.free_mb ? ' · ว่าง ' + Math.round(ds.free_mb / 1024) + ' GB' : ''),
+                        'good');
+                } else {
+                    setMsg('หยุดเก็บภาพแล้ว — บันทึก <b>' + ds.saved + '</b> ภาพ ('
+                        + ds.mb + ' MB · ' + ds.save_fps + ' ภาพ/วิ) · '
+                        + '<b>ทิ้งเพราะดิสก์ตามไม่ทัน ' + ds.dropped + '</b>'
+                        + (ds.finished_reason ? ' · ' + ds.finished_reason : ''),
+                        ds.dropped ? 'bad' : 'good');
                 }
             })
             .catch(function (e) { el.checked = false; setMsg('❌ ' + e.message, 'bad'); });
@@ -382,7 +400,13 @@
                 }
                 if (s.clip_pct) { parts.push('ล้น ' + s.clip_pct + '%'); }
                 if (s.dataset && s.dataset.active) {
-                    parts.push('เก็บภาพ ' + s.dataset.saved);
+                    parts.push('เก็บภาพ ' + s.dataset.saved + '/' + s.dataset.max_frames
+                        + ' (' + s.dataset.mb_per_s + ' MB/s'
+                        + (s.dataset.dropped ? ' · ทิ้ง ' + s.dataset.dropped : '') + ')');
+                } else if (s.dataset && s.dataset.finished_reason) {
+                    parts.push('เก็บภาพจบ: ' + s.dataset.saved + ' ภาพ');
+                    var t = $('hikDatasetToggle');
+                    if (t && t.checked) { t.checked = false; }   // ให้ปุ่มตรงกับความจริง
                 }
                 el.textContent = parts.join(' · ');
                 el.style.display = '';

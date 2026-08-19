@@ -936,9 +936,27 @@ def api_hik_dataset():
     if live is None:
         return jsonify({"status": "error",
                         "message": "ต้องเริ่มกล้องอุตสาหกรรมก่อน (กด Start Detection)"}), 409
-    enabled = bool((request.get_json(silent=True) or {}).get("enabled", False))
-    status = live.start_dataset() if enabled else live.stop_dataset()
-    return jsonify({"status": "ok", "enabled": enabled, "dataset": status})
+    body = request.get_json(silent=True) or {}
+    enabled = bool(body.get("enabled", False))
+    if not enabled:
+        return jsonify({"status": "ok", "enabled": False, "dataset": live.stop_dataset()})
+
+    def _num(key, default, lo, hi):
+        try:
+            return max(lo, min(hi, int(body.get(key, default))))
+        except (TypeError, ValueError):
+            return default
+
+    status = live.start_dataset(
+        max_frames=_num("max_frames", getattr(config, "HIK_DATASET_MAX_FRAMES", 2000),
+                        1, 200000),
+        every_n=_num("every_n", 1, 1, 100),
+        duration_s=_num("duration_s", 0, 0, 3600),
+    )
+    if status.get("error") and not status.get("active"):
+        return jsonify({"status": "error", "message": status["error"],
+                        "dataset": status}), 507
+    return jsonify({"status": "ok", "enabled": True, "dataset": status})
 
 
 @app.route('/api/camera/hik/shot', methods=['POST'])
