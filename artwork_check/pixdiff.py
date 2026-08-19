@@ -153,7 +153,7 @@ def _skip(reason: str, **extra) -> dict:
     return out
 
 
-def _diff_mask(a, b, threshold: int, tolerance_px: int):
+def _diff_mask(a, b, threshold: int, tolerance_px: int, blur_sigma: float = 0.0):
     """แผนที่พิกเซลที่ "ต่างจริง".
 
     ``tolerance_px = 0`` → เทียบตรง ๆ (ใช้กับโหมดทั้งหน้า ซึ่งสองไฟล์
@@ -164,7 +164,20 @@ def _diff_mask(a, b, threshold: int, tolerance_px: int):
     เดียวกันบนหน้าคนละขนาดจะตกลงบน "เศษส่วนพิกเซล" คนละค่า ⇒ ขอบตัวอักษร
     ทุกตัวต่างกันนิดเดียวทั้งแผง (วัดได้ 13 บริเวณปลอมจากการเลื่อน < 1px).
     ทำสองทางแล้วเอาค่ามากสุด เพื่อไม่ให้ผลขึ้นกับว่าไฟล์ไหนเป็น a หรือ b.
+
+    ⚠️ ``tolerance_px`` แก้ได้แค่ "ตำแหน่ง" คลาด (spatial) — วัดบนไฟล์จริง
+    (18 ส.ค. 2026, ``pixdiff_noise_scan.py``) แล้วพบว่า **การเลื่อนแบบเศษ
+    พิกเซลจริง (0.25px/0.5px ไม่ใช่จำนวนเต็ม) ยังเหลือ noise 20-90 บริเวณ
+    ต่อไฟล์แม้เปิด tolerance=1** เพราะ anti-aliasing ที่ตำแหน่งเศษพิกเซล
+    ทำให้ **ค่าสีของพิกเซลเปลี่ยนจริง ไม่ใช่แค่ขยับตำแหน่ง** ซึ่ง dilate/erode
+    แก้ไม่ได้ทั้งหมด. ``blur_sigma`` เป็นตัวทดลองที่สอง (เบลอเบา ๆ ก่อนเทียบ
+    เพื่อลบรายละเอียดระดับต่ำกว่า 1px ทิ้ง) — ดู "candidate" section ใน
+    ``pixdiff_noise_scan.py`` ก่อนเปิดใช้จริง ยังไม่มีค่า default ที่ยืนยันแล้ว.
     """
+    if blur_sigma > 0:
+        k = int(round(blur_sigma * 3)) * 2 + 1
+        a = cv2.GaussianBlur(a, (k, k), blur_sigma)
+        b = cv2.GaussianBlur(b, (k, k), blur_sigma)
     if tolerance_px <= 0:
         return (cv2.absdiff(a, b).max(axis=2) >= threshold).astype(np.uint8) * 255
     k = cv2.getStructuringElement(cv2.MORPH_RECT,
@@ -183,7 +196,8 @@ def compare_images(img_a, img_b,
                    min_region_px: int = MIN_REGION_PX,
                    merge_radius_px: int = MERGE_RADIUS_PX,
                    max_regions: int = MAX_REGIONS,
-                   tolerance_px: int = 0) -> dict:
+                   tolerance_px: int = 0,
+                   blur_sigma: float = 0.0) -> dict:
     """เทียบภาพ BGR สองภาพที่ **ขนาดเท่ากันแล้ว** → บริเวณที่ต่าง.
 
     คืน dict: ``status`` · ``regions`` (bbox เป็นสัดส่วน 0..1 ของหน้า +
@@ -203,7 +217,7 @@ def compare_images(img_a, img_b,
 
     # ต่างกันมากสุดในสามช่องสี = ไวกับสีเพี้ยนที่ความสว่างเท่าเดิม
     # (เทียบ grayscale อย่างเดียวจะมองไม่เห็นแดง↔เขียวที่ luminance ใกล้กัน)
-    mask = _diff_mask(a, b, threshold, tolerance_px)
+    mask = _diff_mask(a, b, threshold, tolerance_px, blur_sigma)
     diff_px = int(np.count_nonzero(mask))
 
     # ต่างกันทั้งใบ = ไม่ใช่ "การแก้ฉลาก" — รายงานรายบริเวณไปก็ไร้ประโยชน์

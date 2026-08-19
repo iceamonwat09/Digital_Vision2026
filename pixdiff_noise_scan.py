@@ -71,6 +71,20 @@ def _down(hi, shift_sub=0):
     return cv2.resize(src, (w // SUPER, h // SUPER), interpolation=cv2.INTER_AREA)
 
 
+def _subpixel_correct(shifted, shift_sub):
+    """จำลองผลของ 'sub-pixel alignment' ที่แม่นกว่าปัจจุบัน — ``compare_zone``
+    ตอนนี้ align ได้แค่ระดับ **จำนวนเต็มพิกเซล** (``cv2.matchTemplate`` คืน
+    ตำแหน่ง int) แล้วพึ่ง ``tolerance_px`` ดูดซับเศษที่เหลือ. ฟังก์ชันนี้
+    แก้ตำแหน่งด้วยระยะที่ **รู้ล่วงหน้าแน่นอน** (เพราะเราเป็นคนสร้าง shift เอง)
+    ผ่าน ``warpAffine`` แบบ sub-pixel — ใช้วัดว่า *ถ้า* อัปเกรด ``_locate()``
+    ให้ align ละเอียดถึงระดับเศษพิกเซลได้จริง จะลด noise ลงได้แค่ไหน
+    ก่อนจะลงทุนสร้างตัวประมาณค่าจริง (phase correlation / parabolic peak)."""
+    dx = -shift_sub / float(SUPER)
+    m = np.float32([[1, 0, dx], [0, 1, 0]])
+    return cv2.warpAffine(shifted, m, (shifted.shape[1], shifted.shape[0]),
+                          flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
+
+
 def _rescaled_pair(hi, pct):
     """จำลอง 'ไฟล์ถูกย่อ/ขยายนิดหน่อยแล้วปรับกลับ' — วัด noise จากการ resample"""
     base = _down(hi)
@@ -101,13 +115,27 @@ def _make_edit(src_path, dst_path, mm_w=4.0, mm_h=2.0, page_index=0):
 
 
 # ── การวัด ───────────────────────────────────────────────────────────
-def _measure(a, b, tol):
-    res = pixdiff.compare_images(a, b, tolerance_px=tol)
+def _measure(a, b, tol, **kw):
+    res = pixdiff.compare_images(a, b, tolerance_px=tol, **kw)
     if res["status"] != pixdiff.OK:
         return {"regions": -1, "diff_px": res.get("diff_px", 0), "areas": []}
     areas = [r["area_px"] for r in res["regions"]]
     return {"regions": res["region_count"], "diff_px": res["diff_px"],
             "areas": areas, "res": res}
+
+
+# ── แนวทางที่เอามาเทียบกัน (candidate) ──────────────────────────────
+# ทุกตัวต้องผ่านเกณฑ์เดียวกัน: noise เป็น 0 **และ** ยังจับสัญญาณ 4x2 mm ได้
+CANDIDATES = [
+    ("tol=1 (ปัจจุบัน)",        dict(tolerance_px=1)),
+    ("tol=2",                   dict(tolerance_px=2)),
+    ("tol=1 + เบลอ 0.6",        dict(tolerance_px=1, blur_sigma=0.6)),
+    ("tol=1 + เบลอ 1.0",        dict(tolerance_px=1, blur_sigma=1.0)),
+    ("tol=2 + เบลอ 1.0",        dict(tolerance_px=2, blur_sigma=1.0)),
+    ("tol=1 + เกณฑ์สี 64",       dict(tolerance_px=1, threshold=64)),
+    ("tol=1 + เกณฑ์สี 96",       dict(tolerance_px=1, threshold=96)),
+    ("tol=1 + เบลอ1 + สี64",     dict(tolerance_px=1, blur_sigma=1.0, threshold=64)),
+]
 
 
 def scan_file(path, dpi, save_dir=""):
@@ -134,6 +162,7 @@ def scan_file(path, dpi, save_dir=""):
 
     # ④ สัญญาณจริง — การแก้ไขขนาดประมาณ 1 คำ (ต้องจับได้ทุก tolerance)
     tmp = tempfile.mkdtemp(prefix="noise_")
+    base_e = None
     try:
         edited = _make_edit(path, os.path.join(tmp, "edited.pdf"))
         if edited:
@@ -145,6 +174,25 @@ def scan_file(path, dpi, save_dir=""):
             shifted_e = _down(hi_e, shift_sub=2)
             out["cases"]["สัญญาณ + เลื่อน 0.5px"] = {
                 t: _measure(base, shifted_e, t) for t in TOLS}
+        # ⑤ เทียบ "แนวทาง" ต่าง ๆ บนเคสที่ยากที่สุด: เลื่อน 0.5px (noise)
+        #    กับสัญญาณ 4x2 mm (ต้องจับได้) — ตัวไหนได้ทั้งสองอย่างถึงใช้ได้
+        shifted_half = _down(hi, shift_sub=2)
+        cand = {}
+        for label, kw in CANDIDATES:
+            noise = _measure(base, shifted_half, kw.get("tolerance_px", 1),
+                             **{k: v for k, v in kw.items() if k != "tolerance_px"})
+            sig = (_measure(base, base_e, kw.get("tolerance_px", 1),
+                            **{k: v for k, v in kw.items() if k != "tolerance_px"})
+                   if base_e is not None else None)
+            cand[label] = {"noise": noise["regions"], "noise_px": noise["diff_px"],
+                           "signal": sig["regions"] if sig else -1,
+                           "noise_areas": noise["areas"]}
+        out["candidates"] = cand
+
+        # ⑥ ถ้า align ได้ละเอียดระดับเศษพิกเซล จะเหลือ noise เท่าไร
+        corrected = _subpixel_correct(shifted_half, 2)
+        out["subpixel_align"] = {
+            t: _measure(base, corrected, t)["regions"] for t in TOLS}
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
@@ -243,6 +291,20 @@ def main() -> int:
             cells = "   ".join("%4d" % _count_at_min(areas, m) for m in MINS)
             print("  %-26s %s" % (case, cells))
 
+        # แนวทางอื่นบนเคสที่ยากที่สุด (เลื่อน 0.5px)
+        if r.get("candidates"):
+            print("  %-26s %-14s %-14s" % ("แนวทาง (เลื่อน 0.5px)",
+                                           "noise", "สัญญาณ 4x2mm"))
+            for label, c in r["candidates"].items():
+                ok = "✓" if (c["noise"] == 0 and c["signal"] >= 1) else " "
+                print("  %s %-24s %-14s %-14s"
+                      % (ok, label, "%d บริเวณ" % c["noise"],
+                         "จับได้ %d" % c["signal"]))
+        if r.get("subpixel_align"):
+            print("  ถ้า align ละเอียดระดับเศษพิกเซลได้: %s"
+                  % " · ".join("tol=%d → %d บริเวณ" % (t, n)
+                               for t, n in sorted(r["subpixel_align"].items())))
+
     if not results:
         return 2
 
@@ -308,6 +370,33 @@ def main() -> int:
             print("%-10d %-10d %-16d %-16d %s%s"
                   % (t, m, n_shift, n_scale, "จับได้ %d/%d" % (ok, tot),
                      "   ← ใช้ได้" if usable else ""))
+
+    # ── สรุปแนวทางอื่น ๆ รวมทุกไฟล์ ──
+    if results[0].get("candidates"):
+        print("\n" + "=" * 100)
+        print("เทียบ 'แนวทาง' ทั้งหมดบนเคสที่ยากที่สุด (เลื่อน 0.5px) — ทุกไฟล์รวมกัน")
+        print("=" * 100)
+        print("%-24s %-18s %-18s %-16s" % ("แนวทาง", "noise สูงสุด/ไฟล์",
+                                           "ไฟล์ที่ noise=0", "สัญญาณจับได้"))
+        print("-" * 100)
+        for label, _kw in CANDIDATES:
+            ns = [r["candidates"][label]["noise"] for r in results
+                  if label in r.get("candidates", {})]
+            sg = [r["candidates"][label]["signal"] for r in results
+                  if label in r.get("candidates", {})]
+            clean = sum(1 for n in ns if n == 0)
+            hit = sum(1 for s in sg if s >= 1)
+            mark = "  ← ใช้ได้" if (clean == len(ns) and hit == len(sg)) else ""
+            print("%-24s %-18d %-18s %-16s%s"
+                  % (label, max(ns) if ns else 0,
+                     "%d/%d" % (clean, len(ns)), "%d/%d" % (hit, len(sg)), mark))
+
+        sub = {t: max((r["subpixel_align"][t] for r in results
+                       if t in r.get("subpixel_align", {})), default=-1)
+               for t in TOLS}
+        print("\nถ้าอัปเกรด align ให้ละเอียดระดับเศษพิกเซล (sub-pixel): %s"
+              % " · ".join("tol=%d → สูงสุด %d บริเวณ" % (t, n)
+                           for t, n in sorted(sub.items()) if n >= 0))
 
     print("\n" + "=" * 100)
     if best:
