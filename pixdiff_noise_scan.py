@@ -130,12 +130,48 @@ CANDIDATES = [
     ("tol=1 (ปัจจุบัน)",        dict(tolerance_px=1)),
     ("tol=2",                   dict(tolerance_px=2)),
     ("tol=1 + เบลอ 0.6",        dict(tolerance_px=1, blur_sigma=0.6)),
+    ("tol=1 + เบลอ 0.8",        dict(tolerance_px=1, blur_sigma=0.8)),
     ("tol=1 + เบลอ 1.0",        dict(tolerance_px=1, blur_sigma=1.0)),
     ("tol=2 + เบลอ 1.0",        dict(tolerance_px=2, blur_sigma=1.0)),
-    ("tol=1 + เกณฑ์สี 64",       dict(tolerance_px=1, threshold=64)),
     ("tol=1 + เกณฑ์สี 96",       dict(tolerance_px=1, threshold=96)),
     ("tol=1 + เบลอ1 + สี64",     dict(tolerance_px=1, blur_sigma=1.0, threshold=64)),
 ]
+
+# ⚠️ ขนาดของ "ความต่างจริง" ที่ต้องจับให้ได้ — ไล่จากใหญ่ไปเล็กสุดที่งาน QC
+# ต้องการจริง. การเบลอก่อนเทียบลบรายละเอียดเล็กทิ้ง ⇒ **ต้องพิสูจน์ว่ามันไม่ได้
+# ทำให้ตาบอดต่อความต่างที่เล็กแต่สำคัญ** เช่น จุดทศนิยมหาย (1.5 -> 15),
+# ตัวอักษรเดียวเปลี่ยน, เครื่องหมาย ® หาย — ซึ่งเล็กกว่า 4x2 mm มาก
+SIGNAL_SIZES_MM = [
+    (4.0, 2.0, "ขนาดหนึ่งคำ"),
+    (2.0, 1.0, "ตัวอักษร 1-2 ตัว"),
+    (1.0, 1.0, "ตัวอักษรเดียว"),
+    (0.6, 0.6, "จุดทศนิยม / ®"),
+    (0.3, 0.3, "เล็กสุดที่ตายังเห็น"),
+]
+
+
+def _signal_on_image(img, mm_w, mm_h, dpi):
+    """วาด 'ความต่างจำลอง' ขนาด mm ที่กำหนดลงบนภาพที่เรนเดอร์แล้ว.
+
+    วาดบน raster (ไม่ใช่บน PDF) โดยตั้งใจ — ได้ขนาดที่ควบคุมได้แม่นยำและ
+    เร็วกว่ามาก. เป็น "ความต่างที่ชัดที่สุดเท่าที่จะเป็นไปได้" ในขนาดนั้น
+    ⇒ ถ้าขนาดนี้ยังจับไม่ได้ ความต่างจริงที่จาง ๆ ยิ่งจับไม่ได้แน่นอน
+    (เป็นขอบเขตบนของความไว ไม่ใช่ค่าที่คาดหวังจากงานจริง).
+    """
+    out = img.copy()
+    h, w = out.shape[:2]
+    gray = cv2.cvtColor(out, cv2.COLOR_BGR2GRAY)
+    ink = (gray < 245).astype(np.uint8)
+    if not np.count_nonzero(ink):
+        return None
+    x, y, bw, bh = cv2.boundingRect(ink)
+    px_w = max(1, int(round(mm_w / 25.4 * dpi)))
+    px_h = max(1, int(round(mm_h / 25.4 * dpi)))
+    cx, cy = x + bw // 2, y + bh // 2
+    x0 = min(max(0, cx), w - px_w - 1)
+    y0 = min(max(0, cy), h - px_h - 1)
+    out[y0:y0 + px_h, x0:x0 + px_w] = (0, 0, 255)     # แดงสด = ต่างชัดที่สุด
+    return out
 
 
 def scan_file(path, dpi, save_dir=""):
@@ -193,6 +229,21 @@ def scan_file(path, dpi, save_dir=""):
         corrected = _subpixel_correct(shifted_half, 2)
         out["subpixel_align"] = {
             t: _measure(base, corrected, t)["regions"] for t in TOLS}
+
+        # ⑦ ความไวต่อความต่าง "ขนาดเล็ก" — ด่านสำคัญของการเบลอ
+        #    เบลอลบรายละเอียดเล็กทิ้ง ต้องพิสูจน์ว่ายังเห็นจุดทศนิยมหาย
+        sens = {}
+        for mm_w, mm_h, label in SIGNAL_SIZES_MM:
+            probe = _signal_on_image(base, mm_w, mm_h, dpi)
+            if probe is None:
+                continue
+            per_cand = {}
+            for cl, kw in CANDIDATES:
+                m = _measure(base, probe, kw.get("tolerance_px", 1),
+                             **{k: v for k, v in kw.items() if k != "tolerance_px"})
+                per_cand[cl] = m["regions"]
+            sens["%.1fx%.1f mm (%s)" % (mm_w, mm_h, label)] = per_cand
+        out["sensitivity"] = sens
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
@@ -304,6 +355,13 @@ def main() -> int:
             print("  ถ้า align ละเอียดระดับเศษพิกเซลได้: %s"
                   % " · ".join("tol=%d → %d บริเวณ" % (t, n)
                                for t, n in sorted(r["subpixel_align"].items())))
+        if r.get("sensitivity"):
+            print("  ความไวต่อความต่างขนาดเล็ก (จำนวนบริเวณที่จับได้):")
+            for size, per in r["sensitivity"].items():
+                cells = " ".join("%s=%d" % (cl.replace("tol=", "t"), n)
+                                 for cl, n in per.items()
+                                 if "เบลอ 1.0" in cl or cl.startswith("tol=1 ("))
+                print("    %-30s %s" % (size, cells))
 
     if not results:
         return 2
@@ -397,6 +455,41 @@ def main() -> int:
         print("\nถ้าอัปเกรด align ให้ละเอียดระดับเศษพิกเซล (sub-pixel): %s"
               % " · ".join("tol=%d → สูงสุด %d บริเวณ" % (t, n)
                            for t, n in sorted(sub.items()) if n >= 0))
+
+    # ── ความไวต่อความต่างขนาดเล็ก: ด่านที่การเบลอต้องผ่าน ──
+    if results[0].get("sensitivity"):
+        print("\n" + "=" * 100)
+        print("ความไว — ความต่างเล็กแค่ไหนที่ยัง 'จับได้ครบทุกไฟล์'")
+        print("(ตัวเลข = จำนวนไฟล์ที่จับได้ จาก %d · ต้องได้ครบถึงจะปลอดภัย)"
+              % len(results))
+        print("=" * 100)
+        sizes = list(results[0]["sensitivity"].keys())
+        head = "%-24s" % "แนวทาง"
+        for s in sizes:
+            head += " %-14s" % s.split(" (")[0]
+        print(head)
+        print("-" * 100)
+        for label, _kw in CANDIDATES:
+            row = "%-24s" % label
+            for s in sizes:
+                hit = sum(1 for r in results
+                          if r.get("sensitivity", {}).get(s, {}).get(label, 0) >= 1)
+                row += " %-14s" % ("%d/%d" % (hit, len(results)))
+            print(row)
+        print("\nขนาดจริงเป็นพิกเซลที่ %d DPI (เทียบกับเกณฑ์ MIN_REGION_PX = %d):"
+              % (args.dpi, pixdiff.MIN_REGION_PX))
+        for w, h, lb in SIGNAL_SIZES_MM:
+            pw = w / 25.4 * args.dpi
+            ph = h / 25.4 * args.dpi
+            area = pw * ph
+            flag = ("  ← เล็กกว่าเกณฑ์ MIN_REGION_PX จึงถูกตัดทิ้งไม่ว่าจะตั้ง "
+                    "blur เท่าไร" if area < pixdiff.MIN_REGION_PX else "")
+            print("   %.1fx%.1f mm = %.1fx%.1f px = %.0f px²  (%s)%s"
+                  % (w, h, pw, ph, area, lb, flag))
+        print("\n⚠️ นี่คือ 'ความต่างที่ชัดที่สุด' ในแต่ละขนาด (สี่เหลี่ยมแดงทึบ)")
+        print("   ความต่างจริงที่จาง ๆ จะจับได้ยากกว่านี้ ⇒ เป็นขอบเขตบนของความไว")
+        print("⚠️ ถ้าขนาดเล็กจับไม่ได้ **ทุกแนวทางเหมือนกัน** แปลว่าเพดานอยู่ที่")
+        print("   DPI/MIN_REGION_PX ไม่ใช่การเบลอ — แก้ด้วยการเพิ่ม DPI แทน")
 
     print("\n" + "=" * 100)
     if best:
