@@ -86,13 +86,19 @@ def _subpixel_correct(shifted, shift_sub):
 
 
 def _rescaled_pair(hi, pct):
-    """จำลอง 'ไฟล์ถูกย่อ/ขยายนิดหน่อยแล้วปรับกลับ' — วัด noise จากการ resample"""
+    """จำลอง 'เนื้อหาถูกย่อ/ขยาย' แล้วเทียบส่วนที่ซ้อนกัน.
+
+    ⚠️ **เคยเขียนผิดมาก่อน — ขยายแล้วย่อกลับเป็นขนาดเดิม** ซึ่งทำให้เนื้อหา
+    กลับไปอยู่ตำแหน่งเดิมทุกจุด ⇒ วัดได้แค่ "ความนุ่มจากการ resample"
+    ไม่ใช่การคลาดจากสเกลเลย. ของจริงต้อง **ครอปจากมุมเดียวกัน** เพื่อให้
+    เนื้อหาที่อยู่ห่างจากมุมไป d พิกเซล เลื่อนไป d*pct — คลาดสะสมตามระยะ
+    ซึ่งคือลักษณะจริงของไฟล์ที่ถูกย่อ/ขยาย.
+    """
     base = _down(hi)
     h, w = base.shape[:2]
     w2, h2 = max(2, int(round(w * (1 + pct)))), max(2, int(round(h * (1 + pct))))
     grown = cv2.resize(base, (w2, h2), interpolation=cv2.INTER_CUBIC)
-    back = cv2.resize(grown, (w, h), interpolation=cv2.INTER_AREA)
-    return base, back
+    return base, grown[:h, :w]
 
 
 def _make_edit(src_path, dst_path, mm_w=4.0, mm_h=2.0, page_index=0):

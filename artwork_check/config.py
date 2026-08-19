@@ -210,6 +210,19 @@ HISTORY_ADMIN_ROLES = tuple(
     if r.strip()
 )
 
+# ── Pixel diff (เทียบ artwork ฉบับเก่า/ใหม่) — advisory ล้วน ─────────
+# ชั้นนี้ **ไม่แตะ defects / verdict / การนับ / DB** และไม่วิ่งตอน
+# "ส่งตรวจสอบ" — ผู้ใช้ต้องกดปุ่มเอง. ค่าทั้งหมดวัดมาจากไฟล์ artwork จริง
+# 11 ไฟล์บนสถานี (ดู pixdiff_noise_scan.py และหัวข้อ pixel diff ใน CLAUDE.md)
+PIXDIFF_ENABLED = os.getenv(
+    "ARTWORK_PIXDIFF_ENABLED", "1").strip().lower() not in ("0", "false", "")
+# DPI ที่ใช้เทียบ. 200 = จับความต่างขนาดตัวอักษรเดียว (1x1 mm = 62 px²) ได้
+# ครบทุกไฟล์. ถ้าต้องจับจุดทศนิยม/® (0.6x0.6 mm = 22 px² ที่ 200 DPI ซึ่ง
+# เล็กกว่า MIN_REGION_PX) ให้ขึ้นเป็น 300 — ช้าขึ้น ~2.25 เท่า
+PIXDIFF_DPI = int(os.getenv("ARTWORK_PIXDIFF_DPI", "200"))
+# เพดานเวลาต่อการเทียบหนึ่งครั้ง (วินาที) — ไฟล์ใหญ่สุดที่วัดได้ใช้ ~4 วิ
+PIXDIFF_TIMEOUT_S = float(os.getenv("ARTWORK_PIXDIFF_TIMEOUT_S", "120"))
+
 # ── Defect classes (severity drives the verdict) ─────────────────────
 #   critical → FAIL, warning → REVIEW, info → shown only
 DEFECT_CLASSES = {

@@ -110,6 +110,77 @@
   }
   window.awCoverageHtml = coverageHtml;
 
+  // ── เทียบภาพเก่า/ใหม่ระดับพิกเซล (advisory ล้วน) ──────────────────
+  // ⚠️ "พบความต่าง" ไม่เท่ากับ "ผิด" — ฉบับใหม่ที่แก้ตามแผนก็ขึ้นความต่าง
+  // เป็นปกติ. หน้าที่ของชั้นนี้คือไม่ให้ความต่างหลุดสายตา ไม่ใช่ตัดสินถูกผิด
+  const PD_WHY = {
+    no_pair: "ไม่มีโซนคู่ในไฟล์อ้างอิง",
+    page_size_mismatch: "ขนาดหน้าสองไฟล์ไม่เท่ากัน",
+    scale_mismatch: "เนื้อหาถูกย่อ/ขยาย — สเกลไม่ตรงกัน",
+    align_failed: "จับคู่ตำแหน่งไม่ได้ — อาจเป็นคนละแผง",
+    zone_blank: "โซนแทบไม่มีเนื้อหาให้เทียบ",
+    zone_too_different: "ต่างกันมากเกินกว่าจะเป็นการแก้ไข",
+    too_different: "ต่างกันทั้งใบ",
+    zone_empty: "โซนอยู่นอกหน้า/เล็กเกินไป",
+    not_pdf: "รองรับเฉพาะ PDF",
+    file_not_found: "ไม่พบไฟล์",
+    render_failed: "เรนเดอร์ไม่สำเร็จ",
+  };
+
+  function pixdiffHtml(pd, recId) {
+    if (!pd || pd.status === "no_ref") {
+      return pd ? '<div class="aw-pd"><div class="aw-pd-head">🔍 เทียบภาพเก่า/ใหม่</div>' +
+        '<div class="aw-pd-note">' + esc(pd.message || "") + "</div></div>" : "";
+    }
+    const zs = pd.zones || [];
+    const hit = zs.filter((z) => z.status === "ok" && z.region_count > 0);
+    const clean = zs.filter((z) => z.status === "ok" && !z.region_count);
+    const skip = zs.filter((z) => z.status !== "ok");
+    let h = '<div class="aw-pd' + (hit.length ? " hit" : "") + '">';
+    h += '<div class="aw-pd-head">🔍 เทียบภาพเก่า/ใหม่ระดับพิกเซล — ' +
+      (hit.length ? "พบความต่าง " + hit.length + " โซน"
+                  : "ไม่พบความต่างในโซนที่เทียบได้") + "</div>";
+    h += '<div class="aw-pd-note">เทียบได้ ' + zs.length + " โซน · " +
+      "ไม่พบความต่าง " + clean.length + " · เทียบไม่ได้ " + skip.length +
+      " · ที่ " + esc(pd.dpi) + " DPI · ใช้เวลา " + esc(pd.elapsed_s) + " วินาที<br>" +
+      "<b>ชั้นนี้เป็นข้อมูลประกอบเท่านั้น</b> — ไม่กระทบผล PASS/FAIL ด้านบน " +
+      "และ “พบความต่าง” ไม่ได้แปลว่าผิด (ฉบับใหม่ที่แก้ตามแผนก็ขึ้นความต่าง)</div>";
+    h += '<div class="aw-pd-rows">';
+    zs.forEach((z) => {
+      const ok = z.status === "ok";
+      const diff = ok && z.region_count > 0;
+      h += '<div class="aw-pd-row' + (diff ? " diff" : ok ? "" : " off") + '">';
+      h += '<span class="aw-pd-dot">' + (diff ? "⚠️" : ok ? "✅" : "—") + "</span>";
+      h += '<span class="aw-pd-name">' + esc(z.label || z.zone_id) +
+        (z.group ? " · กลุ่ม " + esc(z.group) : "") + "</span>";
+      if (ok) {
+        h += '<span class="aw-pd-why">' +
+          (diff ? "ต่าง " + z.region_count + " บริเวณ (" + z.diff_px + " พิกเซล)"
+                : "ไม่พบความต่าง") +
+          (z.shift_mm ? " · เนื้อหาขยับ " + z.shift_mm[0] + "," + z.shift_mm[1] + " mm" : "") +
+          "</span>";
+      } else {
+        h += '<span class="aw-pd-why">ไม่ได้เทียบ — ' +
+          esc(PD_WHY[z.reason] || z.reason || "") + "</span>";
+      }
+      h += "</div>";
+      if (!ok && z.message) {
+        h += '<div class="aw-pd-fix">↳ ' + esc(z.message) + "</div>";
+      }
+      if (diff && recId) {
+        const u = "/api/artwork/" + esc(recId) + "/pixdiff.png?zid=" +
+          encodeURIComponent(z.zone_id) + "&t=" + Date.now();
+        h += '<div class="aw-pd-img"><img src="' + u + '" class="aw-zoomable"' +
+          ' data-src="' + u + '" data-caption="' + esc(z.label || z.zone_id) +
+          ' — กรอบส้ม = บริเวณที่ต่างจากฉบับอ้างอิง" alt="pixdiff" ' +
+          'loading="lazy" decoding="async"></div>';
+      }
+    });
+    h += "</div></div>";
+    return h;
+  }
+  window.awPixdiffHtml = pixdiffHtml;
+
   function renderReport(rep, box) {
     const vClass = rep.verdict === "PASS" ? "aw-v-pass"
       : rep.verdict === "REVIEW" ? "aw-v-review" : "aw-v-fail";
@@ -134,6 +205,9 @@
 
     // ต้องอยู่ "ติดใต้ผลสรุป" — คนอ่าน PASS แล้วมักเลิกอ่านต่อ
     html += coverageHtml(rep.coverage);
+    // ผลเทียบพิกเซลครั้งล่าสุด (ถ้าเคยกด) — advisory ล้วน อยู่ใต้ coverage
+    // เพื่อไม่ให้ปนกับผล PASS/FAIL ด้านบน. รายงานเก่าไม่มีคีย์นี้ = ไม่แสดง
+    html += pixdiffHtml(rep.pixdiff, rep.id);
 
     html += '<div class="aw-summary">';
     Object.keys(CLASS_LABELS).forEach((cls) => {
@@ -598,7 +672,8 @@
   function setBusy(b) {
     busy = b;
     ["awInspect", "awTranslateMain", "awAddZone", "awClearZones", "awRedetect",
-     "awPairAuto", "awTemplateLoad", "awTemplateSave", "awRefToggle"].forEach((id) => {
+     "awPairAuto", "awTemplateLoad", "awTemplateSave", "awRefToggle",
+     "awPixdiff"].forEach((id) => {
       $(id).disabled = b || !inspectionId;
     });
     fileInputB.disabled = b;
@@ -1550,6 +1625,48 @@
   });
 
   // ── inspect ────────────────────────────────────────────────────────
+  // ── เทียบภาพเก่า/ใหม่ (advisory) — ต้องกดเอง ไม่วิ่งตอนส่งตรวจสอบ ──
+  $("awPixdiff").addEventListener("click", async () => {
+    if (!inspectionId || busy) return;
+    if (!refAttached) {
+      alert("ต้องแนบ 🅱 ไฟล์อ้างอิง (ฉบับเก่า/ที่อนุมัติแล้ว) ก่อน — " +
+            'กดปุ่ม "เทียบกับไฟล์อ้างอิง" ด้านบนเพื่อแนบไฟล์');
+      return;
+    }
+    const ga = new Set(zones.filter((z) => docOfZone(z) === "a" && z.group)
+                            .map((z) => z.group));
+    const gb = new Set(zones.filter((z) => docOfZone(z) === "b" && z.group)
+                            .map((z) => z.group));
+    if (![...ga].some((g) => gb.has(g))) {
+      alert("ยังไม่มีโซนคู่ที่ตั้ง “กลุ่ม” ตรงกันระหว่างสองไฟล์\n\n" +
+            "ให้ลากโซนบนไฟล์หลักและไฟล์อ้างอิงให้ครอบแผงเดียวกัน " +
+            'แล้วตั้งช่อง "กลุ่ม" ให้เป็นตัวเดียวกัน (หรือกด "🔗 หากรอบคู่อัตโนมัติ")');
+      return;
+    }
+    setBusy(true);
+    resultBox.innerHTML =
+      '<div class="aw-empty"><span class="aw-spin"></span>' +
+      "กำลังเทียบภาพระดับพิกเซล — ไฟล์ใหญ่อาจใช้เวลาหลายวินาที…</div>";
+    showTabs(true);
+    switchTab("result");
+    try {
+      const pd = await api("/api/artwork/" + inspectionId + "/pixdiff", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ zones: zones }),
+      });
+      resultBox.innerHTML = pixdiffHtml(pd, inspectionId);
+      resultBox.querySelectorAll(".aw-zoomable").forEach(wireZoomable);
+      scrollToResults();
+    } catch (e) {
+      resultBox.innerHTML = '<div class="aw-empty">เทียบภาพไม่สำเร็จ: ' +
+        esc(e.message) + "</div>";
+      scrollToResults();
+    } finally {
+      setBusy(false);
+    }
+  });
+
   $("awInspect").addEventListener("click", async () => {
     if (!inspectionId || busy) return;
     if (!zones.length) { alert("ต้องมีอย่างน้อย 1 โซน"); return; }

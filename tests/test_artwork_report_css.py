@@ -28,14 +28,28 @@ def _read(p):
         return f.read()
 
 
+#: ฟังก์ชันที่ ``renderReport()`` เรียกต่อเพื่อสร้าง HTML — คลาสที่ฟังก์ชัน
+#: พวกนี้พ่นออกมาก็ขึ้นบนหน้าประวัติเหมือนกัน จึงต้องถูกตรวจด้วย.
+#: ⚠️ เดิมสแกนแค่ body ของ ``renderReport`` ⇒ คลาสของ ``coverageHtml``
+#: (``.aw-cov*``) หลุดการตรวจทั้งที่เป็นเคสที่ทำให้เขียนเทสต์นี้ตั้งแต่แรก
+_HELPERS = [
+    ("  function coverageHtml(cov) {", "  window.awCoverageHtml = coverageHtml;"),
+    ("  function pixdiffHtml(pd, recId) {", "  window.awPixdiffHtml = pixdiffHtml;"),
+]
+
+
 def _renderer_source():
-    """**เฉพาะ body ของ renderReport()** — ตัวเดียวที่หน้าประวัติเรียกใช้จริง
-    (``artwork_check_history.js`` เรียก ``window.awRenderReport`` อย่างเดียว
-    ไม่ได้เรียก ``awRenderTextTable``) จึงไม่รวมคลาสของตารางแปล."""
+    """body ของ ``renderReport()`` **บวกฟังก์ชันช่วยที่มันเรียกต่อ** — ทั้งหมด
+    คือสิ่งที่หน้าประวัติเรนเดอร์จริง (``artwork_check_history.js`` เรียก
+    ``window.awRenderReport`` อย่างเดียว ไม่ได้เรียก ``awRenderTextTable``)
+    จึงไม่รวมคลาสของตารางแปล."""
     js = _read(JS)
     a = js.index("  function renderReport(rep, box) {")
     b = js.index("  window.awRenderReport = renderReport;")
-    return js[a:b]
+    src = js[a:b]
+    for start, end in _HELPERS:
+        src += js[js.index(start):js.index(end)]
+    return src
 
 
 def _emitted_classes():

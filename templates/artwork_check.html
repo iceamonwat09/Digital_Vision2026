@@ -187,6 +187,28 @@
   .aw-cov-row.off .aw-cov-name { color:#8d6e00; font-weight:600; }
   .aw-cov-row.off .aw-cov-why  { color:#8d6e00; }
   .aw-cov-fix { margin:0 0 4px 26px; color:#5d4037; font-size:11.5px; }
+  /* ── เทียบภาพเก่า/ใหม่ระดับพิกเซล (advisory) ─────────────────────
+     ⚠️ ต้องมีครบทั้ง artwork_check.html และ artwork_check_history.html
+     เพราะหน้าประวัติเรียก window.awPixdiffHtml ตัวเดียวกัน */
+  .aw-pd { margin-top:10px; border:1px solid #e3e7ec; border-radius:6px;
+           background:#f8fafc; padding:8px 12px; font-size:12.5px; }
+  .aw-pd.hit { background:#fff8e1; border-color:#ffe0a3; }
+  .aw-pd-head { font-weight:700; color:#37474f; margin-bottom:4px; }
+  .aw-pd.hit .aw-pd-head { color:#7a5200; }
+  .aw-pd-note { color:#607d8b; font-size:11.5px; line-height:1.5; margin-bottom:6px; }
+  .aw-pd-rows { display:grid; gap:3px; }
+  .aw-pd-row { display:flex; gap:8px; align-items:baseline; line-height:1.5; }
+  .aw-pd-dot { flex:0 0 auto; }
+  .aw-pd-name { flex:0 0 200px; color:#37474f; }
+  .aw-pd-why { color:#607d8b; }
+  .aw-pd-row.diff .aw-pd-name { color:#8d6e00; font-weight:600; }
+  .aw-pd-row.diff .aw-pd-why { color:#8d6e00; }
+  .aw-pd-row.off .aw-pd-name { color:#90a4ae; }
+  .aw-pd-fix { margin:0 0 4px 26px; color:#5d4037; font-size:11.5px; }
+  .aw-pd-img { margin:4px 0 10px 26px; }
+  .aw-pd-img img { display:block; max-width:100%; max-height:420px;
+                   object-fit:contain; border:1px solid #cfd8dc; border-radius:4px;
+                   background:#fafafa; cursor:zoom-in; }
 
   .aw-summary { display:flex; flex-wrap:wrap; gap:8px; margin:12px 0; }
   .aw-sumcard { flex:1 1 130px; min-width:130px; background:#f8fafc; border:1px solid #e3e7ec;
@@ -409,6 +431,8 @@
                 title="วาดกรอบบนไฟล์หลักให้ครบก่อน แล้วกดปุ่มนี้ ระบบจะหาบล็อกเดียวกันบนไฟล์อ้างอิงแล้วสร้างกรอบคู่ให้อัตโนมัติ (ต้องแนบไฟล์อ้างอิงก่อน)">🔗 หากรอบคู่อัตโนมัติ</button>
         <button id="awTranslateMain" class="aw-btn aw-btn-primary" disabled
                 title="อ่านข้อความในโซน ตรวจการสะกด และแปลเป็นอังกฤษ — เปิดแท็บ “ข้อความ + คำแปล” ให้อัตโนมัติ">📖 แปลภาษา →</button>
+        <button id="awPixdiff" class="aw-btn" disabled
+                title="เทียบภาพระดับพิกเซลระหว่างไฟล์หลัก (ฉบับใหม่) กับไฟล์อ้างอิง (ฉบับเก่า) — จับได้ทั้งฟอนต์เปลี่ยน สีเพี้ยน โลโก้ขยับ โดยไม่ง้อ OCR · ต้องแนบไฟล์อ้างอิงและตั้ง 'กลุ่ม' ให้ตรงกันก่อน · ไม่กระทบผลตรวจ">🔍 เทียบภาพเก่า/ใหม่</button>
         <button id="awInspect" class="aw-btn" disabled
                 title="ตรวจครบทุกชั้น (เทียบ panel/กลุ่ม/ไฟล์อ้างอิง) — ฟีเจอร์นี้อยู่ระหว่างการทดสอบ">ส่งตรวจสอบ →
           <span class="aw-btn-note">(อยู่ระหว่างการทดสอบ)</span></button>

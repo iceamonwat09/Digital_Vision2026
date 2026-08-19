@@ -29,7 +29,7 @@ from typing import List, Optional, Tuple
 
 import cv2
 
-from . import checks, config, ocr, report, vocab, zones as zones_mod
+from . import checks, config, ocr, pixdiff, report, vocab, zones as zones_mod
 from .pdf_ingest import (ArtworkDocument, apply_rotation, encode_jpg,
                          resolve_rotation)
 
@@ -341,6 +341,118 @@ def _save_ocr_cache(insp_dir: str, zone_list: List[dict],
                       f, ensure_ascii=False, indent=2)
     except OSError as e:
         logger.warning("[artwork] could not cache ocr-only result: %s", e)
+
+
+# ── Pixel diff (advisory) — เทียบฉบับใหม่กับฉบับอ้างอิงระดับพิกเซล ──
+# ⚠️ **ไม่ถูกเรียกจาก run_inspection เด็ดขาด** — ผู้ใช้ต้องกดปุ่มเอง.
+# ไม่แตะ defects / verdict / summary / การนับ / DB และไม่เขียน report.json
+PIXDIFF_FILE = "pixdiff.json"
+
+
+def run_pixdiff(rec_id: str, zone_list: List[dict]) -> dict:
+    """เทียบไฟล์หลัก (ฉบับใหม่) กับไฟล์อ้างอิง (ฉบับเก่า) ระดับพิกเซล.
+
+    จับคู่โซนด้วย ``group`` — ชุดเดียวกับที่ชั้นเทียบข้ามไฟล์ใช้อยู่แล้ว
+    ⇒ ผู้ใช้ไม่ต้องเรียนรู้กติกาใหม่. โซนที่ไม่มีคู่จะถูกรายงานว่าข้าม
+    พร้อมเหตุผล ไม่ใช่เงียบหายไป.
+    """
+    d = report.inspection_dir(rec_id)
+    src_a = _find_source(d)
+    try:
+        src_b = _find_source(d, "source_b")
+    except FileNotFoundError:
+        return {"status": "no_ref",
+                "message": "ยังไม่ได้แนบไฟล์อ้างอิง (ฉบับเก่า) — "
+                           "อัปโหลดที่ช่อง 'ไฟล์อ้างอิง' ก่อน",
+                "zones": []}
+
+    zone_list = zones_mod.sanitize_zones(zone_list)
+    zones_a, zones_b = _split_docs(zone_list)
+    by_group_b = {}
+    for z in zones_b:
+        g = (z.get("group") or "").strip()
+        if g:
+            by_group_b.setdefault(g, z)
+
+    t0 = time.time()
+    out_zones = []
+    for za in zones_a:
+        if za.get("type") == "ignore":
+            continue
+        g = (za.get("group") or "").strip()
+        zb = by_group_b.get(g)
+        if not zb:
+            out_zones.append({
+                "zone_id": za["id"], "group": g, "status": "skipped",
+                "reason": "no_pair",
+                "message": "ไม่มีโซนของไฟล์อ้างอิงที่ตั้ง 'กลุ่ม' ตรงกัน "
+                           "— ลากโซนบนไฟล์อ้างอิงแล้วตั้งกลุ่มเป็น '%s'" % (g or "?"),
+                "regions": []})
+            continue
+        res = pixdiff.compare_zone(src_a, za["bbox"], src_b, zb["bbox"],
+                                   dpi=config.PIXDIFF_DPI)
+        res["zone_id"] = za["id"]
+        res["ref_zone_id"] = zb["id"]
+        res["group"] = g
+        res["label"] = za.get("label") or za["id"]
+        # เก็บ bbox ไว้ในผลเลย — ภาพกรอบส้มจะได้ไม่ต้องพึ่ง report.json
+        # ซึ่งอาจยังไม่มี (ผู้ใช้กดเทียบพิกเซลก่อนกดส่งตรวจสอบได้)
+        res["bbox"] = [float(v) for v in za["bbox"]]
+        out_zones.append(res)
+
+    n_cmp = sum(1 for z in out_zones if z.get("status") == pixdiff.OK)
+    n_diff = sum(1 for z in out_zones
+                 if z.get("status") == pixdiff.OK and z.get("region_count"))
+    rep = {
+        "status": "ok",
+        "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "elapsed_s": round(time.time() - t0, 2),
+        "dpi": config.PIXDIFF_DPI,
+        "filename_a": os.path.basename(src_a),
+        "filename_b": os.path.basename(src_b),
+        "compared": n_cmp,
+        "with_diff": n_diff,
+        "skipped": len(out_zones) - n_cmp,
+        "zones": out_zones,
+    }
+    try:
+        with open(os.path.join(d, PIXDIFF_FILE), "w", encoding="utf-8") as f:
+            json.dump(rep, f, ensure_ascii=False, indent=2)
+    except OSError as e:                       # บันทึกไม่ได้ก็ยังคืนผลได้
+        logger.warning("[artwork] could not save pixdiff result: %s", e)
+    logger.info("[artwork] pixdiff %s: เทียบ %d โซน · พบต่าง %d · ข้าม %d (%.1fs)",
+                rec_id, n_cmp, n_diff, rep["skipped"], rep["elapsed_s"])
+    return rep
+
+
+def load_pixdiff(rec_id: str) -> Optional[dict]:
+    """ผลเทียบพิกเซลครั้งล่าสุด (ถ้ามี) — ใช้ตอนเปิดดูรายงานย้อนหลัง"""
+    p = os.path.join(report.inspection_dir(rec_id), PIXDIFF_FILE)
+    if not os.path.exists(p):
+        return None
+    try:
+        with open(p, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
+def pixdiff_zone_png(rec_id: str, zone_id: str) -> Optional[bytes]:
+    """ภาพโซนฝั่งฉบับใหม่ + กรอบส้มชี้บริเวณที่ต่าง (display-only)"""
+    rep = load_pixdiff(rec_id)
+    if not rep:
+        return None
+    z = next((x for x in rep.get("zones", []) if x.get("zone_id") == zone_id), None)
+    if not z or z.get("status") != pixdiff.OK or not z.get("bbox"):
+        return None
+    d = report.inspection_dir(rec_id)
+    img, _mpp = pixdiff.render_zone_mm(_find_source(d), z["bbox"],
+                                       config.PIXDIFF_DPI)
+    if img is None:
+        return None
+    out = pixdiff.draw_regions(img, z.get("regions") or [])
+    ok, buf = cv2.imencode(".png", out)
+    return buf.tobytes() if ok else None
 
 
 def run_ocr_only(rec_id: str, zone_list: List[dict],

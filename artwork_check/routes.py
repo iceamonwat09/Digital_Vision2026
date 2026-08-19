@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 import os
 
-from flask import (Blueprint, g, jsonify, render_template, request,
+from flask import (Blueprint, Response, g, jsonify, render_template, request,
                    send_file, send_from_directory)
 
 from . import (config, ownership, pipeline, report, translate, vocab,
@@ -195,6 +195,46 @@ def api_inspect(rec_id):
         logger.exception("[artwork] inspection failed for %s", rec_id)
         return jsonify({"error": f"ตรวจไม่สำเร็จ: {e}"}), 500
     return jsonify(_with_owner(rec_id, rep))
+
+
+@artwork_bp.route("/api/artwork/<rec_id>/pixdiff", methods=["POST"])
+def api_pixdiff(rec_id):
+    """เทียบฉบับใหม่กับฉบับอ้างอิงระดับพิกเซล — **advisory ล้วน**.
+
+    ต้องกดปุ่มเอง ไม่ถูกเรียกตอน "ส่งตรวจสอบ" และไม่แตะ report.json /
+    defects / verdict / การนับ เลย (เขียนแยกที่ pixdiff.json)
+    """
+    if not config.PIXDIFF_ENABLED:
+        return jsonify({"error": "ปิดการใช้งานอยู่ (ARTWORK_PIXDIFF_ENABLED=0)"}), 403
+    body = request.get_json(silent=True) or {}
+    try:
+        zone_list = zones_mod.sanitize_zones(body.get("zones"))
+    except ValueError as e:
+        return jsonify({"error": f"โซนไม่ถูกต้อง: {e}"}), 400
+    try:
+        rep = pipeline.run_pixdiff(rec_id, zone_list)
+    except (ValueError, FileNotFoundError) as e:
+        return jsonify({"error": str(e)}), 404
+    except Exception as e:
+        logger.exception("[artwork] pixdiff failed for %s", rec_id)
+        return jsonify({"error": f"เทียบพิกเซลไม่สำเร็จ: {e}"}), 500
+    return jsonify(rep)
+
+
+@artwork_bp.route("/api/artwork/<rec_id>/pixdiff.png")
+def api_pixdiff_png(rec_id):
+    """ภาพโซน + กรอบส้มชี้บริเวณที่ต่าง (display-only)"""
+    zone_id = str(request.args.get("zid", "")).strip()
+    if not zone_id:
+        return jsonify({"error": "ต้องระบุ zid"}), 400
+    try:
+        png = pipeline.pixdiff_zone_png(rec_id, zone_id)
+    except Exception:
+        logger.exception("[artwork] pixdiff png failed for %s", rec_id)
+        png = None
+    if not png:
+        return jsonify({"error": "ไม่มีผลเทียบพิกเซลของโซนนี้"}), 404
+    return Response(png, mimetype="image/png")
 
 
 @artwork_bp.route("/api/artwork/<rec_id>/preview.png")
@@ -436,7 +476,14 @@ def api_report(rec_id):
         return jsonify({"error": "bad id"}), 400
     if rep is None:
         return jsonify({"error": "ไม่พบรายงาน"}), 404
-    return jsonify(_with_owner(rec_id, rep))
+    # แนบผลเทียบพิกเซลครั้งล่าสุด (ถ้าเคยกด) — แนบ **ตอนตอบเท่านั้น**
+    # ไม่เขียนลง report.json เพื่อให้ชั้นนี้แยกขาดจากผลตรวจ QC จริง ๆ
+    pd = pipeline.load_pixdiff(rec_id)
+    out = _with_owner(rec_id, rep)
+    if pd:
+        out = dict(out)
+        out["pixdiff"] = pd
+    return jsonify(out)
 
 
 @artwork_bp.route("/api/artwork/history")

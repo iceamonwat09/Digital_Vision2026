@@ -383,6 +383,50 @@ def test_scaled_content_is_refused_not_filtered(tmp_path, panels):
     assert res["regions"] == []
 
 
+def test_identical_panels_are_not_rejected_by_rounding(panels):
+    """⚠️ เคยพลาดมาแล้ว: แผงเดียวกันเป๊ะวัดขนาดหมึกได้ 615x421 กับ 614x420
+    (คลาด 1 px จากการปัดเศษตอน raster) = 1.0016 เท่า ซึ่งเกินด่านสเกลละเอียด
+    ที่ตั้งไว้ 0.00163 ไปนิดเดียว ⇒ ระบบปฏิเสธการเทียบทั้งที่เทียบได้.
+    เครื่องมือวัด (bounding box ±1px) หยาบกว่าเกณฑ์ที่มันต้องบังคับ"""
+    small, big = panels
+    res = pixdiff.compare_zone(str(small), ZONE_SMALL, str(big), ZONE_BIG)
+    assert res["status"] == pixdiff.OK, res.get("message")
+
+
+def test_gross_scale_difference_is_still_refused(tmp_path, panels):
+    """แต่สเกลต่างกันชัด ๆ (แบบ A4 proof ย่อ 29.5%) ต้องปฏิเสธเหมือนเดิม"""
+    small, _big = panels
+    shrunk = tmp_path / "shrunk.pdf"
+    doc = fitz.open()
+    page = doc.new_page(width=2148, height=1290)
+    x0, y0, k = 900, 700, 0.70              # ย่อ 30%
+    page.draw_rect(fitz.Rect(x0, y0, x0 + 220 * k, y0 + 140 * k),
+                   color=(0, 0, 0), width=1)
+    for i, t in enumerate(LINES):
+        page.insert_text((x0 + 10 * k, y0 + (20 + i * 15) * k),
+                         t.format(net=170), fontsize=8 * k, fontname="helv")
+    doc.save(str(shrunk))
+    doc.close()
+    res = pixdiff.compare_zone(str(small), ZONE_SMALL, str(shrunk),
+                               [880 / 2148.0, 690 / 1290.0,
+                                260 / 2148.0, 170 / 1290.0])
+    assert res["status"] == pixdiff.SKIPPED
+    assert res["reason"] in ("scale_mismatch", "align_failed")
+
+
+def test_measured_scale_is_reported_when_measurable(panels):
+    """ความต่างที่เห็นอาจมาจาก 'งานถูกย่อ/ขยาย' — ผู้ตรวจต้องเห็นตัวเลข
+    (โซนต้องกว้างพอให้หมึกไม่ชนขอบ ไม่งั้นวัดสเกลไม่ได้ตามออกแบบ)"""
+    small, big = panels
+    # โซนกว้างกว่าแผงทั้งสองฝั่ง (แผง a อยู่ 60,80-280,220 · b อยู่ 900,700-1120,840)
+    wide_small = [50 / 842.0, 70 / 595.0, 240 / 842.0, 170 / 595.0]
+    wide_big = [880 / 2148.0, 690 / 1290.0, 260 / 2148.0, 170 / 1290.0]
+    res = pixdiff.compare_zone(str(small), wide_small, str(big), wide_big)
+    assert res["status"] == pixdiff.OK
+    assert "scale_ratio" in res and len(res["scale_ratio"]) == 2
+    assert res["scale_ratio"][0] == pytest.approx(1.0, abs=0.01)
+
+
 def test_scale_allowance_shrinks_as_the_zone_grows():
     """โซนยิ่งใหญ่ ยิ่งทนสเกลเพี้ยนได้น้อย — เพราะความคลาดสะสมตามระยะ"""
     assert pixdiff.scale_allowance(400) > pixdiff.scale_allowance(4000)
@@ -437,6 +481,41 @@ def test_tolerant_compare_is_symmetric():
     r1 = pixdiff.compare_images(a, b, tolerance_px=1)
     r2 = pixdiff.compare_images(b, a, tolerance_px=1)
     assert r1["diff_px"] == r2["diff_px"]
+
+
+# ── ค่าที่ล็อกจากการวัดบนไฟล์จริง 11 ไฟล์ ─────────────────────────
+def test_zone_mode_blurs_but_whole_page_does_not():
+    """โหมดโซนต้องเบลอ (แก้ noise เศษพิกเซล) · โหมดทั้งหน้าต้องไม่เบลอ
+    (สองไฟล์เรนเดอร์ลงกริดเดียวกัน วัดได้ 0 พิกเซลอยู่แล้ว จึงต้องเป๊ะ)"""
+    assert pixdiff.ZONE_BLUR_SIGMA == 1.0
+    a = np.full((80, 80, 3), 255, np.uint8)
+    default_page = pixdiff.compare_images(a, a)
+    assert default_page["tolerance_px"] == 0
+
+
+def test_blur_absorbs_subpixel_noise_that_tolerance_alone_cannot():
+    """หัวใจของการตัดสินใจ: เลื่อนเศษพิกเซลบนพื้นไล่เฉด (แบบภาพถ่ายในงานจริง)
+    tolerance อย่างเดียวเอาไม่อยู่ แต่เบลอเอาอยู่"""
+    grad = np.tile(np.linspace(0, 255, 200, dtype=np.uint8), (200, 1))
+    a = cv2.cvtColor(grad, cv2.COLOR_GRAY2BGR)
+    # เลื่อนแบบเศษพิกเซลด้วยการ resample (ไม่ใช่ roll ซึ่งเป็นจำนวนเต็ม)
+    m = np.float32([[1, 0, 0.5], [0, 1, 0]])
+    b = cv2.warpAffine(a, m, (200, 200), flags=cv2.INTER_LINEAR,
+                       borderMode=cv2.BORDER_REPLICATE)
+    tol_only = pixdiff.compare_images(a, b, tolerance_px=1)
+    with_blur = pixdiff.compare_images(a, b, tolerance_px=1, blur_sigma=1.0)
+    assert with_blur["diff_px"] <= tol_only["diff_px"]
+
+
+def test_blur_does_not_hide_a_real_change():
+    """เบลอต้องไม่กลบความต่างจริง — วัดบนไฟล์จริงแล้วสัญญาณ 4x2mm
+    จับได้ 11/11 และจุด 0.6mm กลับจับได้ดีขึ้น (0/11 -> 7/11)"""
+    a = np.full((200, 200, 3), 255, np.uint8)
+    a[50:150, 50:150] = (30, 30, 30)
+    b = a.copy()
+    b[95:105, 95:105] = (0, 0, 255)            # จุดแดง 10x10 กลางบล็อก
+    res = pixdiff.compare_images(a, b, tolerance_px=1, blur_sigma=1.0)
+    assert res["region_count"] >= 1
 
 
 def test_reason_text_is_human_readable():

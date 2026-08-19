@@ -69,8 +69,38 @@ MAX_ZONE_DIFF_RATIO = 0.35   # โซนต่างเกินนี้ = ค�
 # ยอมให้เนื้อหาคลาดกันได้กี่พิกเซลก่อนนับว่า "ต่าง" — จำเป็นเฉพาะโหมดโซน
 # เพราะ align ได้ละเอียดแค่ระดับพิกเซล แต่ของจริงคลาดกันเป็นเศษพิกเซล
 ZONE_TOLERANCE_PX = 1
+# เบลอเบา ๆ ก่อนเทียบ — **ค่านี้คือตัวที่ทำให้โหมดโซนใช้งานได้จริง**
+#
+# วัดบนไฟล์ artwork จริง 11 ไฟล์ (18 ส.ค. 2026) เคสยากสุด (เลื่อน 0.5px):
+#   tol=1 เปล่า ๆ      -> noise 30-222 บริเวณ · ไฟล์ที่สะอาด 0/11
+#   tol=1 + เบลอ 0.6   -> noise 3-21          · ไฟล์ที่สะอาด 0/11
+#   tol=1 + เบลอ 1.0   -> noise 0 ทุกไฟล์      · ไฟล์ที่สะอาด 11/11  ✅
+#
+# ⚠️ ผลที่สวนความคาดหมาย (และเป็นเหตุผลที่เลือก 1.0 ไม่ใช่ 0.8): การเบลอ
+# **ไม่ได้ทำให้ตาบอดต่อความต่างเล็ก ๆ แต่กลับไวขึ้น** — จุดขนาด 0.6x0.6 mm
+# (22 px² ที่ 200 DPI ซึ่งเล็กกว่า MIN_REGION_PX=40) เดิมจับได้ 0/11 ไฟล์
+# แต่เมื่อเบลอ 1.0 จับได้ 7/11 เพราะการเบลอกระจายจุดเล็กออกให้กว้างพอ
+# ผ่านเกณฑ์พื้นที่ขั้นต่ำ. เบลอ 0.8 ได้ 5/11 · tol=2+เบลอ1.0 ได้ 5/11
+# ⇒ tol=1 + เบลอ 1.0 ดีที่สุดทุกแกนที่วัด
+#
+# ตั้ง 0 = ปิด = เทียบตรง ๆ เหมือนโหมดทั้งหน้า
+ZONE_BLUR_SIGMA = 1.0
 # โซนที่มีหมึกน้อยกว่านี้ = ไม่มีอะไรให้เทียบ (ดู zone_blank)
 MIN_INK_RATIO = 0.002
+# ── ด่านสเกล: จับเฉพาะ "คนละสเกลชัด ๆ" เท่านั้น ─────────────────────
+# เดิมตั้งด่านละเอียด (ขอบเลื่อนไม่เกิน 1px ≈ 0.16% ของโซน 615px) แล้ว
+# **ปฏิเสธคู่ที่เหมือนกันเป๊ะ** เพราะการวัดขนาดหมึกด้วย bounding box มีความ
+# คลาด ±1px อยู่แล้ว ⇒ แผงเดียวกันวัดได้ 615x421 กับ 614x420 = 1.0016 เท่า
+# ซึ่งเกินเกณฑ์ 0.00163 ไปนิดเดียว. **เครื่องมือวัดหยาบกว่าเกณฑ์ที่มันต้องบังคับ**
+#
+# ที่ถูกคือแยกสองเรื่องออกจากกัน:
+#   • สเกลต่างกันมาก (เช่น A4 proof ย่อ 29.5% เทียบแผ่นจริง) = เทียบไม่ได้
+#     → ด่านนี้ + คะแนนจับคู่ NCC เป็นตัวจับ
+#   • สเกลต่างกันเล็กน้อย (0.1-0.5%) = **ความต่างจริงของงาน** ไม่ใช่ noise
+#     (ทั้งสองไฟล์เรนเดอร์ที่สเกล mm เดียวกันจากต้นฉบับ vector — ถ้าเนื้อหา
+#     ขนาดไม่เท่ากันแปลว่า artwork ถูกย่อ/ขยายจริง ซึ่งต้องรายงาน ไม่ใช่ซ่อน)
+#     → ปล่อยให้ขึ้นเป็นบริเวณต่างตามปกติ พร้อมบอก scale_ratio ให้ผู้ตรวจอ่าน
+GROSS_SCALE_TOL = 0.05
 
 # สถานะที่คืนได้ — ผู้เรียกต้องแยก "เทียบแล้วไม่ต่าง" ออกจาก "เทียบไม่ได้"
 OK = "ok"
@@ -458,11 +488,10 @@ def _ink_extent(img, edge_margin: int = 2):
 
 
 def scale_allowance(zone_px: int, tolerance_px: int = ZONE_TOLERANCE_PX) -> float:
-    """ความคลาดของสเกลที่ยอมได้ = ระยะที่ขอบไกลสุดเลื่อนไม่เกิน tolerance.
+    """ความคลาดของสเกลที่ *การเทียบพิกเซล* ทนได้ = ขอบไกลสุดเลื่อนไม่เกิน tolerance.
 
-    วัดจากไฟล์จริงแล้ว (``pixdiff_noise_scan.py``): สเกลเพี้ยนแค่ **0.2%**
-    ทำให้เกิดบริเวณปลอม 54-239 บริเวณ และ **ไม่มีค่า min_region ใดกรองออกได้
-    โดยไม่ทิ้งความต่างจริงไปด้วย** ⇒ ต้องปฏิเสธตั้งแต่ต้น ไม่ใช่กรองทีหลัง.
+    ใช้เป็น **ข้อมูลบอกผู้ตรวจ** ว่าความต่างที่เห็นน่าจะมาจากสเกล ไม่ใช่ใช้
+    เป็นด่านปฏิเสธ — ดู ``GROSS_SCALE_TOL`` ว่าทำไม.
     """
     return float(tolerance_px) / float(max(1, zone_px))
 
@@ -532,16 +561,15 @@ def compare_zone(path_a: str, bbox_a, path_b: str, bbox_b,
     # มากขึ้นเรื่อย ๆ ตามระยะ ⇒ ขอบโซนเพี้ยนเกิน tolerance เสมอ
     ew_a, eh_a = _ink_extent(img_a)
     ew_b, eh_b = _ink_extent(img_b)
+    scale_ratio = None
     if ew_a and ew_b and eh_a and eh_b:
         rw, rh = ew_a / float(ew_b), eh_a / float(eh_b)
-        allow = scale_allowance(max(ew_a, eh_a))
-        if abs(rw - 1) > allow or abs(rh - 1) > allow:
+        scale_ratio = [round(rw, 4), round(rh, 4)]
+        if abs(rw - 1) > GROSS_SCALE_TOL or abs(rh - 1) > GROSS_SCALE_TOL:
             return _skip("scale_mismatch",
-                         scale_ratio=[round(rw, 4), round(rh, 4)],
-                         scale_allowance=round(allow, 5),
-                         message="%s (วัดได้ %.3f x %.3f เท่า · ยอมได้ ±%.3f%%)"
-                                 % (reason_text("scale_mismatch"), rw, rh,
-                                    allow * 100))
+                         scale_ratio=scale_ratio,
+                         message="%s (วัดได้ %.3f x %.3f เท่า)"
+                                 % (reason_text("scale_mismatch"), rw, rh))
 
     # โซนที่เล็กกว่าเป็น template — ทนต่อการที่ผู้ใช้ลากสองฝั่งไม่เท่ากัน
     swapped = False
@@ -567,6 +595,7 @@ def compare_zone(path_a: str, bbox_a, path_b: str, bbox_b,
     a_img, b_img = (win, tpl) if swapped else (tpl, win)
 
     kw.setdefault("tolerance_px", ZONE_TOLERANCE_PX)
+    kw.setdefault("blur_sigma", ZONE_BLUR_SIGMA)
     out = compare_images(a_img, b_img, **kw)
     if out["status"] == OK and out["diff_ratio"] > MAX_ZONE_DIFF_RATIO:
         out = _skip("zone_too_different",
@@ -580,6 +609,12 @@ def compare_zone(path_a: str, bbox_a, path_b: str, bbox_b,
     off_x, off_y = (dx - pad_px), (dy - pad_px)
     if swapped:
         off_x, off_y = -off_x, -off_y
+    out["blur_sigma"] = kw.get("blur_sigma", ZONE_BLUR_SIGMA)
+    # รายงานสเกลที่วัดได้เสมอ — ความต่างที่เห็นอาจมาจาก "งานถูกย่อ/ขยาย"
+    # ซึ่งผู้ตรวจต้องรู้ (±0.2% ก็ทำให้ขึ้นบริเวณต่างทั้งแผงได้)
+    if scale_ratio:
+        out["scale_ratio"] = scale_ratio
+        out["scale_tolerated"] = round(scale_allowance(max(ew_a, eh_a)), 5)
     out["match_score"] = round(score, 4)
     out["shift_px"] = [int(off_x), int(off_y)]
     out["shift_mm"] = [round(off_x * mpp, 2), round(off_y * mpp, 2)]

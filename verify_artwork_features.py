@@ -326,6 +326,9 @@ def section_b(s: Suite):
 
         # ── โซนเดียวพังต้องไม่ล้มทั้งใบ (e45fff0) ──
         _check_one_bad_zone(s, pipeline, rid)
+
+        # ── เทียบภาพเก่า/ใหม่ (advisory) ──
+        _check_pixdiff(s, pipeline, tmp)
     except Exception as e:
         s.bad("ชั้น B ทำงานจนจบ", got="%s: %s" % (type(e).__name__, e),
               fix="ดู traceback ด้วย --verbose")
@@ -335,6 +338,79 @@ def section_b(s: Suite):
     finally:
         awcfg.INSPECTIONS_DIR = saved_dir
         shutil.rmtree(tmp, ignore_errors=True)
+
+
+def _make_panel_pdf(path, page_w, page_h, at, net=170):
+    """ฉลากแผงเดียว ขนาดจริงคงที่ วางบนหน้าขนาดใดก็ได้ ตำแหน่งใดก็ได้ —
+    จำลองเคสจริง 'งานเดียวกันคนละ layout' (A4 proof vs แผ่นพิมพ์ใหญ่)"""
+    import fitz
+    doc = fitz.open()
+    page = doc.new_page(width=page_w, height=page_h)
+    x0, y0 = at
+    page.draw_rect(fitz.Rect(x0, y0, x0 + 220, y0 + 150), color=(0, 0, 0), width=1)
+    for i, t in enumerate(PANEL_LINES[:4]):
+        page.insert_text((x0 + 10, y0 + 25 + i * 18), t.format(net=net),
+                         fontsize=9, fontname="helv")
+    doc.save(path)
+    doc.close()
+
+
+def _check_pixdiff(s: Suite, pipeline, tmp: str):
+    """เทียบภาพเก่า/ใหม่ — ต้องเทียบได้แม้หน้าคนละขนาด และต้อง **ไม่แตะ
+    ผลตรวจ QC** (ไม่เขียน report.json / ไม่เปลี่ยน verdict)"""
+    from artwork_check import config as awcfg
+
+    if not getattr(awcfg, "PIXDIFF_ENABLED", False):
+        s.info("เทียบภาพเก่า/ใหม่", "ปิดอยู่ (ARTWORK_PIXDIFF_ENABLED=0)")
+        return
+    new_pdf = os.path.join(tmp, "pd_new.pdf")
+    old_pdf = os.path.join(tmp, "pd_old.pdf")
+    _make_panel_pdf(new_pdf, 842, 595, (60, 80), net=185)      # ฉบับใหม่
+    _make_panel_pdf(old_pdf, 1684, 1190, (700, 500), net=170)  # ฉบับเก่า หน้าใหญ่กว่า
+
+    with open(new_pdf, "rb") as f:
+        rec = pipeline.start_inspection(f.read(), "pd_new.pdf")
+    rid = rec["id"]
+    with open(old_pdf, "rb") as f:
+        pipeline.start_ref(rid, f.read(), "pd_old.pdf")
+
+    zone_list = [
+        {"id": "z1", "type": "panel", "group": "A", "doc": "a", "rotate": 0,
+         "bbox": [50 / 842.0, 70 / 595.0, 240 / 842.0, 170 / 595.0], "label": "แผงหน้า"},
+        {"id": "b1", "type": "panel", "group": "A", "doc": "b", "rotate": 0,
+         "bbox": [690 / 1684.0, 490 / 1190.0, 240 / 1684.0, 170 / 1190.0],
+         "label": "แผงหน้า (เก่า)"},
+        {"id": "z9", "type": "panel", "group": "Z", "doc": "a", "rotate": 0,
+         "bbox": [0.6, 0.6, 0.2, 0.2], "label": "โซนไม่มีคู่"},
+    ]
+    rep = pipeline.run_pixdiff(rid, zone_list)
+    z1 = next((z for z in rep["zones"] if z["zone_id"] == "z1"), {})
+    z9 = next((z for z in rep["zones"] if z["zone_id"] == "z9"), {})
+
+    s.check(z1.get("status") == "ok",
+            "เทียบแผงเดียวกันได้ แม้หน้าสองไฟล์คนละขนาด (A4 vs แผ่นใหญ่)",
+            got="status=%s %s" % (z1.get("status"), z1.get("message", ""))[:110],
+            fix="เคสนี้คือเคสจริงที่พบบ่อยที่สุด — โหมดเทียบทั้งหน้าทำไม่ได้")
+    s.check(z1.get("region_count", 0) >= 1,
+            "จับความต่างจริงได้ (น้ำหนัก 170 vs 185 g)",
+            got="%d บริเวณ · สเกลที่วัดได้ %s · คะแนนจับคู่ %s"
+                % (z1.get("region_count", 0), z1.get("scale_ratio"),
+                   z1.get("match_score")))
+    s.check(z9.get("status") == "skipped" and z9.get("reason") == "no_pair",
+            "โซนที่ไม่มีคู่ถูกรายงานว่าข้าม พร้อมเหตุผล (ไม่เงียบหาย)",
+            got="status=%s reason=%s" % (z9.get("status"), z9.get("reason")))
+
+    d = pipeline.report.inspection_dir(rid)
+    s.check(not os.path.exists(os.path.join(d, "report.json")),
+            "เทียบภาพแล้ว **ไม่สร้าง/ไม่แตะ report.json** (แยกจากผลตรวจ QC)",
+            got="พบ report.json ทั้งที่ยังไม่ได้กดส่งตรวจสอบ",
+            fix="ชั้นนี้ต้องเป็น advisory ล้วน ห้ามกระทบ verdict/การนับ")
+    s.check(pipeline.load_pixdiff(rid) is not None,
+            "ผลถูกบันทึกแยกใน pixdiff.json และโหลดกลับได้")
+    png = pipeline.pixdiff_zone_png(rid, "z1")
+    s.check(bool(png) and len(png) > 1000,
+            "สร้างภาพกรอบส้มชี้บริเวณที่ต่างได้ (ไม่ต้องรอ report.json)",
+            got="%s bytes" % (len(png) if png else 0))
 
 
 def _check_one_bad_zone(s: Suite, pipeline, rid: str):
@@ -636,6 +712,9 @@ REPORT_CLASSES = [
     "aw-cov", "aw-cov-head", "aw-cov-rows", "aw-cov-row", "aw-cov-why",
     "aw-cov-fix", "aw-summary", "aw-sumcard", "aw-defect", "aw-defect-class",
     "aw-img-pair", "aw-img-card", "aw-img-label", "aw-hl-warn", "aw-note",
+    # เทียบภาพเก่า/ใหม่ (pixdiff) — renderReport เรียก pixdiffHtml ต่อ
+    "aw-pd", "aw-pd-head", "aw-pd-note", "aw-pd-rows", "aw-pd-row",
+    "aw-pd-dot", "aw-pd-name", "aw-pd-why", "aw-pd-fix", "aw-pd-img",
 ]
 
 
@@ -665,7 +744,8 @@ def section_e(s: Suite):
                 " block — ขาดแล้วรูปจะกางเต็มจอ/ไม่มีกรอบ โดยไม่มี error")
 
     # ── ② element ที่ JS อ้างถึง ต้องมีจริงใน template ──
-    for eid, what in [("awZoomFit", "ปุ่มพอดีความกว้าง"),
+    for eid, what in [("awPixdiff", "ปุ่มเทียบภาพเก่า/ใหม่"),
+                      ("awZoomFit", "ปุ่มพอดีความกว้าง"),
                       ("awZoomFitPage", "ปุ่มพอดีทั้งหน้า"),
                       ("awDrawContinuous", "ติ๊กวาดต่อเนื่อง"),
                       ("awRestore", "แถบกู้คืนโซนที่ค้างไว้"),
@@ -715,6 +795,8 @@ def section_e(s: Suite):
             fix="ไม่งั้นหัวเรื่องจะพูดเกินจริงว่าไม่พบประเด็น ทั้งที่บางชั้นไม่เคยทำงาน")
     s.check('"aw.session.v1"' in js or "'aw.session.v1'" in js,
             "autosave โซนลง localStorage (aw.session.v1)")
+    s.check("window.awPixdiffHtml" in js,
+            "renderReport เรียก pixdiffHtml ได้ (การ์ดเทียบภาพขึ้นทั้ง 2 หน้า)")
     s.check("awRenderReport" in hist,
             "หน้าประวัติเรียก window.awRenderReport ตัวเดียวกับหน้าตรวจ")
 
