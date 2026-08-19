@@ -83,6 +83,11 @@
                     setHint('❌ ไม่พบ MVS SDK — ' + (d.sdk && d.sdk.hint ? d.sdk.hint : ''), 'bad');
                     return;
                 }
+                if (d.sdk.is_fake) {
+                    // ต้องเห็นจากหน้าจอ ไม่ใช่เห็นแค่ใน log ฝั่งเซิร์ฟเวอร์
+                    setHint('⛔ กำลังใช้ MVS SDK ปลอม (สำหรับทดสอบ) — ภาพไม่ใช่ของกล้องจริง '
+                        + 'ห้ามใช้ตัดสินคุณภาพงาน', 'bad');
+                }
                 state.devices = d.devices || [];
                 sel.innerHTML = '';
                 if (!state.devices.length) {
@@ -101,7 +106,9 @@
                     sel.appendChild(opt);
                 });
                 sel.disabled = state.active;
-                if (blocked) {
+                if (d.sdk.is_fake) {
+                    /* ข้อความเตือน SDK ปลอมสำคัญกว่า อย่าเขียนทับ */
+                } else if (blocked) {
                     setHint('⚠️ กล้องถูกโปรแกรมอื่นจองอยู่ — ปิดโปรแกรม MVS ก่อน (GigE เปิดได้ทีละโปรแกรม)', 'bad');
                 } else {
                     setHint('พบ ' + state.devices.length + ' กล้อง · ⚠️ ต้องปิดโปรแกรม MVS ก่อนใช้งาน', 'good');

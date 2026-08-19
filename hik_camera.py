@@ -117,9 +117,12 @@ def load_sdk(extra_path=None, force=False):
     """
     if _sdk_cache["mod"] is not None and not force:
         return _sdk_cache["mod"], _sdk_cache["info"]
-    tried, errors = [], []
-    for p in sdk_candidates(extra_path):
-        tried.append(p)
+    cands = sdk_candidates(extra_path)
+    tried, errors = list(cands), []
+    # ⚠️ ใส่กลับหลังไปหน้า: sys.path.insert(0, ...) ทำให้ตัว "ที่ใส่ทีหลัง" อยู่หน้าสุด
+    #    ถ้าวนตามลำดับความสำคัญตรง ๆ ผลจะกลับด้าน — ทางที่ผู้ใช้ระบุเอง
+    #    (config.HIK_SDK_PATH / MVCAM_SDK_PATH) จะแพ้ทางมาตรฐานที่บังเอิญมีอยู่ด้วย
+    for p in reversed(cands):
         if os.path.isdir(p) and p not in sys.path:
             sys.path.insert(0, p)
     for name in ("MvCameraControl_class", "MvCameraControl"):
@@ -129,7 +132,15 @@ def load_sdk(extra_path=None, force=False):
             errors.append("%s: %s" % (name, e))
             continue
         if hasattr(mod, "MvCamera"):
-            info = {"module": name, "file": getattr(mod, "__file__", "?"),
+            path = getattr(mod, "__file__", "") or ""
+            # SDK ปลอมมีไว้สำหรับเทสต์เท่านั้น. ถ้ามันถูกโหลดในเครื่องที่ใช้งานจริง
+            # ระบบจะ "ตรวจ" ภาพสังเคราะห์แล้วรายงานผลเหมือนของจริงทุกประการ =
+            # ผลตรวจที่ผิดแบบมั่นใจ (กฎเหล็กข้อ 2) จึงต้องตะโกนออกมาให้เห็น
+            is_fake = "fake_mvs" in path.replace("\\", "/")
+            if is_fake:
+                logger.warning("[hik] ⚠️ กำลังใช้ MVS SDK **ปลอม** สำหรับทดสอบ (%s) — "
+                               "ภาพที่ได้ไม่ใช่ภาพจากกล้องจริง ห้ามใช้ตัดสินคุณภาพงาน", path)
+            info = {"module": name, "file": path, "is_fake": is_fake,
                     "tried": tried, "errors": errors}
             _sdk_cache["mod"], _sdk_cache["info"] = mod, info
             return mod, info
@@ -155,6 +166,7 @@ def sdk_status():
         "available": mod is not None,
         "module": info.get("module"),
         "file": info.get("file"),
+        "is_fake": bool(info.get("is_fake")),
         "errors": info.get("errors", []),
         "hint": None if mod is not None else _INSTALL_HINT,
     }

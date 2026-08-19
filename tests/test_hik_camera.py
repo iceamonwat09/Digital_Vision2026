@@ -464,3 +464,38 @@ def test_release_while_another_thread_reads_params_is_safe():
     assert not t.is_alive()
     assert errors == [], errors
     assert cam.is_initialized is False
+
+
+def test_explicit_sdk_path_wins_over_standard_locations(monkeypatch, tmp_path):
+    """
+    ทางที่ผู้ใช้ระบุเอง (config.HIK_SDK_PATH) ต้องชนะทางมาตรฐานเสมอ.
+    เดิม `sys.path.insert(0, ...)` วนตามลำดับความสำคัญทำให้ผลกลับด้าน —
+    ตัวที่ใส่ทีหลัง (ความสำคัญต่ำสุด) กลับไปอยู่หน้าสุด.
+    """
+    other = tmp_path / "other_sdk"
+    other.mkdir()
+    (other / "MvCameraControl_class.py").write_text(
+        "class MvCamera(object):\n    MARKER = 'ของปลอมอีกตัว'\n", encoding="utf-8")
+    monkeypatch.setattr(hc, "SDK_ROOTS", [str(other)])
+    monkeypatch.setattr(hc.config, "HIK_SDK_PATH", FAKE_SDK, raising=False)
+    for m in ("MvCameraControl_class", "MvCameraControl"):
+        monkeypatch.delitem(sys.modules, m, raising=False)
+    monkeypatch.setattr(sys, "path", [p for p in sys.path
+                                      if "fake_mvs" not in p and "other_sdk" not in p])
+    hc._sdk_cache["mod"] = None
+    mod, info = hc.load_sdk()
+    assert mod is not None
+    assert "fake_mvs" in info["file"], "ทางที่ระบุเองแพ้ทางมาตรฐาน (ลำดับ sys.path กลับด้าน)"
+    assert not hasattr(mod.MvCamera, "MARKER")
+
+
+def test_fake_sdk_is_flagged_loudly():
+    """
+    ถ้า SDK ปลอมถูกโหลดบนเครื่องที่ใช้งานจริง ระบบจะ 'ตรวจ' ภาพสังเคราะห์แล้วรายงานผล
+    เหมือนของจริงทุกประการ = ผลที่ผิดแบบมั่นใจ ⇒ ต้องมีธงให้หน้าเว็บเอาไปเตือน.
+    """
+    st = hc.sdk_status()
+    assert st["available"] is True
+    assert st["is_fake"] is True
+    js = _read(os.path.join("static", "js", "hik_camera.js"))
+    assert "is_fake" in js and "SDK ปลอม" in js
