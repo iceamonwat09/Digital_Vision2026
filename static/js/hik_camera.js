@@ -42,13 +42,193 @@
         ['packet_delay', 'number']
     ];
 
+    var EXP_SLIDER_STEPS = 1000;   // สไลเดอร์ exposure ใช้สเกล log (ช่วงจริง 15 µs – 10 วินาที)
+    var EXP_SLIDER_CAP_US = 100000; // เพดานที่ใช้งานจริง (ค่าที่ยาวกว่านี้ใช้ช่องตัวเลขในกล่องตั้งค่า)
+    var BRIGHT_TARGET = 80;         // ความสว่างเฉลี่ยที่ถือว่า "ใช้งานได้" สำหรับภาพ QC
+
     var state = {
         params: {},        // ค่าล่าสุดที่อ่านจากกล้อง
         devices: [],
         pollTimer: null,
         loading: false,
-        active: false      // ระบบกำลังตรวจด้วยกล้องนี้อยู่หรือไม่
+        active: false,     // ระบบกำลังตรวจด้วยกล้องนี้อยู่หรือไม่
+        expMin: 15, expMax: 40279,   // ช่วงจริงของกล้อง (เติมตอนอ่านค่าได้)
+        gainMax: 24,
+        quickReady: false,
+        lastBright: null
     };
+
+    // ── ปรับแสงด่วน (เกน/เวลารับแสง) ───────────────────────
+    // ค่าสองตัวนี้ตั้งได้ระหว่างสตรีม (live) จึงเห็นผลทันทีบนภาพ.
+    // ส่งแบบหน่วงจังหวะขณะลาก แล้วค่อยบันทึกลงไฟล์ตอนปล่อยเมาส์ —
+    // ถ้าส่งทุก event จะยิงหลายสิบคำขอ/วินาที และเขียนไฟล์ค่าตั้งรัว ๆ โดยไม่จำเป็น
+    var quickTimer = null, quickPending = null;
+
+    function expFromSlider(pos) {
+        var lo = Math.log(state.expMin), hi = Math.log(Math.min(state.expMax, EXP_SLIDER_CAP_US));
+        return Math.exp(lo + (hi - lo) * (pos / EXP_SLIDER_STEPS));
+    }
+
+    function sliderFromExp(us) {
+        var lo = Math.log(state.expMin), hi = Math.log(Math.min(state.expMax, EXP_SLIDER_CAP_US));
+        var v = (Math.log(Math.max(state.expMin, Math.min(us, EXP_SLIDER_CAP_US))) - lo) / (hi - lo);
+        return Math.round(v * EXP_SLIDER_STEPS);
+    }
+
+    function fmtExp(us) {
+        return us >= 1000 ? (us / 1000).toFixed(us >= 10000 ? 0 : 2) + ' ms'
+                          : Math.round(us) + ' µs';
+    }
+
+    function syncSettingsInput(key, value) {
+        // ให้ช่องตัวเลขในกล่องตั้งค่าตรงกับสไลเดอร์เสมอ ไม่งั้นสองที่แสดงคนละค่า
+        var el = $('hik-p-' + key);
+        if (!el) { return; }
+        el.value = String(Math.round(value * 1000) / 1000);
+        el.dataset.original = el.value;
+    }
+
+    function sendQuick(params, save) {
+        return fetch('/api/camera/hik/params', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ params: params, save: !!save })
+        })
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+                if (d.status !== 'ok') { throw new Error(d.message || 'ตั้งค่าไม่สำเร็จ'); }
+                Object.keys(d.applied || {}).forEach(function (k) {
+                    var v = d.applied[k].value;
+                    if (typeof v === 'number') { syncSettingsInput(k, v); }
+                });
+                var failed = Object.keys(d.failed || {});
+                if (failed.length) {
+                    setLightHint('⚠️ ' + failed.map(function (k) {
+                        return (d.failed[k].message || k);
+                    }).join(' · '), true);
+                }
+                if (d.params) { state.params = d.params; }
+            })
+            .catch(function (e) { setLightHint('❌ ' + e.message, true); });
+    }
+
+    function queueQuick(key, value) {
+        quickPending = quickPending || {};
+        quickPending[key] = value;
+        if (quickTimer) { return; }
+        quickTimer = setTimeout(function () {
+            quickTimer = null;
+            var p = quickPending;
+            quickPending = null;
+            if (p) { sendQuick(p, false); }
+        }, 150);
+    }
+
+    function flushQuick(key, value) {
+        // ปล่อยเมาส์ = ค่าสุดท้ายจริง → ส่งทันทีและบันทึกลงไฟล์
+        if (quickTimer) { clearTimeout(quickTimer); quickTimer = null; }
+        quickPending = null;
+        var p = {};
+        p[key] = value;
+        sendQuick(p, true);
+    }
+
+    function setLightHint(text, warn) {
+        var el = $('hikLightHint');
+        if (!el) { return; }
+        el.innerHTML = text;
+        el.className = 'hik-quick-hint' + (warn ? ' warn' : '');
+    }
+
+    function onGainInput(commit) {
+        var el = $('hikGain');
+        if (!el) { return; }
+        var v = parseFloat(el.value);
+        var lab = $('hikGainVal');
+        if (lab) { lab.textContent = v.toFixed(1) + ' dB'; }
+        if (commit) { flushQuick('gain_db', v); } else { queueQuick('gain_db', v); }
+    }
+
+    function onExpInput(commit) {
+        var el = $('hikExp');
+        if (!el) { return; }
+        var us = expFromSlider(parseFloat(el.value));
+        var lab = $('hikExpVal');
+        if (lab) { lab.textContent = fmtExp(us); }
+        if (commit) { flushQuick('exposure_us', us); } else { queueQuick('exposure_us', us); }
+    }
+
+    /** ตั้งช่วงของสไลเดอร์จาก "ค่าที่กล้องบอกเอง" (กล้องคนละรุ่นช่วงไม่เท่ากัน) */
+    function applyQuickFromParams(params) {
+        var g = params.gain_db, e = params.exposure_us;
+        var gEl = $('hikGain'), eEl = $('hikExp');
+        if (gEl && g && g.supported !== false) {
+            state.gainMax = (g.max === null || g.max === undefined) ? 24 : g.max;
+            gEl.min = g.min || 0;
+            gEl.max = state.gainMax;
+            gEl.step = 0.1;
+            gEl.value = g.value;
+            gEl.disabled = false;
+            var gl = $('hikGainVal');
+            if (gl) { gl.textContent = Number(g.value).toFixed(1) + ' dB'; }
+        }
+        if (eEl && e && e.supported !== false) {
+            state.expMin = e.min || 15;
+            state.expMax = e.max || 40279;
+            eEl.min = 0;
+            eEl.max = EXP_SLIDER_STEPS;
+            eEl.value = sliderFromExp(e.value);
+            eEl.disabled = false;
+            var el2 = $('hikExpVal');
+            if (el2) { el2.textContent = fmtExp(e.value); }
+        }
+        state.quickReady = true;
+        updateLightHint();
+    }
+
+    /**
+     * บอกเป็นตัวเลขว่า "ต้องเพิ่มอีกเท่าไร" ไม่ใช่ให้เดาเอง —
+     * ความสว่าง ∝ เวลารับแสง และ ∝ 10^(dB/20) จึงคำนวณย้อนได้ตรง ๆ
+     */
+    function updateLightHint() {
+        var b = state.lastBright;
+        if (!state.quickReady) { return; }
+        if (!b || b.mean === null || b.mean === undefined) {
+            setLightHint('เริ่มกล้อง (Start) แล้วตัวเลขความสว่างจะขึ้นให้จูนตาม', false);
+            return;
+        }
+        if (b.clip > 1) {
+            setLightHint('พิกเซลล้น ' + b.clip.toFixed(1) + '% — รายละเอียดบริเวณสว่างหายถาวร '
+                + 'ให้ <b>ลดเกนหรือเวลารับแสง</b>', true);
+            return;
+        }
+        if (b.mean >= 60) {
+            setLightHint('✅ ระดับแสงใช้งานได้ (เป้าหมาย ~' + BRIGHT_TARGET + '/255)', false);
+            return;
+        }
+        if (b.mean < 1) {
+            // ต่ำกว่านี้การประมาณ "ต้องเพิ่มกี่ dB" ไม่น่าเชื่อถือ (หารด้วยเลขใกล้ศูนย์)
+            // ⇒ บอกสิ่งที่ต้องทำจริงแทนการพ่นตัวเลขที่ดูแม่นแต่ไม่มีความหมาย
+            setLightHint('ภาพมืดเกือบสนิท (' + b.mean.toFixed(1) + '/255) — '
+                + '<b>เปิดรูรับแสงเลนส์ / เพิ่มไฟ / เพิ่มเวลารับแสง</b> ก่อน '
+                + 'แล้วค่อยจูนเกน (เกนอย่างเดียวจะได้แต่ noise)', true);
+            return;
+        }
+        var need = 20 * Math.log10(BRIGHT_TARGET / b.mean);
+        var gEl = $('hikGain');
+        var cur = gEl ? parseFloat(gEl.value) : 0;
+        var room = state.gainMax - cur;
+        var txt = 'ภาพมืด (' + b.mean.toFixed(0) + '/255) — ต้องการอีกราว <b>'
+            + need.toFixed(1) + ' dB</b> จึงจะได้ ~' + BRIGHT_TARGET + '/255';
+        if (need > room) {
+            txt += '<br>⚠️ เกนเหลืออีกแค่ ' + room.toFixed(1)
+                + ' dB — <b>ต้องเพิ่มไฟหรือเปิดรูรับแสงเลนส์</b> เกนอย่างเดียวไม่พอ';
+        } else {
+            txt += '<br>⚠️ เกนสูง = noise มากขึ้น ซึ่งกลืนรอยบุบตื้น ๆ'
+                + ' — ถ้ากระป๋อง<b>วางนิ่ง</b> ให้เพิ่มเวลารับแสงแทนจะได้ภาพสะอาดกว่า';
+        }
+        setLightHint(txt, true);
+    }
 
     function setHint(text, tone) {
         var el = $('hikHint');
@@ -142,6 +322,7 @@
                 }
                 state.params = res.d.params || {};
                 renderParams(state.params, res.d.identity || {});
+                applyQuickFromParams(state.params);
             })
             .catch(function (e) {
                 box.innerHTML = '<div class="hik-note hik-bad">อ่านค่าจากกล้องไม่ได้: ' + e.message + '</div>';
@@ -280,7 +461,11 @@
                 if (d.status !== 'ok') { throw new Error(d.message || 'ตั้งค่าไม่สำเร็จ'); }
                 var failed = Object.keys(d.failed || {});
                 var okCount = Object.keys(d.applied || {}).length;
-                if (d.params) { state.params = d.params; renderParams(d.params, {}); }
+                if (d.params) {
+                    state.params = d.params;
+                    renderParams(d.params, {});
+                    applyQuickFromParams(d.params);
+                }
                 if (failed.length) {
                     var lines = failed.map(function (k) {
                         return '• ' + k + ': ' + ((d.failed[k] && d.failed[k].message) || 'ไม่สำเร็จ');
@@ -410,6 +595,10 @@
                     parts.push('สว่าง ' + s.mean_brightness + '/255');
                 }
                 if (s.clip_pct) { parts.push('ล้น ' + s.clip_pct + '%'); }
+                // ป้อนตัวเลขที่วัดได้จริงกลับเข้าแผง "ปรับแสงด่วน"
+                state.lastBright = { mean: s.mean_brightness, clip: s.clip_pct || 0 };
+                showBrightness(state.lastBright);
+                updateLightHint();
                 if (s.dataset && s.dataset.active) {
                     parts.push('เก็บภาพ ' + s.dataset.saved + '/' + s.dataset.max_frames
                         + ' (' + s.dataset.mb_per_s + ' MB/s'
@@ -427,6 +616,20 @@
             .catch(function () { /* เงียบได้ — เป็นแค่แถบสถานะ */ });
     }
 
+    function showBrightness(b) {
+        var el = $('hikBright');
+        if (!el) { return; }
+        if (!b || b.mean === null || b.mean === undefined) {
+            el.textContent = '—';
+            el.className = 'hik-quick-bright';
+            return;
+        }
+        el.textContent = 'สว่าง ' + b.mean.toFixed(0) + '/255'
+            + (b.clip ? ' · ล้น ' + b.clip.toFixed(1) + '%' : '');
+        el.className = 'hik-quick-bright '
+            + (b.clip > 1 ? 'clip' : (b.mean < 60 ? 'dark' : 'good'));
+    }
+
     function startPolling() {
         if (state.pollTimer) { return; }
         pollStats();
@@ -437,6 +640,11 @@
         if (state.pollTimer) { clearInterval(state.pollTimer); state.pollTimer = null; }
         var el = $('hikStats');
         if (el) { el.style.display = 'none'; }
+        // ตัวเลขความสว่างมาจากภาพสด — พอหยุดสตรีมต้องล้างทิ้ง ไม่ใช่ค้างค่าเก่า
+        // ให้เข้าใจผิดว่ายังวัดอยู่ (กฎเหล็กข้อ 2: ไม่มีข้อมูล ต้องบอกว่าไม่มี)
+        state.lastBright = null;
+        showBrightness(null);
+        updateLightHint();
     }
 
     function selectedSource() {
@@ -457,6 +665,16 @@
             if (ds) { ds.addEventListener('change', toggleDataset); }
             var sh = $('hikShotBtn');
             if (sh) { sh.addEventListener('click', shot); }
+            var g = $('hikGain');
+            if (g) {
+                g.addEventListener('input', function () { onGainInput(false); });
+                g.addEventListener('change', function () { onGainInput(true); });
+            }
+            var ex = $('hikExp');
+            if (ex) {
+                ex.addEventListener('input', function () { onExpInput(false); });
+                ex.addEventListener('change', function () { onExpInput(true); });
+            }
             var close = $('hikShotClose');
             if (close) {
                 close.addEventListener('click', function () {

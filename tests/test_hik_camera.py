@@ -37,7 +37,7 @@ def fake_sdk(monkeypatch, tmp_path):
     # คืนค่า SIM ให้เป็นค่าเริ่มต้นทุกครั้ง — เทสต์ก่อนหน้าต้องไม่รั่วมาถึงตัวถัดไป
     fake.SIM.update({"accessible": True, "open_ok": True, "packet_size": 1500,
                      "optimal_packet_size": 8164, "lost_packets": 0, "lost_frames": 0,
-                     "drop_every": 0, "gray_level": 120, "max_packet_size": 9000,
+                     "drop_every": 0, "gray_level": 9, "max_packet_size": 9000,
                      "missing_nodes": [], "grab_fail": 0})
     hc._sdk_cache["mod"] = None
     hc._sdk_cache["info"] = None
@@ -531,3 +531,52 @@ def test_no_fixed_width_columns_wider_than_the_sidebar():
         fixed = [int(x) for x in re.findall(r"(\d+)px", m.group(1))]
         assert sum(fixed) <= 200, "คอลัมน์ตายตัวรวม %dpx กว้างเกินแถบข้าง: %s" % (
             sum(fixed), m.group(1))
+
+
+# ── ปรับแสงด่วน (สไลเดอร์เกน/เวลารับแสง) ────────────────────
+def test_gain_change_brightens_the_image():
+    """
+    ปรับเกนแล้ว **ภาพต้องสว่างขึ้นจริง** ไม่ใช่แค่ค่าบนจอเปลี่ยน
+    (SDK ปลอมจำลองความสัมพันธ์ สว่าง ∝ เวลารับแสง และ ∝ 10^(dB/20) ตามกล้องจริง)
+    """
+    # ภาพปลอมสว่าง ~9/255 ที่ 2635 µs gain 0 = ตัวเลขเดียวกับที่วัดได้จริงบนสถานี
+    cam = open_cam(params={"exposure_us": 2635.0, "gain_db": 0.0})
+    try:
+        # ความสว่างถูกวัดทุก ๆ HIK_STATS_SAMPLE_EVERY เฟรม (ไม่วัดทุกเฟรมเพื่อไม่เปลืองซีพียู)
+        for _ in range(15):
+            cam.read_frame()
+        dark = cam.stats()["mean_brightness"]
+        cam.set_params({"gain_db": 12.0})              # 12 dB = 4 เท่า
+        for _ in range(15):                            # ให้พ้นรอบการสุ่มวัดความสว่าง
+            cam.read_frame()
+        bright = cam.stats()["mean_brightness"]
+        assert dark is not None and bright is not None
+        assert bright > dark * 2, "ปรับเกนแล้วภาพไม่สว่างขึ้น (%s → %s)" % (dark, bright)
+    finally:
+        cam.release()
+
+
+def test_exposure_and_gain_are_live_settable():
+    """สองค่านี้ต้องตั้งได้ระหว่างสตรีมโดยไม่หยุดภาพ — ไม่งั้นสไลเดอร์จะกระตุกทุกครั้งที่ลาก."""
+    assert hc._SPEC_BY_KEY["gain_db"]["live"] is True
+    assert hc._SPEC_BY_KEY["exposure_us"]["live"] is True
+    cam = open_cam()
+    try:
+        res = cam.set_params({"gain_db": 6.0, "exposure_us": 3000.0})
+        assert res["restarted"] is False and res["failed"] == {}
+    finally:
+        cam.release()
+
+
+def test_quick_light_controls_exist_in_the_ui():
+    """สไลเดอร์ต้องมีอยู่จริงในหน้า และ JS ต้องอ่านช่วงค่าจากกล้อง ไม่ hard-code."""
+    html = _read(os.path.join("templates", "index.html"))
+    js = _read(os.path.join("static", "js", "hik_camera.js"))
+    for eid in ("hikGain", "hikExp", "hikGainVal", "hikExpVal", "hikBright", "hikLightHint"):
+        assert ('id="%s"' % eid) in html, "ไม่มี element %s" % eid
+    assert "applyQuickFromParams" in js
+    assert "params.gain_db" in js and "params.exposure_us" in js
+    # ต้องคำนวณ "ต้องเพิ่มอีกกี่ dB" จากความสว่างที่วัดได้ ไม่ใช่ให้ผู้ใช้เดา
+    assert "Math.log10" in js and "BRIGHT_TARGET" in js
+    for cls in ("hik-quick", "hik-slider", "hik-quick-bright", "hik-quick-hint"):
+        assert ".%s" % cls in html, "ไม่มีกฎ CSS ของ .%s" % cls

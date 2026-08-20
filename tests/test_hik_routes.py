@@ -79,7 +79,7 @@ def client(monkeypatch, tmp_path):
     import MvCameraControl_class as fake
     fake.SIM.update({"accessible": True, "open_ok": True, "packet_size": 1500,
                      "optimal_packet_size": 8164, "lost_packets": 0, "lost_frames": 0,
-                     "drop_every": 0, "gray_level": 120, "max_packet_size": 9000,
+                     "drop_every": 0, "gray_level": 9, "max_packet_size": 9000,
                      "missing_nodes": [], "grab_fail": 0})
     hc._sdk_cache["mod"] = None
     hc._sdk_cache["info"] = None

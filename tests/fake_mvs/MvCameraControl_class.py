@@ -150,7 +150,9 @@ SIM = {
     "lost_packets": 0,
     "lost_frames": 0,
     "drop_every": 0,      # > 0 = ทำให้เลขเฟรมกระโดดทุก ๆ n เฟรม
-    "gray_level": 120,    # ความสว่างของภาพปลอม
+    # ความสว่างของภาพปลอมที่ exposure 2635 µs / gain 0 — ตั้งให้ตรงกับที่ **วัดได้จริง**
+    # บนสถานี (8.6/255) เพื่อให้เทสต์เรื่องแสงเจอสถานการณ์เดียวกับหน้างาน
+    "gray_level": 9,
     "max_packet_size": 9000,   # เพดานที่ NIC รับได้ (1500 = ยังไม่เปิด Jumbo Frame)
     "missing_nodes": [],       # ชื่อ node ที่ "เฟิร์มแวร์นี้ไม่มี" (จำลองเคส binning/gamma)
     "grab_fail": 0,            # > 0 = ทำให้ GetImageBuffer ล้มเหลว n ครั้งแรก
@@ -337,15 +339,23 @@ class MvCamera(object):
         n = w * h
         # ภาพปลอม: สร้าง "ครั้งเดียวต่อขนาด" แล้วใช้ซ้ำ — ถ้าสร้างใหม่ทุกเฟรม
         # เทสต์ที่รัน pipeline จริงจะช้าจนใช้งานไม่ได้ (2448x2048 = 5 ล้านไบต์/เฟรม)
+        # ความสว่างของภาพปลอมตอบสนองต่อ exposure/gain เหมือนกล้องจริง
+        # (สว่าง ∝ เวลารับแสง และ ∝ 10^(dB/20)) — ทำให้ทดสอบ UI ปรับแสงได้จริง
+        lvl = int(min(255, SIM["gray_level"]
+                      * (self._f["ExposureTime"] / 2635.0)
+                      * (10.0 ** (self._f["Gain"] / 20.0))))
         cache = getattr(self, "_frame_cache", None)
-        if cache is None or cache[0] != (w, h, SIM["gray_level"]):
+        if cache is None or cache[0] != (w, h, lvl):
+            # เติมทั้งบัฟเฟอร์ด้วย memset (ทำในภาษา C จึงเร็วพอสำหรับ 5 ล้านพิกเซล) —
+            # ถ้าเติมแบบกระจายทีละจุดด้วยลูป Python ค่าเฉลี่ยความสว่างจะออกมาเป็น 0
+            # หลังย่อภาพ แล้วเทสต์เรื่องแสงจะวัดอะไรไม่ได้เลย
             buf = (ctypes.c_ubyte * n)()
-            lvl = int(SIM["gray_level"])
-            for y in range(0, h, 16):
+            ctypes.memset(buf, lvl, n)
+            for y in range(0, h, 32):              # แต้มลายบาง ๆ ให้ Laplacian ไม่เป็น 0
                 base = y * w
-                for x in range(0, w, 16):
-                    buf[base + x] = min(255, lvl + (40 if (x // 16) % 2 else 0))
-            self._frame_cache = ((w, h, SIM["gray_level"]), buf)
+                for x in range(0, w, 32):
+                    buf[base + x] = min(255, lvl + 40)
+            self._frame_cache = ((w, h, lvl), buf)
             cache = self._frame_cache
         buf = cache[1]
         self._num += 1
@@ -369,7 +379,13 @@ class MvCamera(object):
         n = int(prm.nWidth) * int(prm.nHeight)
         if int(prm.nDstBufferSize) < n * 3:
             return 0x80000105
-        for i in range(0, n, 997):                   # เติมบางจุดพอให้สถิติไม่เป็นศูนย์
+        # ภาพปลอมเป็นสีเทาเกือบสม่ำเสมอ ⇒ "แปลง" ด้วยการเติมระดับเดียวกันทั้งภาพ
+        # (memset = เร็วพอที่จะรันได้ทุกเฟรมในเทสต์)
+        # ⚠️ อ่านพิกเซลที่ 1 ไม่ใช่ที่ 0 — พิกเซล (0,0) เป็นจุด "ลาย" ที่สว่างกว่าพื้น
+        #    ถ้าใช้เป็นระดับพื้นจะทำให้ทั้งภาพสว่างเกินจริง (เคยทำให้เทสต์เรื่องแสงเพี้ยน)
+        base = prm.pSrcData[1]
+        ctypes.memset(prm.pDstBuffer, base, n * 3)
+        for i in range(0, n, 4099):                  # คงลายไว้บ้างเพื่อความคม
             v = prm.pSrcData[i]
             prm.pDstBuffer[i * 3] = v
             prm.pDstBuffer[i * 3 + 1] = v
