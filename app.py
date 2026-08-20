@@ -52,6 +52,16 @@ def _auth_fallback():
         "has_perm": lambda *_a, **_k: True,
     }
 
+# Hikrobot industrial camera (GigE / MVS SDK) — แหล่งภาพที่ 4 ของโหมด Can Dent.
+# import แบบกันพลาดด้วยเหตุผลเดียวกับ blueprint ของ Artwork ด้านล่าง: ถ้าโมดูลนี้
+# มีปัญหา (SDK เพี้ยน/ไฟล์เสีย) ต้องกระทบแค่แท็บใหม่ ไม่ใช่ล้มทั้งแอป.
+# หมายเหตุ: hik_camera **ไม่ import MVS SDK ตอน import** จึงปลอดภัยบนเครื่องที่ไม่มี MVS.
+try:
+    import hik_camera
+except Exception as _hik_err:                       # pragma: no cover
+    hik_camera = None
+    logger.error(f"Hikrobot camera module unavailable: {_hik_err}")
+
 # Artwork Proof Check (ตรวจสะกดคำ/ตัวเลขใน artwork ก่อนพิมพ์).
 # Fully isolated blueprint — a failure here only disables that one mode
 # and can never break Can Dent / Label / Label Paper.
@@ -800,6 +810,208 @@ def api_scan_cameras():
     return jsonify({"cameras": cameras})
 
 
+# ── Hikrobot (GigE) — endpoint ของแท็บ "กล้องอุตสาหกรรม" ───────────────
+# ทุกเส้นทางในบล็อกนี้แตะเฉพาะกล้อง Hikrobot: ไม่มีตัวไหนเรียก Camera/StreamCamera
+# หรือแก้สถานะของโหมด USB/RTSP/STREAM/Snapshot เลย.
+
+def _hik_unavailable():
+    """ตอบเหมือนกันทุก endpoint เมื่อโมดูลโหลดไม่ได้ — บอกสาเหตุ ไม่ใช่ 500 เปล่า ๆ."""
+    return jsonify({
+        "status": "error",
+        "message": "โมดูลกล้อง Hikrobot โหลดไม่ได้ (ดู log ตอนเริ่มระบบ)",
+    }), 500
+
+
+def _live_hik_camera():
+    """กล้อง Hikrobot ที่กำลังสตรีมอยู่ (None ถ้าโหมดปัจจุบันไม่ใช่กล้องนี้)."""
+    cam = camera                                    # snapshot ตัวแปร global ครั้งเดียว
+    if hik_camera is None or cam is None:
+        return None
+    if isinstance(cam, hik_camera.HikCamera) and cam.is_initialized:
+        return cam
+    return None
+
+
+@app.route('/api/camera/hik/scan', methods=['GET'])
+def api_hik_scan():
+    """รายชื่อกล้อง Hikrobot + สถานะ SDK (ไม่เปิดกล้อง)."""
+    if hik_camera is None:
+        return _hik_unavailable()
+    status = hik_camera.sdk_status()
+    devices, err = ([], status.get("hint"))
+    if status["available"]:
+        devices, err = hik_camera.scan_devices()
+    live = _live_hik_camera()
+    return jsonify({
+        "status": "ok",
+        "sdk": status,
+        "devices": devices,
+        "error": err,
+        "saved": hik_camera.load_settings(),
+        "active_source": live.camera_index if live else None,
+    })
+
+
+@app.route('/api/camera/hik/params', methods=['GET'])
+@_serialized
+def api_hik_params_get():
+    """
+    ค่า + ช่วงที่ตั้งได้จริงของกล้อง. ถ้ากำลังสตรีมอยู่จะอ่านจากกล้องตัวที่เปิดอยู่;
+    ถ้ายังไม่ได้กด Start จะเปิดกล้องชั่วคราวแบบไม่สตรีมเพื่ออ่านค่า แล้วปิดทันที.
+    """
+    if hik_camera is None:
+        return _hik_unavailable()
+    live = _live_hik_camera()
+    if live is not None:
+        return jsonify({"status": "ok", "live": True, **live.describe()})
+    if detection_active:
+        return jsonify({
+            "status": "error",
+            "message": "ระบบกำลังตรวจด้วยแหล่งภาพอื่นอยู่ — หยุดก่อนจึงจะอ่านค่ากล้องได้",
+        }), 409
+    data, err = hik_camera.probe_params(request.args.get("source") or None)
+    if data is None:
+        return jsonify({"status": "error", "message": err or "อ่านค่ากล้องไม่สำเร็จ"}), 500
+    return jsonify({"status": "ok", "live": False, "saved": hik_camera.load_settings(), **data})
+
+
+@app.route('/api/camera/hik/params', methods=['POST'])
+def api_hik_params_set():
+    """
+    ตั้งค่ากล้อง. ถ้ากล้องกำลังสตรีมจะตั้งให้ทันที (ค่าที่ GenICam ล็อกระหว่างสตรีม
+    จะถูกตั้งในช่วงหยุด-เริ่มสตรีมสั้น ๆ ให้เอง) และบันทึกไว้ใช้รอบถัดไป.
+    ถ้ายังไม่ได้เริ่มกล้อง = บันทึกอย่างเดียว แล้วจะถูกใช้ตอนกด Start.
+    """
+    if hik_camera is None:
+        return _hik_unavailable()
+    body = request.get_json(silent=True) or {}
+    params = body.get("params")
+    if not isinstance(params, dict) or not params:
+        return jsonify({"status": "error", "message": "ต้องส่ง params เป็น object"}), 400
+
+    live = _live_hik_camera()
+    applied, failed = {}, {}
+    if live is not None:
+        result = live.set_params(params)
+        applied, failed = result.get("applied", {}), result.get("failed", {})
+
+    saved_ok = None
+    if body.get("save", True):
+        store = hik_camera.load_settings()
+        # เก็บเฉพาะคีย์ที่ระบบรู้จัก — กัน payload แปลกปลอมเข้าไปอยู่ในไฟล์ค่าตั้ง
+        for k, v in params.items():
+            if k in hik_camera._SPEC_BY_KEY or k == "roi_center":
+                store[k] = v
+        saved_ok = hik_camera.save_settings(store)
+
+    return jsonify({
+        "status": "ok",
+        "live": live is not None,
+        "applied": applied,
+        "failed": failed,
+        "saved": saved_ok,
+        "params": live.get_params() if live is not None else None,
+        "stats": live.stats() if live is not None else None,
+    })
+
+
+@app.route('/api/camera/hik/status', methods=['GET'])
+def api_hik_status():
+    """สถิติสด: fps จริง · เฟรม/แพ็กเก็ตที่หาย · ความสว่าง · การเก็บชุดข้อมูล."""
+    if hik_camera is None:
+        return _hik_unavailable()
+    live = _live_hik_camera()
+    if live is None:
+        return jsonify({"status": "ok", "active": False})
+    return jsonify({"status": "ok", "active": True,
+                    "identity": live.identity, "stats": live.stats()})
+
+
+@app.route('/api/camera/hik/dataset', methods=['POST'])
+def api_hik_dataset():
+    """เปิด/ปิดการเก็บภาพความละเอียดเต็มไว้เทรน (ไม่กระทบผลตรวจ/การนับ)."""
+    if hik_camera is None:
+        return _hik_unavailable()
+    live = _live_hik_camera()
+    if live is None:
+        return jsonify({"status": "error",
+                        "message": "ต้องเริ่มกล้องอุตสาหกรรมก่อน (กด Start Detection)"}), 409
+    body = request.get_json(silent=True) or {}
+    enabled = bool(body.get("enabled", False))
+    if not enabled:
+        return jsonify({"status": "ok", "enabled": False, "dataset": live.stop_dataset()})
+
+    def _num(key, default, lo, hi):
+        try:
+            return max(lo, min(hi, int(body.get(key, default))))
+        except (TypeError, ValueError):
+            return default
+
+    status = live.start_dataset(
+        max_frames=_num("max_frames", getattr(config, "HIK_DATASET_MAX_FRAMES", 2000),
+                        1, 200000),
+        every_n=_num("every_n", 1, 1, 100),
+        duration_s=_num("duration_s", 0, 0, 3600),
+    )
+    if status.get("error") and not status.get("active"):
+        return jsonify({"status": "error", "message": status["error"],
+                        "dataset": status}), 507
+    return jsonify({"status": "ok", "enabled": True, "dataset": status})
+
+
+@app.route('/api/camera/hik/shot', methods=['POST'])
+def api_hik_shot():
+    """
+    ถ่าย **1 เฟรมความละเอียดเต็ม** จากกล้องที่กำลังสตรีม แล้วตรวจที่ imgsz สูง.
+    ต่างจากภาพสดตรงที่ไม่ถูกย่อ (HIK_LIVE_MAX_WIDTH) จึงใช้ประเมินว่าโมเดลได้อะไร
+    เพิ่มจากรายละเอียด 5MP. **ไม่แตะการนับ/DB** — เป็นเครื่องมือทดสอบล้วน ๆ
+    (คนละเส้นทางกับ /api/snapshot ซึ่งใช้ viewfinder ของกล้อง USB).
+    """
+    if hik_camera is None:
+        return _hik_unavailable()
+    if detector is None or detector.model is None:
+        return jsonify({"status": "error", "message": "ยังไม่ได้โหลดโมเดล"}), 400
+    live = _live_hik_camera()
+    if live is None:
+        return jsonify({"status": "error",
+                        "message": "ต้องเริ่มกล้องอุตสาหกรรมก่อน (กด Start Detection)"}), 409
+    try:
+        frame = live.snap_full(timeout=3.0)
+        if frame is None:
+            return jsonify({
+                "status": "error",
+                "message": "ไม่ได้ภาพจากกล้องภายในเวลาที่รอ — ปฏิเสธการตัดสินแทนที่จะใช้ภาพเก่า",
+            }), 500
+
+        imgsz = _snapshot_imgsz((request.get_json(silent=True) or {}).get("imgsz"))
+        t0 = time.perf_counter()
+        detections = detector.detect(frame, imgsz=imgsz)
+        infer_ms = round((time.perf_counter() - t0) * 1000.0, 1)
+
+        dents = [d for d in detections if d["class_name"] not in _NON_DEFECT_CLASSES]
+        disp_frame, disp_dets = _scale_for_display(frame, detections, _SNAPSHOT_DISPLAY_MAX_W)
+        annotated = detector.draw_detections(disp_frame, disp_dets)
+        ret, buffer = cv2.imencode('.jpg', annotated, _JPEG_PARAMS)
+        if not ret:
+            return jsonify({"status": "error", "message": "เข้ารหัสภาพไม่สำเร็จ"}), 500
+
+        cap_h, cap_w = frame.shape[:2]
+        return jsonify({
+            "status": "ok",
+            "image": "data:image/jpeg;base64," + base64.b64encode(buffer.tobytes()).decode("ascii"),
+            "verdict": "ng" if dents else "ok",
+            "dent_count": len(dents),
+            "max_confidence": round(max((d["confidence"] for d in dents), default=0.0), 2),
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "capture_size": f"{cap_w}x{cap_h}",
+            "infer_ms": infer_ms,
+            "infer_imgsz": imgsz,
+        })
+    except Exception as e:
+        logger.error(f"Hikrobot shot failed: {e}", exc_info=True)
+        return jsonify({"status": "error", "message": f"ถ่ายภาพไม่สำเร็จ: {e}"}), 500
+
+
 @app.route('/api/detection/start', methods=['POST'])
 @_serialized
 def start_detection():
@@ -838,7 +1050,16 @@ def start_detection():
     # Initialize camera on demand. The STREAM sentinel uses a virtual camera fed
     # by frames pushed from the browser (/api/stream/push); everything else opens
     # a real USB/RTSP camera exactly as before.
-    if camera_index == config.STREAM_SOURCE_SENTINEL:
+    if hik_camera is not None and hik_camera.is_hik_source(camera_index):
+        # กล้องอุตสาหกรรม Hikrobot (GigE). HikCamera มีสัญญาเดียวกับ Camera
+        # (initialize/read_frame/release) ⇒ capture_loop/inference_loop ไม่ต้องรู้จักมัน.
+        camera = hik_camera.HikCamera(camera_index=camera_index)
+        if not camera.initialize():
+            msg = camera.last_error or "เปิดกล้องอุตสาหกรรมไม่สำเร็จ"
+            camera = None
+            logger.error(f"Hikrobot camera open failed: {msg}")
+            return jsonify({"status": "error", "message": msg}), 500
+    elif camera_index == config.STREAM_SOURCE_SENTINEL:
         camera = StreamCamera(camera_index=camera_index)
         camera.initialize()  # never fails — just arms the push buffer
     else:

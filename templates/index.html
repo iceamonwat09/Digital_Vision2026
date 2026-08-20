@@ -49,6 +49,7 @@
                     <button id="tabUsb"  class="src-tab src-tab-active" onclick="switchSource('usb')">กล้อง USB</button>
                     <button id="tabRtsp" class="src-tab" onclick="switchSource('rtsp')">กล้อง IP (RTSP)</button>
                     <button id="tabStream" class="src-tab" onclick="switchSource('stream')">สตรีม</button>
+                    <button id="tabHik" class="src-tab" onclick="switchSource('hik')">กล้องอุตสาหกรรม</button>
                 </div>
 
                 <!-- USB panel -->
@@ -88,6 +89,69 @@
                     </div>
                     <p class="control-hint" id="streamHint">ใช้กล้องของเครื่องที่เปิดหน้านี้ (ต้องเข้าผ่าน HTTPS หรือ localhost)</p>
                 </div>
+
+                <!-- HIKROBOT panel (กล้องอุตสาหกรรม GigE ผ่าน MVS SDK) -->
+                <div id="panelHik" class="camera-panel" style="display:none">
+                    <div class="camera-select-group">
+                        <select id="hikCameraSelect" class="camera-select" title="เลือกกล้องอุตสาหกรรม" disabled>
+                            <option value="" disabled selected>กดค้นหาเพื่อหากล้อง…</option>
+                        </select>
+                        <button id="refreshHikBtn" class="btn btn-icon" title="ค้นหากล้อง">&#x1F504;</button>
+                    </div>
+                    <p class="control-hint" id="hikHint">⚠️ ต้องปิดโปรแกรม MVS ก่อน — GigE เปิดได้ทีละโปรแกรม</p>
+
+                    <div id="hikRoiPresets" class="hik-presets">
+                        <span class="hik-presets-label">ROI:</span>
+                        <button class="btn btn-mini" data-roi="full" type="button">เต็มเฟรม</button>
+                        <button class="btn btn-mini" data-roi="half" type="button">ครึ่งกลาง</button>
+                        <button class="btn btn-mini" data-roi="quarter" type="button">¼ กลาง</button>
+                    </div>
+                    <p class="control-hint hik-presets-note">
+                        ROI เล็กลง = เร็วขึ้นมาก และฝากระป๋องกินเฟรมมากขึ้น (วัดจริง: เต็มเฟรม 23.6 fps · ครึ่งกลาง 69 fps)
+                    </p>
+
+                    <details id="hikSettings" class="hik-box">
+                        <summary>⚙️ ตั้งค่ากล้อง (ช่วงค่ามาจากตัวกล้องจริง)</summary>
+                        <div id="hikParams" class="hik-params"></div>
+                        <div class="hik-actions">
+                            <button id="hikApplyBtn" class="btn btn-secondary btn-mini" type="button">💾 ใช้ค่า + บันทึก</button>
+                            <button id="hikReloadBtn" class="btn btn-mini" type="button">↻ อ่านค่าจากกล้อง</button>
+                        </div>
+                        <div id="hikApplyMsg" class="control-hint" style="text-align:left"></div>
+                    </details>
+
+                    <label class="hik-check">
+                        <input type="checkbox" id="hikDatasetToggle" disabled>
+                        💾 เก็บภาพชุดข้อมูล (ความละเอียดเต็ม — ไว้เทรน/ตรวจสอบภายหลัง)
+                    </label>
+                    <div class="hik-ds-opts">
+                        <label>นาน <input id="hikDsDuration" type="number" min="0" max="3600" value="60"> วิ</label>
+                        <label>ทุก <input id="hikDsEveryN" type="number" min="1" max="100" value="1"> เฟรม</label>
+                        <label>สูงสุด <input id="hikDsMax" type="number" min="1" max="200000" value="5000"> ภาพ</label>
+                    </div>
+                    <p class="control-hint hik-ds-note">
+                        เก็บที่ <b>อัตรากล้อง</b> (ไม่ขึ้นกับความเร็วโมเดล) — นี่คือวิธีทดสอบกับไลน์จริง:
+                        เก็บภาพทุกใบที่วิ่งผ่าน แล้วเอาไปวัดผลทีหลังด้วย <code>hik_offline_eval.py</code>
+                    </p>
+
+                    <div class="hik-shot-row">
+                        <select id="hikShotImgsz" class="camera-select hik-imgsz" title="ขนาดภาพที่โมเดลตรวจ">
+                            <option value="1280" selected>1280 · ละเอียดสุด</option>
+                            <option value="960">960 · กลาง</option>
+                            <option value="480">480 · เท่าโหมด live</option>
+                        </select>
+                        <button id="hikShotBtn" class="btn btn-secondary" type="button" disabled>📸 ถ่าย 1 เฟรม (เต็มความละเอียด)</button>
+                    </div>
+                    <p class="control-hint">
+                        ภาพสดถูกย่อก่อนส่งเข้าโมเดลเพื่อความลื่น — ปุ่มนี้ใช้ภาพ <b>เต็มความละเอียด</b> ตรวจครั้งเดียว
+                        (ไม่นับ ไม่บันทึกลงฐานข้อมูล)
+                    </p>
+                    <p class="control-hint hik-warn">
+                        ⚠️ โหมดนี้เป็น <b>free-running สำหรับทดสอบ</b> — การนับ “1 กระป๋อง = 1 การตรวจ”
+                        ใช้ช่องว่างระหว่างใบเป็นตัวแบ่ง จึงเชื่อถือได้เฉพาะกับกระป๋องที่วางนิ่งหรือเคลื่อนช้า
+                        ยังไม่ใช่โหมดสำหรับไลน์ผลิตจริง (ต้องใช้ทริกเกอร์จาก photo-eye)
+                    </p>
+                </div>
             </section>
 
             <!-- ขั้นที่ 3: เริ่ม/หยุด -->
@@ -125,6 +189,8 @@
                      one). Values come from /api/detection/status → perf and are
                      refreshed by the existing 1s status poll. USB tab only. -->
                 <div id="liveStats" style="display:none">—</div>
+                <!-- Hikrobot: แถบสถิติสด (fps จริง/เฟรมหาย/ความสว่าง) — แท็บนี้เท่านั้น -->
+                <div id="hikStats" style="display:none">—</div>
             </div>
 
             <div class="stats-row">
@@ -228,7 +294,60 @@
     </div>
 </div>
 
+<!-- ── ผลการ "ถ่าย 1 เฟรม" ของกล้องอุตสาหกรรม (แยกจาก snapshot ของกล้อง USB) ── -->
+<div id="hikShotOverlay" class="snap-overlay" style="display:none">
+    <div class="snap-modal hik-shot-modal">
+        <div class="snap-modal-head">
+            <span>ผลตรวจจากภาพเต็มความละเอียด (กล้องอุตสาหกรรม)</span>
+            <button id="hikShotClose" class="snap-x" title="ปิด">&times;</button>
+        </div>
+        <div class="hik-shot-body">
+            <img id="hikShotImg" alt="ภาพจากกล้องอุตสาหกรรมพร้อมกรอบผลตรวจ">
+            <div id="hikShotVerdict" class="hik-shot-verdict">—</div>
+            <div id="hikShotMeta" class="control-hint"></div>
+        </div>
+    </div>
+</div>
+
 <style>
+    /* ── กล้องอุตสาหกรรม (Hikrobot) ───────────────────────────── */
+    .hik-presets { display: flex; align-items: center; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
+    .hik-presets-label { font-size: 13px; color: #475569; }
+    .hik-presets-note { text-align: left !important; margin-top: 4px !important; }
+    .btn-mini { padding: 4px 10px; font-size: 12px; }
+    .hik-box { margin-top: 10px; border: 1px solid #e2e8f0; border-radius: 8px; padding: 8px 10px; }
+    .hik-box > summary { cursor: pointer; font-size: 13px; color: #334155; font-weight: 600; }
+    .hik-params { margin-top: 10px; }
+    .hik-ident { font-size: 12px; color: #0f172a; background: #f1f5f9; border-radius: 6px;
+                 padding: 4px 8px; margin-bottom: 8px; word-break: break-all; }
+    .hik-row { display: grid; grid-template-columns: 1fr 96px 74px; align-items: center;
+               gap: 6px; margin-bottom: 6px; }
+    .hik-label { font-size: 12px; color: #475569; }
+    .hik-input { width: 100%; font-size: 12px; padding: 3px 6px;
+                 border: 1px solid #cbd5e1; border-radius: 6px; }
+    .hik-row input[type="checkbox"].hik-input { width: 16px; height: 16px; justify-self: start; }
+    .hik-range { font-size: 10px; color: #94a3b8; text-align: right; white-space: nowrap; }
+    .hik-note { font-size: 11px; color: #64748b; margin-top: 6px; }
+    .hik-bad { color: #dc2626; }
+    .hik-actions { display: flex; gap: 6px; margin-top: 8px; }
+    .hik-check { display: flex; align-items: center; gap: 6px; margin-top: 10px;
+                 font-size: 13px; color: #475569; cursor: pointer; }
+    .hik-ds-opts { display: flex; gap: 8px; margin-top: 6px; flex-wrap: wrap;
+                   font-size: 12px; color: #475569; }
+    .hik-ds-opts input { width: 62px; font-size: 12px; padding: 2px 4px;
+                         border: 1px solid #cbd5e1; border-radius: 5px; }
+    .hik-ds-note { text-align: left !important; line-height: 1.5; }
+    .hik-shot-row { display: flex; gap: 6px; margin-top: 10px; align-items: center; }
+    .hik-imgsz { flex: 0 0 150px; }
+    .hik-shot-row .btn { flex: 1; }
+    .hik-warn { text-align: left !important; color: #b45309 !important; line-height: 1.5; }
+    .hik-shot-modal { width: min(900px, 96vw); }
+    .hik-shot-body { padding: 14px; overflow: auto; }
+    .hik-shot-body img { display: block; max-width: 100%; border-radius: 8px; }
+    .hik-shot-verdict { margin-top: 10px; font-size: 18px; font-weight: 700; text-align: center; }
+    .hik-shot-verdict.ok { color: #16a34a; }
+    .hik-shot-verdict.ng { color: #dc2626; }
+
     .snap-overlay {
         position: fixed; inset: 0; z-index: 1000;
         background: rgba(15, 23, 42, .72);
@@ -323,7 +442,7 @@
     #streamVideo { display: block; width: 100%; height: auto; }
     /* size/position are set per-frame in JS to match the <video> exactly */
     #streamOverlay { position: absolute; left: 0; top: 0; pointer-events: none; }
-    #streamStats, #liveStats {
+    #streamStats, #liveStats, #hikStats {
         position: absolute; left: 10px; top: 10px; z-index: 2;
         background: rgba(15, 23, 42, .65); color: #e2e8f0;
         font: 600 11px/1.4 ui-monospace, monospace;
@@ -334,6 +453,8 @@
 {% endblock %}
 
 {% block extra_js %}
+<!-- แผงกล้องอุตสาหกรรม: โมดูลปิด เปิดออกมาแค่ window.HikUI (ดูเหตุผลในหัวไฟล์) -->
+<script src="{{ url_for('static', filename='js/hik_camera.js') }}"></script>
 <script>
     const startBtn        = document.getElementById('startBtn');
     const stopBtn         = document.getElementById('stopBtn');
@@ -367,9 +488,14 @@
         document.getElementById('panelUsb').style.display    = src === 'usb'    ? '' : 'none';
         document.getElementById('panelRtsp').style.display   = src === 'rtsp'   ? '' : 'none';
         document.getElementById('panelStream').style.display = src === 'stream' ? '' : 'none';
+        document.getElementById('panelHik').style.display    = src === 'hik'    ? '' : 'none';
         document.getElementById('tabUsb').classList.toggle('src-tab-active',    src === 'usb');
         document.getElementById('tabRtsp').classList.toggle('src-tab-active',   src === 'rtsp');
         document.getElementById('tabStream').classList.toggle('src-tab-active', src === 'stream');
+        document.getElementById('tabHik').classList.toggle('src-tab-active',    src === 'hik');
+        // แถบสถิติของกล้องอุตสาหกรรมมีความหมายเฉพาะบนแท็บของมันเอง
+        if (src !== 'hik' && window.HikUI) { HikUI.stopPolling(); }
+        if (src === 'hik' && window.HikUI) { HikUI.onShow(); }
         // Lazily enumerate browser cameras the first time STREAM is selected, so
         // we never prompt for camera permission unless the user actually wants it.
         if (src === 'stream' && streamCameraSelect.dataset.scanned !== '1') {
@@ -849,6 +975,9 @@
                 modelSelect.disabled       = isActive || modelSelect.options.length === 0;
                 refreshModelsBtn.disabled  = isActive;
                 Array.from(modeTabs.children).forEach(b => b.disabled = isActive);
+                // กล้องอุตสาหกรรม: ล็อกการเลือกกล้อง/ค้นหาระหว่างตรวจ และเปิดปุ่ม
+                // "ถ่าย 1 เฟรม"/"เก็บชุดข้อมูล" เฉพาะตอนกล้องทำงานอยู่จริง
+                if (window.HikUI && currentSource === 'hik') { HikUI.setActive(isActive); }
 
                 // Snapshot is exclusive with live streaming (shared camera = slow),
                 // so it's only available when detection is stopped.
@@ -897,6 +1026,11 @@
             const val = cameraSelect.value;
             if (val === '' || val === null) { alert('กรุณาเลือกกล้องก่อน'); return; }
             cameraIndex = parseInt(val);
+        } else if (currentSource === 'hik') {
+            // ค่าเป็นสตริง "hik:<serial>" — ฝั่งเซิร์ฟเวอร์ใช้ค่านี้เลือกกล้องเอง
+            const src = window.HikUI ? HikUI.selectedSource() : null;
+            if (!src) { alert('กรุณาเลือกกล้องอุตสาหกรรมก่อน (กดปุ่มค้นหา)'); return; }
+            cameraIndex = src;
         } else {
             const url = rtspUrlInput.value.trim();
             if (!url) { alert('กรุณาใส่ RTSP URL ก่อน'); return; }
@@ -1284,6 +1418,7 @@
     });
 
     // ── Init ──────────────────────────────────────────
+    if (window.HikUI) { HikUI.init(); }
     initModes();
     scanCameras();
     updateStatus();
