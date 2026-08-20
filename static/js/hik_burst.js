@@ -24,7 +24,10 @@
         offset: 0,
         sel: {},             // ไฟล์ที่ติ๊กไว้
         autoTop: 12,
+        fps: null,
+        megapixels: null,
         pollTimer: null,
+        shapeTimer: null,
         jobTimer: null,
         pending: null        // ขั้นถัดไปที่ต้องทำเมื่องานปัจจุบันจบ
     };
@@ -49,6 +52,58 @@
     }
 
     function gb(mb) { return mb ? (mb / 1024).toFixed(1) + ' GB' : '—'; }
+
+    // ── ตัวประมาณ "จะได้กี่ภาพ" ก่อนกดถ่าย ───────────────────
+    // ผู้ใช้ตั้งเวลาเป็นวินาที แต่สิ่งที่เขาต้องแบกคือ **จำนวนภาพกับเมกะไบต์**
+    // ⇒ คำนวณจาก fps ที่ **วัดได้จริง** ของกล้อง (ไม่ใช่ตัวเลขในสเปก) ให้เห็นก่อน
+    var EST_KB_PER_MP = 190;                  // วัดจากไฟล์จริง: JPEG q95 ≈ 0.19 MB ต่อล้านพิกเซล
+
+    function refreshEstimate() {
+        var el = $('hikBurstEst');
+        if (!el) { return; }
+        var secs = Math.max(1, Math.min(60, num('hikBurstSeconds', 10)));
+        var every = Math.max(1, Math.min(20, num('hikBurstEveryN', 1)));
+        markPresets(every);
+        var fps = state.fps, mp = state.megapixels;
+        if (!fps) {
+            el.className = 'hik-burst-est';
+            el.innerHTML = 'กด Start Detection ก่อน แล้วระบบจะบอกว่าจะได้กี่ภาพ';
+            return;
+        }
+        var shots = Math.round(fps * secs / every);
+        var mb = mp ? Math.round(shots * mp * EST_KB_PER_MP / 1024) : null;
+        var gap = every / fps;                 // เวลาระหว่างภาพที่เก็บจริง
+        var warn = mb !== null && mb > 400;
+        el.className = 'hik-burst-est' + (warn ? ' warn' : '');
+        el.innerHTML = 'จะได้ราว <b>' + shots + '</b> ภาพ'
+            + (mb !== null ? ' · <b>' + mb + '</b> MB' : '')
+            + ' · ห่างกัน <b>' + Math.round(gap * 1000) + '</b> ms'
+            + (every > 1 ? ' (เก็บ 1 ใน ' + every + ' เฟรม)' : '')
+            + (warn ? '<br>⚠️ ไฟล์เยอะ — เพิ่ม “เก็บ 1 ใน N” เพื่อลดจำนวนภาพ '
+                + 'โดยที่ <b>ความเบลอของแต่ละภาพไม่เปลี่ยน</b>' : '');
+    }
+
+    function markPresets(every) {
+        Array.prototype.forEach.call(
+            document.querySelectorAll('#hikEveryPresets [data-every]'), function (b) {
+                b.classList.toggle('on', Number(b.dataset.every) === every);
+            });
+    }
+
+    /** อ่าน fps + ขนาดภาพที่กล้องส่งจริง เพื่อให้ตัวประมาณไม่ใช่การเดา */
+    function pollCameraShape() {
+        fetch('/api/camera/hik/status')
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+                if (!d || !d.active || !d.stats) { state.fps = null; return; }
+                state.fps = d.stats.fps || d.stats.fps_avg || null;
+                var size = (d.stats.size || '').split('x');
+                state.megapixels = (size.length === 2)
+                    ? (Number(size[0]) * Number(size[1]) / 1e6) : null;
+            })
+            .catch(function () { /* เงียบได้ — เป็นแค่ตัวประมาณ */ })
+            .finally(refreshEstimate);
+    }
 
     // ── ① ถ่าย ──────────────────────────────────────────────
     function startBurst() {
@@ -159,14 +214,21 @@
     function showJob(job, err) {
         var el = $('hikGalJob');
         if (!el) { return; }
-        if (err) { el.style.display = ''; el.innerHTML = err; return; }
+        if (err) {
+            el.style.display = '';
+            el.className = 'hik-gal-job';
+            el.innerHTML = err;
+            return;
+        }
         if (!job || !job.running) { el.style.display = 'none'; return; }
         var label = job.kind === 'metrics' ? 'กำลังวัดความคม/ความเบลอ' : 'กำลังตรวจด้วยโมเดล';
         var pct = job.total ? Math.round(job.done * 100 / job.total) : 0;
         el.style.display = '';
-        el.innerHTML = '⏳ ' + label + ' · <b>' + job.done + '/' + job.total + '</b> ('
-            + pct + '%) · ' + job.elapsed_s + ' วิ '
-            + '<button class="btn btn-mini" type="button" id="hikJobCancel">ยกเลิก</button>';
+        el.className = 'hik-gal-job';
+        el.innerHTML = '<span>⏳ ' + label + '</span>'
+            + '<span class="hik-progress"><i style="width:' + pct + '%"></i></span>'
+            + '<span><b>' + job.done + '/' + job.total + '</b> · ' + job.elapsed_s + ' วิ</span>'
+            + '<button class="btn btn-secondary btn-sm" type="button" id="hikJobCancel">ยกเลิก</button>';
         var c = $('hikJobCancel');
         if (c) {
             c.addEventListener('click', function () {
@@ -234,19 +296,21 @@
         var box = $('hikGalSessions');
         if (!box) { return; }
         if (!list.length) {
-            box.innerHTML = '<div class="control-hint">ยังไม่มีภาพที่ถ่ายไว้</div>';
+            box.innerHTML = '<div class="hik-empty">ยังไม่มีภาพที่ถ่ายไว้</div>';
             return;
         }
         box.innerHTML = list.map(function (s) {
-            var exp = s.exposure_us ? Math.round(s.exposure_us) + ' µs' : 'exposure ?';
-            var blur = (s.summary && s.summary.blur_px_median !== null
-                && s.summary.blur_px_median !== undefined)
-                ? ' · เบลอ ~' + s.summary.blur_px_median + ' px' : '';
+            var sub = [s.frames + ' ภาพ', s.mb + ' MB',
+                (s.exposure_us ? Math.round(s.exposure_us) + ' µs' : 'exposure ?')];
+            if (s.summary && s.summary.blur_px_median !== null
+                && s.summary.blur_px_median !== undefined) {
+                sub.push('เบลอ ' + s.summary.blur_px_median + ' px');
+            }
             return '<div class="hik-gal-sess' + (s.name === state.session ? ' active' : '')
                 + '" data-name="' + s.name + '">'
                 + '<b>' + (s.started_at || s.name) + (s.name === capturing ? ' 🔴' : '') + '</b>'
-                + '<span>' + s.frames + ' ภาพ · ' + s.mb + ' MB · ' + exp + blur + '</span>'
-                + (s.dropped ? '<span style="color:#dc2626">ทิ้ง ' + s.dropped + ' เฟรม</span>' : '')
+                + '<span class="sub">' + sub.join(' · ') + '</span>'
+                + (s.dropped ? '<span class="drop">⚠ ทิ้ง ' + s.dropped + ' เฟรม</span>' : '')
                 + '</div>';
         }).join('');
         Array.prototype.forEach.call(box.querySelectorAll('[data-name]'), function (el) {
@@ -302,66 +366,111 @@
             });
     }
 
+    function kpi(label, value, unit, tone) {
+        return '<div class="hik-kpi ' + (tone || '') + '">'
+            + '<div class="k">' + label + '</div>'
+            + '<div class="v">' + value + (unit ? ' <span class="u">' + unit + '</span>' : '')
+            + '</div></div>';
+    }
+
+    function blurTone(px) {
+        if (px === null || px === undefined) { return 'muted'; }
+        return px <= 1 ? 'good' : (px <= 3 ? 'warn' : 'bad');
+    }
+
     /**
      * แถบสรุป — ตัวเลขที่ตัดสินว่า "กล้องจับภาพที่ไม่เบลอได้ไหม"
      * ทุกค่าเป็นของที่ **วัดได้จากภาพจริง** ไม่ใช่ค่าที่ตั้งไว้ และค่าที่วัดไม่ได้
      * จะขึ้น "—" ไม่ใช่ตัวเลขที่เดามา
      */
     function renderSummary(d) {
-        var el = $('hikGalSummary');
-        if (!el) { return; }
+        var box = $('hikGalKpis');
+        var note = $('hikGalSummary');
+        var drop = $('hikGalDrop');
+        if (!box || !note) { return; }
         var m = d.meta || {};
         var s = d.summary || {};
-        var head = '<b>' + (d.total || 0) + ' ภาพ</b>'
-            + ' · exposure <b>' + (m.exposure_us ? Math.round(m.exposure_us) + ' µs' : '—') + '</b>'
-            + ' · gain ' + fmt(m.gain_db) + ' dB'
-            + ' · ' + (m.size || '—')
-            + (s.fps_measured ? ' · <b>' + s.fps_measured + ' fps</b> (วัดจากเวลาเฟรมจริง)' : '')
-            + (m.dropped ? ' · <span class="hik-gal-bad">ทิ้ง ' + m.dropped + ' เฟรม</span>' : '');
 
-        if (!d.metrics_ready) {
-            el.innerHTML = head + '<br><span class="hik-gal-warn">ยังไม่ได้วัดความคม — '
-                + 'กดปุ่ม "📏 วัดความคม/ความเบลอ"</span>';
-            return;
+        var cards = [
+            kpi('ภาพในชุด', d.total || 0, 'ภาพ'),
+            kpi('exposure', m.exposure_us ? Math.round(m.exposure_us) : '—', 'µs'),
+            kpi('gain', m.gain_db === undefined || m.gain_db === null ? '—' : fmt(m.gain_db), 'dB'),
+            kpi('ขนาดภาพ', m.size || '—', '')
+        ];
+        if (d.metrics_ready) {
+            cards.push(kpi('ความเร็ววัตถุ',
+                s.speed_px_s ? Math.round(s.speed_px_s) : '—', 'px/วิ',
+                s.speed_px_s ? '' : 'muted'));
+            cards.push(kpi('เบลอ (กลาง)',
+                s.blur_px_median === null || s.blur_px_median === undefined
+                    ? '—' : fmt(s.blur_px_median, 2), 'px', blurTone(s.blur_px_median)));
+            cards.push(kpi('เบลอน้อยสุด',
+                s.blur_px_min === null || s.blur_px_min === undefined
+                    ? '—' : fmt(s.blur_px_min, 2), 'px', blurTone(s.blur_px_min)));
+            cards.push(kpi('exposure ที่เบลอ ≤1px',
+                s.max_exposure_us_1px ? Math.round(s.max_exposure_us_1px) : '—', 'µs',
+                s.max_exposure_us_1px ? '' : 'muted'));
         }
-        var body;
-        if (!s.speed_px_s) {
-            body = '<span class="hik-gal-warn">วัดความเร็วของวัตถุไม่ได้ '
-                + '(พบเฟรมที่มีของเคลื่อนไหว ' + (s.moving_frames || 0) + '/' + s.total_frames + ')'
-                + ' ⇒ บอกระยะเบลอเป็นตัวเลขไม่ได้</span> — '
-                + 'ลองโบกวัตถุให้ผ่านกลางเฟรมและให้ฉากหลังนิ่ง แล้วถ่ายใหม่';
-        } else {
-            var blur = s.blur_px_median;
-            var cls = blur === null || blur === undefined ? ''
-                : (blur <= 1 ? 'hik-gal-good' : (blur <= 3 ? 'hik-gal-warn' : 'hik-gal-bad'));
-            var verdict = blur === null || blur === undefined ? '—'
-                : (blur <= 1 ? 'คม ✅' : (blur <= 3 ? 'พอใช้ ⚠️' : 'เบลอ ❌'));
-            body = 'วัตถุเคลื่อนที่ <b>' + s.speed_px_s + ' px/วินาที</b>'
-                + (s.speed_mm_s ? ' (' + s.speed_mm_s + ' mm/วิ)' : '')
-                + ' ⇒ ที่ exposure นี้ <b class="' + cls + ' big">เบลอ ~'
-                + fmt(blur, 2) + ' พิกเซล</b> · ' + verdict
-                + '<br>เบลอน้อยที่สุดที่จับได้ <b>' + fmt(s.blur_px_min, 2) + ' px</b>'
-                + ' · ภาพที่คมที่สุดคือ <b>' + (s.best_file || '—') + '</b>';
-            if (s.max_exposure_us_1px) {
-                body += '<br>📏 ที่ความเร็วนี้ exposure ต้องไม่เกิน <b>'
-                    + Math.round(s.max_exposure_us_1px) + ' µs</b> จึงจะเบลอ ≤1 px';
-                if (s.light_factor_needed && s.light_factor_needed > 1.2) {
-                    body += '<br>💡 ต้องเพิ่มไฟอีก <b class="hik-gal-bad">~'
-                        + s.light_factor_needed + ' เท่า</b> เพื่อให้ภาพ'
-                        + '<b>สว่างเท่าเดิม</b>ที่ exposure สั้นลง';
-                    if (s.light_factor_usable
-                        && s.light_factor_usable > s.light_factor_needed * 1.2) {
-                        body += ' · และ <b class="hik-gal-bad">~' + s.light_factor_usable
-                            + ' เท่า</b> ถ้าอยากให้สว่างพอใช้งานจริง (~'
-                            + s.target_mean + '/255 — ตอนนี้วัดได้ '
-                            + fmt(s.mean_median) + ')';
-                    }
-                } else if (s.light_factor_needed) {
-                    body += ' ⇒ <b class="hik-gal-good">exposure ปัจจุบันผ่านแล้ว</b>';
-                }
+        box.innerHTML = cards.join('');
+
+        // เฟรมที่ทิ้ง = กระป๋องที่หายไปจากชุดทดสอบ ⇒ ต้องเด่น ห้ามซ่อนในบรรทัดยาว ๆ
+        if (drop) {
+            if (m.dropped) {
+                var total = (m.saved || d.total || 0) + m.dropped;
+                var pct = total ? Math.round(m.dropped * 100 / total) : 0;
+                drop.style.display = '';
+                drop.innerHTML = '⚠️ <b>ทิ้งไป ' + m.dropped + ' เฟรม (' + pct
+                    + '% ของที่กล้องส่งมา)</b> เพราะดิสก์เขียนไม่ทัน — '
+                    + 'เก็บได้จริงแค่ ' + (m.saved || d.total) + ' ภาพ. '
+                    + 'ตั้ง <b>"เก็บ 1 ใน N เฟรม"</b> ให้สูงขึ้น หรือลด ROI '
+                    + 'แล้วถ่ายใหม่ จะได้ภาพที่กระจายทั่วช่วงเวลาแทนที่จะขาดเป็นช่วง ๆ';
+            } else {
+                drop.style.display = 'none';
             }
         }
-        el.innerHTML = head + '<br>' + body;
+
+        if (!d.metrics_ready) {
+            note.className = 'hik-note warn';
+            note.innerHTML = 'ยังไม่ได้วัดความคมของชุดนี้ — กด <b>“📏 วัดความคม/ความเบลอ”</b> '
+                + 'เพื่อให้ระบบคำนวณความเร็วของวัตถุและระยะเบลอจากภาพจริง';
+            return;
+        }
+        if (!s.speed_px_s) {
+            note.className = 'hik-note warn';
+            note.innerHTML = '<b>วัดความเร็วของวัตถุไม่ได้</b> (พบเฟรมที่มีของเคลื่อนไหว '
+                + (s.moving_frames || 0) + '/' + s.total_frames + ') ⇒ บอกระยะเบลอเป็นตัวเลขไม่ได้'
+                + '<br>ให้วัตถุผ่าน<b>กลางเฟรม</b> · ฉากหลังต้องนิ่ง · '
+                + 'วัตถุต้องกินพื้นที่มากกว่า 0.4% แต่ไม่เกิน 80% ของเฟรม แล้วถ่ายใหม่';
+            return;
+        }
+        var blur = s.blur_px_median;
+        var tone = blurTone(blur);
+        var verdict = blur <= 1 ? '✅ คมพอ — กล้องหยุดการเคลื่อนที่ได้ที่ exposure นี้'
+            : (blur <= 3 ? '⚠️ พอใช้ — ยังเห็นรอยเปื้อนจากการเคลื่อนที่'
+                : '❌ เบลอเกินไป — รายละเอียดรอยบุบหายไปกับการเคลื่อนที่');
+        var body = '<b>' + verdict + '</b><br>'
+            + 'วัตถุเคลื่อนที่ <b>' + Math.round(s.speed_px_s) + ' px/วินาที</b>'
+            + (s.speed_mm_s ? ' (' + s.speed_mm_s + ' mm/วิ)' : '')
+            + ' × exposure ' + Math.round(s.exposure_us) + ' µs ⇒ เบลอ <b>'
+            + fmt(blur, 2) + ' พิกเซล</b> · ภาพที่คมที่สุดคือ <b>' + (s.best_file || '—') + '</b>';
+        if (s.max_exposure_us_1px) {
+            body += '<br>📏 ที่ความเร็วนี้ exposure ต้องไม่เกิน <b>'
+                + Math.round(s.max_exposure_us_1px) + ' µs</b> จึงจะเบลอ ≤1 px';
+            if (s.light_factor_needed && s.light_factor_needed > 1.2) {
+                body += ' ⇒ ต้องเพิ่มไฟอีก <b>~' + s.light_factor_needed
+                    + ' เท่า</b> เพื่อให้ภาพ<b>สว่างเท่าเดิม</b>';
+                if (s.light_factor_usable
+                    && s.light_factor_usable > s.light_factor_needed * 1.2) {
+                    body += ' · และ <b>~' + s.light_factor_usable
+                        + ' เท่า</b> ถ้าอยากให้สว่างพอใช้งานจริง (~' + s.target_mean
+                        + '/255 — ตอนนี้วัดได้ ' + fmt(s.mean_median) + ')';
+                }
+            } else if (s.light_factor_needed) {
+                body += ' ⇒ <b>exposure ปัจจุบันผ่านแล้ว</b>';
+            }
+        }
+        note.className = 'hik-note ' + (tone === 'good' ? 'good' : (tone === 'warn' ? 'warn' : 'bad'));
+        note.innerHTML = body;
     }
 
     function badge(r) {
@@ -378,36 +487,42 @@
         return '';
     }
 
+    function kv(label, value, hl) {
+        return '<dt>' + label + '</dt><dd' + (hl ? ' class="hl"' : '') + '>' + value + '</dd>';
+    }
+
     function renderGrid() {
         var grid = $('hikGalGrid');
         if (!grid) { return; }
         var name = state.session;
         if (!state.rows.length) {
-            grid.innerHTML = '<div class="control-hint">ชุดนี้ไม่มีภาพ</div>';
+            grid.innerHTML = '<div class="hik-empty">ชุดนี้ไม่มีภาพ</div>';
             $('hikGalMore').style.display = 'none';
             return;
         }
         var base = '/api/camera/hik/bursts/' + encodeURIComponent(name);
         grid.innerHTML = state.rows.map(function (r) {
+            var tags = badge(r) + kindBadge(r);
             var info = '<div class="hik-card-info">'
-                + '<div>' + r.file + ' ' + badge(r) + ' ' + kindBadge(r) + '</div>'
-                + '<div><span class="k">คะแนนคม</span> ' + fmt(r.sharp, 0)
-                + ' · <span class="k">แกน x/y</span> ' + fmt(r.ratio, 2) + '</div>'
-                + '<div><span class="k">เบลอ</span> '
-                + (r.blur_px === undefined || r.blur_px === null
-                    ? '—' : '<b>' + r.blur_px + ' px</b>')
-                + ' · <span class="k">ความเร็ว</span> '
-                + (r.speed_px_s ? r.speed_px_s + ' px/s' : '—') + '</div>'
-                + '</div>';
+                + '<div class="hik-card-name">' + r.file + '</div>'
+                + '<dl class="hik-kv">'
+                + kv('คะแนนคม', fmt(r.sharp, 0))
+                + kv('แกน x/y', fmt(r.ratio, 2))
+                + kv('เบลอ', (r.blur_px === undefined || r.blur_px === null)
+                    ? '—' : r.blur_px + ' px', true)
+                + kv('ความเร็ว', r.speed_px_s ? Math.round(r.speed_px_s) + ' px/s' : '—')
+                + '</dl></div>';
             return '<div class="hik-card' + (state.sel[r.file] ? ' sel' : '') + '" data-f="' + r.file + '">'
+                + '<div class="hik-shot-wrap">'
+                + '<img loading="lazy" src="' + base + '/thumb/' + r.file + '" '
+                + 'alt="เฟรม ' + r.file + ' จากชุดถ่ายรัว" data-zoom="' + r.file + '">'
                 + '<div class="hik-card-top">'
-                + '<input type="checkbox" data-sel="' + r.file + '"'
+                + '<input type="checkbox" data-sel="' + r.file + '" title="เลือกภาพนี้"'
                 + (state.sel[r.file] ? ' checked' : '') + '>'
                 + '<button class="hik-x" data-del="' + r.file + '" title="ลบภาพนี้">&times;</button>'
                 + '</div>'
-                + '<img loading="lazy" src="' + base + '/thumb/' + r.file + '" '
-                + 'alt="เฟรม ' + r.file + ' จากชุดถ่ายรัว" data-zoom="' + r.file + '">'
-                + info + '</div>';
+                + (tags ? '<div class="hik-card-tags">' + tags + '</div>' : '')
+                + '</div>' + info + '</div>';
         }).join('');
 
         Array.prototype.forEach.call(grid.querySelectorAll('[data-del]'), function (b) {
@@ -436,17 +551,25 @@
         var base = '/api/camera/hik/bursts/' + encodeURIComponent(state.session);
         $('hikFrameImg').src = base + '/frame/' + file + '?annotate=1&roi=1&t=' + Date.now();
         $('hikFrameTitle').textContent = state.session + ' · ' + file;
-        var meta = row ? ('คะแนนคม ' + fmt(row.sharp, 0)
-            + ' · แกน x/y ' + fmt(row.ratio, 2)
-            + ' · ความสว่าง ' + fmt(row.mean)
-            + ' · เลื่อนจากเฟรมก่อน ' + (row.shift_px ? row.shift_px + ' px' : '—')
-            + ' · เบลอ ' + (row.blur_px === undefined || row.blur_px === null
-                ? '—' : row.blur_px + ' px')
-            + (row.roi_src === 'frame'
-                ? ' · ⚠️ วัดจากทั้งเฟรม (ไม่พบวัตถุที่เคลื่อนไหว)'
-                : (row.roi_src === 'moving' ? ' · วัดเฉพาะในกรอบสีฟ้า'
-                    : ' · ยังไม่ได้วัดชุดนี้'))) : '';
-        $('hikFrameMeta').textContent = meta;
+        var kpis = $('hikFrameKpis');
+        if (kpis) {
+            kpis.innerHTML = row ? [
+                kpi('คะแนนคม', fmt(row.sharp, 0), ''),
+                kpi('แกน x/y', fmt(row.ratio, 2), ''),
+                kpi('ความสว่าง', fmt(row.mean), '/255'),
+                kpi('เลื่อนจากเฟรมก่อน', row.shift_px ? row.shift_px : '—', 'px',
+                    row.shift_px ? '' : 'muted'),
+                kpi('เบลอ', (row.blur_px === undefined || row.blur_px === null)
+                    ? '—' : row.blur_px, 'px', blurTone(row.blur_px))
+            ].join('') : '';
+        }
+        $('hikFrameMeta').textContent = row
+            ? (row.roi_src === 'frame'
+                ? '⚠️ ตัวเลขนี้วัดจากทั้งเฟรม เพราะไม่พบวัตถุที่เคลื่อนไหว'
+                : (row.roi_src === 'moving'
+                    ? 'ตัวเลขวัดเฉพาะในกรอบสีฟ้า (บริเวณที่เคลื่อนไหว) ไม่ใช่ทั้งเฟรม'
+                    : 'ยังไม่ได้วัดชุดนี้ — กด “📏 วัดความคม/ความเบลอ” ก่อน'))
+            : '';
         ov.style.display = '';
     }
 
@@ -525,6 +648,20 @@
                     if (state.capturing) { stopBurst(); } else { startBurst(); }
                 });
             }
+            ['hikBurstSeconds', 'hikBurstEveryN'].forEach(function (id) {
+                var el = $(id);
+                if (el) { el.addEventListener('input', refreshEstimate); }
+            });
+            Array.prototype.forEach.call(
+                document.querySelectorAll('#hikEveryPresets [data-every]'), function (btn) {
+                    btn.addEventListener('click', function () {
+                        var inp = $('hikBurstEveryN');
+                        if (inp) { inp.value = btn.dataset.every; }
+                        refreshEstimate();
+                    });
+                });
+            refreshEstimate();
+
             var g = $('hikBurstGalleryBtn');
             if (g) { g.addEventListener('click', function () { openGallery(state.session); }); }
             bindOverlay('hikBurstOverlay', 'hikGalClose');
@@ -581,6 +718,15 @@
         setActive: function (active) {
             var b = $('hikBurstBtn');
             if (b && !state.capturing) { b.disabled = !active; }
+            clearInterval(state.shapeTimer);
+            if (active) {
+                pollCameraShape();
+                // fps ขยับตาม ROI/exposure ที่ผู้ใช้แก้ระหว่างทาง ⇒ ตัวประมาณต้องตามด้วย
+                state.shapeTimer = setInterval(pollCameraShape, 4000);
+            } else {
+                state.fps = null;
+                refreshEstimate();
+            }
         }
     };
 })();

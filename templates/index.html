@@ -150,11 +150,18 @@
                         <div class="hik-ds-opts">
                             <label><span>นาน (วินาที)</span>
                                 <input id="hikBurstSeconds" type="number" min="1" max="60" value="10"></label>
-                            <label><span>ทุกกี่เฟรม</span>
+                            <label><span>เก็บ 1 ใน (เฟรม)</span>
                                 <input id="hikBurstEveryN" type="number" min="1" max="20" value="1"></label>
                         </div>
+                        <div class="hik-every-presets" id="hikEveryPresets">
+                            <button type="button" data-every="1">ทุกเฟรม</button>
+                            <button type="button" data-every="3">1 ใน 3</button>
+                            <button type="button" data-every="7">1 ใน 7</button>
+                            <button type="button" data-every="14">1 ใน 14</button>
+                        </div>
+                        <div id="hikBurstEst" class="hik-burst-est">—</div>
                         <button id="hikBurstBtn" class="btn btn-secondary btn-block" type="button" disabled>🎬 เริ่มถ่ายรัว</button>
-                        <button id="hikBurstGalleryBtn" class="btn btn-mini btn-block" type="button">🖼️ ภาพที่ถ่ายไว้ / ลบภาพ</button>
+                        <button id="hikBurstGalleryBtn" class="btn btn-secondary btn-block" type="button">🖼️ ภาพที่ถ่ายไว้ / ลบภาพ</button>
                         <div id="hikBurstMsg" class="control-hint"></div>
                     </div>
                     <p class="control-hint">เก็บที่ <b>อัตรากล้อง</b> แล้ว <b>ตรวจทีหลัง</b> —
@@ -337,27 +344,30 @@
                 <div id="hikGalDisk" class="hik-gal-disk"></div>
             </aside>
             <section class="hik-gal-main">
-                <div id="hikGalSummary" class="hik-gal-summary">เลือกชุดภาพทางซ้าย</div>
+                <div id="hikGalKpis" class="hik-kpis"></div>
+                <div id="hikGalSummary" class="hik-note info">เลือกชุดภาพทางซ้าย</div>
+                <div id="hikGalDrop" class="hik-note bad" style="display:none"></div>
                 <div class="hik-gal-bar">
-                    <label>เรียงตาม
-                        <select id="hikGalSort" class="camera-select">
-                            <option value="sharp" selected>คมที่สุดก่อน</option>
-                            <option value="blur">เบลอน้อยที่สุดก่อน</option>
-                            <option value="name">ลำดับเวลา</option>
-                        </select>
-                    </label>
-                    <button id="hikGalMetricsBtn" class="btn btn-mini" type="button">📏 วัดความคม/ความเบลอ</button>
-                    <button id="hikGalDetectTopBtn" class="btn btn-mini" type="button">🔍 ตรวจ 12 ใบที่คมสุด</button>
-                    <button id="hikGalDetectAllBtn" class="btn btn-mini" type="button">🔍 ตรวจทั้งชุด</button>
-                    <span class="hik-gal-spacer"></span>
-                    <button id="hikGalSelAll" class="btn btn-mini" type="button">☑ เลือกทั้งหน้า</button>
-                    <button id="hikGalDelSel" class="btn btn-mini btn-danger-mini" type="button">🗑 ลบที่เลือก</button>
-                    <button id="hikGalDelAll" class="btn btn-mini btn-danger-mini" type="button">🗑 ลบทั้งชุด</button>
+                    <select id="hikGalSort" class="camera-select" title="เรียงลำดับภาพ">
+                        <option value="sharp" selected>เรียง: คมที่สุดก่อน</option>
+                        <option value="blur">เรียง: เบลอน้อยที่สุดก่อน</option>
+                        <option value="name">เรียง: ตามเวลา</option>
+                    </select>
+                    <div class="hik-gal-group">
+                        <button id="hikGalMetricsBtn" class="btn btn-secondary btn-sm" type="button">📏 วัดความคม/ความเบลอ</button>
+                        <button id="hikGalDetectTopBtn" class="btn btn-secondary btn-sm" type="button">🔍 ตรวจ 12 ใบที่คมสุด</button>
+                        <button id="hikGalDetectAllBtn" class="btn btn-secondary btn-sm" type="button">🔍 ตรวจทั้งชุด</button>
+                    </div>
+                    <div class="hik-gal-group right">
+                        <button id="hikGalSelAll" class="btn btn-secondary btn-sm" type="button">☑ เลือกทั้งหน้า</button>
+                        <button id="hikGalDelSel" class="btn btn-danger-soft btn-sm" type="button">🗑 ลบที่เลือก</button>
+                        <button id="hikGalDelAll" class="btn btn-danger-soft btn-sm" type="button">🗑 ลบทั้งชุด</button>
+                    </div>
                 </div>
                 <div id="hikGalJob" class="hik-gal-job" style="display:none"></div>
                 <div id="hikGalGrid" class="hik-gal-grid"></div>
                 <div id="hikGalMore" class="hik-gal-more" style="display:none">
-                    <button id="hikGalMoreBtn" class="btn btn-mini" type="button">โหลดเพิ่ม</button>
+                    <button id="hikGalMoreBtn" class="btn btn-secondary btn-sm" type="button">โหลดเพิ่ม</button>
                 </div>
             </section>
         </div>
@@ -373,6 +383,7 @@
         </div>
         <div class="hik-frame-body">
             <img id="hikFrameImg" alt="ภาพเฟรมเดียวจากชุดถ่ายรัว">
+            <div id="hikFrameKpis" class="hik-kpis"></div>
             <div id="hikFrameMeta" class="control-hint"></div>
         </div>
     </div>
@@ -460,94 +471,216 @@
         border: 1px solid #cbd5e1; border-radius: 6px;
     }
 
-    /* ── ถ่ายรัว: แผงในแถบข้าง ── */
+    /* ══ ถ่ายรัว: แผงในแถบข้าง ══════════════════════════════════
+       ใช้โทเคนของหน้าหลัก (--blue / --gray-* / --radius / --shadow-*)
+       ทั้งหมด เพื่อให้แท็บนี้เป็นส่วนหนึ่งของหน้าเดียวกัน ไม่ใช่ของแปะเพิ่ม */
     .hik-burst-box {
-        margin-top: 12px; padding: 10px; border: 1px solid #e2e8f0;
-        border-radius: 8px; background: #f8fafc;
+        margin-top: 12px; padding: 11px 12px;
+        border: 1.5px solid var(--gray-200); border-radius: var(--radius);
+        background: var(--gray-50);
     }
-    .hik-burst-title { font-size: 12px; font-weight: 700; color: #334155; margin-bottom: 6px; }
-    .hik-burst-box .btn-block { width: 100%; margin-top: 6px; }
-    .hik-burst-box.is-recording { border-color: #ef4444; background: #fef2f2; }
+    .hik-burst-title {
+        font-size: 12px; font-weight: 700; color: var(--navy);
+        margin-bottom: 8px; display: flex; align-items: center; gap: 6px;
+    }
+    .hik-burst-box .btn-block { width: 100%; margin-top: 7px; }
+    .hik-burst-box.is-recording {
+        border-color: var(--danger); background: #FEF2F2;
+        box-shadow: 0 0 0 3px rgba(229,57,53,.10);
+    }
+    .hik-burst-est {
+        margin-top: 7px; padding: 6px 8px; border-radius: 7px;
+        background: var(--blue-pale); color: var(--navy);
+        font-size: 11px; line-height: 1.5;
+    }
+    .hik-burst-est b { font-family: var(--font-mono); font-size: 12.5px; }
+    .hik-burst-est.warn { background: #FFF8E1; color: #8D5B00; }
+    .hik-every-presets { display: flex; gap: 4px; margin-top: 6px; }
+    .hik-every-presets button {
+        flex: 1 1 0; min-width: 0; padding: 4px 2px; font-size: 10.5px;
+        border: 1px solid var(--gray-200); background: var(--white);
+        color: var(--gray-600); border-radius: 6px; cursor: pointer;
+        font-family: inherit; transition: .15s;
+    }
+    .hik-every-presets button:hover { border-color: var(--blue-light); color: var(--blue); }
+    .hik-every-presets button.on {
+        background: var(--blue); border-color: var(--blue); color: #fff; font-weight: 700;
+    }
 
-    /* ── ถ่ายรัว: แกลเลอรี ── */
-    .hik-gal-modal { width: min(1500px, 96vw); max-width: 96vw; }
-    .hik-gal-body { display: flex; gap: 12px; align-items: stretch; min-height: 0; }
+    /* ══ ถ่ายรัว: แกลเลอรี ══════════════════════════════════════ */
+    .hik-gal-modal { width: min(1560px, 97vw); }
+    /* ⚠️ min-height:0 ทุกชั้นของ flex ที่ห่อ grid — ถ้าขาดแม้ชั้นเดียว
+       การ์ดในกริดจะถูกบีบจนสูงเหลือ ~26px แล้วถูก overflow:hidden ตัดทิ้ง
+       (เจอจริงบนสถานี: เห็นเป็นแถบเทาบาง ๆ ไม่มีทั้งภาพและตัวเลข) */
+    .hik-gal-body { display: flex; gap: 14px; align-items: stretch; min-height: 0; }
     .hik-gal-side {
-        flex: 0 0 230px; min-width: 0; border-right: 1px solid #e2e8f0;
-        padding-right: 10px; display: flex; flex-direction: column;
+        flex: 0 0 236px; min-width: 0; min-height: 0;
+        display: flex; flex-direction: column;
+        border-right: 1.5px solid var(--gray-200); padding-right: 12px;
     }
-    .hik-gal-side-head { font-size: 11.5px; font-weight: 700; color: #64748b; margin-bottom: 6px; }
-    .hik-gal-list { overflow-y: auto; max-height: 62vh; font-size: 11.5px; }
+    .hik-gal-side-head {
+        font-size: 10px; font-weight: 700; color: var(--gray-400);
+        text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px;
+    }
+    .hik-gal-list { overflow-y: auto; min-height: 0; flex: 1 1 auto; }
     .hik-gal-sess {
-        padding: 7px 8px; border: 1px solid #e2e8f0; border-radius: 6px;
-        margin-bottom: 6px; cursor: pointer; background: #fff; line-height: 1.45;
+        padding: 9px 10px; border: 1.5px solid var(--gray-200); border-radius: 9px;
+        margin-bottom: 7px; cursor: pointer; background: var(--white);
+        transition: border-color .15s, box-shadow .15s;
     }
-    .hik-gal-sess:hover { border-color: #93c5fd; }
-    .hik-gal-sess.active { border-color: #2563eb; background: #eff6ff; }
-    .hik-gal-sess b { display: block; font-size: 12px; color: #1e293b; }
-    .hik-gal-sess span { color: #64748b; }
-    .hik-gal-disk { margin-top: 8px; font-size: 11px; color: #64748b; }
-    .hik-gal-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
-    .hik-gal-summary {
-        font-size: 12px; line-height: 1.65; color: #334155; background: #f8fafc;
-        border: 1px solid #e2e8f0; border-radius: 6px; padding: 8px 10px; margin-bottom: 8px;
+    .hik-gal-sess:hover { border-color: var(--blue-light); box-shadow: var(--shadow-sm); }
+    .hik-gal-sess.active {
+        border-color: var(--blue); background: var(--blue-pale);
+        box-shadow: 0 0 0 1px var(--blue) inset;
     }
-    .hik-gal-summary b { color: #0f172a; }
-    .hik-gal-summary .big { font-size: 14px; }
-    .hik-gal-warn { color: #b45309; }
-    .hik-gal-bad { color: #dc2626; }
-    .hik-gal-good { color: #15803d; }
+    .hik-gal-sess b { display: block; font-size: 12px; color: var(--gray-800); font-weight: 700; }
+    .hik-gal-sess .sub {
+        display: block; margin-top: 3px; font-size: 11px; color: var(--gray-600);
+        font-family: var(--font-mono);
+    }
+    .hik-gal-sess .drop { display: block; margin-top: 2px; font-size: 10.5px; color: var(--danger); font-weight: 600; }
+    .hik-gal-disk {
+        margin-top: 10px; padding-top: 9px; border-top: 1px solid var(--gray-200);
+        font-size: 11px; color: var(--gray-600);
+    }
+    .hik-gal-main { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+
+    /* KPI — รูปแบบเดียวกับการ์ดสถิติของหน้าหลัก */
+    .hik-kpis {
+        display: grid; grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+        gap: 8px; margin-bottom: 10px;
+    }
+    .hik-kpi {
+        background: var(--white); border: 1.5px solid var(--gray-200);
+        border-radius: 10px; padding: 9px 11px; min-width: 0;
+    }
+    .hik-kpi .k {
+        font-size: 9.5px; font-weight: 700; color: var(--gray-400);
+        text-transform: uppercase; letter-spacing: .8px;
+    }
+    .hik-kpi .v {
+        font-family: var(--font-mono); font-size: 19px; font-weight: 700;
+        color: var(--blue); line-height: 1.25; margin-top: 3px;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .hik-kpi .u { font-size: 11px; font-weight: 600; color: var(--gray-400); }
+    .hik-kpi.good .v { color: var(--success); }
+    .hik-kpi.warn .v { color: #B26A00; }
+    .hik-kpi.bad  .v { color: var(--danger); }
+    .hik-kpi.muted .v { color: var(--gray-400); }
+
+    .hik-note {
+        border-radius: 9px; padding: 9px 12px; font-size: 12px; line-height: 1.65;
+        margin-bottom: 10px; border: 1.5px solid transparent;
+    }
+    .hik-note b { font-weight: 700; }
+    .hik-note.info { background: var(--blue-pale); border-color: #BBDEFB; color: var(--navy); }
+    .hik-note.good { background: #E8F5E9; border-color: #C8E6C9; color: #1B5E20; }
+    .hik-note.warn { background: #FFF8E1; border-color: #FFE0A3; color: #8D5B00; }
+    .hik-note.bad  { background: #FEF2F2; border-color: #FECACA; color: #A31515; }
+
     .hik-gal-bar {
-        display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
-        margin-bottom: 8px; font-size: 11.5px; color: #475569;
+        display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 10px;
     }
-    .hik-gal-bar .camera-select { width: auto; min-width: 140px; }
-    .hik-gal-spacer { flex: 1 1 auto; }
-    .btn-danger-mini { border-color: #fecaca; color: #b91c1c; }
+    .hik-gal-bar .camera-select { width: auto; min-width: 150px; height: 32px; padding: 3px 8px; }
+    .hik-gal-group { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+    /* margin-left:auto ทำให้กลุ่มปุ่มลบชิดขวา **แม้ตอนที่แถบตัดขึ้นบรรทัดใหม่**
+       (spacer อย่างเดียวใช้ไม่ได้เมื่อ wrap แล้ว) */
+    .hik-gal-group.right { margin-left: auto; }
+    .btn-sm { padding: 6px 11px; font-size: 11.5px; border-radius: 7px; }
+    /* ปุ่มลบ: ให้ "อ่านออกว่าอันตราย" โดยไม่ตะโกนกลบปุ่มอื่นทั้งแถบ
+       (ปุ่มแดงทึบสงวนไว้ให้ Stop Detection ซึ่งเป็นปุ่มหลักของหน้า) */
+    .btn-danger-soft {
+        background: var(--white); color: var(--danger);
+        border: 1.5px solid #F5B5B4; box-shadow: none;
+    }
+    .btn-danger-soft:hover:not(:disabled) {
+        background: #FEF2F2; border-color: var(--danger); color: #B71C1C;
+    }
     .hik-gal-job {
-        font-size: 11.5px; color: #1d4ed8; background: #eff6ff; border: 1px solid #bfdbfe;
-        border-radius: 6px; padding: 6px 9px; margin-bottom: 8px;
+        display: flex; align-items: center; gap: 10px; margin-bottom: 10px;
+        font-size: 12px; color: var(--navy); background: var(--blue-pale);
+        border: 1.5px solid #BBDEFB; border-radius: 9px; padding: 8px 11px;
     }
+    .hik-progress {
+        flex: 1 1 auto; height: 6px; border-radius: 3px; background: #fff;
+        overflow: hidden; min-width: 60px;
+    }
+    .hik-progress i { display: block; height: 100%; background: var(--blue); transition: width .3s; }
+
+    /* กริดภาพ — align-content:start กันไม่ให้แถวถูกยืด/บีบตามความสูงของกล่อง */
     .hik-gal-grid {
-        display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
-        gap: 8px; overflow-y: auto; max-height: 60vh; padding-right: 4px;
+        display: grid; grid-template-columns: repeat(auto-fill, minmax(196px, 1fr));
+        /* grid-auto-rows: max-content คือตัวที่ทำให้แถวสูงเท่าเนื้อหาจริง —
+           ถ้าปล่อยเป็น auto ในกริดที่ความสูง "ถูกกำหนดมาแล้ว" จากชั้น flex
+           แถวจะถูกบีบเหลือ ~48px แต่การ์ดยังสูง 277px ⇒ **การ์ดซ้อนทับกัน**
+           เห็นเป็นแถบเทายาวมีแต่ปุ่มกากบาท ไม่มีตัวเลขสักตัว (เจอจริงบนสถานี) */
+        grid-auto-rows: max-content;
+        align-content: start; gap: 10px; overflow-y: auto; min-height: 0;
+        flex: 1 1 auto; padding: 2px 4px 2px 2px;
     }
     .hik-card {
-        border: 1px solid #e2e8f0; border-radius: 7px; overflow: hidden;
-        background: #fff; position: relative; font-size: 10.5px;
+        align-self: start; border: 1.5px solid var(--gray-200); border-radius: 10px;
+        background: var(--white); overflow: hidden; transition: border-color .15s, box-shadow .15s;
     }
-    .hik-card.sel { border-color: #2563eb; box-shadow: 0 0 0 2px #bfdbfe inset; }
-    .hik-card img { width: 100%; display: block; cursor: zoom-in; background: #0f172a; }
-    .hik-card-info { padding: 5px 6px; line-height: 1.5; color: #475569; }
-    .hik-card-info .k { color: #94a3b8; }
+    .hik-card:hover { border-color: var(--blue-light); box-shadow: var(--shadow-sm); }
+    .hik-card.sel { border-color: var(--blue); box-shadow: 0 0 0 2px var(--blue-light); }
+    /* ⚠️ ความสูงของภาพย่อเป็น px คงที่โดยตั้งใจ — ไม่ใช้ aspect-ratio + width:100%
+       เพราะความสูงจะขึ้นกับความกว้างของคอลัมน์ ซึ่งยังไม่รู้ค่าตอนที่กริดคำนวณ
+       ความสูงของแถว ⇒ ภาพนับเป็น 0 แล้วแถวถูกบีบ (ต้นเหตุของบั๊กการ์ดซ้อนทับ) */
+    .hik-shot-wrap { position: relative; height: 152px; background: var(--gray-800); }
+    .hik-card img {
+        display: block; width: 100%; height: 100%; object-fit: cover;
+        cursor: zoom-in; background: var(--gray-800);
+    }
     .hik-card-top {
-        position: absolute; top: 4px; left: 4px; right: 4px; display: flex;
-        gap: 4px; align-items: center;
+        position: absolute; top: 6px; left: 6px; right: 6px;
+        display: flex; gap: 6px; align-items: flex-start;
     }
-    .hik-card-top input { margin: 0; cursor: pointer; }
+    .hik-card-top input { margin: 0; cursor: pointer; width: 15px; height: 15px; accent-color: var(--blue); }
     .hik-x {
-        margin-left: auto; border: none; background: rgba(15,23,42,.72); color: #fff;
-        border-radius: 4px; width: 20px; height: 20px; line-height: 18px;
-        cursor: pointer; font-size: 13px; padding: 0;
+        margin-left: auto; border: none; background: rgba(15,23,42,.62); color: #fff;
+        border-radius: 6px; width: 22px; height: 22px; line-height: 20px;
+        cursor: pointer; font-size: 14px; padding: 0; transition: background .15s;
     }
-    .hik-x:hover { background: #dc2626; }
+    .hik-x:hover { background: var(--danger); }
+    .hik-card-tags {
+        position: absolute; left: 6px; bottom: 6px; right: 6px;
+        display: flex; gap: 4px; flex-wrap: wrap;
+    }
     .hik-badge {
-        display: inline-block; padding: 0 5px; border-radius: 4px; font-weight: 700;
-        font-size: 10px; color: #fff;
+        display: inline-block; padding: 1px 6px; border-radius: 5px;
+        font-size: 9.5px; font-weight: 700; color: #fff; letter-spacing: .2px;
     }
-    .hik-badge.ng { background: #dc2626; }
-    .hik-badge.ok { background: #16a34a; }
-    .hik-badge.sharp { background: #0f766e; }
-    .hik-badge.motion { background: #b45309; }
-    .hik-badge.iso { background: #7c3aed; }
-    .hik-gal-more { text-align: center; margin-top: 8px; }
+    .hik-badge.ng { background: var(--danger); }
+    .hik-badge.ok { background: var(--success); }
+    .hik-badge.sharp { background: #0F766E; }
+    .hik-badge.motion { background: #B26A00; }
+    .hik-badge.iso { background: #6D28D9; }
+    .hik-card-info { padding: 7px 9px 8px; }
+    .hik-card-name {
+        font-family: var(--font-mono); font-size: 11px; color: var(--gray-800);
+        font-weight: 600; margin-bottom: 4px;
+    }
+    .hik-kv { display: grid; grid-template-columns: auto 1fr; gap: 1px 7px; font-size: 10.5px; }
+    .hik-kv dt { color: var(--gray-400); }
+    .hik-kv dd { font-family: var(--font-mono); color: var(--gray-600); text-align: right; }
+    .hik-kv dd.hl { color: var(--gray-800); font-weight: 700; }
+    .hik-empty { color: var(--gray-400); font-size: 12px; padding: 24px; text-align: center; }
+    .hik-gal-more { text-align: center; margin-top: 10px; flex: 0 0 auto; }
     .hik-frame-modal { width: min(1320px, 94vw); }
-    .hik-frame-body img { width: 100%; border-radius: 6px; background: #0f172a; }
-    @media (max-width: 900px) {
+    .hik-frame-body img {
+        width: 100%; border-radius: 10px; background: var(--gray-800);
+        border: 1.5px solid var(--gray-200);
+    }
+    .hik-frame-body .hik-kpis { margin-top: 10px; margin-bottom: 0; }
+    @media (max-width: 980px) {
         .hik-gal-body { flex-direction: column; }
-        .hik-gal-side { flex: 0 0 auto; border-right: none; border-bottom: 1px solid #e2e8f0;
-                        padding-right: 0; padding-bottom: 8px; }
-        .hik-gal-list { max-height: 22vh; }
+        .hik-gal-side {
+            flex: 0 0 auto; border-right: none; border-bottom: 1.5px solid var(--gray-200);
+            padding-right: 0; padding-bottom: 10px;
+        }
+        .hik-gal-list { max-height: 20vh; }
     }
     .hik-shot-row { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
     .hik-shot-row .btn { width: 100%; }
