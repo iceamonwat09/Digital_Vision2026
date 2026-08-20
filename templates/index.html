@@ -100,15 +100,14 @@
                     </div>
                     <p class="control-hint" id="hikHint">⚠️ ต้องปิดโปรแกรม MVS ก่อน — GigE เปิดได้ทีละโปรแกรม</p>
 
+                    <div class="hik-presets-label">ขนาดภาพจากกล้อง (ROI)</div>
                     <div id="hikRoiPresets" class="hik-presets">
-                        <span class="hik-presets-label">ROI:</span>
                         <button class="btn btn-mini" data-roi="full" type="button">เต็มเฟรม</button>
                         <button class="btn btn-mini" data-roi="half" type="button">ครึ่งกลาง</button>
                         <button class="btn btn-mini" data-roi="quarter" type="button">¼ กลาง</button>
                     </div>
-                    <p class="control-hint hik-presets-note">
-                        ROI เล็กลง = เร็วขึ้นมาก และฝากระป๋องกินเฟรมมากขึ้น (วัดจริง: เต็มเฟรม 23.6 fps · ครึ่งกลาง 69 fps)
-                    </p>
+                    <p class="control-hint">ROI เล็กลง = เร็วขึ้นมาก และฝากระป๋องกินเฟรมมากขึ้น<br>
+                        <b>วัดจริง:</b> เต็มเฟรม 23.6 fps · ครึ่งกลาง 69 fps</p>
 
                     <details id="hikSettings" class="hik-box">
                         <summary>⚙️ ตั้งค่ากล้อง (ช่วงค่ามาจากตัวกล้องจริง)</summary>
@@ -125,14 +124,16 @@
                         💾 เก็บภาพชุดข้อมูล (ความละเอียดเต็ม — ไว้เทรน/ตรวจสอบภายหลัง)
                     </label>
                     <div class="hik-ds-opts">
-                        <label>นาน <input id="hikDsDuration" type="number" min="0" max="3600" value="60"> วิ</label>
-                        <label>ทุก <input id="hikDsEveryN" type="number" min="1" max="100" value="1"> เฟรม</label>
-                        <label>สูงสุด <input id="hikDsMax" type="number" min="1" max="200000" value="5000"> ภาพ</label>
+                        <label><span>นาน (วินาที)</span>
+                            <input id="hikDsDuration" type="number" min="0" max="3600" value="60"></label>
+                        <label><span>ทุกกี่เฟรม</span>
+                            <input id="hikDsEveryN" type="number" min="1" max="100" value="1"></label>
+                        <label><span>สูงสุด (ภาพ)</span>
+                            <input id="hikDsMax" type="number" min="1" max="200000" value="5000"></label>
                     </div>
-                    <p class="control-hint hik-ds-note">
-                        เก็บที่ <b>อัตรากล้อง</b> (ไม่ขึ้นกับความเร็วโมเดล) — นี่คือวิธีทดสอบกับไลน์จริง:
-                        เก็บภาพทุกใบที่วิ่งผ่าน แล้วเอาไปวัดผลทีหลังด้วย <code>hik_offline_eval.py</code>
-                    </p>
+                    <p class="control-hint">เก็บที่ <b>อัตรากล้อง</b> (ไม่ขึ้นกับความเร็วโมเดล) —
+                        วิธีทดสอบกับไลน์จริง: เก็บทุกใบที่วิ่งผ่าน แล้ววัดผลทีหลังด้วย
+                        <code>hik_offline_eval.py</code></p>
 
                     <div class="hik-shot-row">
                         <select id="hikShotImgsz" class="camera-select hik-imgsz" title="ขนาดภาพที่โมเดลตรวจ">
@@ -142,14 +143,11 @@
                         </select>
                         <button id="hikShotBtn" class="btn btn-secondary" type="button" disabled>📸 ถ่าย 1 เฟรม (เต็มความละเอียด)</button>
                     </div>
-                    <p class="control-hint">
-                        ภาพสดถูกย่อก่อนส่งเข้าโมเดลเพื่อความลื่น — ปุ่มนี้ใช้ภาพ <b>เต็มความละเอียด</b> ตรวจครั้งเดียว
-                        (ไม่นับ ไม่บันทึกลงฐานข้อมูล)
-                    </p>
+                    <p class="control-hint">ภาพสดถูกย่อก่อนเข้าโมเดลเพื่อความลื่น —
+                        ปุ่มนี้ตรวจภาพ <b>เต็มความละเอียด</b> ครั้งเดียว (ไม่นับ ไม่ลงฐานข้อมูล)</p>
                     <p class="control-hint hik-warn">
-                        ⚠️ โหมดนี้เป็น <b>free-running สำหรับทดสอบ</b> — การนับ “1 กระป๋อง = 1 การตรวจ”
-                        ใช้ช่องว่างระหว่างใบเป็นตัวแบ่ง จึงเชื่อถือได้เฉพาะกับกระป๋องที่วางนิ่งหรือเคลื่อนช้า
-                        ยังไม่ใช่โหมดสำหรับไลน์ผลิตจริง (ต้องใช้ทริกเกอร์จาก photo-eye)
+                        ⚠️ <b>โหมดทดสอบ (free-running)</b> — ตัวนับใช้ช่องว่างระหว่างใบเป็นตัวแบ่ง
+                        จึงเชื่อได้เฉพาะกระป๋องที่นิ่ง/เคลื่อนช้า <b>ยังใช้กับไลน์ผลิตจริงไม่ได้</b>
                     </p>
                 </div>
             </section>
@@ -310,37 +308,98 @@
 </div>
 
 <style>
-    /* ── กล้องอุตสาหกรรม (Hikrobot) ───────────────────────────── */
-    .hik-presets { display: flex; align-items: center; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
-    .hik-presets-label { font-size: 13px; color: #475569; }
-    .hik-presets-note { text-align: left !important; margin-top: 4px !important; }
-    .btn-mini { padding: 4px 10px; font-size: 12px; }
-    .hik-box { margin-top: 10px; border: 1px solid #e2e8f0; border-radius: 8px; padding: 8px 10px; }
-    .hik-box > summary { cursor: pointer; font-size: 13px; color: #334155; font-weight: 600; }
-    .hik-params { margin-top: 10px; }
-    .hik-ident { font-size: 12px; color: #0f172a; background: #f1f5f9; border-radius: 6px;
-                 padding: 4px 8px; margin-bottom: 8px; word-break: break-all; }
-    .hik-row { display: grid; grid-template-columns: 1fr 96px 74px; align-items: center;
-               gap: 6px; margin-bottom: 6px; }
-    .hik-label { font-size: 12px; color: #475569; }
-    .hik-input { width: 100%; font-size: 12px; padding: 3px 6px;
-                 border: 1px solid #cbd5e1; border-radius: 6px; }
-    .hik-row input[type="checkbox"].hik-input { width: 16px; height: 16px; justify-self: start; }
-    .hik-range { font-size: 10px; color: #94a3b8; text-align: right; white-space: nowrap; }
-    .hik-note { font-size: 11px; color: #64748b; margin-top: 6px; }
+    /* ── กล้องอุตสาหกรรม (Hikrobot) ─────────────────────────────
+       ข้อจำกัดที่ต้องออกแบบรอบ: แถบข้างกว้าง 300px (เหลือใช้จริง ~263px)
+       ⇒ ห้ามมีคอลัมน์ความกว้างตายตัวรวมกันเกินนั้น และทุกกล่องต้อง min-width:0
+       ไม่งั้นเนื้อหาจะดันให้ทั้งหน้าเลื่อนแนวนอน */
+    #panelHik .control-hint { text-align: left; margin: 6px 0 0; line-height: 1.55; }
+    #panelHik .btn-icon { flex: 0 0 auto; }
+
+    .hik-presets { display: flex; align-items: center; gap: 4px; margin-top: 5px; }
+    .hik-presets-label { font-size: 11.5px; color: #64748b; margin-top: 12px; font-weight: 600; }
+    .btn-mini {
+        padding: 3px 8px; font-size: 12px; line-height: 1.4;
+        border-radius: 6px; flex: 1 1 auto; min-width: 0;
+    }
+
+    /* กล่องตั้งค่า: จำกัดความสูงแล้วเลื่อนในตัวเอง — ไม่งั้น 19 ตัวควบคุม
+       จะดันปุ่ม Start/Stop หลุดจอไปไกล */
+    .hik-box {
+        margin-top: 10px; border: 1px solid #e2e8f0; border-radius: 10px;
+        background: #f8fafc; padding: 8px 10px; min-width: 0;
+    }
+    .hik-box > summary {
+        cursor: pointer; font-size: 12.5px; font-weight: 700; color: #334155;
+        list-style: none; display: flex; align-items: center; gap: 6px;
+    }
+    .hik-box > summary::-webkit-details-marker { display: none; }
+    .hik-box > summary::before { content: '▸'; color: #94a3b8; font-size: 11px; }
+    .hik-box[open] > summary::before { content: '▾'; }
+    .hik-params { margin-top: 8px; max-height: 46vh; overflow-y: auto; padding-right: 2px; }
+
+    .hik-ident {
+        font-size: 11px; color: #0f172a; background: #e2e8f0; border-radius: 6px;
+        padding: 5px 8px; margin-bottom: 8px; line-height: 1.5; word-break: break-word;
+    }
+    .hik-group {
+        font-size: 10.5px; font-weight: 700; letter-spacing: .04em; color: #64748b;
+        text-transform: uppercase; margin: 10px 0 5px; padding-bottom: 3px;
+        border-bottom: 1px solid #e2e8f0;
+    }
+    .hik-group:first-child { margin-top: 0; }
+    /* 2 คอลัมน์: ป้ายชื่อยืดได้ (min-width:0) + ตัวควบคุมกว้างคงที่พอดีนิ้ว */
+    .hik-row {
+        display: grid; grid-template-columns: minmax(0, 1fr) 88px;
+        align-items: center; gap: 4px 6px; margin-bottom: 7px;
+    }
+    .hik-label {
+        font-size: 11.5px; color: #475569; line-height: 1.35;
+        overflow-wrap: anywhere;
+    }
+    .hik-range { font-size: 10px; color: #94a3b8; display: block; margin-top: 1px; }
+    .hik-input {
+        width: 100%; min-width: 0; font-size: 11.5px; padding: 3px 5px;
+        border: 1px solid #cbd5e1; border-radius: 6px; background: #fff;
+        color: #0f172a;
+    }
+    .hik-input:focus { outline: 2px solid #bfdbfe; outline-offset: 0; border-color: #60a5fa; }
+    .hik-row input[type="checkbox"].hik-input {
+        width: 16px; height: 16px; justify-self: end; padding: 0;
+    }
+    .hik-note { font-size: 11px; color: #64748b; margin-top: 8px; line-height: 1.5; }
     .hik-bad { color: #dc2626; }
-    .hik-actions { display: flex; gap: 6px; margin-top: 8px; }
-    .hik-check { display: flex; align-items: center; gap: 6px; margin-top: 10px;
-                 font-size: 13px; color: #475569; cursor: pointer; }
-    .hik-ds-opts { display: flex; gap: 8px; margin-top: 6px; flex-wrap: wrap;
-                   font-size: 12px; color: #475569; }
-    .hik-ds-opts input { width: 62px; font-size: 12px; padding: 2px 4px;
-                         border: 1px solid #cbd5e1; border-radius: 5px; }
-    .hik-ds-note { text-align: left !important; line-height: 1.5; }
-    .hik-shot-row { display: flex; gap: 6px; margin-top: 10px; align-items: center; }
-    .hik-imgsz { flex: 0 0 150px; }
-    .hik-shot-row .btn { flex: 1; }
-    .hik-warn { text-align: left !important; color: #b45309 !important; line-height: 1.5; }
+    .hik-actions { display: flex; gap: 6px; margin-top: 10px; }
+    .hik-actions .btn { flex: 1 1 auto; min-width: 0; }
+
+    .hik-check {
+        display: flex; align-items: flex-start; gap: 6px; margin-top: 12px;
+        font-size: 12.5px; color: #334155; cursor: pointer; line-height: 1.45;
+    }
+    .hik-check input { margin-top: 2px; flex: 0 0 auto; }
+    .hik-ds-opts {
+        display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 5px; margin-top: 6px;
+    }
+    .hik-ds-opts label {
+        display: flex; flex-direction: column; gap: 2px;
+        font-size: 10.5px; color: #64748b; min-width: 0;
+    }
+    .hik-ds-opts input {
+        width: 100%; min-width: 0; font-size: 11.5px; padding: 3px 4px;
+        border: 1px solid #cbd5e1; border-radius: 6px;
+    }
+
+    .hik-shot-row { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
+    .hik-shot-row .btn { width: 100%; }
+    .hik-imgsz { width: 100%; }
+
+    .hik-warn {
+        margin-top: 12px !important; padding: 8px 10px; border-radius: 8px;
+        background: #fffbeb; border: 1px solid #fde68a;
+        color: #92400e !important; font-size: 11px !important;
+    }
+
+    /* แถบสถิติสดบนภาพ + ผลการถ่าย 1 เฟรม */
     .hik-shot-modal { width: min(900px, 96vw); }
     .hik-shot-body { padding: 14px; overflow: auto; }
     .hik-shot-body img { display: block; max-width: 100%; border-radius: 8px; }
@@ -396,6 +455,10 @@
     /* USB panel: stack children vertically (the shared .camera-panel is a flex
        ROW — with more than the select inside, a row squeezes into columns) */
     #panelUsb { flex-direction: column; align-items: stretch; }
+    /* แท็บกล้องอุตสาหกรรมมีลูกเกือบสิบตัว ⇒ ถ้าไม่ตั้ง column จะถูกจัดเรียงข้างกัน
+       ในคอลัมน์กว้าง 263px แล้วตัวหนังสือแตกเป็นแนวตั้งทีละอักษร (เคยเกิดจริง) */
+    #panelHik { flex-direction: column; align-items: stretch; min-width: 0; }
+    #panelHik > * { min-width: 0; max-width: 100%; }
 
     /* Camera image-control cards (brightness/contrast, snapshot popup) */
     .cam-ctrl {
