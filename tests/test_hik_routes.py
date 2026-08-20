@@ -10,7 +10,10 @@
 """
 
 import importlib.util
+import json
 import os
+import pathlib
+import time
 import sys
 import types
 
@@ -208,3 +211,226 @@ def test_live_params_apply_while_streaming(client):
         assert d["stats"]["frames"] >= 0
     finally:
         client.post("/api/detection/stop")
+
+
+# ════════════════════════════════════════════════════════════════════
+# โหมด "ถ่ายรัว" (burst) — ระดับ HTTP
+# ════════════════════════════════════════════════════════════════════
+import hik_burst as hbmod                             # noqa: E402
+
+
+@pytest.fixture
+def bclient(client, monkeypatch, tmp_path):
+    """client เดิม + โฟลเดอร์ burst ชั่วคราว (ห้ามแตะ data/ ของเครื่องจริง)."""
+    root = tmp_path / "burst"
+    root.mkdir()
+    monkeypatch.setattr(hbmod.config, "HIK_BURST_DIR", str(root), raising=False)
+    monkeypatch.setattr(appmod.config, "HIK_BURST_DIR", str(root), raising=False)
+    hbmod._job = None
+    appmod._hik_burst_session = None
+    yield client
+    appmod._hik_burst_session = None
+
+
+def _start_hik(c):
+    return c.post("/api/detection/start", json={"camera_index": "hik:DA4994130"})
+
+
+def test_burst_needs_the_camera_running(bclient):
+    r = bclient.post("/api/camera/hik/burst", json={"seconds": 2})
+    assert r.status_code == 409
+    assert "Start Detection" in r.get_json()["message"]
+
+
+def test_burst_records_frames_and_camera_settings(bclient):
+    assert _start_hik(bclient).status_code == 200
+    try:
+        r = bclient.post("/api/camera/hik/burst", json={"seconds": 2})
+        assert r.status_code == 200, r.get_json()
+        name = r.get_json()["session"]
+        assert name
+
+        time.sleep(1.2)
+        st = bclient.get("/api/camera/hik/burst").get_json()
+        assert st["status"] == "ok"
+
+        bclient.delete("/api/camera/hik/burst")
+        meta = json.loads((pathlib.Path(hbmod.burst_root()) / name / "meta.json")
+                          .read_text(encoding="utf-8"))
+        # ⚠️ ถ้าไม่มี exposure ใน meta ภาพชุดนี้เทียบข้ามรอบไม่ได้เลย
+        assert "exposure_us" in meta
+        assert meta["seconds"] == 2
+        assert isinstance(meta.get("frame_ts"), list)
+        assert len(meta["frame_ts"]) >= meta["saved"]
+    finally:
+        bclient.post("/api/detection/stop")
+
+
+def test_two_bursts_cannot_run_at_once(bclient):
+    _start_hik(bclient)
+    try:
+        assert bclient.post("/api/camera/hik/burst", json={"seconds": 5}).status_code == 200
+        assert bclient.post("/api/camera/hik/burst", json={"seconds": 5}).status_code == 409
+    finally:
+        bclient.delete("/api/camera/hik/burst")
+        bclient.post("/api/detection/stop")
+
+
+def test_dataset_toggle_is_refused_while_a_burst_runs(bclient):
+    """ตัวเขียนไฟล์มีตัวเดียว — ถ้าเปิดซ้อนได้ ชุดที่กำลังถ่ายจะถูกตัดจบเงียบ ๆ."""
+    _start_hik(bclient)
+    try:
+        bclient.post("/api/camera/hik/burst", json={"seconds": 5})
+        r = bclient.post("/api/camera/hik/dataset", json={"enabled": True})
+        assert r.status_code == 409
+        assert "ถ่ายรัว" in r.get_json()["message"]
+    finally:
+        bclient.delete("/api/camera/hik/burst")
+        bclient.post("/api/detection/stop")
+
+
+def test_burst_is_refused_while_the_dataset_is_recording(bclient):
+    _start_hik(bclient)
+    try:
+        bclient.post("/api/camera/hik/dataset", json={"enabled": True})
+        r = bclient.post("/api/camera/hik/burst", json={"seconds": 5})
+        assert r.status_code == 409
+    finally:
+        bclient.post("/api/camera/hik/dataset", json={"enabled": False})
+        bclient.post("/api/detection/stop")
+
+
+def test_seconds_are_clamped_to_the_configured_ceiling(bclient):
+    _start_hik(bclient)
+    try:
+        d = bclient.post("/api/camera/hik/burst", json={"seconds": 9999}).get_json()
+        assert d["seconds"] == appmod.config.HIK_BURST_MAX_SECONDS
+    finally:
+        bclient.delete("/api/camera/hik/burst")
+        bclient.post("/api/detection/stop")
+
+
+def _make_session(name="20260820_101010", frames=3):
+    root = pathlib.Path(hbmod.burst_root())
+    d = root / name
+    d.mkdir(parents=True, exist_ok=True)
+    import numpy as np
+    import cv2
+    for i in range(frames):
+        img = np.full((60, 80, 3), 40 + i * 30, np.uint8)
+        cv2.imwrite(str(d / ("%05d.jpg" % (i + 1))), img)
+    (d / "meta.json").write_text(json.dumps(
+        {"started_at": "2026-08-20 10:10:10", "exposure_us": 2000.0,
+         "saved": frames, "dropped": 0}), encoding="utf-8")
+    return name
+
+
+def test_listing_reports_sessions_and_disk(bclient):
+    _make_session()
+    d = bclient.get("/api/camera/hik/bursts").get_json()
+    assert d["status"] == "ok"
+    assert d["sessions"][0]["frames"] == 3
+    assert d["free_mb"] is None or d["free_mb"] > 0
+
+
+def test_detail_lists_frames_before_metrics_exist(bclient):
+    name = _make_session()
+    d = bclient.get("/api/camera/hik/bursts/%s" % name).get_json()
+    assert d["total"] == 3 and d["metrics_ready"] is False
+
+
+@pytest.mark.parametrize("bad", ["..", "%2e%2e", "nope", "a%2Fb"])
+def test_unknown_or_unsafe_session_names_are_refused(bclient, bad):
+    assert bclient.get("/api/camera/hik/bursts/%s" % bad).status_code in (404, 405)
+
+
+def test_frame_route_refuses_paths_outside_the_session(bclient):
+    name = _make_session()
+    assert bclient.get("/api/camera/hik/bursts/%s/frame/meta.json" % name).status_code == 404
+    assert bclient.get("/api/camera/hik/bursts/%s/thumb/meta.json" % name).status_code == 404
+
+
+def test_thumb_is_generated_on_demand(bclient):
+    name = _make_session()
+    r = bclient.get("/api/camera/hik/bursts/%s/thumb/00001.jpg" % name)
+    assert r.status_code == 200 and r.mimetype == "image/jpeg"
+    assert (pathlib.Path(hbmod.burst_root()) / name / hbmod.THUMB_DIR / "00001.jpg").exists()
+
+
+def test_frame_route_serves_the_untouched_original(bclient):
+    name = _make_session()
+    r = bclient.get("/api/camera/hik/bursts/%s/frame/00001.jpg" % name)
+    assert r.status_code == 200
+    raw = (pathlib.Path(hbmod.burst_root()) / name / "00001.jpg").read_bytes()
+    assert r.data == raw
+
+
+def test_delete_frames_and_then_the_session(bclient):
+    name = _make_session()
+    r = bclient.delete("/api/camera/hik/bursts/%s/frames" % name,
+                       json={"files": ["00002.jpg", "../../evil"]})
+    assert r.get_json()["removed"] == ["00002.jpg"]
+    assert bclient.get("/api/camera/hik/bursts/%s" % name).get_json()["total"] == 2
+
+    assert bclient.delete("/api/camera/hik/bursts/%s" % name).status_code == 200
+    assert bclient.get("/api/camera/hik/bursts/%s" % name).status_code == 404
+
+
+def test_cannot_delete_the_session_being_recorded(bclient):
+    _start_hik(bclient)
+    try:
+        name = bclient.post("/api/camera/hik/burst", json={"seconds": 5}).get_json()["session"]
+        assert bclient.delete("/api/camera/hik/bursts/%s" % name).status_code == 409
+    finally:
+        bclient.delete("/api/camera/hik/burst")
+        bclient.post("/api/detection/stop")
+
+
+def test_detect_without_a_model_is_refused(bclient):
+    name = _make_session()
+    r = bclient.post("/api/camera/hik/bursts/%s/detect" % name, json={"all": True})
+    assert r.status_code == 400
+    assert "โมเดล" in r.get_json()["message"]
+
+
+def test_metrics_job_runs_and_reports_progress(bclient):
+    name = _make_session(frames=4)
+    r = bclient.post("/api/camera/hik/bursts/%s/metrics" % name)
+    assert r.status_code == 200
+    for _ in range(60):
+        job = bclient.get("/api/camera/hik/burst").get_json()["job"]
+        if job and not job["running"]:
+            break
+        time.sleep(0.05)
+    assert bclient.get("/api/camera/hik/bursts/%s" % name).get_json()["metrics_ready"] is True
+
+
+def test_deleting_a_session_mid_job_leaves_no_ghost_folder(bclient):
+    """เจอจากการขับด้วยเบราว์เซอร์จริง: กดลบทั้งชุดขณะงานวัดผลยังวิ่งอยู่ แล้วงาน
+    เขียน metrics.json/_thumbs กลับลงโฟลเดอร์ที่เพิ่งลบ ⇒ เหลือ "ซากชุด" ที่ไม่มี
+    ภาพสักใบค้างในรายการตลอดไป."""
+    name = _make_session(frames=6)
+    assert bclient.post("/api/camera/hik/bursts/%s/metrics" % name).status_code == 200
+    assert bclient.delete("/api/camera/hik/bursts/%s" % name).status_code == 200
+    time.sleep(0.6)
+    assert not (pathlib.Path(hbmod.burst_root()) / name).exists()
+    assert bclient.get("/api/camera/hik/bursts").get_json()["sessions"] == []
+
+
+def test_a_frame_deleted_mid_request_answers_404_not_500(bclient):
+    """ผู้ใช้กดลบขณะภาพย่อกำลังทยอยโหลด = เรื่องปกติ ต้องไม่พ่น 500 + stack trace."""
+    name = _make_session(frames=2)
+    missing = pathlib.Path(hbmod.burst_root()) / name / "00001.jpg"
+    r = bclient.get("/api/camera/hik/bursts/%s/thumb/00001.jpg" % name)
+    assert r.status_code == 200
+    missing.unlink()
+    (pathlib.Path(hbmod.burst_root()) / name / hbmod.THUMB_DIR / "00001.jpg").unlink()
+    for url in ("thumb", "frame"):
+        r = bclient.get("/api/camera/hik/bursts/%s/%s/00001.jpg" % (name, url))
+        assert r.status_code == 404, (url, r.status_code)
+
+
+def test_send_jpeg_turns_a_vanished_file_into_404(bclient):
+    with appmod.app.test_request_context():
+        resp, code = appmod._send_jpeg("/definitely/not/here.jpg")
+        assert code == 404

@@ -9,7 +9,7 @@ import os
 # print it on startup and confirm it is actually executing the new code.
 # NOTE: shown on the navbar badge too — keep it short (<= ~28 chars) or it
 # gets ellipsized there (full value always visible in the footer / hover).
-CONFIG_VERSION = "2026.08.19-hikrobot"
+CONFIG_VERSION = "2026.08.20-hikburst"
 
 # ====================
 # CAMERA CONFIGURATION
@@ -129,6 +129,24 @@ HIK_DATASET_JPEG_QUALITY = 95
 # หยุดบันทึกเมื่อพื้นที่ว่างเหลือน้อยกว่านี้ — สถานีนี้เป็นเครื่องที่ใช้งานจริง
 # (ที่ ROI ครึ่ง 69 fps ≈ 35 MB/วินาที ⇒ เต็ม 100 GB ได้ใน ~50 นาที)
 HIK_DATASET_MIN_FREE_MB = 2048
+
+# ── โหมด "ถ่ายรัว" (burst) — เครื่องมือทดสอบว่ากล้องหยุดการเคลื่อนที่ได้ไหม ────
+# ต่างจาก HIK_DATASET_* ตรงที่ burst มีอายุสั้น (วินาที) และมี "แกลเลอรี + ปุ่มลบ"
+# บนหน้าเว็บ ⇒ เก็บคนละโฟลเดอร์เพื่อไม่ให้ปนกับชุดข้อมูลที่เก็บไว้เทรน.
+# ⚠️ การถ่ายวิ่งที่ **อัตรากล้อง** ไม่ใช่อัตราของโมเดล — ถ้าถ่ายสลับตรวจจะได้
+#    ~2 ภาพ/วินาที ซึ่งวัด "ความเร็วของ bestX" ไม่ใช่ "ความสามารถของกล้อง".
+HIK_BURST_DIR = "data/hik_burst"
+HIK_BURST_DEFAULT_SECONDS = 10
+HIK_BURST_MAX_SECONDS = 60       # 10 วิ ที่ ROI ครึ่ง 69 fps ≈ 690 ภาพ ≈ 220 MB
+HIK_BURST_MAX_FRAMES = 3000
+HIK_BURST_JPEG_QUALITY = 95
+HIK_BURST_THUMB_WIDTH = 260
+# ตรวจกี่ภาพอัตโนมัติหลังถ่ายเสร็จ (เรียงจากคมที่สุด) — 0 = ไม่ตรวจอัตโนมัติ
+HIK_BURST_AUTODETECT_TOP = 12
+# มิลลิเมตรต่อพิกเซล ณ ระนาบชิ้นงาน — วัดเองด้วยการถ่ายไม้บรรทัด แล้วใส่ที่นี่.
+# None = ยังไม่ได้วัด ⇒ หน้าเว็บจะรายงานความเร็ว/ระยะเบลอเป็น **พิกเซล** เท่านั้น
+# (ไม่เดาเป็น mm — ตัวเลขที่เดาแล้วดูน่าเชื่อถืออันตรายกว่าไม่มีตัวเลข).
+HIK_BURST_MM_PER_PX = None
 
 # ค่าที่ผู้ใช้บันทึกจากหน้าเว็บ (อยู่นอก git — ต่างเครื่องต่างค่าได้)
 HIK_SETTINGS_FILE = "data/hik_camera.json"

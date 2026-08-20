@@ -629,8 +629,12 @@ class _DatasetWriter(object):
     """
 
     def __init__(self, root, max_frames=2000, jpeg_quality=95, every_n=1,
-                 duration_s=0, min_free_mb=2048):
+                 duration_s=0, min_free_mb=2048, meta=None):
         self.root = root
+        # ค่าตั้งกล้อง ณ วินาทีที่เริ่มเก็บ — เขียนลง meta.json ข้าง ๆ ภาพ.
+        # ถ้าไม่เก็บไว้ เปิดโฟลเดอร์ดูทีหลังจะไม่มีทางรู้ว่าถ่ายที่ exposure เท่าไร
+        # ⇒ ภาพที่เก็บมาเทียบข้ามรอบไม่ได้เลย (ซึ่งคือทั้งหมดของการทดสอบความเบลอ)
+        self.meta = dict(meta or {})
         self.max_frames = int(max_frames)
         self.jpeg_quality = int(jpeg_quality)
         self.every_n = max(1, int(every_n))
@@ -644,6 +648,11 @@ class _DatasetWriter(object):
         self.finished_reason = None
         self._seen = 0
         self._t0 = 0.0
+        # เวลามาถึงของแต่ละเฟรม (บันทึกใน **เธรดจับภาพ** ตอนเข้าคิว ไม่ใช่ตอนเขียนไฟล์
+        # ซึ่งช้ากว่าและไม่คงที่) ⇒ ระยะห่างระหว่างเฟรมเป็นเวลาจริงของกล้อง.
+        # คิวเป็น FIFO และ every_n ถูกคัดก่อนหน้านี้แล้ว ⇒ รายการที่ i คู่กับไฟล์ที่ i+1
+        self._ts = []
+        self._meta_done = False
         self._q = queue.Queue(maxsize=8)
         self._stop = threading.Event()
         self._thread = None
@@ -662,10 +671,40 @@ class _DatasetWriter(object):
                           % (free_mb, self.min_free_mb))
             return False
         self._t0 = time.time()
+        self.meta.setdefault("started_at", time.strftime("%Y-%m-%d %H:%M:%S"))
+        self.meta["every_n"] = self.every_n
+        self.meta["jpeg_quality"] = self.jpeg_quality
+        self._write_meta()
         self._stop.clear()
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
         return True
+
+    def _write_meta(self, final=False):
+        """เขียน meta.json (เขียนทับได้ — เรียกตอนเริ่มและตอนจบ)."""
+        if not self.dir:
+            return
+        data = dict(self.meta)
+        if final:
+            # ตัดให้เท่าจำนวนที่ **เขียนลงดิสก์จริง** — เฟรมที่ค้างในคิวตอนสั่งหยุด
+            # ไม่ได้ถูกบันทึก ถ้าไม่ตัด เวลาจะเลื่อนไปทั้งชุดโดยไม่มีใครรู้
+            ts = list(self._ts)[:self.saved]
+            data["frame_ts"] = [round(t, 6) for t in ts]
+            data["saved"] = self.saved
+            data["dropped"] = self.dropped
+            data["finished_reason"] = self.finished_reason
+            data["ended_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+        try:
+            with open(os.path.join(self.dir, "meta.json"), "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+        except Exception as e:                        # pragma: no cover - ดิสก์/สิทธิ์
+            logger.warning("[hik] เขียน meta.json ไม่สำเร็จ: %s", e)
+
+    def _finish_meta(self):
+        if self._meta_done:
+            return
+        self._meta_done = True
+        self._write_meta(final=True)
 
     def _free_mb(self):
         try:
@@ -692,6 +731,7 @@ class _DatasetWriter(object):
             return
         try:
             self._q.put_nowait(frame)
+            self._ts.append(time.time())
         except queue.Full:
             self.dropped += 1
 
@@ -723,6 +763,7 @@ class _DatasetWriter(object):
                 self.error = str(e)
                 logger.warning("บันทึกภาพชุดข้อมูลไม่สำเร็จ: %s", e)
                 self._finish("เขียนไฟล์ไม่สำเร็จ")
+                self._finish_meta()
                 return
             # ⚠️ เครื่องนี้เป็นสถานีที่ใช้งานจริง — ห้ามเขียนจนดิสก์เต็ม
             #    (ที่ ROI ครึ่ง 69 fps ≈ 35 MB/วินาที เต็ม 100 GB ได้ใน ~50 นาที)
@@ -734,7 +775,9 @@ class _DatasetWriter(object):
                                   % free_mb)
                     logger.warning("[hik] %s", self.error)
                     self._finish("พื้นที่ดิสก์ใกล้เต็ม")
+                    self._finish_meta()
                     return
+        self._finish_meta()
 
     def stop(self):
         self._stop.set()
@@ -742,6 +785,7 @@ class _DatasetWriter(object):
         self._thread = None
         if t is not None:
             t.join(timeout=2.0)
+        self._finish_meta()
 
     def status(self):
         elapsed = max(1e-6, time.time() - self._t0) if self._t0 else 0.0
@@ -1593,7 +1637,8 @@ class HikCamera(object):
             st["dataset"] = self._dataset.status()
         return st
 
-    def start_dataset(self, root=None, max_frames=None, every_n=1, duration_s=0):
+    def start_dataset(self, root=None, max_frames=None, every_n=1, duration_s=0,
+                      jpeg_quality=None, meta=None):
         if self._dataset is not None:
             return self._dataset.status()
         root = root or _cfg("HIK_DATASET_DIR") or os.path.join("data", "hik_dataset")
@@ -1602,9 +1647,10 @@ class HikCamera(object):
             root = os.path.join(base, root)
         w = _DatasetWriter(root,
                            max_frames=max_frames or _cfg("HIK_DATASET_MAX_FRAMES", 2000),
-                           jpeg_quality=_cfg("HIK_DATASET_JPEG_QUALITY", 95),
+                           jpeg_quality=jpeg_quality or _cfg("HIK_DATASET_JPEG_QUALITY", 95),
                            every_n=every_n, duration_s=duration_s,
-                           min_free_mb=_cfg("HIK_DATASET_MIN_FREE_MB", 2048))
+                           min_free_mb=_cfg("HIK_DATASET_MIN_FREE_MB", 2048),
+                           meta=meta)
         if not w.start():
             return w.status()
         self._dataset = w

@@ -62,6 +62,14 @@ except Exception as _hik_err:                       # pragma: no cover
     hik_camera = None
     logger.error(f"Hikrobot camera module unavailable: {_hik_err}")
 
+# โหมด "ถ่ายรัว" (แกลเลอรี + ตัวเลขความเบลอ) — แยกโมดูลเพราะไม่แตะกล้องเลย
+# (อ่าน/เขียนเฉพาะโฟลเดอร์ภาพของตัวเอง) และต้องเทสต์ได้โดยไม่มี MVS/โมเดล.
+try:
+    import hik_burst
+except Exception as _hb_err:                        # pragma: no cover
+    hik_burst = None
+    logger.error(f"Hikrobot burst module unavailable: {_hb_err}")
+
 # Artwork Proof Check (ตรวจสะกดคำ/ตัวเลขใน artwork ก่อนพิมพ์).
 # Fully isolated blueprint — a failure here only disables that one mode
 # and can never break Can Dent / Label / Label Paper.
@@ -940,6 +948,11 @@ def api_hik_dataset():
     enabled = bool(body.get("enabled", False))
     if not enabled:
         return jsonify({"status": "ok", "enabled": False, "dataset": live.stop_dataset()})
+    # ตัวเขียนไฟล์มีตัวเดียวต่อกล้อง ⇒ ถ้าปล่อยให้เปิดซ้อนตอนถ่ายรัว ชุดภาพที่ผู้ใช้
+    # กำลังถ่ายจะถูกตัดจบกลางคันแบบเงียบ ๆ (เห็นแค่ "จำนวนภาพน้อยกว่าที่ควร")
+    if _hik_burst_session is not None:
+        return jsonify({"status": "error",
+                        "message": "กำลังถ่ายรัวอยู่ — รอให้จบก่อนแล้วค่อยเก็บชุดข้อมูล"}), 409
 
     def _num(key, default, lo, hi):
         try:
@@ -1010,6 +1023,396 @@ def api_hik_shot():
     except Exception as e:
         logger.error(f"Hikrobot shot failed: {e}", exc_info=True)
         return jsonify({"status": "error", "message": f"ถ่ายภาพไม่สำเร็จ: {e}"}), 500
+
+
+# ── โหมด "ถ่ายรัว" (burst) ────────────────────────────────────────────
+# เครื่องมือทดสอบล้วน ๆ: **ไม่แตะการนับ / ไม่เขียน DB / ไม่แตะ verdict ของโหมดสด**
+# เหมือนปุ่ม "ถ่าย 1 เฟรม" เดิม. ใช้ตัวเขียนไฟล์ตัวเดียวกับการเก็บชุดข้อมูล
+# (`HikCamera.start_dataset`) จึงไม่มีเธรดใหม่มาแย่งเฟรมกับ `capture_loop`.
+
+_hik_burst_session = None          # ชื่อชุดที่กำลังถ่ายอยู่ (None = ไม่ได้ถ่าย)
+_hik_burst_deadline = 0.0          # เวลาที่ควรจบ — กันเคส "ไม่มีเฟรมเข้ามาเลย"
+
+
+def _hik_burst_unavailable():
+    return jsonify({"status": "error",
+                    "message": "โมดูลถ่ายรัวโหลดไม่ได้ (ดู log ตอนเริ่มระบบ)"}), 500
+
+
+def _hik_burst_guard():
+    """ด่านร่วมของทุก endpoint ของโหมดนี้ — คืน response เมื่อใช้ไม่ได้."""
+    if hik_burst is None:
+        return _hik_burst_unavailable()
+    return None
+
+
+def _burst_error(e, code=400):
+    return jsonify({"status": "error", "message": str(e)}), code
+
+
+def _send_jpeg(path):
+    """ส่งไฟล์ภาพ — ถ้าไฟล์หายไประหว่างทางให้ตอบ 404 ไม่ใช่ 500.
+    เกิดขึ้นเป็นปกติ: ผู้ใช้กดลบขณะที่ภาพย่อในแกลเลอรียังทยอยโหลดอยู่
+    (เบราว์เซอร์ขอทีละใบ) — ไม่ใช่ข้อผิดพลาดของระบบ ไม่ควรพ่น stack trace."""
+    from flask import send_file
+    try:
+        return send_file(path, mimetype="image/jpeg")
+    except (FileNotFoundError, OSError):
+        return _burst_error("ไม่พบภาพนี้ (อาจถูกลบไปแล้ว)", 404)
+
+
+def _hik_burst_meta(live, seconds):
+    """ค่าตั้งกล้อง ณ วินาทีที่กดถ่าย — ถ้าไม่เก็บไว้ ภาพที่ได้จะเทียบข้ามรอบไม่ได้
+    (ซึ่งคือทั้งหมดของการทดสอบ "exposure เท่าไรถึงจะไม่เบลอ")."""
+    meta = {"seconds": seconds, "source": live.camera_index,
+            "identity": live.identity}
+    try:
+        params = live.get_params() or {}
+    except Exception:                                # pragma: no cover
+        params = {}
+
+    def _val(key):
+        entry = params.get(key)
+        if isinstance(entry, dict) and entry.get("supported"):
+            return entry.get("value")
+        return None
+
+    meta["exposure_us"] = _val("exposure_us")
+    meta["gain_db"] = _val("gain_db")
+    meta["exposure_auto"] = (params.get("exposure_auto") or {}).get("symbolic")
+    w, h = _val("width"), _val("height")
+    if w and h:
+        meta["size"] = "%dx%d" % (int(w), int(h))
+    elif getattr(live, "width", None):
+        meta["size"] = "%dx%d" % (live.width, live.height)
+    stats = live.stats() or {}
+    meta["fps_at_start"] = stats.get("fps")
+    meta["mean_brightness_at_start"] = stats.get("mean_brightness")
+    return meta
+
+
+def _hik_burst_finalize(live):
+    """ปิดชุดที่ถ่ายจบแล้วให้เรียบร้อย แล้วคืนสถานะสุดท้าย (idempotent)."""
+    global _hik_burst_session, _hik_burst_deadline
+    status = live.stop_dataset() if live is not None else None
+    name = _hik_burst_session
+    _hik_burst_session = None
+    _hik_burst_deadline = 0.0
+    if name and hik_burst is not None:
+        logger.info("[hik-burst] ถ่ายรัวจบ: %s", name)
+    return name, status
+
+
+@app.route('/api/camera/hik/burst', methods=['POST'])
+def api_hik_burst_start():
+    """เริ่มถ่ายรัว — เก็บทุกเฟรมที่กล้องส่งมาเป็นเวลา N วินาที."""
+    global _hik_burst_session, _hik_burst_deadline
+    bad = _hik_burst_guard()
+    if bad:
+        return bad
+    if hik_camera is None:
+        return _hik_unavailable()
+    live = _live_hik_camera()
+    if live is None:
+        return jsonify({"status": "error",
+                        "message": "ต้องเริ่มกล้องอุตสาหกรรมก่อน (กด Start Detection)"}), 409
+    if _hik_burst_session is not None:
+        return jsonify({"status": "error", "message": "กำลังถ่ายรัวอยู่แล้ว"}), 409
+    if (live.stats() or {}).get("dataset"):
+        return jsonify({
+            "status": "error",
+            "message": "กำลังเก็บภาพชุดข้อมูลอยู่ — ปิดก่อนแล้วค่อยถ่ายรัว "
+                       "(ทั้งสองอย่างใช้ตัวเขียนไฟล์ตัวเดียวกัน)",
+        }), 409
+
+    body = request.get_json(silent=True) or {}
+    try:
+        seconds = int(body.get("seconds", getattr(config, "HIK_BURST_DEFAULT_SECONDS", 10)))
+    except (TypeError, ValueError):
+        seconds = getattr(config, "HIK_BURST_DEFAULT_SECONDS", 10)
+    seconds = max(1, min(int(getattr(config, "HIK_BURST_MAX_SECONDS", 60)), seconds))
+    try:
+        every_n = max(1, min(20, int(body.get("every_n", 1))))
+    except (TypeError, ValueError):
+        every_n = 1
+
+    status = live.start_dataset(
+        root=getattr(config, "HIK_BURST_DIR", "data/hik_burst"),
+        max_frames=int(getattr(config, "HIK_BURST_MAX_FRAMES", 3000)),
+        every_n=every_n, duration_s=seconds,
+        jpeg_quality=int(getattr(config, "HIK_BURST_JPEG_QUALITY", 95)),
+        meta=_hik_burst_meta(live, seconds),
+    )
+    if not status or (status.get("error") and not status.get("active")):
+        return jsonify({"status": "error",
+                        "message": (status or {}).get("error", "เริ่มถ่ายรัวไม่สำเร็จ"),
+                        "burst": status}), 507
+    _hik_burst_session = os.path.basename(status.get("dir") or "")
+    _hik_burst_deadline = time.time() + seconds + 3.0
+    logger.info("[hik-burst] เริ่มถ่ายรัว %d วินาที → %s", seconds, _hik_burst_session)
+    return jsonify({"status": "ok", "session": _hik_burst_session,
+                    "seconds": seconds, "burst": status})
+
+
+@app.route('/api/camera/hik/burst', methods=['GET'])
+def api_hik_burst_status():
+    """สถานะการถ่ายรัว + สถานะงานเบื้องหลัง (วัดผล/ตรวจ)."""
+    bad = _hik_burst_guard()
+    if bad:
+        return bad
+    live = _live_hik_camera()
+    out = {"status": "ok", "session": _hik_burst_session,
+           "job": hik_burst.job_status(), "free_mb": hik_burst.free_mb()}
+    if _hik_burst_session is None or live is None:
+        if _hik_burst_session is not None:            # กล้องหลุดกลางคัน
+            _hik_burst_finalize(None)
+            out["session"] = None
+        out["capturing"] = False
+        return jsonify(out)
+
+    ds = (live.stats() or {}).get("dataset") or {}
+    # ตัวเขียนหยุดเองเมื่อครบเวลา/ครบจำนวน/ดิสก์ใกล้เต็ม — ตรงนี้คือจุดที่เก็บกวาด.
+    # `_hik_burst_deadline` กันเคสที่ **ไม่มีเฟรมเข้ามาเลย** (put() ไม่ถูกเรียก
+    # ⇒ ตัวเขียนไม่มีทางรู้ว่าครบเวลาแล้ว) ซึ่งจะค้างเป็น "กำลังถ่าย" ตลอดไป
+    done = (not ds) or ds.get("finished_reason") or not ds.get("active")
+    if done or (_hik_burst_deadline and time.time() > _hik_burst_deadline):
+        name, final = _hik_burst_finalize(live)
+        out.update(capturing=False, session=None, finished=name,
+                   burst=final or ds)
+        return jsonify(out)
+    out.update(capturing=True, burst=ds)
+    return jsonify(out)
+
+
+@app.route('/api/camera/hik/burst', methods=['DELETE'])
+def api_hik_burst_stop():
+    """หยุดถ่ายรัวก่อนครบเวลา."""
+    bad = _hik_burst_guard()
+    if bad:
+        return bad
+    if _hik_burst_session is None:
+        return jsonify({"status": "ok", "session": None, "burst": None})
+    name, final = _hik_burst_finalize(_live_hik_camera())
+    return jsonify({"status": "ok", "session": None, "finished": name, "burst": final})
+
+
+@app.route('/api/camera/hik/bursts', methods=['GET'])
+def api_hik_bursts():
+    bad = _hik_burst_guard()
+    if bad:
+        return bad
+    return jsonify({"status": "ok", "sessions": hik_burst.list_sessions(),
+                    "free_mb": hik_burst.free_mb(),
+                    "job": hik_burst.job_status(),
+                    "capturing": _hik_burst_session,
+                    "mm_per_px": getattr(config, "HIK_BURST_MM_PER_PX", None),
+                    "autodetect_top": int(getattr(config, "HIK_BURST_AUTODETECT_TOP", 12))})
+
+
+@app.route('/api/camera/hik/bursts/<name>', methods=['GET'])
+def api_hik_burst_detail(name):
+    bad = _hik_burst_guard()
+    if bad:
+        return bad
+    sort = request.args.get("sort", "sharp")
+    try:
+        limit = max(0, min(500, int(request.args.get("limit", 120))))
+        offset = max(0, int(request.args.get("offset", 0)))
+    except (TypeError, ValueError):
+        limit, offset = 120, 0
+    try:
+        data = hik_burst.session_detail(name, sort=sort, limit=limit, offset=offset)
+    except ValueError as e:
+        return _burst_error(e, 404)
+    data.update(status="ok", job=hik_burst.job_status())
+    return jsonify(data)
+
+
+@app.route('/api/camera/hik/bursts/<name>', methods=['DELETE'])
+def api_hik_burst_delete(name):
+    bad = _hik_burst_guard()
+    if bad:
+        return bad
+    if name == _hik_burst_session:
+        return jsonify({"status": "error",
+                        "message": "ชุดนี้กำลังถ่ายอยู่ — หยุดก่อนแล้วค่อยลบ"}), 409
+    # งานวัดผล/ตรวจที่ยังวิ่งอยู่จะเขียนไฟล์กลับลงโฟลเดอร์ที่เพิ่งลบไป (metrics.json /
+    # _thumbs) ⇒ เหลือ "ซากชุด" ที่ไม่มีภาพสักใบค้างอยู่ในรายการ. หยุดงานก่อนเสมอ
+    if hik_burst.job_running_on(name):
+        hik_burst.cancel_job(wait=3.0)
+    try:
+        hik_burst.delete_session(name)
+    except ValueError as e:
+        return _burst_error(e, 404)
+    except OSError as e:
+        return _burst_error("ลบไม่สำเร็จ: %s" % e, 500)
+    return jsonify({"status": "ok", "deleted": name, "free_mb": hik_burst.free_mb()})
+
+
+@app.route('/api/camera/hik/bursts/<name>/frames', methods=['DELETE'])
+def api_hik_burst_delete_frames(name):
+    bad = _hik_burst_guard()
+    if bad:
+        return bad
+    files = (request.get_json(silent=True) or {}).get("files") or []
+    if not isinstance(files, list):
+        return _burst_error("ต้องส่ง files เป็นลิสต์")
+    try:
+        removed = hik_burst.delete_frames(name, files[:2000])
+    except ValueError as e:
+        return _burst_error(e, 404)
+    return jsonify({"status": "ok", "removed": removed, "count": len(removed),
+                    "free_mb": hik_burst.free_mb()})
+
+
+@app.route('/api/camera/hik/bursts/<name>/metrics', methods=['POST'])
+def api_hik_burst_metrics(name):
+    """สั่งวัดความคม/ความเบลอของทั้งชุด (งานเบื้องหลัง — 690 ภาพ ≈ 20-30 วินาที)."""
+    bad = _hik_burst_guard()
+    if bad:
+        return bad
+    try:
+        hik_burst.session_dir(name)
+    except ValueError as e:
+        return _burst_error(e, 404)
+    ok, msg = hik_burst.start_job(
+        "metrics", name, lambda job: hik_burst.compute_metrics(name, job=job))
+    if not ok:
+        return jsonify({"status": "error", "message": msg,
+                        "job": hik_burst.job_status()}), 409
+    return jsonify({"status": "ok", "job": hik_burst.job_status()})
+
+
+def _burst_detect_one(path):
+    """ตรวจ 1 ภาพจากไฟล์ — เส้นทางเดียวกับปุ่ม "ถ่าย 1 เฟรม" (imgsz สูง)."""
+    frame = cv2.imread(path)
+    if frame is None:
+        raise RuntimeError("อ่านไฟล์ภาพไม่ได้")
+    imgsz = _snapshot_imgsz(None)
+    t0 = time.perf_counter()
+    detections = detector.detect(frame, imgsz=imgsz)
+    infer_ms = round((time.perf_counter() - t0) * 1000.0, 1)
+    dents = [d for d in detections if d["class_name"] not in _NON_DEFECT_CLASSES]
+    return {"verdict": "ng" if dents else "ok", "dent_count": len(dents),
+            "max_confidence": round(max((d["confidence"] for d in dents), default=0.0), 2),
+            "infer_ms": infer_ms, "imgsz": imgsz,
+            "at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+
+
+@app.route('/api/camera/hik/bursts/<name>/detect', methods=['POST'])
+def api_hik_burst_detect(name):
+    """ส่งภาพในชุดเข้าโมเดล — เลือกได้: ระบุไฟล์เอง / N ใบที่คมที่สุด / ทั้งชุด."""
+    bad = _hik_burst_guard()
+    if bad:
+        return bad
+    if detector is None or detector.model is None:
+        return jsonify({"status": "error", "message": "ยังไม่ได้โหลดโมเดล"}), 400
+    body = request.get_json(silent=True) or {}
+    try:
+        path = hik_burst.session_dir(name)
+    except ValueError as e:
+        return _burst_error(e, 404)
+
+    if body.get("all"):
+        files = hik_burst.list_frames(path)
+    elif body.get("top"):
+        try:
+            top = max(1, min(200, int(body["top"])))
+        except (TypeError, ValueError):
+            top = int(getattr(config, "HIK_BURST_AUTODETECT_TOP", 12))
+        files = hik_burst.top_sharp_files(name, top)
+        if not files:
+            return jsonify({"status": "error",
+                            "message": "ยังไม่ได้วัดความคมของชุดนี้ — กดวัดผลก่อน "
+                                       "(จะได้ไม่ต้องเดาว่าใบไหนคมที่สุด)"}), 409
+    else:
+        files = [f for f in (body.get("files") or []) if isinstance(f, str)][:500]
+    if not files:
+        return _burst_error("ไม่มีภาพให้ตรวจ")
+
+    ok, msg = hik_burst.start_job(
+        "detect", name,
+        lambda job: hik_burst.run_detect(name, files, _burst_detect_one, job=job))
+    if not ok:
+        return jsonify({"status": "error", "message": msg,
+                        "job": hik_burst.job_status()}), 409
+    return jsonify({"status": "ok", "count": len(files), "job": hik_burst.job_status()})
+
+
+@app.route('/api/camera/hik/burst-job', methods=['DELETE'])
+def api_hik_burst_job_cancel():
+    bad = _hik_burst_guard()
+    if bad:
+        return bad
+    hik_burst.cancel_job()
+    return jsonify({"status": "ok", "job": hik_burst.job_status()})
+
+
+@app.route('/api/camera/hik/bursts/<name>/thumb/<filename>', methods=['GET'])
+def api_hik_burst_thumb(name, filename):
+    """ภาพย่อ — สร้างให้อัตโนมัติถ้ายังไม่มี (ปกติสร้างไว้แล้วตอนวัดผล)."""
+    bad = _hik_burst_guard()
+    if bad:
+        return bad
+    try:
+        full = hik_burst.frame_path(name, filename)
+    except ValueError as e:
+        return _burst_error(e, 404)
+    if not os.path.isfile(full):
+        return _burst_error("ไม่พบภาพนี้ (อาจถูกลบไปแล้ว)", 404)
+    thumb = os.path.join(os.path.dirname(full), hik_burst.THUMB_DIR, filename)
+    if not os.path.isfile(thumb):
+        img = cv2.imread(full, cv2.IMREAD_GRAYSCALE)
+        if img is None:
+            return _burst_error("อ่านไฟล์ภาพไม่ได้", 500)
+        hik_burst._thumb(os.path.dirname(full), filename, img,
+                         int(getattr(config, "HIK_BURST_THUMB_WIDTH", 260)))
+    return _send_jpeg(full if not os.path.isfile(thumb) else thumb)
+
+
+@app.route('/api/camera/hik/bursts/<name>/frame/<filename>', methods=['GET'])
+def api_hik_burst_frame(name, filename):
+    """ภาพเต็ม — ``?annotate=1`` วาดกรอบผลตรวจ, ``?roi=1`` วาดกรอบบริเวณที่วัด.
+    ทั้งสองอย่างเป็น **การแสดงผลล้วน** ไม่เขียนทับไฟล์ต้นฉบับ."""
+    bad = _hik_burst_guard()
+    if bad:
+        return bad
+    try:
+        full = hik_burst.frame_path(name, filename)
+    except ValueError as e:
+        return _burst_error(e, 404)
+    if not os.path.isfile(full):
+        return _burst_error("ไม่พบภาพนี้ (อาจถูกลบไปแล้ว)", 404)
+
+    want_box = request.args.get("annotate") == "1"
+    want_roi = request.args.get("roi") == "1"
+    if not want_box and not want_roi:
+        return _send_jpeg(full)
+
+    frame = cv2.imread(full)
+    if frame is None:
+        return _burst_error("อ่านไฟล์ภาพไม่ได้", 500)
+    dets = []
+    if want_box and detector is not None and detector.model is not None:
+        try:
+            dets = detector.detect(frame, imgsz=_snapshot_imgsz(None))
+        except Exception as e:                        # pragma: no cover
+            logger.warning("[hik-burst] ตรวจภาพเพื่อแสดงผลไม่สำเร็จ: %s", e)
+    disp, disp_dets = _scale_for_display(frame, dets, _SNAPSHOT_DISPLAY_MAX_W)
+    if want_roi:
+        metrics = hik_burst.load_metrics(name) or {}
+        rec = (metrics.get("frames") or {}).get(filename) or {}
+        roi = rec.get("roi")
+        if roi:
+            scale = disp.shape[1] / float(frame.shape[1])
+            x, y, w, h = [int(v * scale) for v in roi]
+            cv2.rectangle(disp, (x, y), (x + w, y + h), (255, 200, 0), 2)
+    if disp_dets:
+        disp = detector.draw_detections(disp, disp_dets)
+    ok, buf = cv2.imencode('.jpg', disp, _JPEG_PARAMS)
+    if not ok:
+        return _burst_error("เข้ารหัสภาพไม่สำเร็จ", 500)
+    return Response(buf.tobytes(), mimetype="image/jpeg")
 
 
 @app.route('/api/detection/start', methods=['POST'])
