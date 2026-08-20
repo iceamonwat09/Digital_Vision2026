@@ -436,7 +436,7 @@ def test_css_classes_used_by_js_exist_in_the_template():
     """คลาสที่ JS สร้างต้องมีกฎ CSS จริง ไม่งั้นแผงจะโผล่มาแบบไม่มีรูปทรง."""
     html = _read(os.path.join("templates", "index.html"))
     for cls in ("hik-row", "hik-label", "hik-input", "hik-range", "hik-note",
-                "hik-bad", "hik-ident", "hik-shot-verdict"):
+                "hik-bad", "hik-ident", "hik-group", "hik-shot-verdict"):
         assert ".%s" % cls in html, "ไม่มีกฎ CSS ของ .%s" % cls
 
 
@@ -504,3 +504,30 @@ def test_fake_sdk_is_flagged_loudly():
     assert st["is_fake"] is True
     js = _read(os.path.join("static", "js", "hik_camera.js"))
     assert "is_fake" in js and "SDK ปลอม" in js
+
+
+def test_hik_panel_stacks_vertically():
+    """
+    `.camera-panel` ที่ใช้ร่วมกันเป็น flex **แนวนอน** — แผงนี้มีลูกเกือบสิบตัว
+    ถ้าไม่ตั้ง flex-direction: column ในคอลัมน์กว้าง 263px ตัวหนังสือจะแตกเป็น
+    แนวตั้งทีละอักษร (เกิดขึ้นจริงแล้วบนสถานี). กฎเดียวกับที่ #panelUsb ใช้อยู่.
+    """
+    html = _read(os.path.join("templates", "index.html"))
+    assert "#panelHik { flex-direction: column" in html
+    # และต้องไม่ไปแก้กฎกลางที่โหมดอื่นใช้ร่วมกัน
+    assert ".camera-panel { display: flex; align-items: center; }" in \
+        _read(os.path.join("static", "css", "style.css"))
+
+
+def test_no_fixed_width_columns_wider_than_the_sidebar():
+    """
+    คอลัมน์ความกว้างตายตัวรวมกันต้องไม่เกินความกว้างที่ใช้ได้จริงของแถบข้าง (~263px)
+    ไม่งั้นเนื้อหาจะดันให้ทั้งหน้าเลื่อนแนวนอน.
+    """
+    import re
+    html = _read(os.path.join("templates", "index.html"))
+    block = html[html.index(".hik-presets {"):html.index(".snap-overlay {")]
+    for m in re.finditer(r"grid-template-columns:\s*([^;]+);", block):
+        fixed = [int(x) for x in re.findall(r"(\d+)px", m.group(1))]
+        assert sum(fixed) <= 200, "คอลัมน์ตายตัวรวม %dpx กว้างเกินแถบข้าง: %s" % (
+            sum(fixed), m.group(1))

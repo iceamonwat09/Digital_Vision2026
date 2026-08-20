@@ -18,25 +18,27 @@
     var $ = function (id) { return document.getElementById(id); };
 
     // ลำดับการแสดง + ชนิดตัวควบคุม. คีย์ที่กล้องไม่รองรับ (supported=false) จะถูกซ่อน
+    // [คีย์, ชนิดตัวควบคุม, (ถ้ามี) หัวข้อกลุ่มที่เริ่มตรงนี้]
+    // หัวข้อกลุ่มจะถูกพิมพ์เฉพาะเมื่อกลุ่มนั้นมีตัวควบคุมที่กล้องรองรับจริงอย่างน้อย 1 ตัว
     var UI_ORDER = [
-        ['exposure_auto', 'select'],
+        ['exposure_auto', 'select', 'แสงและการรับภาพ'],
         ['exposure_us', 'number'],
         ['gain_auto', 'select'],
         ['gain_db', 'number'],
         ['balance_white_auto', 'select'],
-        ['framerate_enable', 'check'],
+        ['framerate_enable', 'check', 'อัตราเฟรม'],
         ['framerate', 'number'],
-        ['pixel_format', 'select'],
+        ['pixel_format', 'select', 'ภาพและ ROI'],
         ['width', 'number'],
         ['height', 'number'],
         ['offset_x', 'number'],
         ['offset_y', 'number'],
         ['reverse_x', 'check'],
         ['reverse_y', 'check'],
-        ['trigger_mode', 'select'],
+        ['trigger_mode', 'select', 'ทริกเกอร์'],
         ['trigger_source', 'select'],
         ['trigger_activation', 'select'],
-        ['packet_size', 'number'],
+        ['packet_size', 'number', 'เครือข่าย GigE'],
         ['packet_delay', 'number']
     ];
 
@@ -167,17 +169,33 @@
             box.appendChild(head);
         }
 
+        var pendingGroup = null;
         UI_ORDER.forEach(function (pair) {
             var key = pair[0], kind = pair[1];
+            if (pair[2]) { pendingGroup = pair[2]; }
             var p = params[key];
             if (!p || p.supported === false) { return; }   // กล้องไม่มี node นี้ → ซ่อน
+
+            if (pendingGroup) {
+                var gh = document.createElement('div');
+                gh.className = 'hik-group';
+                gh.textContent = pendingGroup;
+                box.appendChild(gh);
+                pendingGroup = null;
+            }
 
             var row = document.createElement('div');
             row.className = 'hik-row';
             var label = document.createElement('label');
             label.className = 'hik-label';
             label.setAttribute('for', 'hik-p-' + key);
-            label.textContent = p.label || key;
+            label.appendChild(document.createTextNode(p.label || key));
+            if (kind === 'number' && p.min !== null && p.min !== undefined) {
+                var rng = document.createElement('span');
+                rng.className = 'hik-range';
+                rng.textContent = fmtNum(p.min) + ' – ' + fmtNum(p.max);
+                label.appendChild(rng);
+            }
             row.appendChild(label);
 
             var input;
@@ -212,13 +230,6 @@
                 input.title = 'ค่านี้จะทำให้สตรีมหยุด-เริ่มใหม่สั้น ๆ ตอนบันทึก';
             }
             row.appendChild(input);
-
-            var range = document.createElement('span');
-            range.className = 'hik-range';
-            if (kind === 'number' && p.min !== null && p.min !== undefined) {
-                range.textContent = fmtNum(p.min) + '–' + fmtNum(p.max);
-            }
-            row.appendChild(range);
             box.appendChild(row);
         });
 
