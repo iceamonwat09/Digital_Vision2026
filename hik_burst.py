@@ -85,6 +85,15 @@ SHARP_REL_OK = 0.80       # คมเกิน 80% ของภาพที่�
 TARGET_MEAN = 80.0
 DIR_RATIO_MARGIN = 0.70   # อัตราส่วนแกนต่างจากฐานเกินเท่านี้จึงกล้าบอกทิศทางเบลอ
 
+# ── การวินิจฉัย "เฟรมหายไปไหน" ──────────────────────────────────────
+# GigE 1 Gbit/s = 125 MB/s ตามทฤษฎี. ประสิทธิภาพจริงขึ้นกับขนาดแพ็กเก็ต:
+# แพ็กเก็ต 1500 ไบต์ (ค่าโรงงาน) เสีย overhead มากกว่า Jumbo 8164 ไบต์มาก
+# ⇒ ใช้เทียบว่า fps ที่ได้ "ชนเพดานสาย" หรือ "ต่ำกว่าเพดานมาก" (คนละสาเหตุ)
+GIGE_MB_S = 125.0
+GIGE_EFF_JUMBO = 0.90
+GIGE_EFF_SMALL = 0.70
+JUMBO_MIN_PACKET = 4000       # ต่ำกว่านี้ถือว่ายังไม่ได้เปิด Jumbo Frame
+
 METRICS_FILE = "metrics.json"
 DETECT_FILE = "detect.json"
 META_FILE = "meta.json"
@@ -209,6 +218,7 @@ def session_brief(name):
         "summary": summary,
         "detected": len(detect),
         "ng": ng,
+        "diag": diagnose(meta),
     }
 
 
@@ -574,6 +584,129 @@ def _annotate_directions(frames, summary):
     return frames
 
 
+def diagnose(meta):
+    """
+    ตอบคำถามเดียว: **เฟรมที่ควรได้ หายไปตรงไหน**
+
+    แยกให้ชัด 3 สาเหตุ เพราะ **วิธีแก้คนละเรื่องกันโดยสิ้นเชิง**:
+      ① เฟรมหายระหว่างทาง  → เลขเฟรมของกล้องกระโดด / แพ็กเก็ตหาย
+                              แก้ที่ packet size + Jumbo Frame บน NIC
+      ② ดิสก์เขียนไม่ทัน    → เฟรมมาถึงแล้วแต่คิวเต็ม
+                              แก้ที่ "เก็บ 1 ใน N" · ลด ROI · หยุดโมเดลระหว่างถ่าย
+      ③ กล้องส่งมาช้าเอง    → ไม่มีเฟรมหาย ไม่มีการทิ้ง แต่อัตราต่ำ
+                              แก้ที่ AcquisitionFrameRate / exposure / packet size
+
+    คืน ``None`` เมื่อข้อมูลไม่พอจะสรุป — ไม่เดา (กฎเหล็กข้อ 2)
+    """
+    if not isinstance(meta, dict):
+        return None
+    a = meta.get("diag_start") or {}
+    b = meta.get("diag_end") or {}
+    saved = int(meta.get("saved") or 0)
+    dropped = int(meta.get("dropped") or 0)
+    elapsed = float(meta.get("elapsed_s") or 0)
+    if not elapsed or (saved + dropped) == 0:
+        return None
+
+    every_n = max(1, int(meta.get("every_n") or 1))
+    offered = saved + dropped                          # เฟรมที่ผ่านตัวกรอง every_n มาแล้ว
+    delivered = offered * every_n                      # เฟรมที่กล้องส่งถึงเราจริง
+    delivered_fps = delivered / elapsed
+
+    def delta(key):
+        x, y = a.get(key), b.get(key)
+        if x is None or y is None:
+            return None
+        return max(0, int(y) - int(x))
+
+    lost_transport = delta("cam_dropped")
+    timeouts = delta("cam_timeouts")
+    net_a = (a.get("net") or {}) if isinstance(a.get("net"), dict) else {}
+    net_b = (b.get("net") or {}) if isinstance(b.get("net"), dict) else {}
+    lost_packets = (int(net_b["lost_packets"]) - int(net_a["lost_packets"])) \
+        if ("lost_packets" in net_a and "lost_packets" in net_b) else None
+
+    out = {
+        "delivered_fps": round(delivered_fps, 1),
+        "saved": saved, "dropped_disk": dropped,
+        "lost_transport": lost_transport, "lost_packets": lost_packets,
+        "timeouts": timeouts, "elapsed_s": round(elapsed, 1),
+        "cam_fps": b.get("cam_fps") or a.get("cam_fps"),
+        "stage_ms": meta.get("stage_ms") or {},
+        "framerate_enable": meta.get("framerate_enable"),
+        "framerate": meta.get("framerate"),
+        "packet_size": meta.get("packet_size"),
+    }
+
+    # เพดานของสาย GigE ที่ ROI + รูปแบบพิกเซลนี้ (ไบต์ต่อพิกเซลของ Bayer = 1)
+    w, h = _size_of(meta)
+    if w and h:
+        mb = w * h / 1e6
+        eff = GIGE_EFF_JUMBO if (meta.get("packet_size") or 0) >= JUMBO_MIN_PACKET \
+            else GIGE_EFF_SMALL
+        out["gige_ceiling_fps"] = round(GIGE_MB_S * eff / mb, 1)
+        out["jumbo"] = bool((meta.get("packet_size") or 0) >= JUMBO_MIN_PACKET)
+
+    # ── ตัดสิน ──
+    # ⚠️ ต้องรายงาน **ทุกสาเหตุที่พบ** ไม่ใช่หยุดที่ข้อแรก: เคสจริงบนสถานี
+    #    (16.5 fps + ทิ้ง 127 เฟรม) มีปัญหาสองข้อพร้อมกัน — ถ้ารายงานแค่ "ดิสก์"
+    #    ผู้ใช้จะไปแก้ดิสก์แล้วยังติดที่ 16.5 fps อยู่ดี
+    # ลำดับหัวข้อหลัก = ลำดับที่ควรลงมือแก้: เฟรมที่ "ไม่เคยมี" ต้องแก้ก่อน
+    # เฟรมที่ "มีแล้วเขียนไม่ทัน" (เพราะพอแก้ให้กล้องเร็วขึ้น ดิสก์จะยิ่งตามไม่ทัน)
+    issues = []
+    if lost_transport:
+        issues.append({
+            "cause": "transport",
+            "text": "เฟรมหายระหว่างทาง %d เฟรม (เลขเฟรมของกล้องกระโดด)" % lost_transport,
+            "fix": ("ตั้ง packet size ให้ใหญ่ขึ้นและเปิด Jumbo Frame บน NIC "
+                    "— การหยุดโมเดลหรือลดจำนวนภาพจะไม่ช่วยเลย")})
+    elif lost_packets:
+        issues.append({
+            "cause": "transport",
+            "text": "แพ็กเก็ตหาย %d ระหว่างถ่าย" % lost_packets,
+            "fix": "ตั้ง packet size / เปิด Jumbo Frame / ลด packet delay"})
+
+    if meta.get("framerate_enable") and meta.get("framerate"):
+        issues.append({
+            "cause": "framerate_cap",
+            "text": ("กล้องถูกจำกัดอัตราเฟรมไว้เองที่ %.1f fps "
+                     "(AcquisitionFrameRate เปิดอยู่)" % float(meta["framerate"])),
+            "fix": "ปิด \"จำกัดอัตราเฟรม\" ในแผงตั้งค่ากล้อง แล้วถ่ายใหม่"})
+    elif out.get("gige_ceiling_fps") and delivered_fps < out["gige_ceiling_fps"] * 0.5:
+        issues.append({
+            "cause": "camera_rate",
+            "text": ("กล้องส่งมาแค่ %.1f fps ทั้งที่สายรับได้ราว %.0f fps "
+                     "และไม่มีเฟรมหาย/ไม่มีการทิ้งระหว่างทาง"
+                     % (delivered_fps, out["gige_ceiling_fps"])),
+            "fix": ("เช็ค packet size (ค่าโรงงาน 1500 ทำให้ได้ 15-17 fps) · "
+                    "exposure ที่ยาวเกิน · หรือ AcquisitionFrameRate")})
+
+    if dropped:
+        issues.append({
+            "cause": "disk",
+            "text": ("ดิสก์เขียนไม่ทัน — ทิ้ง %d เฟรม (%.0f%% ของที่มาถึง)"
+                     % (dropped, dropped * 100.0 / offered)),
+            "fix": ("ตั้ง \"เก็บ 1 ใน N\" ให้สูงขึ้น · ลด ROI · "
+                    "หรือเปิด \"หยุดโมเดลระหว่างถ่ายรัว\"")})
+
+    if not issues:
+        issues.append({"cause": "ok", "text": "ไม่พบเฟรมหายและไม่มีการทิ้ง", "fix": ""})
+
+    out["issues"] = issues
+    out["cause"] = issues[0]["cause"]
+    out["text"] = issues[0]["text"]
+    out["fix"] = issues[0]["fix"]
+    return out
+
+
+def _size_of(meta):
+    try:
+        w, h = str(meta.get("size") or "").lower().split("x")
+        return int(w), int(h)
+    except Exception:
+        return None, None
+
+
 def load_metrics(name):
     data = _read_json(os.path.join(session_dir(name), METRICS_FILE))
     if not isinstance(data, dict) or data.get("version") != METRICS_VERSION:
@@ -618,7 +751,7 @@ def session_detail(name, sort="sharp", limit=0, offset=0):
         rows = rows[offset:offset + limit]
     return {"name": name, "meta": meta, "summary": metrics.get("summary") or {},
             "metrics_ready": bool(fm), "total": total, "frames": rows,
-            "free_mb": free_mb()}
+            "diag": diagnose(meta), "free_mb": free_mb()}
 
 
 def top_sharp_files(name, count):

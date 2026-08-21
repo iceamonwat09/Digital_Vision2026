@@ -432,8 +432,31 @@ def inference_loop():
     best_frame = None
     best_dets = None
 
+    paused = False
     while detection_active:
         try:
+            # ── หยุดตรวจชั่วคราวระหว่าง "ถ่ายรัว" (opt-in ต่อครั้ง) ──
+            # คืน CPU/แบนด์วิดท์ RAM ให้เธรดเขียนไฟล์ทั้งหมด. ล้างผลตรวจทิ้งด้วย
+            # ไม่งั้น generate_frames จะวาดกรอบเก่าทับเฟรมใหม่ = ชี้จุดผิดแบบมั่นใจ
+            if _inference_paused():
+                if not paused:
+                    paused = True
+                    can_present = False
+                    can_counted_ng = False
+                    empty_streak = 0
+                    best_score, best_frame, best_dets = -1.0, None, None
+                    pool_collecting = False
+                    with det_lock:
+                        latest_detections = []
+                    detection_stats["current_defects"] = 0
+                    logger.info("[hik-burst] หยุดการตรวจชั่วคราวระหว่างถ่ายรัว")
+                time.sleep(0.02)
+                continue
+            if paused:
+                paused = False
+                last_seq = -1          # เริ่มนับกระป๋องใหม่จากเฟรมล่าสุด
+                logger.info("[hik-burst] กลับมาตรวจตามปกติ")
+
             with raw_lock:
                 frame = latest_raw_frame
                 seq = raw_frame_seq
@@ -1032,6 +1055,19 @@ def api_hik_shot():
 
 _hik_burst_session = None          # ชื่อชุดที่กำลังถ่ายอยู่ (None = ไม่ได้ถ่าย)
 _hik_burst_deadline = 0.0          # เวลาที่ควรจบ — กันเคส "ไม่มีเฟรมเข้ามาเลย"
+_hik_burst_pause_inf = False       # ผู้ใช้ขอหยุดโมเดลระหว่างถ่ายรัวรอบนี้หรือไม่
+
+
+def _inference_paused():
+    """
+    True เฉพาะตอนที่ **กำลังถ่ายรัวอยู่จริง และผู้ใช้ติ๊กขอหยุดโมเดล**.
+
+    ⚠️ ผูกกับ ``_hik_burst_deadline`` โดยตั้งใจ: ต่อให้เส้นทางปิดงานพังไปทั้งหมด
+    (exception / กล้องหลุด / เบราว์เซอร์ปิด) การหยุดตรวจก็จะคลายเองเมื่อถึงเวลา
+    ที่ตั้งไว้ + 3 วินาที — **เป็นไปไม่ได้ที่ระบบจะค้างในสภาพ "ไม่ตรวจ" ตลอดไป**
+    """
+    return bool(_hik_burst_pause_inf and _hik_burst_session is not None
+                and _hik_burst_deadline and time.time() < _hik_burst_deadline)
 
 
 def _hik_burst_unavailable():
@@ -1080,6 +1116,13 @@ def _hik_burst_meta(live, seconds):
     meta["exposure_us"] = _val("exposure_us")
     meta["gain_db"] = _val("gain_db")
     meta["exposure_auto"] = (params.get("exposure_auto") or {}).get("symbolic")
+    # ค่าที่ใช้ตอบว่า "ทำไมได้ fps เท่านี้" — ถ้าไม่เก็บไว้ ต้องมานั่งเดาทีหลัง
+    meta["framerate_enable"] = _val("framerate_enable")
+    meta["framerate"] = _val("framerate")
+    meta["packet_size"] = _val("packet_size")
+    meta["packet_delay"] = _val("packet_delay")
+    meta["pixel_format"] = (params.get("pixel_format") or {}).get("symbolic")
+    meta["trigger_mode"] = (params.get("trigger_mode") or {}).get("symbolic")
     w, h = _val("width"), _val("height")
     if w and h:
         meta["size"] = "%dx%d" % (int(w), int(h))
@@ -1093,11 +1136,12 @@ def _hik_burst_meta(live, seconds):
 
 def _hik_burst_finalize(live):
     """ปิดชุดที่ถ่ายจบแล้วให้เรียบร้อย แล้วคืนสถานะสุดท้าย (idempotent)."""
-    global _hik_burst_session, _hik_burst_deadline
+    global _hik_burst_session, _hik_burst_deadline, _hik_burst_pause_inf
     status = live.stop_dataset() if live is not None else None
     name = _hik_burst_session
     _hik_burst_session = None
     _hik_burst_deadline = 0.0
+    _hik_burst_pause_inf = False
     if name and hik_burst is not None:
         logger.info("[hik-burst] ถ่ายรัวจบ: %s", name)
     return name, status
@@ -1106,7 +1150,7 @@ def _hik_burst_finalize(live):
 @app.route('/api/camera/hik/burst', methods=['POST'])
 def api_hik_burst_start():
     """เริ่มถ่ายรัว — เก็บทุกเฟรมที่กล้องส่งมาเป็นเวลา N วินาที."""
-    global _hik_burst_session, _hik_burst_deadline
+    global _hik_burst_session, _hik_burst_deadline, _hik_burst_pause_inf
     bad = _hik_burst_guard()
     if bad:
         return bad
@@ -1149,9 +1193,13 @@ def api_hik_burst_start():
                         "burst": status}), 507
     _hik_burst_session = os.path.basename(status.get("dir") or "")
     _hik_burst_deadline = time.time() + seconds + 3.0
+    # ต้องเปิดทั้ง flag ของระบบ **และ** ติ๊กมาในคำขอ จึงจะหยุดตรวจ
+    _hik_burst_pause_inf = bool(body.get("pause_inference")) and bool(
+        getattr(config, "HIK_BURST_PAUSE_INFERENCE", False))
     logger.info("[hik-burst] เริ่มถ่ายรัว %d วินาที → %s", seconds, _hik_burst_session)
     return jsonify({"status": "ok", "session": _hik_burst_session,
-                    "seconds": seconds, "burst": status})
+                    "seconds": seconds, "burst": status,
+                    "pause_inference": _hik_burst_pause_inf})
 
 
 @app.route('/api/camera/hik/burst', methods=['GET'])
@@ -1180,7 +1228,7 @@ def api_hik_burst_status():
         out.update(capturing=False, session=None, finished=name,
                    burst=final or ds)
         return jsonify(out)
-    out.update(capturing=True, burst=ds)
+    out.update(capturing=True, burst=ds, paused_inference=_inference_paused())
     return jsonify(out)
 
 
@@ -1206,7 +1254,9 @@ def api_hik_bursts():
                     "job": hik_burst.job_status(),
                     "capturing": _hik_burst_session,
                     "mm_per_px": getattr(config, "HIK_BURST_MM_PER_PX", None),
-                    "autodetect_top": int(getattr(config, "HIK_BURST_AUTODETECT_TOP", 12))})
+                    "autodetect_top": int(getattr(config, "HIK_BURST_AUTODETECT_TOP", 12)),
+                    "can_pause_inference": bool(
+                        getattr(config, "HIK_BURST_PAUSE_INFERENCE", False))})
 
 
 @app.route('/api/camera/hik/bursts/<name>', methods=['GET'])

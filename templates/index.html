@@ -159,6 +159,11 @@
                             <button type="button" data-every="7">1 ใน 7</button>
                             <button type="button" data-every="14">1 ใน 14</button>
                         </div>
+                        <label class="hik-check hik-pause-row" id="hikBurstPauseRow" style="display:none">
+                            <input type="checkbox" id="hikBurstPause">
+                            <span>⏸️ หยุดโมเดลระหว่างถ่ายรัว
+                                <b class="hik-pause-warn">— การนับและการบันทึก DB จะหยุดด้วย</b></span>
+                        </label>
                         <div id="hikBurstEst" class="hik-burst-est">—</div>
                         <button id="hikBurstBtn" class="btn btn-secondary btn-block" type="button" disabled>🎬 เริ่มถ่ายรัว</button>
                         <button id="hikBurstGalleryBtn" class="btn btn-secondary btn-block" type="button">🖼️ ภาพที่ถ่ายไว้ / ลบภาพ</button>
@@ -347,6 +352,7 @@
                 <div id="hikGalKpis" class="hik-kpis"></div>
                 <div id="hikGalSummary" class="hik-note info">เลือกชุดภาพทางซ้าย</div>
                 <div id="hikGalDrop" class="hik-note bad" style="display:none"></div>
+                <div id="hikGalDiag" class="hik-note info" style="display:none"></div>
                 <div class="hik-gal-bar">
                     <select id="hikGalSort" class="camera-select" title="เรียงลำดับภาพ">
                         <option value="sharp" selected>เรียง: คมที่สุดก่อน</option>
@@ -495,6 +501,14 @@
     }
     .hik-burst-est b { font-family: var(--font-mono); font-size: 12.5px; }
     .hik-burst-est.warn { background: #FFF8E1; color: #8D5B00; }
+    .hik-pause-row { margin-top: 8px; font-size: 11.5px; align-items: flex-start; }
+    .hik-pause-warn { color: var(--danger); font-weight: 600; }
+    .hik-diag-grid {
+        display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        gap: 4px 14px; margin-top: 6px; font-size: 11.5px;
+    }
+    .hik-diag-grid span { color: var(--gray-600); }
+    .hik-diag-grid b { font-family: var(--font-mono); color: var(--gray-800); }
     .hik-every-presets { display: flex; gap: 4px; margin-top: 6px; }
     .hik-every-presets button {
         flex: 1 1 0; min-width: 0; padding: 4px 2px; font-size: 10.5px;

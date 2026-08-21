@@ -9,7 +9,7 @@ import os
 # print it on startup and confirm it is actually executing the new code.
 # NOTE: shown on the navbar badge too — keep it short (<= ~28 chars) or it
 # gets ellipsized there (full value always visible in the footer / hover).
-CONFIG_VERSION = "2026.08.20-hikburst"
+CONFIG_VERSION = "2026.08.21-blurdiag"
 
 # ====================
 # CAMERA CONFIGURATION
@@ -147,6 +147,14 @@ HIK_BURST_AUTODETECT_TOP = 12
 # None = ยังไม่ได้วัด ⇒ หน้าเว็บจะรายงานความเร็ว/ระยะเบลอเป็น **พิกเซล** เท่านั้น
 # (ไม่เดาเป็น mm — ตัวเลขที่เดาแล้วดูน่าเชื่อถืออันตรายกว่าไม่มีตัวเลข).
 HIK_BURST_MM_PER_PX = None
+
+# ── หยุดโมเดลระหว่างถ่ายรัว (opt-in) ────────────────────────────────
+# ระหว่างเก็บข้อมูลเราไม่ต้องการผลตรวจสด แต่ `inference_loop` วิ่ง bestX ทุก ~50 ms
+# บน iGPU และ JPEG encode กิน CPU — RAM ของสถานีเป็น single-channel ซึ่งเป็น
+# คอขวดที่วัดไว้แล้ว ⇒ ทั้งสองแย่งกันจนเฟรมถูกทิ้ง.
+# ⚠️ ระหว่างที่หยุด **การนับและการบันทึก DB จะหยุดด้วย** จึงเปิดเองเป็นค่าเริ่มต้นไม่ได้
+# ⚠️ เปิด flag นี้ยังไม่พอ — ต้องติ๊กในแผงถ่ายรัวต่อครั้งด้วย (กันเผลอ)
+HIK_BURST_PAUSE_INFERENCE = False
 
 # ค่าที่ผู้ใช้บันทึกจากหน้าเว็บ (อยู่นอก git — ต่างเครื่องต่างค่าได้)
 HIK_SETTINGS_FILE = "data/hik_camera.json"

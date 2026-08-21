@@ -540,3 +540,137 @@ def test_light_factor_matches_the_exposure_it_recommends(burst_root, tmp_path):
     s = hb.compute_metrics(name)["summary"]
     assert s["light_factor_needed"] == pytest.approx(
         1000.0 / s["max_exposure_us_1px"], rel=0.02)
+
+
+# ── ⑬ วินิจฉัย "เฟรมหายไปตรงไหน" ───────────────────────────────────
+# วิธีแก้ของสามสาเหตุนี้คนละเรื่องกันโดยสิ้นเชิง ⇒ ชี้ผิดสาเหตุ = ไปแก้ของที่ไม่พัง
+def _meta(saved=100, dropped=0, elapsed=10.0, every_n=1, size="1224x1024",
+          cam_dropped=(0, 0), lost_packets=None, framerate_enable=False,
+          framerate=None, packet_size=8164, cam_fps=None):
+    a = {"cam_frames": 0, "cam_dropped": cam_dropped[0], "cam_timeouts": 0,
+         "cam_fps": cam_fps}
+    b = {"cam_frames": saved + dropped, "cam_dropped": cam_dropped[1],
+         "cam_timeouts": 0, "cam_fps": cam_fps}
+    if lost_packets is not None:
+        a["net"] = {"lost_packets": 0, "lost_frames": 0, "recv_frames": 0}
+        b["net"] = {"lost_packets": lost_packets, "lost_frames": 0, "recv_frames": 0}
+    return {"saved": saved, "dropped": dropped, "elapsed_s": elapsed,
+            "every_n": every_n, "size": size, "packet_size": packet_size,
+            "framerate_enable": framerate_enable, "framerate": framerate,
+            "diag_start": a, "diag_end": b, "stage_ms": {"encode": 8.0, "write": 2.0}}
+
+
+def test_diagnose_blames_the_network_when_frame_numbers_jump(burst_root):
+    g = hb.diagnose(_meta(saved=100, dropped=0, cam_dropped=(0, 40)))
+    assert g["cause"] == "transport"
+    assert g["lost_transport"] == 40
+    assert "packet size" in g["fix"]
+
+
+def test_diagnose_blames_the_disk_when_frames_arrived_but_were_dropped(burst_root):
+    # เฟรมมาถึงเต็มอัตรา (690 ใน 10 วิ) แต่เขียนได้แค่ 563 ⇒ เหลือสาเหตุเดียวคือดิสก์
+    g = hb.diagnose(_meta(saved=563, dropped=127, elapsed=10.0))
+    assert g["cause"] == "disk"
+    assert g["dropped_disk"] == 127
+    assert "18%" in g["text"]
+
+
+def test_diagnose_reports_every_cause_not_just_the_first(burst_root):
+    """
+    เคสจริงบนสถานี: กล้องส่งมาแค่ 16.5 fps **และ** ดิสก์ทิ้ง 127 เฟรม
+    ถ้ารายงานแค่ข้อเดียว ผู้ใช้จะแก้ดิสก์แล้วยังติดที่ 16.5 fps อยู่ดี
+    """
+    g = hb.diagnose(_meta(saved=38, dropped=127, elapsed=10.0))
+    causes = [i["cause"] for i in g["issues"]]
+    assert "camera_rate" in causes and "disk" in causes
+    # ลำดับ = ลำดับที่ควรลงมือแก้: เฟรมที่ "ไม่เคยมี" ก่อนเฟรมที่ "เขียนไม่ทัน"
+    assert causes.index("camera_rate") < causes.index("disk")
+    assert g["cause"] == "camera_rate"
+
+
+def test_a_healthy_burst_has_exactly_one_ok_issue(burst_root):
+    g = hb.diagnose(_meta(saved=690, dropped=0, elapsed=10.0))
+    assert [i["cause"] for i in g["issues"]] == ["ok"]
+
+
+def test_transport_loss_outranks_disk_loss(burst_root):
+    """ทั้งสองอย่างพร้อมกัน ⇒ ต้องชี้ที่เครือข่ายก่อน เพราะการลดจำนวนภาพไม่ช่วยเลย"""
+    g = hb.diagnose(_meta(saved=38, dropped=127, cam_dropped=(0, 40)))
+    assert g["cause"] == "transport"
+
+
+def test_diagnose_spots_a_self_imposed_frame_rate_cap(burst_root):
+    g = hb.diagnose(_meta(saved=165, dropped=0, elapsed=10.0,
+                          framerate_enable=True, framerate=16.5))
+    assert g["cause"] == "framerate_cap"
+    assert "16.5" in g["text"]
+    # รู้สาเหตุแน่ชัดแล้ว ⇒ ไม่ต้องเดาซ้ำว่า "กล้องช้าเอง"
+    assert "camera_rate" not in [i["cause"] for i in g["issues"]]
+
+
+def test_diagnose_flags_a_camera_that_is_simply_slow(burst_root):
+    """ไม่มีเฟรมหาย ไม่มีการทิ้ง ไม่มีการจำกัด แต่ยังได้แค่ 16.5 fps
+    = ลายเซ็นของ packet size ที่ยังเป็นค่าโรงงาน"""
+    g = hb.diagnose(_meta(saved=165, dropped=0, elapsed=10.0, packet_size=1500))
+    assert g["cause"] == "camera_rate"
+    assert g["delivered_fps"] == pytest.approx(16.5, rel=0.01)
+    assert g["gige_ceiling_fps"] > 30
+
+
+def test_diagnose_says_ok_when_nothing_is_wrong(burst_root):
+    g = hb.diagnose(_meta(saved=690, dropped=0, elapsed=10.0))
+    assert g["cause"] == "ok"
+    assert g["delivered_fps"] == pytest.approx(69.0, rel=0.01)
+
+
+def test_delivered_fps_counts_the_frames_every_n_threw_away(burst_root):
+    """เก็บ 1 ใน 7 แล้วได้ 10 ภาพ/วิ ⇒ กล้องส่งมาจริง 70 fps ไม่ใช่ 10"""
+    g = hb.diagnose(_meta(saved=100, dropped=0, elapsed=10.0, every_n=7))
+    assert g["delivered_fps"] == pytest.approx(70.0, rel=0.01)
+
+
+def test_gige_ceiling_depends_on_jumbo_frames(burst_root):
+    big = hb.diagnose(_meta(packet_size=8164))
+    small = hb.diagnose(_meta(packet_size=1500))
+    assert big["jumbo"] is True and small["jumbo"] is False
+    assert big["gige_ceiling_fps"] > small["gige_ceiling_fps"]
+
+
+def test_diagnose_reports_lost_packets_from_the_sdk(burst_root):
+    g = hb.diagnose(_meta(saved=100, dropped=0, lost_packets=500))
+    assert g["cause"] == "transport"
+    assert g["lost_packets"] == 500
+
+
+def test_diagnose_returns_none_when_it_cannot_tell(burst_root):
+    assert hb.diagnose(None) is None
+    assert hb.diagnose({}) is None
+    assert hb.diagnose({"saved": 0, "dropped": 0, "elapsed_s": 10}) is None
+    assert hb.diagnose({"saved": 10, "dropped": 0}) is None       # ไม่มี elapsed
+
+
+def test_diagnose_survives_meta_without_the_new_fields(burst_root):
+    """ชุดภาพที่ถ่ายไว้ก่อนมีระบบวินิจฉัย ต้องไม่ทำให้หน้าเว็บพัง"""
+    g = hb.diagnose({"saved": 38, "dropped": 127, "elapsed_s": 10.0})
+    assert g is not None
+    # ไม่มี size ⇒ คำนวณเพดานสายไม่ได้ ⇒ ไม่กล่าวหาว่ากล้องช้า (ไม่เดา)
+    assert "gige_ceiling_fps" not in g
+    assert g["cause"] == "disk"
+    assert g["lost_transport"] is None                 # ไม่รู้ ⇒ None ไม่ใช่ 0
+
+
+def test_size_parsing_is_tolerant(burst_root):
+    assert hb._size_of({"size": "1224x1024"}) == (1224, 1024)
+    assert hb._size_of({"size": "แปลก"}) == (None, None)
+    assert hb._size_of({}) == (None, None)
+
+
+def test_session_detail_carries_the_diagnosis(burst_root, tmp_path):
+    name, root = make_session(tmp_path, [_frame(10), _frame(40)])
+    meta_p = os.path.join(root, name, hb.META_FILE)
+    m = json.loads(open(meta_p, encoding="utf-8").read())
+    m.update(_meta(saved=38, dropped=127))
+    open(meta_p, "w", encoding="utf-8").write(json.dumps(m))
+    d = hb.session_detail(name)
+    assert "disk" in [i["cause"] for i in d["diag"]["issues"]]
+    assert hb.session_brief(name)["diag"] is not None

@@ -629,12 +629,18 @@ class _DatasetWriter(object):
     """
 
     def __init__(self, root, max_frames=2000, jpeg_quality=95, every_n=1,
-                 duration_s=0, min_free_mb=2048, meta=None):
+                 duration_s=0, min_free_mb=2048, meta=None,
+                 counters_cb=None, net_cb=None):
         self.root = root
         # ค่าตั้งกล้อง ณ วินาทีที่เริ่มเก็บ — เขียนลง meta.json ข้าง ๆ ภาพ.
         # ถ้าไม่เก็บไว้ เปิดโฟลเดอร์ดูทีหลังจะไม่มีทางรู้ว่าถ่ายที่ exposure เท่าไร
         # ⇒ ภาพที่เก็บมาเทียบข้ามรอบไม่ได้เลย (ซึ่งคือทั้งหมดของการทดสอบความเบลอ)
         self.meta = dict(meta or {})
+        # อ่านตัวนับของกล้อง (ราคาถูก ไม่แตะ SDK) และสถิติเครือข่าย (แตะ SDK จึงเรียกแค่
+        # ตอนเริ่ม/ตอนจบ). สองอย่างนี้คือสิ่งที่แยก **"เฟรมหายระหว่างทาง"** ออกจาก
+        # **"ดิสก์เขียนไม่ทัน"** ได้ — ซึ่งวิธีแก้คนละเรื่องกันโดยสิ้นเชิง
+        self.counters_cb = counters_cb
+        self.net_cb = net_cb
         self.max_frames = int(max_frames)
         self.jpeg_quality = int(jpeg_quality)
         self.every_n = max(1, int(every_n))
@@ -653,6 +659,9 @@ class _DatasetWriter(object):
         # คิวเป็น FIFO และ every_n ถูกคัดก่อนหน้านี้แล้ว ⇒ รายการที่ i คู่กับไฟล์ที่ i+1
         self._ts = []
         self._meta_done = False
+        self._enc_ms = []                             # เวลา encode JPEG ต่อเฟรม
+        self._write_ms = []                           # เวลาเขียนลงดิสก์ต่อเฟรม
+        self._fps_series = []                         # (วินาทีที่, เฟรมที่กล้องส่งมาแล้ว)
         self._q = queue.Queue(maxsize=8)
         self._stop = threading.Event()
         self._thread = None
@@ -674,11 +683,24 @@ class _DatasetWriter(object):
         self.meta.setdefault("started_at", time.strftime("%Y-%m-%d %H:%M:%S"))
         self.meta["every_n"] = self.every_n
         self.meta["jpeg_quality"] = self.jpeg_quality
+        self.meta["diag_start"] = self._snapshot(net=True)
         self._write_meta()
         self._stop.clear()
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
         return True
+
+    def _snapshot(self, net=False):
+        """ภาพนิ่งของตัวนับ ณ ขณะนี้ — ``net=True`` จึงจะแตะ SDK (ช้ากว่ามาก)."""
+        snap = {"t": round(time.time(), 3)}
+        try:
+            if self.counters_cb is not None:
+                snap.update(self.counters_cb() or {})
+            if net and self.net_cb is not None:
+                snap["net"] = self.net_cb()
+        except Exception as e:                        # pragma: no cover - ไม่ยอมให้ล้มการเก็บภาพ
+            snap["error"] = str(e)
+        return snap
 
     def _write_meta(self, final=False):
         """เขียน meta.json (เขียนทับได้ — เรียกตอนเริ่มและตอนจบ)."""
@@ -694,6 +716,15 @@ class _DatasetWriter(object):
             data["dropped"] = self.dropped
             data["finished_reason"] = self.finished_reason
             data["ended_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+            data["diag_end"] = self._snapshot(net=True)
+            data["elapsed_s"] = round(max(1e-6, time.time() - self._t0), 3)
+            data["fps_series"] = list(self._fps_series)
+            data["stage_ms"] = {
+                "encode": round(sum(self._enc_ms) / len(self._enc_ms), 2) if self._enc_ms else None,
+                "write": round(sum(self._write_ms) / len(self._write_ms), 2) if self._write_ms else None,
+                "encode_max": round(max(self._enc_ms), 2) if self._enc_ms else None,
+                "write_max": round(max(self._write_ms), 2) if self._write_ms else None,
+            }
         try:
             with open(os.path.join(self.dir, "meta.json"), "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
@@ -752,13 +783,20 @@ class _DatasetWriter(object):
                 continue
             try:
                 path = os.path.join(self.dir, "%05d.jpg" % (self.saved + 1))
+                _t_enc = time.time()
                 ok, buf = cv2.imencode(".jpg", frame,
                                        [int(cv2.IMWRITE_JPEG_QUALITY), self.jpeg_quality])
+                _t_wr = time.time()
                 if ok:
                     with open(path, "wb") as f:
                         f.write(buf.tobytes())
                     self.saved += 1
                     self.bytes += len(buf)
+                    # เก็บเวลารายขั้นไว้ตอบว่า "ช้าที่ encode หรือช้าที่ดิสก์"
+                    self._enc_ms.append((_t_wr - _t_enc) * 1000.0)
+                    self._write_ms.append((time.time() - _t_wr) * 1000.0)
+                    if not self._fps_series or (time.time() - self._fps_series[-1]["t"]) >= 1.0:
+                        self._fps_series.append(self._snapshot())
             except Exception as e:                    # ดิสก์เต็ม/สิทธิ์ ⇒ หยุดเงียบไม่ได้
                 self.error = str(e)
                 logger.warning("บันทึกภาพชุดข้อมูลไม่สำเร็จ: %s", e)
@@ -1650,7 +1688,16 @@ class HikCamera(object):
                            jpeg_quality=jpeg_quality or _cfg("HIK_DATASET_JPEG_QUALITY", 95),
                            every_n=every_n, duration_s=duration_s,
                            min_free_mb=_cfg("HIK_DATASET_MIN_FREE_MB", 2048),
-                           meta=meta)
+                           meta=meta,
+                           # อ่านตัวแปรของตัวเองล้วน ๆ — ไม่แตะ SDK ไม่ต้องรอ lock
+                           # จึงเรียกถี่ได้โดยไม่ทำให้การจับภาพช้าลง
+                           counters_cb=lambda: {
+                               "cam_frames": self._frames,
+                               "cam_dropped": self._dropped,
+                               "cam_timeouts": self._timeouts,
+                               "cam_fps": round(self._fps_ema, 2) if self._fps_ema else None,
+                           },
+                           net_cb=self.net_stats)
         if not w.start():
             return w.status()
         self._dataset = w

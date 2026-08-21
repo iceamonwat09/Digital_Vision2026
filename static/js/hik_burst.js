@@ -114,7 +114,11 @@
         fetch('/api/camera/hik/burst', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ seconds: seconds, every_n: num('hikBurstEveryN', 1) })
+            body: JSON.stringify({
+                seconds: seconds,
+                every_n: num('hikBurstEveryN', 1),
+                pause_inference: !!($('hikBurstPause') || {}).checked
+            })
         })
             .then(function (r) { return r.json(); })
             .then(function (d) {
@@ -149,7 +153,9 @@
                     var b = d.burst || {};
                     msg('🔴 กำลังถ่าย… <b>' + (b.saved || 0) + '</b> ภาพ · '
                         + fmt(b.mb, 0) + ' MB · ' + fmt(b.save_fps) + ' ภาพ/วิ'
-                        + (b.dropped ? ' · <b style="color:#dc2626">ทิ้ง ' + b.dropped + '</b>' : ''));
+                        + (b.dropped ? ' · <b style="color:#dc2626">ทิ้ง ' + b.dropped + '</b>' : '')
+                        + (d.paused_inference
+                            ? '<br><b style="color:#dc2626">⏸️ หยุดตรวจ/หยุดนับอยู่</b>' : ''));
                     state.pollTimer = setTimeout(pollBurst, 700);
                     return;
                 }
@@ -276,6 +282,8 @@
             .then(function (r) { return r.json(); })
             .then(function (d) {
                 if (d.autodetect_top) { state.autoTop = d.autodetect_top; }
+                var pr = $('hikBurstPauseRow');
+                if (pr) { pr.style.display = d.can_pause_inference ? '' : 'none'; }
                 var btn = $('hikGalDetectTopBtn');
                 if (btn) { btn.textContent = '🔍 ตรวจ ' + state.autoTop + ' ใบที่คมสุด'; }
                 renderSessions(d.sessions || [], d.capturing);
@@ -429,6 +437,8 @@
             }
         }
 
+        renderDiag(d.diag);
+
         if (!d.metrics_ready) {
             note.className = 'hik-note warn';
             note.innerHTML = 'ยังไม่ได้วัดความคมของชุดนี้ — กด <b>“📏 วัดความคม/ความเบลอ”</b> '
@@ -471,6 +481,51 @@
         }
         note.className = 'hik-note ' + (tone === 'good' ? 'good' : (tone === 'warn' ? 'warn' : 'bad'));
         note.innerHTML = body;
+    }
+
+    /**
+     * "เฟรมที่ควรได้ หายไปตรงไหน" — แยก 3 สาเหตุที่วิธีแก้คนละเรื่องกัน
+     * เฟรมหายระหว่างทาง (เครือข่าย) · ดิสก์เขียนไม่ทัน · กล้องส่งมาช้าเอง
+     */
+    function renderDiag(g) {
+        var el = $('hikGalDiag');
+        if (!el) { return; }
+        if (!g) { el.style.display = 'none'; return; }
+        var tone = g.cause === 'ok' ? 'good'
+            : (g.cause === 'transport' || g.cause === 'framerate_cap' ? 'bad' : 'warn');
+        var icon = g.cause === 'ok' ? '✅' : (tone === 'bad' ? '⛔' : '⚠️');
+        var kv = [
+            ['กล้องส่งมาจริง', fmt(g.delivered_fps) + ' fps'],
+            ['เพดานสาย GigE', g.gige_ceiling_fps ? '~' + g.gige_ceiling_fps + ' fps' : '—'],
+            ['Jumbo Frame', g.jumbo === undefined ? '—' : (g.jumbo ? 'เปิด' : 'ปิด')],
+            ['packet size', g.packet_size || '—'],
+            ['เฟรมหายระหว่างทาง', g.lost_transport === null
+                || g.lost_transport === undefined ? '—' : g.lost_transport],
+            ['แพ็กเก็ตหาย', g.lost_packets === null
+                || g.lost_packets === undefined ? '—' : g.lost_packets],
+            ['ทิ้งเพราะดิสก์', g.dropped_disk],
+            ['จำกัดอัตราเฟรม', g.framerate_enable
+                ? ('เปิดที่ ' + fmt(g.framerate) + ' fps') : 'ปิด'],
+            ['encode/เขียน (ms)', fmt((g.stage_ms || {}).encode, 1) + ' / '
+                + fmt((g.stage_ms || {}).write, 1)]
+        ];
+        // แสดง **ทุกสาเหตุที่พบ** เรียงตามลำดับที่ควรลงมือแก้ — เคสจริงมีสองปัญหา
+        // พร้อมกันได้ (กล้องส่งช้า + ดิสก์ตามไม่ทัน) ถ้าโชว์แค่ข้อแรกผู้ใช้จะแก้ไม่ครบ
+        var list = (g.issues && g.issues.length) ? g.issues
+            : [{ cause: g.cause, text: g.text, fix: g.fix }];
+        var many = list.length > 1;
+        var body = list.map(function (it, i) {
+            return (many ? '<b>' + (i + 1) + '.</b> ' : '') + '<b>' + it.text + '</b>'
+                + (it.fix ? '<br><span' + (many ? ' style="padding-left:16px"' : '')
+                    + '>👉 ' + it.fix + '</span>' : '');
+        }).join('<br>');
+        el.style.display = '';
+        el.className = 'hik-note ' + tone;
+        el.innerHTML = icon + ' ' + body
+            + '<div class="hik-diag-grid">'
+            + kv.map(function (p) {
+                return '<div><span>' + p[0] + '</span> <b>' + p[1] + '</b></div>';
+            }).join('') + '</div>';
     }
 
     function badge(r) {
@@ -661,6 +716,16 @@
                     });
                 });
             refreshEstimate();
+
+            var pause = $('hikBurstPause');
+            if (pause) {
+                try { pause.checked = localStorage.getItem('hik.pauseInf') === '1'; }
+                catch (e) { /* โหมดส่วนตัว/ปิด storage — ไม่ใช่เรื่องผิดปกติ */ }
+                pause.addEventListener('change', function () {
+                    try { localStorage.setItem('hik.pauseInf', pause.checked ? '1' : '0'); }
+                    catch (e) { /* ไม่จำก็ไม่เป็นไร */ }
+                });
+            }
 
             var g = $('hikBurstGalleryBtn');
             if (g) { g.addEventListener('click', function () { openGallery(state.session); }); }

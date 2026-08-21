@@ -434,3 +434,211 @@ def test_send_jpeg_turns_a_vanished_file_into_404(bclient):
     with appmod.app.test_request_context():
         resp, code = appmod._send_jpeg("/definitely/not/here.jpg")
         assert code == 404
+
+
+# ════════════════════════════════════════════════════════════════════
+# ②a เก็บหลักฐานว่า "เฟรมหายไปตรงไหน"
+# ════════════════════════════════════════════════════════════════════
+def test_burst_meta_records_everything_needed_to_diagnose(bclient):
+    """ถ้าไม่เก็บตัวเลขพวกนี้ตอนถ่าย ทีหลังต้องมานั่งเดาว่าเฟรมหายเพราะอะไร"""
+    assert _start_hik(bclient).status_code == 200
+    try:
+        name = bclient.post("/api/camera/hik/burst",
+                            json={"seconds": 2}).get_json()["session"]
+        time.sleep(1.2)
+        bclient.delete("/api/camera/hik/burst")
+        meta = json.loads((pathlib.Path(hbmod.burst_root()) / name / "meta.json")
+                          .read_text(encoding="utf-8"))
+        for key in ("diag_start", "diag_end", "stage_ms", "elapsed_s",
+                    "framerate_enable", "framerate", "packet_size", "pixel_format"):
+            assert key in meta, key
+        # ตัวนับฝั่งกล้อง = ตัวที่แยก "หายระหว่างทาง" ออกจาก "ดิสก์ตามไม่ทัน"
+        for key in ("cam_frames", "cam_dropped", "cam_timeouts"):
+            assert key in meta["diag_start"], key
+            assert key in meta["diag_end"], key
+        assert isinstance(meta["diag_end"].get("net"), (dict, type(None)))
+    finally:
+        bclient.post("/api/detection/stop")
+
+
+def test_burst_detail_endpoint_returns_a_diagnosis(bclient):
+    assert _start_hik(bclient).status_code == 200
+    try:
+        name = bclient.post("/api/camera/hik/burst",
+                            json={"seconds": 2}).get_json()["session"]
+        time.sleep(1.2)
+        bclient.delete("/api/camera/hik/burst")
+        d = bclient.get("/api/camera/hik/bursts/%s" % name).get_json()
+        assert d["diag"] is not None
+        assert d["diag"]["cause"] in ("ok", "disk", "transport",
+                                      "camera_rate", "framerate_cap")
+    finally:
+        bclient.post("/api/detection/stop")
+
+
+# ════════════════════════════════════════════════════════════════════
+# ②b หยุดโมเดลระหว่างถ่ายรัว — opt-in สองชั้น + คลายเองเสมอ
+# ════════════════════════════════════════════════════════════════════
+def test_inference_is_never_paused_by_default(bclient):
+    assert appmod._inference_paused() is False
+
+
+def test_request_alone_cannot_pause_when_the_config_flag_is_off(bclient, monkeypatch):
+    """ชั้นที่ 1: ถ้า flag ของระบบปิด ต่อให้หน้าเว็บส่งมาก็ต้องไม่หยุดตรวจ"""
+    monkeypatch.setattr(appmod.config, "HIK_BURST_PAUSE_INFERENCE", False, raising=False)
+    _start_hik(bclient)
+    try:
+        d = bclient.post("/api/camera/hik/burst",
+                         json={"seconds": 5, "pause_inference": True}).get_json()
+        assert d["pause_inference"] is False
+        assert appmod._inference_paused() is False
+    finally:
+        bclient.delete("/api/camera/hik/burst")
+        bclient.post("/api/detection/stop")
+
+
+def test_flag_alone_cannot_pause_without_the_request(bclient, monkeypatch):
+    """ชั้นที่ 2: เปิด flag ไว้แล้วก็ยังต้องติ๊กต่อครั้ง — กันเผลอหยุดการตรวจ"""
+    monkeypatch.setattr(appmod.config, "HIK_BURST_PAUSE_INFERENCE", True, raising=False)
+    _start_hik(bclient)
+    try:
+        d = bclient.post("/api/camera/hik/burst", json={"seconds": 5}).get_json()
+        assert d["pause_inference"] is False
+        assert appmod._inference_paused() is False
+    finally:
+        bclient.delete("/api/camera/hik/burst")
+        bclient.post("/api/detection/stop")
+
+
+def test_both_layers_on_pauses_and_stopping_resumes(bclient, monkeypatch):
+    monkeypatch.setattr(appmod.config, "HIK_BURST_PAUSE_INFERENCE", True, raising=False)
+    _start_hik(bclient)
+    try:
+        d = bclient.post("/api/camera/hik/burst",
+                         json={"seconds": 5, "pause_inference": True}).get_json()
+        assert d["pause_inference"] is True
+        assert appmod._inference_paused() is True
+        st = bclient.get("/api/camera/hik/burst").get_json()
+        assert st["paused_inference"] is True
+        bclient.delete("/api/camera/hik/burst")
+        assert appmod._inference_paused() is False     # คลายทันทีที่หยุดถ่าย
+    finally:
+        bclient.post("/api/detection/stop")
+
+
+def test_pause_expires_by_itself_even_if_the_cleanup_path_never_runs(bclient, monkeypatch):
+    """
+    ตาข่ายนิรภัยที่สำคัญที่สุดของฟีเจอร์นี้: ถ้าเส้นทางปิดงานพังไปทั้งหมด
+    (exception / กล้องหลุด / ปิดเบราว์เซอร์) ระบบต้อง **ไม่ค้างในสภาพไม่ตรวจ**
+    """
+    monkeypatch.setattr(appmod.config, "HIK_BURST_PAUSE_INFERENCE", True, raising=False)
+    _start_hik(bclient)
+    try:
+        bclient.post("/api/camera/hik/burst",
+                     json={"seconds": 5, "pause_inference": True})
+        assert appmod._inference_paused() is True
+        appmod._hik_burst_deadline = time.time() - 0.1     # จำลองว่าเลยเวลาไปแล้ว
+        assert appmod._inference_paused() is False
+    finally:
+        bclient.delete("/api/camera/hik/burst")
+        bclient.post("/api/detection/stop")
+
+
+def test_listing_tells_the_page_whether_pausing_is_allowed(bclient, monkeypatch):
+    monkeypatch.setattr(appmod.config, "HIK_BURST_PAUSE_INFERENCE", False, raising=False)
+    assert bclient.get("/api/camera/hik/bursts").get_json()["can_pause_inference"] is False
+    monkeypatch.setattr(appmod.config, "HIK_BURST_PAUSE_INFERENCE", True, raising=False)
+    assert bclient.get("/api/camera/hik/bursts").get_json()["can_pause_inference"] is True
+
+
+class _CountingDetector:
+    """โมเดลปลอมที่นับว่าถูกเรียกกี่ครั้ง — ใช้ดูว่า 'หยุดตรวจ' หยุดจริงไหม"""
+
+    def __init__(self):
+        self.calls = 0
+        self.model = object()
+
+    def detect(self, frame, imgsz=None):
+        self.calls += 1
+        return []
+
+    def draw_detections(self, frame, dets):            # pragma: no cover
+        return frame
+
+    def _class_names(self):                            # pragma: no cover
+        return {}
+
+
+def _wait_growth(det, seconds=0.8):
+    """เพิ่มขึ้นกี่ครั้งในช่วงเวลาที่กำหนด"""
+    before = det.calls
+    time.sleep(seconds)
+    return det.calls - before
+
+
+def test_pausing_actually_stops_the_model_from_running(bclient, monkeypatch):
+    """
+    เทสต์ที่พิสูจน์ว่าฟีเจอร์ทำงานจริง ไม่ใช่แค่ตัวแปรเปลี่ยนค่า:
+    นับจำนวนครั้งที่ `detector.detect` ถูกเรียก ก่อน/ระหว่าง/หลังการหยุด
+    """
+    monkeypatch.setattr(appmod.config, "HIK_BURST_PAUSE_INFERENCE", True, raising=False)
+    fake = _CountingDetector()
+    monkeypatch.setattr(appmod, "detector", fake, raising=False)
+    assert _start_hik(bclient).status_code == 200
+    try:
+        assert _wait_growth(fake) > 0, "ปกติต้องมีการตรวจเกิดขึ้น"
+
+        bclient.post("/api/camera/hik/burst",
+                     json={"seconds": 6, "pause_inference": True})
+        time.sleep(0.3)                                # ให้เธรดตรวจเห็นสถานะใหม่
+        assert _wait_growth(fake) == 0, "ระหว่างหยุด ต้องไม่มีการตรวจเลย"
+
+        bclient.delete("/api/camera/hik/burst")
+        time.sleep(0.3)
+        assert _wait_growth(fake) > 0, "หยุดถ่ายแล้วต้องกลับมาตรวจเอง"
+    finally:
+        bclient.post("/api/detection/stop")
+
+
+def test_a_burst_without_pausing_leaves_the_model_running(bclient, monkeypatch):
+    """พฤติกรรมเดิมต้องไม่เปลี่ยน — ถ่ายรัวแบบไม่ติ๊ก = ตรวจต่อตามปกติ"""
+    monkeypatch.setattr(appmod.config, "HIK_BURST_PAUSE_INFERENCE", True, raising=False)
+    fake = _CountingDetector()
+    monkeypatch.setattr(appmod, "detector", fake, raising=False)
+    _start_hik(bclient)
+    try:
+        bclient.post("/api/camera/hik/burst", json={"seconds": 6})
+        time.sleep(0.3)
+        assert _wait_growth(fake) > 0
+    finally:
+        bclient.delete("/api/camera/hik/burst")
+        bclient.post("/api/detection/stop")
+
+
+def test_paused_inference_clears_the_boxes_instead_of_leaving_stale_ones(bclient, monkeypatch):
+    """
+    กฎเหล็กข้อ 2: ระหว่างหยุดตรวจ ห้ามปล่อยกรอบเก่าค้างบนภาพใหม่
+    (คนดูจะเชื่อว่ากรอบนั้นคือผลตรวจของเฟรมที่เห็นอยู่)
+    """
+    monkeypatch.setattr(appmod.config, "HIK_BURST_PAUSE_INFERENCE", True, raising=False)
+
+    class _AlwaysNG(_CountingDetector):
+        def detect(self, frame, imgsz=None):
+            self.calls += 1
+            return [{"class_name": "dent", "confidence": 0.9,
+                     "bbox": [10, 10, 30, 30], "center": [20, 20]}]
+
+    fake = _AlwaysNG()
+    monkeypatch.setattr(appmod, "detector", fake, raising=False)
+    _start_hik(bclient)
+    try:
+        time.sleep(0.6)
+        assert appmod.latest_detections, "ก่อนหยุดต้องมีกรอบอยู่"
+        bclient.post("/api/camera/hik/burst",
+                     json={"seconds": 6, "pause_inference": True})
+        time.sleep(0.6)
+        assert appmod.latest_detections == []
+        assert appmod.detection_stats["current_defects"] == 0
+    finally:
+        bclient.delete("/api/camera/hik/burst")
+        bclient.post("/api/detection/stop")
