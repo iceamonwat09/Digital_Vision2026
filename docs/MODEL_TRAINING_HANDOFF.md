@@ -262,3 +262,252 @@ can-dent-model-<วันที่>/
 ## 📞 ติดต่อ
 
 มีข้อสงสัยเรื่องกติกาการ label หรือเกณฑ์ตรวจรับ — ถามก่อนลงมือเสมอ
+
+---
+
+# 📘 ภาคผนวก · Step-by-Step: จาก Roboflow → Google Colab → ได้ไฟล์ `best.pt`
+
+ทำตามทีละขั้น ไม่ต้องข้าม ใช้เวลารวมประมาณ 20 นาที (ไม่รวมเวลาเทรน)
+
+---
+
+## ตอนที่ 1 · สร้าง Version ใน Roboflow
+
+### ขั้นที่ 1.1 — เปิดเมนู Versions
+เมนูซ้ายมือ → **`Versions`** → ปุ่ม **`Create New Version`**
+
+### ขั้นที่ 1.2 — หน้า Train/Test Split
+
+Roboflow เสนอ **70% / 20% / 10%** มาให้
+
+- ถ้าภาพมาจากการถ่ายรัว/วิดีโอ → **ห้ามใช้ปุ่ม Rebalance แบบสุ่ม**
+  ต้องกลับไปที่ Dataset แล้ว assign เองโดยยึด: **กระป๋องใบเดียวกันต้องอยู่ split เดียวกัน**
+- ถ้าเป็น Gold Set (ภาพน้อย ไม่ได้เทรนจริง) → ปล่อยตามค่าเริ่มต้น
+
+กด **`Continue`**
+
+### ขั้นที่ 1.3 — หน้า Preprocessing
+
+| รายการ | ตั้งเป็น | หมายเหตุ |
+|---|---|---|
+| **Auto-Orient** | ✅ เปิด | กัน EXIF หมุนภาพเงียบ ๆ |
+| **Resize** | **`Fit within` · `640 × 640`** | ⚠️ **ห้ามต่ำกว่านี้** · เลือก `Fit` ไม่ใช่ `Stretch` (ไม่งั้นรอยบุบกลมจะถูกยืดเป็นรี) |
+| Auto-Contrast / Grayscale / Tile / Isolate | ❌ ปิดทั้งหมด | ทำให้ภาพเทรนต่างจากภาพจริงที่กล้องส่งเข้าระบบ |
+
+กด **`Continue`**
+
+### ขั้นที่ 1.4 — หน้า Augmentation
+
+**เปิดเฉพาะ 6 อย่างนี้ ค่าตามตาราง:**
+
+| Augmentation | ค่า |
+|---|---|
+| Brightness | −15% ถึง +15% |
+| Exposure | −10% ถึง +10% |
+| Rotation | −10° ถึง +10° |
+| Flip | Horizontal ✅ (Vertical ✅ ถ้าถ่ายจากด้านบน) |
+| Blur | สูงสุด 1 px |
+| Noise | สูงสุด 2% |
+
+**🔴 ห้ามเปิด:** `Cutout` · `Mosaic` · `Hue` · `Saturation` · `Shear` · `Crop`
+> `Cutout` เจาะรูดำบนภาพ = **สร้างรอยบุบปลอม** หรือลบรอยจริงทิ้งโดยที่ label ยังอยู่
+
+**Maximum Version Size:** เลือก **`3x`** (อย่าไป 5x-10x กับ dataset เล็ก — ได้แค่ epoch ที่ช้าขึ้น ไม่ได้ข้อมูลใหม่)
+
+กด **`Create`** → รอ 1-3 นาที
+
+---
+
+## ตอนที่ 2 · Export เอาโค้ดสำหรับ Colab
+
+### ขั้นที่ 2.1
+เมื่อ version สร้างเสร็จ → กด **`Export Dataset`** (หรือ `Download Dataset`)
+
+### ขั้นที่ 2.2 — เลือกให้ถูก
+
+| ช่อง | เลือก |
+|---|---|
+| **Format** | **`YOLOv8`** |
+| วิธีรับไฟล์ | **`Show download code`** ⬅️ **ไม่ใช่** `Download zip` |
+
+> เลือก `Show download code` เพราะจะเอาไปวางใน Colab ให้มันดาวน์โหลดเอง
+> (ถ้าโหลด zip มาเครื่องแล้วอัปขึ้น Colab จะช้ากว่ามาก)
+
+### ขั้นที่ 2.3 — คัดลอกโค้ด
+
+จะได้โค้ดหน้าตาแบบนี้ (**เลข/ชื่อจะเป็นของโปรเจกต์คุณเอง**):
+
+```python
+from roboflow import Roboflow
+rf = Roboflow(api_key="xxxxxxxxxxxxxxxx")
+project = rf.workspace("ชื่อ-workspace").project("ชื่อ-project")
+version = project.version(1)
+dataset = version.download("yolov8")
+```
+
+**คัดลอกเก็บไว้** (มี API key อยู่ในนั้น — อย่าเอาไปโพสต์สาธารณะ)
+
+---
+
+## ตอนที่ 3 · Google Colab
+
+### ขั้นที่ 3.1 — เปิด Colab
+ไปที่ **https://colab.research.google.com** → ล็อกอินด้วย Google → **`New notebook`**
+
+### ขั้นที่ 3.2 — 🔴 เปิด GPU ก่อน (ขั้นที่คนลืมมากที่สุด)
+
+เมนูบน → **`Runtime`** → **`Change runtime type`**
+→ **Hardware accelerator** = **`T4 GPU`** → **`Save`**
+
+> ⚠️ **ถ้าลืมขั้นนี้ Colab จะรันบน CPU** แล้วเทรนที่ควรเสร็จใน 30 นาที จะกลายเป็น **หลายชั่วโมง**
+> และมันจะไม่เตือนอะไรเลย
+
+### ขั้นที่ 3.3 — เช็คว่าได้ GPU จริง
+
+วางในช่องแรก แล้วกด ▶️ (หรือ `Shift + Enter`)
+
+```python
+!nvidia-smi
+```
+
+**ต้องเห็นคำว่า `Tesla T4`** ถ้าขึ้น error ว่าหาคำสั่งไม่เจอ = ยังไม่ได้ GPU → กลับไปทำขั้น 3.2
+
+### ขั้นที่ 3.4 — ติดตั้งไลบรารี
+
+กด **`+ Code`** เพิ่มช่องใหม่ แล้ววาง:
+
+```python
+!pip install -q ultralytics roboflow
+```
+
+### ขั้นที่ 3.5 — ดาวน์โหลด dataset
+
+ช่องใหม่ → **วางโค้ดที่คัดลอกมาจากขั้น 2.3**
+
+```python
+from roboflow import Roboflow
+rf = Roboflow(api_key="xxxxxxxxxxxxxxxx")
+project = rf.workspace("ชื่อ-workspace").project("ชื่อ-project")
+version = project.version(1)
+dataset = version.download("yolov8")
+
+print("dataset อยู่ที่:", dataset.location)
+```
+
+### ขั้นที่ 3.6 — ⚠️ แก้ path ใน data.yaml (กับดักคลาสสิก)
+
+`data.yaml` ที่ Roboflow ให้มาใช้ path แบบสัมพัทธ์ ซึ่งมักพังบน Colab
+**ต้องรันช่องนี้ทุกครั้ง** ไม่งั้นจะเจอ error `Dataset not found`
+
+```python
+import yaml
+
+p = f"{dataset.location}/data.yaml"
+with open(p) as f:
+    d = yaml.safe_load(f)
+
+d["train"] = f"{dataset.location}/train/images"
+d["val"]   = f"{dataset.location}/valid/images"
+d["test"]  = f"{dataset.location}/test/images"
+
+with open(p, "w") as f:
+    yaml.dump(d, f)
+
+print(d)   # ⬅️ ต้องเห็น names: ['can', 'dent'] ตรงนี้
+```
+
+> 🔴 **บรรทัด print คือด่านตรวจสำคัญ** — ถ้า `names` ไม่ใช่ `['can', 'dent']` **หยุดตรงนี้เลย**
+> กลับไปแก้ที่ Roboflow → `Classes & Tags` แล้วสร้าง version ใหม่ อย่าเทรนต่อ
+
+### ขั้นที่ 3.7 — เริ่มเทรน
+
+```python
+!yolo segment train \
+    model=yolov8m-seg.pt \
+    data={dataset.location}/data.yaml \
+    epochs=100 \
+    imgsz=640 \
+    batch=8 \
+    patience=25 \
+    device=0 \
+    project=/content/runs \
+    name=candent
+```
+
+**ระหว่างเทรนให้ดู 2 คอลัมน์นี้:**
+
+| คอลัมน์ | หมายถึง | สัญญาณอันตราย |
+|---|---|---|
+| `box_loss` / `seg_loss` | ค่าความผิดพลาด | ควรลดลงเรื่อย ๆ · ถ้านิ่งไม่ขยับ = ข้อมูลน้อยเกินหรือ label เพี้ยน |
+| `mAP50` | ความแม่นรวม | 🚩 **ถ้าพุ่งเกิน 0.95 ตั้งแต่ 10 epoch แรก = สงสัย data leakage ทันที** |
+
+⏱️ **เวลาที่ใช้โดยประมาณบน T4:** 100 ภาพ ≈ 20-30 นาที · 300 ภาพ ≈ 1-1.5 ชั่วโมง
+
+> ⚠️ **อย่าปิดแท็บ Colab ระหว่างเทรน** — ถ้าไม่มีการโต้ตอบนาน ๆ มันจะตัดการเชื่อมต่อและงานหายหมด
+
+### ขั้นที่ 3.8 — ดูผลว่าผ่านเกณฑ์ไหม
+
+```python
+from IPython.display import Image, display
+display(Image("/content/runs/candent/results.png"))
+display(Image("/content/runs/candent/confusion_matrix.png"))
+```
+
+แล้วดูตัวเลขรายคลาส:
+
+```python
+!yolo segment val \
+    model=/content/runs/candent/weights/best.pt \
+    data={dataset.location}/data.yaml \
+    split=test
+```
+
+**ตารางที่ออกมาต้องดูบรรทัด `dent`:**
+
+| ต้องได้ | ค่า |
+|---|---|
+| **`R` (Recall) ของ `dent`** | **≥ 0.95** ⬅️ ตัวชี้ขาด |
+| `P` (Precision) ของ `dent` | ≥ 0.85 |
+| `mAP50` รวม | ≥ 0.80 |
+
+### ขั้นที่ 3.9 — ดาวน์โหลดไฟล์กลับเครื่อง
+
+```python
+from google.colab import files
+files.download("/content/runs/candent/weights/best.pt")
+```
+
+**เผื่อไว้อีกชั้น — สำรองลง Google Drive ด้วย** (Colab ลบไฟล์ทิ้งเมื่อ session จบ):
+
+```python
+from google.colab import drive
+drive.mount("/content/drive")
+!mkdir -p "/content/drive/MyDrive/candent_model"
+!cp -r /content/runs/candent "/content/drive/MyDrive/candent_model/"
+print("สำรองไว้ที่ Google Drive แล้ว")
+```
+
+### ขั้นที่ 3.10 — เก็บไฟล์ที่ต้องส่งให้ครบ 5 อย่าง (ตาม §7)
+
+```
+/content/runs/candent/
+├── weights/best.pt          ← ไฟล์โมเดล (สำคัญที่สุด)
+├── results.csv
+├── results.png
+├── confusion_matrix.png
+└── args.yaml                ← ค่าที่ใช้เทรนทั้งหมด
+```
+พร้อม `data.yaml` จาก dataset และ `README.txt` ที่ตอบคำถาม 6 ข้อใน §7
+
+---
+
+## 🧯 ปัญหาที่เจอบ่อยบน Colab
+
+| อาการ | สาเหตุ | วิธีแก้ |
+|---|---|---|
+| `Dataset not found` / `train: not found` | path ใน data.yaml ผิด | รันขั้น **3.6** ซ้ำ |
+| เทรนช้ามาก ไม่มี GPU | ลืมเลือก T4 | `Runtime → Change runtime type → T4 GPU` แล้ว **รันใหม่ทั้งหมด** |
+| `CUDA out of memory` | batch ใหญ่ไป | ลด `batch=8` → `batch=4` |
+| session หลุดกลางทาง | ทิ้งไว้นานไม่โต้ตอบ | เปิดแท็บทิ้งไว้ · สำรองลง Drive ทุก 30 นาที |
+| `names` ไม่ใช่ `['can','dent']` | คลาสใน Roboflow ไม่สะอาด | 🔴 **หยุด** กลับไปแก้ `Classes & Tags` → สร้าง version ใหม่ |
+| mAP สูงผิดปกติตั้งแต่ต้น | data leakage | กลับไปแบ่ง split ตามใบกระป๋อง (§4) |
