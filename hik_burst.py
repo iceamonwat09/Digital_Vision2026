@@ -79,6 +79,12 @@ MIN_PC_RESPONSE = 0.12    # คะแนน phase correlation ต่ำกว่
 PC_TOL_PX = 6.0           # กรอบวัตถุคลาดได้เองราวนี้ (ขอบที่ threshold ได้มาไม่นิ่ง)
 PC_TOL_FRAC = 0.6
 MIN_PC_SIDE = 16          # หน้าต่างที่เล็กกว่านี้จับคู่ตำแหน่งไม่ได้
+# ⚠️ ต่ำกว่านี้ = **วัดความเร็วไม่ได้จริง** ไม่ใช่ "วัดได้ว่าช้า"
+# ด่านตรวจซ้ำยอมให้คลาดได้ ±PC_TOL_PX (6 px) ⇒ การเลื่อนที่เล็กกว่า ~2 px/เฟรม
+# ตกอยู่ในช่วงที่ตัวตรวจซ้ำแยกไม่ออกระหว่าง "ขยับจริง" กับ "สั่น/สัญญาณรบกวน".
+# เจอจริงบนสถานี: วัดได้ 0.53 px/เฟรม แล้วระบบไปสรุปว่า exposure สูงสุด = 217,391 µs
+# (0.22 วินาที!) พร้อมไฟเขียว "คมพอ" — ตัวเลขที่ไร้ความหมายแต่ดูน่าเชื่อถือ
+MIN_MEANINGFUL_SHIFT_PX = 2.0
 SHARP_REL_OK = 0.80       # คมเกิน 80% ของภาพที่คมที่สุดในชุด = ถือว่า "คม"
 # ความสว่างเฉลี่ยที่ "พอใช้งาน" สำหรับภาพ QC — ค่าเดียวกับ `diagnose_hikrobot.TARGET_MEAN`
 # (ถ้าแก้ที่หนึ่ง ต้องแก้อีกที่ ไม่งั้นเครื่องมือสองตัวจะแนะนำไฟคนละจำนวนเท่า)
@@ -525,9 +531,16 @@ def _summarize(frames, exposure_us, mm_per_px):
     base_ratio = _median(sharp_ratios)
 
     speed_med = _median(speeds)
+    shift_med = _median([v.get("shift_px") for v in frames.values()])
     mean_med = _median([v.get("mean") for v in frames.values()])
+    # "ขยับน้อยเกินกว่าจะวัดได้" ต่างจาก "ขยับช้า" — อย่างแรกแปลว่าเรา *ไม่รู้*
+    moving_enough = bool(shift_med is not None and shift_med >= MIN_MEANINGFUL_SHIFT_PX)
     out = {
         "mean_median": round(mean_med, 1) if mean_med is not None else None,
+        "shift_px_median": round(shift_med, 2) if shift_med is not None else None,
+        "motion": ("ok" if moving_enough
+                   else ("negligible" if shift_med is not None else "unknown")),
+        "min_shift_px": MIN_MEANINGFUL_SHIFT_PX,
         "best_file": best_file,
         "best_sharp": best_sharp,
         "moving_frames": len(moving),
@@ -542,8 +555,9 @@ def _summarize(frames, exposure_us, mm_per_px):
     }
     if out["dt_ms_median"]:
         out["fps_measured"] = round(1000.0 / out["dt_ms_median"], 1)
-    if speed_med and speed_med > 0:
+    if speed_med and speed_med > 0 and moving_enough:
         # exposure สูงสุดที่จะได้เบลอ ≤ 1 พิกเซล ที่ความเร็ว **ที่วัดได้จริง**
+        # ⚠️ คำนวณต่อเฉพาะเมื่อวัตถุขยับพอที่จะวัดได้ ไม่งั้นจะได้ค่ามหาศาลไร้ความหมาย
         max_us = 1.0 / speed_med * 1e6
         out["max_exposure_us_1px"] = round(max_us, 1)
         if exposure_us:
@@ -563,9 +577,19 @@ def _summarize(frames, exposure_us, mm_per_px):
 
 
 def _annotate_directions(frames, summary):
-    """ติดป้าย "เบลอแบบไหน" เฉพาะเมื่อหลักฐานชัดพอ — ไม่ชัดให้เว้นว่างไว้."""
+    """ติดป้าย "เบลอแบบไหน" เฉพาะเมื่อหลักฐานชัดพอ — ไม่ชัดให้เว้นว่างไว้.
+
+    ⚠️ ถ้าทั้งชุดไม่มีการเคลื่อนที่ที่วัดได้ **ห้ามติดป้ายทิศทางเลย** — ความต่าง
+    เล็ก ๆ ของอัตราส่วนแกนบนภาพนิ่งจะกลายเป็นป้าย "เบลอแนวตั้ง" ที่ไม่มีมูล
+    (เจอจริงบนสถานี: ภาพฝากระป๋องที่วางนิ่งได้ป้าย "เบลอแนวตั้ง" ทั้งชุด)
+    """
     best = summary.get("best_sharp") or 0.0
     base = summary.get("base_ratio")
+    if summary.get("motion") != "ok":
+        for v in frames.values():
+            sharp = v.get("sharp") or 0.0
+            v["blur_kind"] = "sharp" if (best > 0 and sharp >= best * SHARP_REL_OK) else None
+        return frames
     for v in frames.values():
         sharp = v.get("sharp") or 0.0
         if best > 0 and sharp >= best * SHARP_REL_OK:
@@ -673,13 +697,23 @@ def diagnose(meta):
                      "(AcquisitionFrameRate เปิดอยู่)" % float(meta["framerate"])),
             "fix": "ปิด \"จำกัดอัตราเฟรม\" ในแผงตั้งค่ากล้อง แล้วถ่ายใหม่"})
     elif out.get("gige_ceiling_fps") and delivered_fps < out["gige_ceiling_fps"] * 0.5:
+        # คำแนะนำต้องเปลี่ยนตามหลักฐาน: ถ้า packet size ใหญ่และ Jumbo เปิดอยู่แล้ว
+        # การบอกให้ไป "เช็ค packet size" คือส่งผู้ใช้ไปแก้ของที่ไม่ได้พัง
+        if out.get("jumbo"):
+            fix = ("แพ็กเก็ตตั้งถูกแล้ว (Jumbo เปิด, packet %s) ⇒ คอขวดอยู่ที่ **เครื่อง** "
+                   "ไม่ใช่สาย: โมเดลที่วิ่งสด + การส่งภาพ MJPEG ขึ้นหน้าเว็บ + JPEG encode "
+                   "แย่งซีพียู/แบนด์วิดท์ RAM กัน. ลองติ๊ก \"หยุดโมเดลระหว่างถ่ายรัว\" "
+                   "และปิดหน้าเว็บที่แสดงภาพสดไว้ระหว่างถ่าย แล้วเทียบตัวเลขกัน"
+                   % (out.get("packet_size") or "?"))
+        else:
+            fix = ("เช็ค packet size (ค่าโรงงาน 1500 ทำให้ได้ 15-17 fps) · "
+                   "เปิด Jumbo Frame ที่ NIC · exposure ที่ยาวเกิน · AcquisitionFrameRate")
         issues.append({
             "cause": "camera_rate",
             "text": ("กล้องส่งมาแค่ %.1f fps ทั้งที่สายรับได้ราว %.0f fps "
                      "และไม่มีเฟรมหาย/ไม่มีการทิ้งระหว่างทาง"
                      % (delivered_fps, out["gige_ceiling_fps"])),
-            "fix": ("เช็ค packet size (ค่าโรงงาน 1500 ทำให้ได้ 15-17 fps) · "
-                    "exposure ที่ยาวเกิน · หรือ AcquisitionFrameRate")})
+            "fix": fix})
 
     if dropped:
         issues.append({

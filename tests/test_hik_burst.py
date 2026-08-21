@@ -674,3 +674,76 @@ def test_session_detail_carries_the_diagnosis(burst_root, tmp_path):
     d = hb.session_detail(name)
     assert "disk" in [i["cause"] for i in d["diag"]["issues"]]
     assert hb.session_brief(name)["diag"] is not None
+
+
+# ── ⑭ "ขยับน้อยเกินกว่าจะวัดได้" ต้องไม่ถูกรายงานเป็น "ช้าและคมดี" ──
+# เจอจริงบนสถานี 21 ส.ค.: วัตถุขยับ 0.53 px/เฟรม แล้วระบบขึ้นไฟเขียว "คมพอ"
+# พร้อม exposure สูงสุด 217,391 µs (0.22 วินาที) — ตัวเลขไร้ความหมายแต่ดูน่าเชื่อถือ
+def _still_frames(n=8):
+    """กระป๋องวางนิ่ง ขยับแค่ระดับสัญญาณรบกวน"""
+    return [_frame(40 + (i % 2)) for i in range(n)]
+
+
+def test_a_barely_moving_object_is_reported_as_unmeasurable(burst_root, tmp_path):
+    name, _ = make_session(tmp_path, _still_frames(), exposure_us=5055.0)
+    s = hb.compute_metrics(name)["summary"]
+    assert s["motion"] in ("negligible", "unknown")
+
+
+def test_no_exposure_advice_when_the_object_barely_moved(burst_root, tmp_path):
+    """ห้ามคำนวณ exposure สูงสุด/ตัวคูณไฟจากความเร็วที่เป็นสัญญาณรบกวน"""
+    name, _ = make_session(tmp_path, _still_frames(), exposure_us=5055.0)
+    s = hb.compute_metrics(name)["summary"]
+    assert "max_exposure_us_1px" not in s
+    assert "light_factor_needed" not in s
+
+
+def test_real_motion_still_gets_full_advice(burst_root, tmp_path):
+    """ของที่ขยับจริงต้องไม่ถูกด่านนี้ตัดทิ้ง"""
+    name, _ = make_session(tmp_path, [_frame(20 + i * 25) for i in range(6)],
+                           exposure_us=2000.0)
+    s = hb.compute_metrics(name)["summary"]
+    assert s["motion"] == "ok"
+    assert s["shift_px_median"] >= hb.MIN_MEANINGFUL_SHIFT_PX
+    assert s["max_exposure_us_1px"] > 0
+
+
+def test_no_direction_badges_on_a_still_burst(burst_root, tmp_path):
+    """ภาพนิ่งต้องไม่ได้ป้าย 'เบลอแนวตั้ง' จากความต่างเล็ก ๆ ของอัตราส่วนแกน"""
+    name, _ = make_session(tmp_path, _still_frames(), exposure_us=5055.0)
+    fm = hb.compute_metrics(name)["frames"]
+    kinds = {v.get("blur_kind") for v in fm.values()}
+    assert kinds <= {"sharp", None}, kinds
+
+
+def test_direction_badges_survive_when_motion_is_real(burst_root, tmp_path):
+    frames = [_frame(20 + i * 25, blur=0 if i == 2 else 17) for i in range(6)]
+    name, _ = make_session(tmp_path, frames)
+    fm = hb.compute_metrics(name)["frames"]
+    assert any(v.get("blur_kind") in ("motion_x", "motion_y", "isotropic")
+               for v in fm.values())
+
+
+def test_shift_median_is_reported_so_the_user_can_judge(burst_root, tmp_path):
+    name, _ = make_session(tmp_path, [_frame(20 + i * 25) for i in range(6)])
+    s = hb.compute_metrics(name)["summary"]
+    assert s["shift_px_median"] is not None
+    assert s["min_shift_px"] == hb.MIN_MEANINGFUL_SHIFT_PX
+
+
+# ── ⑮ คำแนะนำต้องตรงกับหลักฐาน ──────────────────────────────────
+def test_advice_stops_blaming_packet_size_once_jumbo_is_on(burst_root):
+    """
+    เจอจริง: packet size = 8164 + Jumbo เปิด + ไม่มีเฟรมหาย แต่ยังได้ 9.5 fps
+    ระบบเดิมยังบอกให้ "เช็ค packet size" = ส่งผู้ใช้ไปแก้ของที่ไม่ได้พัง
+    """
+    g = hb.diagnose(_meta(saved=190, dropped=0, elapsed=20.0, packet_size=8164))
+    assert g["cause"] == "camera_rate"
+    assert "packet size" not in g["fix"] or "ตั้งถูกแล้ว" in g["fix"]
+    assert "หยุดโมเดล" in g["fix"]
+
+
+def test_advice_still_blames_packet_size_when_it_is_the_factory_value(burst_root):
+    g = hb.diagnose(_meta(saved=165, dropped=0, elapsed=10.0, packet_size=1500))
+    assert g["cause"] == "camera_rate"
+    assert "1500" in g["fix"]

@@ -370,6 +370,10 @@ def main():
         return 2
     print("  โฟลเดอร์ : %s" % args.images)
     print("  จำนวน    : %d ภาพ" % len(imgs))
+    # dump_defect_images.py เขียนสะสมในโฟลเดอร์เดิม ⇒ รันซ้ำแล้วภาพจะเพิ่มขึ้นเรื่อย ๆ
+    if len(imgs) > 40 and not args.limit:
+        print("  ⚠️ ภาพเยอะ (โฟลเดอร์นี้สะสมจากการรัน dump_defect_images หลายครั้ง)")
+        print("     ใช้ --limit 30 เพื่อให้เร็วขึ้น หรือล้างโฟลเดอร์ก่อนดึงใหม่")
     if len(imgs) < 20:
         print("  ⚠️ น้อยกว่า 20 ภาพ — ผลจะแกว่ง ใช้ตัดสินใจซื้อของยังไม่ควร")
 
@@ -394,6 +398,20 @@ def main():
     scales = [float(x) for x in args.scales.split(",")]
 
     head("③ ไล่ความเบลอ")
+    # จับเวลา 1 ครั้งจริง แล้วบอกไปเลยว่าจะใช้เวลาเท่าไร — ไม่งั้นผู้ใช้ไม่รู้ว่า
+    # ต้องรอ 1 นาทีหรือ 20 นาที แล้วกด Ctrl+C ทิ้งกลางคัน (เกิดขึ้นจริงมาแล้ว)
+    import time as _t
+    _t0 = _t.perf_counter()
+    detect_fn(imgs[0])
+    per = _t.perf_counter() - _t0
+    runs = len(imgs) * (len(blurs) + 1) * len(scales)
+    print("  ภาพ %d × (เบลอ %d ระดับ + ฐาน) × สเกล %d = **ตรวจ %d ครั้ง**"
+          % (len(imgs), len(blurs), len(scales), runs))
+    print("  ครั้งละ ~%.0f ms ⇒ **ใช้เวลาราว %d นาที %d วินาที**"
+          % (per * 1000, int(runs * per) // 60, int(runs * per) % 60))
+    if runs * per > 600:
+        print("  ⚠️ นานเกิน 10 นาที — ลด --limit (เช่น --limit 25) หรือลด --blurs ได้")
+    print()
     done = {"n": 0}
     total = len(blurs) * len(scales)
 

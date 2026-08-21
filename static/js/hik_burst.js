@@ -310,9 +310,11 @@
         box.innerHTML = list.map(function (s) {
             var sub = [s.frames + ' ภาพ', s.mb + ' MB',
                 (s.exposure_us ? Math.round(s.exposure_us) + ' µs' : 'exposure ?')];
-            if (s.summary && s.summary.blur_px_median !== null
-                && s.summary.blur_px_median !== undefined) {
-                sub.push('เบลอ ' + s.summary.blur_px_median + ' px');
+            var sm = s.summary || {};
+            if (sm.motion === 'negligible') {
+                sub.push('วัตถุแทบไม่ขยับ');
+            } else if (sm.blur_px_median !== null && sm.blur_px_median !== undefined) {
+                sub.push('เบลอ ' + sm.blur_px_median + ' px');
             }
             return '<div class="hik-gal-sess' + (s.name === state.session ? ' active' : '')
                 + '" data-name="' + s.name + '">'
@@ -406,18 +408,27 @@
             kpi('ขนาดภาพ', m.size || '—', '')
         ];
         if (d.metrics_ready) {
+            // วัตถุขยับต่ำกว่าพื้นสัญญาณรบกวน ⇒ แสดง "—" ไม่ใช่ตัวเลขที่วัดไม่ได้จริง
+            // (บนสถานีเคยขึ้น "เบลอ 0.02 px" + "exposure ≤1px = 217,391 µs" ทั้งที่
+            //  วัตถุแทบไม่ขยับ = ตัวเลขที่ดูน่าเชื่อถือแต่ไม่มีความหมาย)
+            var quiet = s.motion === 'negligible';
             cards.push(kpi('ความเร็ววัตถุ',
-                s.speed_px_s ? Math.round(s.speed_px_s) : '—', 'px/วิ',
-                s.speed_px_s ? '' : 'muted'));
+                (s.speed_px_s && !quiet) ? Math.round(s.speed_px_s) : '—', 'px/วิ',
+                (s.speed_px_s && !quiet) ? '' : 'muted'));
             cards.push(kpi('เบลอ (กลาง)',
-                s.blur_px_median === null || s.blur_px_median === undefined
-                    ? '—' : fmt(s.blur_px_median, 2), 'px', blurTone(s.blur_px_median)));
+                (quiet || s.blur_px_median === null || s.blur_px_median === undefined)
+                    ? '—' : fmt(s.blur_px_median, 2), 'px',
+                quiet ? 'muted' : blurTone(s.blur_px_median)));
             cards.push(kpi('เบลอน้อยสุด',
-                s.blur_px_min === null || s.blur_px_min === undefined
-                    ? '—' : fmt(s.blur_px_min, 2), 'px', blurTone(s.blur_px_min)));
+                (quiet || s.blur_px_min === null || s.blur_px_min === undefined)
+                    ? '—' : fmt(s.blur_px_min, 2), 'px',
+                quiet ? 'muted' : blurTone(s.blur_px_min)));
             cards.push(kpi('exposure ที่เบลอ ≤1px',
                 s.max_exposure_us_1px ? Math.round(s.max_exposure_us_1px) : '—', 'µs',
                 s.max_exposure_us_1px ? '' : 'muted'));
+            cards.push(kpi('วัตถุขยับต่อเฟรม',
+                s.shift_px_median === null || s.shift_px_median === undefined
+                    ? '—' : fmt(s.shift_px_median, 2), 'px', quiet ? 'warn' : ''));
         }
         box.innerHTML = cards.join('');
 
@@ -451,6 +462,18 @@
                 + (s.moving_frames || 0) + '/' + s.total_frames + ') ⇒ บอกระยะเบลอเป็นตัวเลขไม่ได้'
                 + '<br>ให้วัตถุผ่าน<b>กลางเฟรม</b> · ฉากหลังต้องนิ่ง · '
                 + 'วัตถุต้องกินพื้นที่มากกว่า 0.4% แต่ไม่เกิน 80% ของเฟรม แล้วถ่ายใหม่';
+            return;
+        }
+        // วัตถุขยับน้อยกว่าพื้นสัญญาณรบกวน = **เราไม่รู้** ไม่ใช่ "ช้าและคมดี"
+        // ห้ามขึ้นไฟเขียว เพราะการทดสอบนี้ยังไม่ได้ตอบคำถามเรื่องความเบลอเลย
+        if (s.motion === 'negligible') {
+            note.className = 'hik-note warn';
+            note.innerHTML = '⚠️ <b>วัตถุแทบไม่ได้เคลื่อนที่ — การทดสอบนี้ยังไม่ได้ตอบ'
+                + 'คำถามเรื่องความเบลอ</b><br>วัดได้ <b>' + fmt(s.shift_px_median, 2)
+                + ' พิกเซลต่อเฟรม</b> (ต่ำกว่าเกณฑ์ที่วัดได้จริง ' + s.min_shift_px + ' px) '
+                + '⇒ ตัวเลขความเร็วและระยะเบลอเป็นสัญญาณรบกวน ไม่ใช่การเคลื่อนที่'
+                + '<br>ชุดนี้ยัง<b>ใช้ดูความคม/โฟกัส/แสงได้</b> — แต่ถ้าจะวัดความเบลอ '
+                + 'ต้องเลื่อนวัตถุให้เร็วขึ้นมาก (ไลน์จริงที่ 450 ใบ/นาที ≈ 7,800 px/วินาที)';
             return;
         }
         var blur = s.blur_px_median;
