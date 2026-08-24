@@ -614,7 +614,8 @@ def diagnose(meta):
 
     แยกให้ชัด 3 สาเหตุ เพราะ **วิธีแก้คนละเรื่องกันโดยสิ้นเชิง**:
       ① เฟรมหายระหว่างทาง  → เลขเฟรมของกล้องกระโดด / แพ็กเก็ตหาย
-                              แก้ที่ packet size + Jumbo Frame บน NIC
+                              แก้ที่ packet size + Jumbo Frame — หรือถ้าสองอย่างนั้น
+                              ตั้งถูกแล้ว ให้ไปที่ฝั่งรับ (Receive Buffers ของ NIC)
       ② ดิสก์เขียนไม่ทัน    → เฟรมมาถึงแล้วแต่คิวเต็ม
                               แก้ที่ "เก็บ 1 ใน N" · ลด ROI · หยุดโมเดลระหว่างถ่าย
       ③ กล้องส่งมาช้าเอง    → ไม่มีเฟรมหาย ไม่มีการทิ้ง แต่อัตราต่ำ
@@ -678,17 +679,43 @@ def diagnose(meta):
     # ลำดับหัวข้อหลัก = ลำดับที่ควรลงมือแก้: เฟรมที่ "ไม่เคยมี" ต้องแก้ก่อน
     # เฟรมที่ "มีแล้วเขียนไม่ทัน" (เพราะพอแก้ให้กล้องเร็วขึ้น ดิสก์จะยิ่งตามไม่ทัน)
     issues = []
+
+    def _transport_fix(pct):
+        """
+        คำแนะนำของสาเหตุ "เฟรมหายระหว่างทาง" ต้องอ่านหลักฐานที่ตัวเองเก็บมา.
+
+        เดิมบอกให้ "ตั้ง packet size + เปิด Jumbo Frame" ทุกครั้ง — บนสถานีที่
+        packet = 8164 และ Jumbo เปิดอยู่แล้ว นั่นคือการส่งผู้ใช้ไปแก้ของที่ไม่ได้พัง
+        (กฎเหล็กข้อ 2) และปิดบังสาเหตุจริงซึ่งอยู่ที่ **ฝั่งรับ** ไม่ใช่ขนาดแพ็กเก็ต.
+        """
+        if not out.get("jumbo"):
+            return ("ตั้ง packet size ให้ใหญ่ขึ้นและเปิด Jumbo Frame บน NIC "
+                    "— การหยุดโมเดลหรือลดจำนวนภาพจะไม่ช่วยเลย")
+        head = ("แพ็กเก็ตตั้งถูกแล้ว (Jumbo เปิด, packet %s) ⇒ ไม่ใช่เรื่องขนาดแพ็กเก็ต. "
+                % (out.get("packet_size") or "?"))
+        tail = ("สาเหตุที่เหลืออยู่ที่ **ฝั่งรับ**: เพิ่ม Receive Buffers ของ NIC "
+                "(Device Manager → การ์ดแลน → Advanced → Receive Buffers = 2048) · "
+                "ตั้ง packet delay (GevSCPD) เล็กน้อยเพื่อลดความกระชาก · "
+                "ลดภาระ CPU ระหว่างถ่าย")
+        if pct is not None and pct < 1.0:
+            # หายเศษเสี้ยวเปอร์เซ็นต์ = ยังไม่ใช่ปัญหาที่ควรไล่ตอนนี้ — บอกให้ชัด
+            # ไม่งั้นผู้ใช้จะเสียเวลาไล่ของที่กระทบผลตรวจน้อยกว่าเรื่องอื่นมาก
+            return head + ("หายเพียง %.1f%% ⇒ ยังไม่ใช่ปัญหาที่ต้องไล่ตอนนี้. "
+                           "ถ้าจะรีดให้เป็น 0: " % pct) + tail
+        return head + tail
+
     if lost_transport:
+        pct = lost_transport * 100.0 / max(1, delivered + lost_transport)
         issues.append({
             "cause": "transport",
-            "text": "เฟรมหายระหว่างทาง %d เฟรม (เลขเฟรมของกล้องกระโดด)" % lost_transport,
-            "fix": ("ตั้ง packet size ให้ใหญ่ขึ้นและเปิด Jumbo Frame บน NIC "
-                    "— การหยุดโมเดลหรือลดจำนวนภาพจะไม่ช่วยเลย")})
+            "text": ("เฟรมหายระหว่างทาง %d เฟรม (%.1f%% ของที่กล้องส่ง "
+                     "— เลขเฟรมของกล้องกระโดด)" % (lost_transport, pct)),
+            "fix": _transport_fix(pct)})
     elif lost_packets:
         issues.append({
             "cause": "transport",
             "text": "แพ็กเก็ตหาย %d ระหว่างถ่าย" % lost_packets,
-            "fix": "ตั้ง packet size / เปิด Jumbo Frame / ลด packet delay"})
+            "fix": _transport_fix(None)})
 
     if meta.get("framerate_enable") and meta.get("framerate"):
         issues.append({

@@ -561,10 +561,50 @@ def _meta(saved=100, dropped=0, elapsed=10.0, every_n=1, size="1224x1024",
 
 
 def test_diagnose_blames_the_network_when_frame_numbers_jump(burst_root):
-    g = hb.diagnose(_meta(saved=100, dropped=0, cam_dropped=(0, 40)))
+    g = hb.diagnose(_meta(saved=100, dropped=0, cam_dropped=(0, 40), packet_size=1500))
     assert g["cause"] == "transport"
     assert g["lost_transport"] == 40
     assert "packet size" in g["fix"]
+
+
+def test_transport_advice_does_not_tell_you_to_fix_what_is_already_right(burst_root):
+    """
+    เจอบนสถานี 24 ส.ค.: Jumbo เปิด + packet 8164 อยู่แล้ว แต่กล่องวินิจฉัยยังบอกให้
+    "ตั้ง packet size ให้ใหญ่ขึ้นและเปิด Jumbo Frame" = ส่งผู้ใช้ไปแก้ของที่ไม่ได้พัง
+    และปิดบังสาเหตุจริงซึ่งอยู่ฝั่งรับ (กฎเหล็กข้อ 2 — คำแนะนำต้องดูหลักฐานของตัวเอง)
+    """
+    g = hb.diagnose(_meta(saved=100, dropped=0, cam_dropped=(0, 40), packet_size=8164))
+    assert g["cause"] == "transport"
+    assert g["jumbo"] is True
+    assert "ตั้ง packet size ให้ใหญ่ขึ้น" not in g["fix"]
+    assert "8164" in g["fix"]                      # อ้างหลักฐานที่เก็บมาเอง
+    assert "Receive Buffers" in g["fix"]           # ชี้ไปที่ฝั่งรับแทน
+
+
+def test_transport_advice_still_names_packet_size_when_jumbo_is_off(burst_root):
+    """อีกด้านของเหรียญ: packet เล็กจริง ⇒ ต้องบอกให้ตั้ง packet size + เปิด Jumbo"""
+    g = hb.diagnose(_meta(saved=100, dropped=0, cam_dropped=(0, 40), packet_size=1500))
+    assert g["jumbo"] is False
+    assert "packet size" in g["fix"] and "Jumbo Frame" in g["fix"]
+    assert "Receive Buffers" not in g["fix"]
+
+
+def test_tiny_transport_loss_is_reported_as_not_worth_chasing(burst_root):
+    """
+    2 เฟรมจาก 683 = 0.3% — ต้องบอกสัดส่วน และบอกว่ายังไม่ใช่ปัญหาที่ต้องไล่ตอนนี้
+    ไม่งั้นผู้ใช้เสียเวลากับของที่กระทบผลตรวจน้อยกว่าเรื่องอื่นมาก
+    """
+    g = hb.diagnose(_meta(saved=101, dropped=0, elapsed=10.0, every_n=7,
+                          cam_dropped=(0, 2), packet_size=8164))
+    assert g["cause"] == "transport"
+    assert "0.3%" in g["text"]
+    assert "ยังไม่ใช่ปัญหาที่ต้องไล่ตอนนี้" in g["fix"]
+
+
+def test_big_transport_loss_is_not_downplayed(burst_root):
+    """กลับด้าน: หายเยอะต้องไม่ขึ้นข้อความ 'ยังไม่ใช่ปัญหา'"""
+    g = hb.diagnose(_meta(saved=100, dropped=0, cam_dropped=(0, 40), packet_size=8164))
+    assert "ยังไม่ใช่ปัญหาที่ต้องไล่ตอนนี้" not in g["fix"]
 
 
 def test_diagnose_blames_the_disk_when_frames_arrived_but_were_dropped(burst_root):
