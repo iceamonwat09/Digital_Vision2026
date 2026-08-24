@@ -783,3 +783,87 @@ def test_live_smooth_toggle_never_leaks_into_usb(client):
         assert _smooth_now() is False
     finally:
         appmod.hik_live_smooth_override = None
+
+
+# ── "ถ่าย 1 เฟรม" แบบ 2 เฟส ────────────────────────────────────────
+# เดิมคำขอเดียวทำ จับภาพ → ตรวจ → ส่งกลับ ⇒ ผู้ใช้ไม่เห็นรูปเลยจนกว่าโมเดล
+# จะเสร็จ (imgsz 1280 บนสถานี ~420 ms) ทั้งที่การ "ถ่าย" ใช้เวลาแค่ ~15 ms
+@pytest.fixture
+def shotclient(client, monkeypatch):
+    """client + โมเดลปลอมที่นับการเรียก — เส้นทาง shot ต้องมี detector.model"""
+    fake = _CountingDetector()
+    monkeypatch.setattr(appmod, "detector", fake, raising=False)
+    appmod.hik_shot_frame = None
+    r = client.post("/api/detection/start",
+                    json={"mode": "can_dent", "camera_index": "hik:DA4994130"})
+    assert r.status_code == 200, r.get_json()
+    client.fake_detector = fake
+    yield client
+    client.post("/api/detection/stop")
+    appmod.hik_shot_frame = None
+
+
+def test_shot_phase_one_returns_the_picture_without_running_the_model(shotclient,
+                                                                      monkeypatch):
+    """
+    ⚠️ นับ `detector.detect` ตรง ๆ ไม่ได้ — `inference_loop` เรียกมันอยู่ตลอดเวลา
+    ในเบื้องหลัง. จึงดักที่ `_hik_shot_inspect` ซึ่งเป็นทางเดียวที่เส้นทาง shot
+    ใช้เรียกโมเดล: ถ้าเฟส ① แตะมัน เทสต์ต้องพังเสียงดัง
+    """
+    client = shotclient
+
+    def _boom(*a, **k):                       # pragma: no cover
+        raise AssertionError("เฟส ① ต้องไม่เรียกโมเดลเลย")
+
+    monkeypatch.setattr(appmod, "_hik_shot_inspect", _boom)
+    d = client.post("/api/camera/hik/shot", json={"detect": False}).get_json()
+    assert d["status"] == "ok"
+    assert d["image"].startswith("data:image/jpeg;base64,")
+    assert d["pending_detect"] is True
+    assert d.get("shot_id")
+    # ⚠️ ต้องไม่มีอะไรที่ดูเหมือนผลตรวจ (กฎเหล็กข้อ 2 — ยังไม่รู้ ต้องบอกว่าไม่รู้)
+    assert "verdict" not in d and "dent_count" not in d
+
+
+def test_shot_phase_two_inspects_the_frame_that_was_captured(shotclient):
+    client = shotclient
+    if True:
+        a = client.post("/api/camera/hik/shot", json={"detect": False}).get_json()
+        b = client.post("/api/camera/hik/shot/inspect",
+                        json={"shot_id": a["shot_id"], "imgsz": 480}).get_json()
+        assert b["status"] == "ok"
+        assert b["verdict"] in ("ok", "ng")
+        assert b["pending_detect"] is False
+        assert b["infer_imgsz"] == 480
+        assert b["shot_id"] == a["shot_id"]
+        assert b["capture_size"] == a["capture_size"]
+
+
+def test_shot_phase_two_refuses_a_stale_shot_id(shotclient):
+    """ถ่ายใหม่ระหว่างรอผลตรวจ ⇒ ต้องปฏิเสธ ไม่ใช่คืนผลของเฟรมก่อนหน้าเงียบ ๆ"""
+    client = shotclient
+    if True:
+        a = client.post("/api/camera/hik/shot", json={"detect": False}).get_json()
+        client.post("/api/camera/hik/shot", json={"detect": False})   # ถ่ายทับ
+        r = client.post("/api/camera/hik/shot/inspect", json={"shot_id": a["shot_id"]})
+        assert r.status_code == 409
+        assert "ถ่ายภาพใหม่" in r.get_json()["message"]
+
+
+def test_shot_inspect_without_a_capture_is_refused(shotclient):
+    client = shotclient
+    if True:
+        appmod.hik_shot_frame = None
+        r = client.post("/api/camera/hik/shot/inspect", json={})
+        assert r.status_code == 409
+
+
+def test_shot_without_detect_flag_keeps_the_old_one_call_behaviour(shotclient):
+    """client เก่าที่ไม่ส่ง detect มา ต้องได้ผลครบในคำขอเดียวเหมือนเดิม"""
+    client = shotclient
+    if True:
+        d = client.post("/api/camera/hik/shot", json={"imgsz": 480}).get_json()
+        assert d["status"] == "ok"
+        assert d["verdict"] in ("ok", "ng")
+        assert d["pending_detect"] is False
+        assert d["image"].startswith("data:image/jpeg;base64,")

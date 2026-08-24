@@ -358,19 +358,28 @@
     }
 
     // ── ถ่าย 1 เฟรมความละเอียดเต็ม แล้วตรวจ ──────────────────
+    /**
+     * ถ่าย 1 เฟรม — **2 เฟส**: ① คืนรูปทันที ② ค่อยตรวจ
+     *
+     * เดิมเป็นคำขอเดียว ⇒ ผู้ใช้ไม่เห็นรูปเลยจนกว่าโมเดลจะเสร็จ (imgsz 1280
+     * บนสถานี ~420 ms) ทั้งที่ตัวการ "ถ่าย" ใช้เวลาแค่ ~15 ms
+     */
     function shot() {
         var btn = $('hikShotBtn');
         var imgszSel = $('hikShotImgsz');
+        var imgsz = imgszSel ? Number(imgszSel.value) : undefined;
         if (btn) { btn.disabled = true; btn.textContent = 'กำลังถ่าย…'; }
         fetch('/api/camera/hik/shot', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ imgsz: imgszSel ? Number(imgszSel.value) : undefined })
+            body: JSON.stringify({ detect: false })
         })
             .then(function (r) { return r.json(); })
             .then(function (d) {
                 if (d.status !== 'ok') { throw new Error(d.message || 'ถ่ายไม่สำเร็จ'); }
-                showShot(d);
+                showShot(d);                       // ← รูปขึ้นตรงนี้ ไม่รอโมเดล
+                if (btn) { btn.textContent = 'กำลังตรวจ…'; }
+                return inspectShot(d.shot_id, imgsz);
             })
             .catch(function (e) { setMsg('❌ ' + e.message, 'bad'); })
             .finally(function () {
@@ -378,17 +387,53 @@
             });
     }
 
+    function inspectShot(shotId, imgsz) {
+        return fetch('/api/camera/hik/shot/inspect', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ shot_id: shotId, imgsz: imgsz })
+        })
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+                if (d.status !== 'ok') { throw new Error(d.message || 'ตรวจไม่สำเร็จ'); }
+                showShot(d);                       // เติมกรอบ + ผลตรวจทับของเดิม
+            })
+            .catch(function (e) {
+                // ⚠️ ห้ามปล่อยให้ค้างที่ "กำลังตรวจ…" — ต้องบอกว่าตรวจไม่สำเร็จ
+                var v = $('hikShotVerdict');
+                if (v) {
+                    v.textContent = '⚠️ ตรวจไม่สำเร็จ — ' + e.message;
+                    v.className = 'hik-shot-verdict';
+                }
+            });
+    }
+
     function showShot(d) {
         var ov = $('hikShotOverlay');
         if (!ov) { return; }
-        $('hikShotImg').src = d.image;
-        var ng = d.verdict === 'ng';
+        if (d.image) { $('hikShotImg').src = d.image; }
         var v = $('hikShotVerdict');
+        var meta = ['ภาพ ' + d.capture_size];
+        if (d.capture_ms != null) { meta.push('จับภาพ ' + d.capture_ms + ' ms'); }
+
+        if (d.pending_detect) {
+            // ⚠️ ยังไม่รู้ผล — ต้องบอกว่ายังไม่รู้ ห้ามแสดงอะไรที่ดูเหมือนผลตรวจ
+            v.textContent = '⏳ กำลังตรวจ…';
+            v.className = 'hik-shot-verdict';
+            $('hikShotMeta').textContent = meta.join(' · ');
+            ov.style.display = '';
+            return;
+        }
+
+        var ng = d.verdict === 'ng';
         v.textContent = ng ? ('NG — พบ ' + d.dent_count + ' จุด') : 'OK — ไม่พบรอยบุบ';
         v.className = 'hik-shot-verdict ' + (ng ? 'ng' : 'ok');
-        $('hikShotMeta').textContent = 'ภาพ ' + d.capture_size + ' · ตรวจที่ imgsz '
-            + d.infer_imgsz + ' · ใช้เวลา ' + d.infer_ms + ' ms'
-            + (ng ? (' · ความมั่นใจสูงสุด ' + d.max_confidence) : '');
+        meta.push('ตรวจที่ imgsz ' + d.infer_imgsz + ' · โมเดล ' + d.infer_ms + ' ms');
+        // รอคิวนาน = การตรวจสดกำลังใช้ iGPU อยู่ (คนละเรื่องกับโมเดลหนัก)
+        if (d.wait_ms > 20) { meta.push('รอคิวโมเดล ' + Math.round(d.wait_ms) + ' ms'); }
+        if (d.encode_ms != null) { meta.push('แสดงผล ' + d.encode_ms + ' ms'); }
+        if (ng) { meta.push('ความมั่นใจสูงสุด ' + d.max_confidence); }
+        $('hikShotMeta').textContent = meta.join(' · ');
         ov.style.display = '';
     }
 

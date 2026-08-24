@@ -138,6 +138,15 @@ frame_capture_enabled = False     # toggled by the UI (POST /api/frame_capture)
 # True/False = ผู้ใช้สลับเองจากช่องติ๊กในแผง (POST /api/camera/hik/live_smooth).
 # ⚠️ แสดงผลล้วน — ไม่แตะการนับ/DB/verdict ซึ่งใช้เฟรมที่โมเดลตรวจจริงเสมอ
 hik_live_smooth_override = None
+
+# ── "ถ่าย 1 เฟรม" แบบ 2 เฟส ────────────────────────────────────────────────
+# เดิมคำขอเดียวทำ จับภาพ → ตรวจ → ส่งกลับ ⇒ ผู้ใช้ต้องรอ **ทั้ง inference**
+# (imgsz 1280 บนสถานี ~420 ms) ก่อนจะได้เห็นรูปเลยแม้แต่นิดเดียว. แยกเป็น
+# เฟส ① คืนรูปทันที (จับภาพ ~15 ms + ย่อ/encode) เฟส ② ค่อยตรวจ ⇒ ภาพขึ้นเร็ว
+# ⚠️ เก็บได้ช่องเดียว (ล่าสุดเท่านั้น) — เป็นเครื่องมือทดสอบ ไม่ใช่คิวงาน
+hik_shot_lock = threading.Lock()
+hik_shot_frame = None             # เฟรมความละเอียดเต็มของช็อตล่าสุด
+hik_shot_id = 0                   # กันเฟส ② ไปตรวจเฟรมของช็อตก่อนหน้า
 latest_best_jpeg = None           # annotated JPEG of the sharpest NG frame
 latest_best_ts = 0.0              # time.time() when it was published
 best_lock = threading.Lock()
@@ -1068,41 +1077,121 @@ def api_hik_shot():
     if live is None:
         return jsonify({"status": "error",
                         "message": "ต้องเริ่มกล้องอุตสาหกรรมก่อน (กด Start Detection)"}), 409
+    global hik_shot_frame, hik_shot_id
+    body = request.get_json(silent=True) or {}
+    # detect=False ⇒ เฟส ① เท่านั้น (คืนรูปทันที ไม่รอโมเดล) — ค่าตั้งต้นของหน้าเว็บ
+    # ไม่ส่ง detect มาเลย = พฤติกรรมเดิม (ถ่าย+ตรวจในคำขอเดียว) สำหรับ client เก่า
+    want_detect = body.get("detect", True)
     try:
+        t_cap = time.perf_counter()
         frame = live.snap_full(timeout=3.0)
+        capture_ms = round((time.perf_counter() - t_cap) * 1000.0, 1)
         if frame is None:
             return jsonify({
                 "status": "error",
                 "message": "ไม่ได้ภาพจากกล้องภายในเวลาที่รอ — ปฏิเสธการตัดสินแทนที่จะใช้ภาพเก่า",
             }), 500
 
-        imgsz = _snapshot_imgsz((request.get_json(silent=True) or {}).get("imgsz"))
-        t0 = time.perf_counter()
-        detections = detector.detect(frame, imgsz=imgsz)
-        infer_ms = round((time.perf_counter() - t0) * 1000.0, 1)
-
-        dents = [d for d in detections if d["class_name"] not in _NON_DEFECT_CLASSES]
-        disp_frame, disp_dets = _scale_for_display(frame, detections, _SNAPSHOT_DISPLAY_MAX_W)
-        annotated = detector.draw_detections(disp_frame, disp_dets)
-        ret, buffer = cv2.imencode('.jpg', annotated, _JPEG_PARAMS)
-        if not ret:
-            return jsonify({"status": "error", "message": "เข้ารหัสภาพไม่สำเร็จ"}), 500
+        with hik_shot_lock:
+            hik_shot_id += 1
+            shot_id = hik_shot_id
+            hik_shot_frame = frame
 
         cap_h, cap_w = frame.shape[:2]
-        return jsonify({
-            "status": "ok",
-            "image": "data:image/jpeg;base64," + base64.b64encode(buffer.tobytes()).decode("ascii"),
-            "verdict": "ng" if dents else "ok",
-            "dent_count": len(dents),
-            "max_confidence": round(max((d["confidence"] for d in dents), default=0.0), 2),
-            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "capture_size": f"{cap_w}x{cap_h}",
-            "infer_ms": infer_ms,
-            "infer_imgsz": imgsz,
-        })
+        common = {"status": "ok", "shot_id": shot_id,
+                  "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                  "capture_size": f"{cap_w}x{cap_h}", "capture_ms": capture_ms}
+
+        if not want_detect:
+            # เฟส ① — รูปเปล่า ไม่มีกรอบ ไม่มี verdict. ตั้งใจ **ไม่ใส่ verdict**
+            # ให้เลย: หน้าเว็บต้องขึ้นว่า "กำลังตรวจ…" ไม่ใช่ค่าที่ดูเหมือนผลตรวจ
+            # (กฎเหล็กข้อ 2 — ยังไม่รู้ ต้องบอกว่ายังไม่รู้)
+            t_enc = time.perf_counter()
+            disp, _ = _scale_for_display(frame, [], _SNAPSHOT_DISPLAY_MAX_W)
+            ret, buffer = cv2.imencode('.jpg', disp, _JPEG_PARAMS)
+            if not ret:
+                return jsonify({"status": "error", "message": "เข้ารหัสภาพไม่สำเร็จ"}), 500
+            common["encode_ms"] = round((time.perf_counter() - t_enc) * 1000.0, 1)
+            common["image"] = ("data:image/jpeg;base64,"
+                               + base64.b64encode(buffer.tobytes()).decode("ascii"))
+            common["pending_detect"] = True
+            return jsonify(common)
+
+        imgsz = _snapshot_imgsz(body.get("imgsz"))
+        out = _hik_shot_inspect(frame, imgsz)
+        out.update(common)
+        return jsonify(out)
     except Exception as e:
         logger.error(f"Hikrobot shot failed: {e}", exc_info=True)
         return jsonify({"status": "error", "message": f"ถ่ายภาพไม่สำเร็จ: {e}"}), 500
+
+
+def _hik_shot_inspect(frame, imgsz):
+    """ตรวจเฟรมที่ถ่ายไว้ + วาดกรอบ + เข้ารหัสเป็น data URI (ใช้ร่วม 2 เส้นทาง)."""
+    t_wait = time.perf_counter()
+    detections = detector.detect(frame, imgsz=imgsz)
+    total_ms = round((time.perf_counter() - t_wait) * 1000.0, 1)
+    # แยก "รอคิว" ออกจาก "เวลาของโมเดล" — ไม่งั้นตัวเลขเดียวจะบอกไม่ได้ว่าช้า
+    # เพราะโมเดลหนัก หรือเพราะการตรวจสดกำลังใช้ iGPU อยู่ (วิธีแก้คนละเรื่อง)
+    wait_ms = float(getattr(detector, "last_wait_ms", 0.0) or 0.0)
+    dents = [d for d in detections if d["class_name"] not in _NON_DEFECT_CLASSES]
+
+    t_enc = time.perf_counter()
+    disp_frame, disp_dets = _scale_for_display(frame, detections, _SNAPSHOT_DISPLAY_MAX_W)
+    annotated = detector.draw_detections(disp_frame, disp_dets)
+    ret, buffer = cv2.imencode('.jpg', annotated, _JPEG_PARAMS)
+    if not ret:
+        raise RuntimeError("เข้ารหัสภาพไม่สำเร็จ")
+    return {
+        "status": "ok",
+        "image": "data:image/jpeg;base64," + base64.b64encode(buffer.tobytes()).decode("ascii"),
+        "verdict": "ng" if dents else "ok",
+        "dent_count": len(dents),
+        "max_confidence": round(max((d["confidence"] for d in dents), default=0.0), 2),
+        "infer_ms": round(max(0.0, total_ms - wait_ms), 1),
+        "wait_ms": round(wait_ms, 1),
+        "infer_imgsz": imgsz,
+        "encode_ms": round((time.perf_counter() - t_enc) * 1000.0, 1),
+        "pending_detect": False,
+    }
+
+
+@app.route('/api/camera/hik/shot/inspect', methods=['POST'])
+def api_hik_shot_inspect():
+    """
+    เฟส ② ของ "ถ่าย 1 เฟรม": ตรวจเฟรมที่เฟส ① เก็บไว้.
+
+    แยกจากการถ่ายเพราะ inference ที่ imgsz 1280 บนสถานีใช้ ~420 ms ⇒ ถ้ารวม
+    อยู่ในคำขอเดียว ผู้ใช้จะไม่เห็นรูปเลยจนกว่าโมเดลจะเสร็จ. เฟส ① คืนรูปใน
+    ~50 ms แล้วเฟสนี้ค่อยเติมกรอบ/ผลตรวจทีหลัง.
+
+    ``shot_id`` กันการตรวจเฟรมผิดใบ — ถ่ายใหม่ระหว่างที่เฟสนี้ยังไม่จบ จะได้ 409
+    แทนที่จะเงียบ ๆ คืนผลของเฟรมก่อนหน้า (กฎเหล็กข้อ 2).
+    """
+    if hik_camera is None:
+        return _hik_unavailable()
+    if detector is None or detector.model is None:
+        return jsonify({"status": "error", "message": "ยังไม่ได้โหลดโมเดล"}), 400
+    body = request.get_json(silent=True) or {}
+    with hik_shot_lock:
+        frame = hik_shot_frame
+        cur_id = hik_shot_id
+    if frame is None:
+        return jsonify({"status": "error", "message": "ยังไม่มีภาพที่ถ่ายไว้"}), 409
+    want_id = body.get("shot_id")
+    if want_id is not None and int(want_id) != cur_id:
+        return jsonify({"status": "error",
+                        "message": "มีการถ่ายภาพใหม่ระหว่างรอผลตรวจ — สั่งตรวจใหม่อีกครั้ง",
+                        "shot_id": cur_id}), 409
+    try:
+        out = _hik_shot_inspect(frame, _snapshot_imgsz(body.get("imgsz")))
+        out["shot_id"] = cur_id
+        cap_h, cap_w = frame.shape[:2]
+        out["capture_size"] = f"{cap_w}x{cap_h}"
+        return jsonify(out)
+    except Exception as e:
+        logger.error(f"Hikrobot shot inspect failed: {e}", exc_info=True)
+        return jsonify({"status": "error", "message": f"ตรวจภาพไม่สำเร็จ: {e}"}), 500
 
 
 # ── โหมด "ถ่ายรัว" (burst) ────────────────────────────────────────────

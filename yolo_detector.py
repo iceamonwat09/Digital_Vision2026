@@ -147,6 +147,9 @@ class YOLODetector:
         # RLock เพราะเป็นการป้องกันเชิงโครงสร้าง — เรียกซ้อนในเธรดเดียวกัน
         # ไม่ควรเกิด แต่ถ้าเกิดต้องไม่กลายเป็น deadlock ที่หยุดสายการผลิต.
         self._infer_lock = threading.RLock()
+        # เวลารอคิวโมเดลของการเรียกครั้งล่าสุด (ms) — ให้ route รายงานแยกจาก
+        # เวลาของโมเดลเอง ไม่งั้น "ตรวจช้า" กับ "รอคิวนาน" แยกกันไม่ออก
+        self.last_wait_ms = 0.0
 
     @property
     def is_bestx_mode(self) -> bool:
@@ -539,6 +542,7 @@ class YOLODetector:
             t_wait = time.perf_counter()
             with self._infer_lock:
                 wait_ms = (time.perf_counter() - t_wait) * 1000.0
+                self.last_wait_ms = round(wait_ms, 1)
                 t0 = time.perf_counter()
                 results = self.model(
                     frame,
