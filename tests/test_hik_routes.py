@@ -654,6 +654,24 @@ def _smooth_now():
     return appmod._live_smooth()
 
 
+def test_smooth_live_defaults_to_locked_boxes(client):
+    """
+    ⚠️ **กรอบต้องล็อกกับกระป๋องเป็นค่าตั้งต้น** — เคยตั้ง default เป็น smooth
+    (24 ส.ค. 2026) แล้วผู้ใช้เจอ "กรอบ Dent ตามภาพไม่ทัน" ทันที ซึ่งเป็นปัญหา
+    ที่โปรเจกต์เคยตัดสินใจแก้ไปแล้ว. กรอบที่ชี้ผิดตำแหน่ง = ผลที่ผิดแบบมั่นใจ
+    (กฎเหล็กข้อ 2) ⇒ ห้ามเป็นค่าตั้งต้น แม้จะแลกมากับภาพที่ลื่นกว่า
+    """
+    assert appmod.config.HIK_LIVE_SMOOTH_VIDEO is False
+    r = client.post("/api/detection/start",
+                    json={"mode": "can_dent", "camera_index": "hik:DA4994130"})
+    assert r.status_code == 200, r.get_json()
+    try:
+        assert appmod._live_hik_camera() is not None
+        assert _smooth_now() is False, "ค่าตั้งต้นต้องเป็นกรอบล็อก ไม่ใช่ภาพลื่น"
+    finally:
+        client.post("/api/detection/stop")
+
+
 def test_smooth_live_is_on_for_the_industrial_camera(client, monkeypatch):
     monkeypatch.setattr(appmod.config, "LIVE_SMOOTH_VIDEO", False, raising=False)
     monkeypatch.setattr(appmod.config, "HIK_LIVE_SMOOTH_VIDEO", True, raising=False)
@@ -725,3 +743,43 @@ def test_detector_serialises_concurrent_inference(client):
     for t in threads:
         t.join()
     assert inside["max"] == 1, "โมเดลถูกเรียกซ้อนกัน — lock ไม่ทำงาน"
+
+
+# ── ช่องติ๊กสลับโหมดภาพสด (ไม่ต้องรีสตาร์ต) ─────────────────────────
+def test_live_smooth_toggle_round_trip(client):
+    r = client.post("/api/detection/start",
+                    json={"mode": "can_dent", "camera_index": "hik:DA4994130"})
+    assert r.status_code == 200, r.get_json()
+    try:
+        d = client.get("/api/camera/hik/live_smooth").get_json()
+        assert d["smooth"] is False and d["overridden"] is False
+        assert _smooth_now() is False
+
+        d = client.post("/api/camera/hik/live_smooth",
+                        json={"smooth": True}).get_json()
+        assert d["smooth"] is True and d["overridden"] is True
+        assert _smooth_now() is True, "การสลับต้องมีผลกับภาพสดจริง"
+
+        d = client.post("/api/camera/hik/live_smooth",
+                        json={"smooth": False}).get_json()
+        assert d["smooth"] is False
+        assert _smooth_now() is False
+
+        # ส่ง null = กลับไปใช้ค่าจาก config
+        d = client.post("/api/camera/hik/live_smooth",
+                        json={"smooth": None}).get_json()
+        assert d["overridden"] is False and d["smooth"] == d["default"]
+    finally:
+        appmod.hik_live_smooth_override = None
+        client.post("/api/detection/stop")
+
+
+def test_live_smooth_toggle_never_leaks_into_usb(client):
+    """สลับไว้ตอนใช้กล้องอุตสาหกรรม แล้วกลับไป USB ต้องได้พฤติกรรมเดิมเป๊ะ"""
+    try:
+        client.post("/api/camera/hik/live_smooth", json={"smooth": True})
+        appmod.camera = None                       # ไม่ได้ใช้กล้องอุตสาหกรรมแล้ว
+        assert appmod._live_hik_camera() is None
+        assert _smooth_now() is False
+    finally:
+        appmod.hik_live_smooth_override = None

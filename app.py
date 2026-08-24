@@ -134,6 +134,10 @@ det_lock = threading.Lock()
 # the feed on it for config.FRAME_CAPTURE_HOLD_SEC when the mode is on. Display
 # only — never affects counting or DB logging.
 frame_capture_enabled = False     # toggled by the UI (POST /api/frame_capture)
+# โหมดแสดงผลของภาพสด "กล้องอุตสาหกรรม": None = ใช้ค่าจาก config.HIK_LIVE_SMOOTH_VIDEO
+# True/False = ผู้ใช้สลับเองจากช่องติ๊กในแผง (POST /api/camera/hik/live_smooth).
+# ⚠️ แสดงผลล้วน — ไม่แตะการนับ/DB/verdict ซึ่งใช้เฟรมที่โมเดลตรวจจริงเสมอ
+hik_live_smooth_override = None
 latest_best_jpeg = None           # annotated JPEG of the sharpest NG frame
 latest_best_ts = 0.0              # time.time() when it was published
 best_lock = threading.Lock()
@@ -593,8 +597,11 @@ def _live_smooth():
     """
     if frame_capture_enabled or getattr(config, "LIVE_SMOOTH_VIDEO", False):
         return True
-    return bool(getattr(config, "HIK_LIVE_SMOOTH_VIDEO", False)
-                and _live_hik_camera() is not None)
+    if _live_hik_camera() is None:
+        return False
+    if hik_live_smooth_override is not None:      # ผู้ใช้สลับเองจากหน้าเว็บ
+        return bool(hik_live_smooth_override)
+    return bool(getattr(config, "HIK_LIVE_SMOOTH_VIDEO", False))
 
 
 def generate_frames():
@@ -836,6 +843,36 @@ def api_frame_capture():
     frame_capture_enabled = bool(data.get("enabled", False))
     logger.info(f"Frame Capture mode {'ON' if frame_capture_enabled else 'OFF'}")
     return jsonify({"status": "ok", "enabled": frame_capture_enabled})
+
+
+@app.route('/api/camera/hik/live_smooth', methods=['GET', 'POST'])
+def api_hik_live_smooth():
+    """
+    สลับโหมดแสดงผลของภาพสด "กล้องอุตสาหกรรม" โดยไม่ต้องรีสตาร์ต.
+
+    ``smooth=False`` (ค่าตั้งต้น) = ภาพคือเฟรมที่โมเดลตรวจจริง ⇒ **กรอบล็อกเป๊ะ
+    กับกระป๋อง** แต่ภาพอัปเดตตามอัตราการตรวจ.
+    ``smooth=True`` = ภาพคือเฟรมดิบล่าสุด ⇒ ลื่น **แต่กรอบตามไม่ทันตอนวัตถุขยับ**.
+
+    ⚠️ **แสดงผลล้วน 100%** — การนับกระป๋อง/บันทึก DB/verdict ใช้เฟรมที่โมเดล
+    ตรวจจริงเสมอ ไม่ใช่ภาพที่เห็นบนจอ ⇒ ผลตรวจไม่เปลี่ยนไม่ว่าจะเลือกโหมดไหน.
+    ⚠️ มีผลเฉพาะแหล่งภาพ Hikrobot — USB/RTSP/STREAM ไม่ถูกแตะ.
+    """
+    global hik_live_smooth_override
+    default = bool(getattr(config, "HIK_LIVE_SMOOTH_VIDEO", False))
+    if request.method == 'POST':
+        data = request.get_json(silent=True) or {}
+        if data.get("smooth") is None:
+            hik_live_smooth_override = None            # กลับไปใช้ค่าจาก config
+        else:
+            hik_live_smooth_override = bool(data.get("smooth"))
+        logger.info("[hik] โหมดภาพสด = %s",
+                    "ลื่น (กรอบตามช้า)" if _live_smooth() else "กรอบล็อกกับเฟรมที่ตรวจ")
+    return jsonify({"status": "ok",
+                    "smooth": hik_live_smooth_override
+                    if hik_live_smooth_override is not None else default,
+                    "default": default,
+                    "overridden": hik_live_smooth_override is not None})
 
 
 @app.route('/viewfinder_feed')

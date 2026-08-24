@@ -392,6 +392,35 @@
         ov.style.display = '';
     }
 
+    // ── โหมดแสดงผลของภาพสด (กรอบล็อก vs ภาพลื่น) ─────────
+    // ⚠️ แสดงผลล้วน — การนับ/บันทึก DB/verdict ใช้เฟรมที่โมเดลตรวจจริงเสมอ
+    function loadSmooth() {
+        fetch('/api/camera/hik/live_smooth')
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+                var el = $('hikSmoothToggle');
+                if (el && d && d.status === 'ok') { el.checked = !!d.smooth; }
+            })
+            .catch(function () { /* เงียบได้ — ช่องติ๊กจะคงค่าเริ่มต้นของหน้า */ });
+    }
+
+    function toggleSmooth() {
+        var el = $('hikSmoothToggle');
+        if (!el) { return; }
+        var want = !!el.checked;
+        fetch('/api/camera/hik/live_smooth', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ smooth: want })
+        })
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+                // ให้ช่องติ๊กตรงกับสิ่งที่เซิร์ฟเวอร์ใช้จริงเสมอ ไม่ใช่สิ่งที่กดไป
+                if (d && d.status === 'ok') { el.checked = !!d.smooth; }
+            })
+            .catch(function () { el.checked = !want; });
+    }
+
     // ── สถิติสด ───────────────────────────────────────────
     function pollStats() {
         fetch('/api/camera/hik/status')
@@ -461,6 +490,9 @@
             if (reload) { reload.addEventListener('click', loadParams); }
             var ds = $('hikDatasetToggle');
             if (ds) { ds.addEventListener('change', toggleDataset); }
+            var sm = $('hikSmoothToggle');
+            if (sm) { sm.addEventListener('change', toggleSmooth); }
+            loadSmooth();
             var sh = $('hikShotBtn');
             if (sh) { sh.addEventListener('click', shot); }
             var close = $('hikShotClose');
