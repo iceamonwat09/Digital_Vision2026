@@ -9,7 +9,7 @@ import os
 # print it on startup and confirm it is actually executing the new code.
 # NOTE: shown on the navbar badge too — keep it short (<= ~28 chars) or it
 # gets ellipsized there (full value always visible in the footer / hover).
-CONFIG_VERSION = "2026.08.24-fastshot"
+CONFIG_VERSION = "2026.08.24-bestframe"
 
 # ====================
 # CAMERA CONFIGURATION
@@ -186,7 +186,13 @@ HIK_BURST_DIR = "data/hik_burst"
 HIK_BURST_DEFAULT_SECONDS = 10
 HIK_BURST_MAX_SECONDS = 60       # 10 วิ ที่ ROI ครึ่ง 69 fps ≈ 690 ภาพ ≈ 220 MB
 HIK_BURST_MAX_FRAMES = 3000
-HIK_BURST_JPEG_QUALITY = 95
+# คุณภาพ JPEG ของภาพถ่ายรัว. **นี่คือคันโยกของ "ดิสก์เขียนทันไหม"** —
+# วัดบนสถานี 24 ส.ค.: encode 45.1 ms + เขียน 3.0 ms = 48.1 ms/ภาพ ⇒ เขียนได้
+# แค่ 20.8 ภาพ/วิ ขณะที่กล้องส่งมา 68.3 fps. คุณภาพต่ำลง = encode เร็วขึ้นและ
+# ไฟล์เล็กลง ⇒ เก็บได้ถี่ขึ้น (ซึ่งสำคัญกว่าคุณภาพระดับ 95 สำหรับการวัดความคม
+# และการตรวจด้วยโมเดล — ทั้งคู่ทำงานที่ imgsz ≤ 1280 อยู่แล้ว)
+# ⚠️ ไม่กระทบ "เก็บภาพชุดข้อมูล" (HIK_DATASET_JPEG_QUALITY) ที่เอาไปเทรน
+HIK_BURST_JPEG_QUALITY = 90
 HIK_BURST_THUMB_WIDTH = 260
 # ตรวจกี่ภาพอัตโนมัติหลังถ่ายเสร็จ (เรียงจากคมที่สุด) — 0 = ไม่ตรวจอัตโนมัติ
 HIK_BURST_AUTODETECT_TOP = 12
@@ -201,7 +207,7 @@ HIK_BURST_MM_PER_PX = None
 # คอขวดที่วัดไว้แล้ว ⇒ ทั้งสองแย่งกันจนเฟรมถูกทิ้ง.
 # ⚠️ ระหว่างที่หยุด **การนับและการบันทึก DB จะหยุดด้วย** จึงเปิดเองเป็นค่าเริ่มต้นไม่ได้
 # ⚠️ เปิด flag นี้ยังไม่พอ — ต้องติ๊กในแผงถ่ายรัวต่อครั้งด้วย (กันเผลอ)
-HIK_BURST_PAUSE_INFERENCE = False
+HIK_BURST_PAUSE_INFERENCE = True
 
 # ค่าที่ผู้ใช้บันทึกจากหน้าเว็บ (อยู่นอก git — ต่างเครื่องต่างค่าได้)
 HIK_SETTINGS_FILE = "data/hik_camera.json"

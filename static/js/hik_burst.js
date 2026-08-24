@@ -6,7 +6,7 @@
  * เปิดออกมาแค่ window.HikBurst และ **ไม่แตะตัวแปรของหน้าอื่นเลย**
  *
  * ลำดับการทำงานหลังกด "เริ่มถ่ายรัว":
- *   ถ่าย (อัตรากล้อง) → วัดความคม/ความเบลอทั้งชุด → ตรวจ N ใบที่คมที่สุด
+ *   ถ่าย (อัตรากล้อง) → วัดทั้งชุด → ตรวจ N ใบที่ดีที่สุด (สมบูรณ์ + คม)
  * ทั้ง 3 ขั้นเป็นงานคนละก้อน ต่อกันที่ฝั่งนี้ เพื่อให้ผู้ใช้เห็นความคืบหน้าทุกขั้น
  * แทนที่จะกดแล้วเงียบไปครึ่งนาที
  */
@@ -198,7 +198,7 @@
             + drop + '<br>กำลังวัดความคม…', 'good');
         if (!name) { return; }
         openGallery(name);
-        // ต่อขั้น: วัดผล → แล้วค่อยตรวจ N ใบที่คมที่สุด (ต้องวัดก่อนถึงจะรู้ว่าใบไหนคม)
+        // ต่อขั้น: วัดผล → แล้วค่อยตรวจ N ใบที่ดีที่สุด (ต้องวัดก่อนถึงจะรู้)
         state.pending = { kind: 'detect_top', session: name };
         runMetrics(name);
     }
@@ -277,7 +277,7 @@
                 if (state.session) { loadSession(state.session, true); }
                 loadSessions();
                 if (next && next.kind === 'detect_top' && job && !job.cancelled && !job.error) {
-                    msg('✅ วัดผลเสร็จ — กำลังตรวจ ' + state.autoTop + ' ใบที่คมที่สุด', 'good');
+                    msg('✅ วัดผลเสร็จ — กำลังตรวจ ' + state.autoTop + ' ใบที่ดีที่สุด', 'good');
                     runDetect(next.session, { top: state.autoTop });
                 }
             })
@@ -300,7 +300,7 @@
                 var pr = $('hikBurstPauseRow');
                 if (pr) { pr.style.display = d.can_pause_inference ? '' : 'none'; }
                 var btn = $('hikGalDetectTopBtn');
-                if (btn) { btn.textContent = '🔍 ตรวจ ' + state.autoTop + ' ใบที่คมสุด'; }
+                if (btn) { btn.textContent = '🔍 ตรวจ ' + state.autoTop + ' ใบที่ดีที่สุด'; }
                 renderSessions(d.sessions || [], d.capturing);
                 var disk = $('hikGalDisk');
                 if (disk) {
@@ -344,7 +344,7 @@
     }
 
     function loadSession(name, keepOffset) {
-        var sort = ($('hikGalSort') || {}).value || 'sharp';
+        var sort = ($('hikGalSort') || {}).value || 'best';
         if (!keepOffset || state.session !== name) {
             state.offset = 0;
             state.rows = [];
@@ -378,7 +378,7 @@
     }
 
     function loadMore() {
-        var sort = ($('hikGalSort') || {}).value || 'sharp';
+        var sort = ($('hikGalSort') || {}).value || 'best';
         var url = '/api/camera/hik/bursts/' + encodeURIComponent(state.session)
             + '?sort=' + encodeURIComponent(sort) + '&limit=' + PAGE
             + '&offset=' + state.offset;
@@ -584,6 +584,24 @@
         return '<dt>' + label + '</dt><dd' + (hl ? ' class="hl"' : '') + '>' + value + '</dd>';
     }
 
+    /**
+     * ความสมบูรณ์ของวัตถุในเฟรม.
+     * ⚠️ "—" (วัดไม่ได้) ต้องต่างจาก "0%" (วัดได้แต่ไม่สมบูรณ์) อย่างชัดเจน —
+     * รวมสองอย่างนี้เป็นค่าเดียวคือการเดา (กฎเหล็กข้อ 2)
+     */
+    function completeText(r) {
+        if (r.complete === undefined || r.complete === null) {
+            return '<span title="หาวัตถุที่เคลื่อนที่ในเฟรมนี้ไม่เจอ">— วัดไม่ได้</span>';
+        }
+        var pct = Math.round(r.complete * 100);
+        if (r.complete <= 0) {
+            return '<b style="color:#dc2626" title="กรอบแตะขอบเฟรม = ชิ้นงานถูกตัด">'
+                + 'โดนขอบตัด</b>';
+        }
+        var col = pct >= 80 ? '#16a34a' : (pct >= 55 ? '#ca8a04' : '#dc2626');
+        return '<b style="color:' + col + '">' + pct + '%</b>';
+    }
+
     function renderGrid() {
         var grid = $('hikGalGrid');
         if (!grid) { return; }
@@ -599,6 +617,7 @@
             var info = '<div class="hik-card-info">'
                 + '<div class="hik-card-name">' + r.file + '</div>'
                 + '<dl class="hik-kv">'
+                + kv('สมบูรณ์', completeText(r))
                 + kv('คะแนนคม', fmt(r.sharp, 0))
                 + kv('แกน x/y', fmt(r.ratio, 2))
                 + kv('เบลอ', (r.blur_px === undefined || r.blur_px === null)
@@ -757,8 +776,13 @@
 
             var pause = $('hikBurstPause');
             if (pause) {
-                try { pause.checked = localStorage.getItem('hik.pauseInf') === '1'; }
-                catch (e) { /* โหมดส่วนตัว/ปิด storage — ไม่ใช่เรื่องผิดปกติ */ }
+                // ⚠️ ค่าตั้งต้น = **ติ๊ก** — ระหว่างเก็บข้อมูลเราไม่ต้องการผลตรวจสด
+                // และการตรวจสดแย่ง iGPU จนดิสก์เขียนไม่ทัน (เฟรมหาย = กระป๋องหาย).
+                // ผู้ใช้ยังปลดติ๊กได้ และตัวเลือกถูกจำไว้ต่อเบราว์เซอร์
+                try {
+                    var saved = localStorage.getItem('hik.pauseInf');
+                    pause.checked = (saved === null) ? true : (saved === '1');
+                } catch (e) { pause.checked = true; }
                 pause.addEventListener('change', function () {
                     try { localStorage.setItem('hik.pauseInf', pause.checked ? '1' : '0'); }
                     catch (e) { /* ไม่จำก็ไม่เป็นไร */ }

@@ -787,3 +787,146 @@ def test_advice_still_blames_packet_size_when_it_is_the_factory_value(burst_root
     g = hb.diagnose(_meta(saved=165, dropped=0, elapsed=10.0, packet_size=1500))
     assert g["cause"] == "camera_rate"
     assert "1500" in g["fix"]
+
+
+# ── ⑭ คะแนน "ความสมบูรณ์" ของวัตถุในเฟรม ─────────────────────────
+# ยืมเกณฑ์จาก app._can_complete() ของโหมด USB: กรอบต้องไม่แตะขอบเฟรม
+# ⚠️ ห้ามตั้งชื่อ W/H — ชนกับขนาดเฟรมทดสอบที่บรรทัดบนสุดของไฟล์
+FW, FH = 1000, 800
+
+
+def test_object_touching_the_edge_scores_zero():
+    """โดนขอบตัด = ใช้ตัดสินอะไรไม่ได้ ⇒ 0 เสมอ ไม่ว่าจะคมแค่ไหน"""
+    assert hb.completeness([0, 300, 200, 200], FW, FH) == 0.0          # ชิดซ้าย
+    assert hb.completeness([800, 300, 200, 200], FW, FH) == 0.0        # ชิดขวา
+    assert hb.completeness([400, 0, 200, 200], FW, FH) == 0.0          # ชิดบน
+    assert hb.completeness([400, 600, 200, 200], FW, FH) == 0.0        # ชิดล่าง
+
+
+def test_edge_margin_is_two_percent_like_the_usb_mode():
+    """เผื่อขอบ 2% — กรอบที่อยู่ในระยะนั้นถือว่าแตะขอบแล้ว"""
+    assert hb.COMPLETE_EDGE_MARGIN == 0.02
+    assert hb.completeness([19, 300, 200, 200], FW, FH) == 0.0         # x=19 < 2% ของ 1000
+    assert hb.completeness([21, 300, 200, 200], FW, FH) > 0.0          # x=21 > 20 ⇒ ผ่าน
+
+
+def test_centred_object_beats_an_off_centre_one():
+    mid = hb.completeness([400, 300, 200, 200], FW, FH)                # กลางเป๊ะ
+    off = hb.completeness([100, 100, 200, 200], FW, FH)                # มุมบนซ้าย
+    assert mid > off > 0.0
+    assert mid == pytest.approx(1.0, abs=0.01)
+
+
+def test_partially_entered_object_scores_lower_than_a_whole_one():
+    """ยังโผล่ไม่หมด (กรอบเล็กกว่าใบใหญ่สุดของชุดมาก) ⇒ คะแนนต่ำลง"""
+    full = 200 * 200
+    whole = hb.completeness([400, 300, 200, 200], FW, FH, max_area=full)
+    part = hb.completeness([400, 300, 80, 80], FW, FH, max_area=full)
+    assert whole > part
+    assert part < 0.5
+
+
+def test_no_object_returns_none_not_zero():
+    """
+    ⚠️ "หาวัตถุไม่เจอ" ต้องต่างจาก "เจอแล้วแต่ไม่สมบูรณ์" — รวมเป็นค่าเดียว
+    คือการเดา (กฎเหล็กข้อ 2) และทำให้เฟรมที่วัดไม่ได้ถูกมองว่าแย่ที่สุด
+    """
+    assert hb.completeness(None, FW, FH) is None
+    assert hb.completeness([], FW, FH) is None
+    assert hb.completeness([10, 10, 0, 0], FW, FH) is None
+    assert hb.completeness([10, 10, 50, 50], 0, 0) is None
+
+
+def test_ranking_prefers_a_complete_frame_over_a_sharper_clipped_one():
+    """หัวใจของฟีเจอร์: ภาพคมแต่โดนขอบตัด ต้องแพ้ภาพเต็มใบที่คมน้อยกว่า"""
+    clipped = {"sharp": 10000.0, "complete": 0.0}
+    whole = {"sharp": 4000.0, "complete": 1.0}
+    assert hb.rank_key(whole, 10000.0) > hb.rank_key(clipped, 10000.0)
+
+
+def test_ranking_still_uses_sharpness_among_equally_complete_frames():
+    a = {"sharp": 9000.0, "complete": 1.0}
+    b = {"sharp": 3000.0, "complete": 1.0}
+    assert hb.rank_key(a, 9000.0) > hb.rank_key(b, 9000.0)
+
+
+def test_unmeasurable_frames_rank_below_known_complete_ones_but_are_not_dropped():
+    """วัดไม่ได้ ⇒ ไม่ถูกตัดทิ้ง แต่ต้องอยู่หลังเฟรมที่ 'รู้ว่าสมบูรณ์'"""
+    unknown = {"sharp": 10000.0, "complete": None}
+    whole = {"sharp": 10000.0, "complete": 1.0}
+    assert hb.rank_key(whole, 10000.0) > hb.rank_key(unknown, 10000.0) > 0.0
+
+
+def test_when_nothing_is_measurable_the_order_falls_back_to_sharpness():
+    """ทั้งชุดหาวัตถุไม่เจอ ⇒ ต้องได้ลำดับตามความคมเหมือนเดิม ไม่ใช่ลำดับมั่ว"""
+    recs = {"a": {"sharp": 100.0, "complete": None},
+            "b": {"sharp": 900.0, "complete": None},
+            "c": {"sharp": 500.0, "complete": None}}
+    order = sorted(recs, key=lambda k: hb.rank_key(recs[k], 900.0), reverse=True)
+    assert order == ["b", "c", "a"]
+
+
+def test_add_completeness_uses_the_biggest_box_in_the_session_as_whole():
+    """ไม่ต้องรู้ขนาดชิ้นงานล่วงหน้า — ใบใหญ่สุดของชุดคือตัวแทนของ 'เต็มใบ'"""
+    frames = {
+        "1.jpg": {"roi": [400, 300, 200, 200], "roi_src": "moving"},   # เต็มใบ
+        "2.jpg": {"roi": [400, 300, 60, 60], "roi_src": "moving"},     # เพิ่งโผล่
+        "3.jpg": {"roi": None, "roi_src": "frame"},                    # ไม่เจอวัตถุ
+    }
+    scored = hb._add_completeness(frames, {"size": "1000x800"})
+    assert scored == 2
+    assert frames["1.jpg"]["complete"] > frames["2.jpg"]["complete"]
+    assert frames["3.jpg"]["complete"] is None
+
+
+def test_add_completeness_without_a_frame_size_scores_nothing():
+    """ไม่รู้ขนาดเฟรม = ตัดสินเรื่องขอบไม่ได้ ⇒ ไม่เดา"""
+    frames = {"1.jpg": {"roi": [10, 10, 20, 20], "roi_src": "moving"}}
+    assert hb._add_completeness(frames, {}) == 0
+
+
+def test_end_to_end_a_sharper_clipped_frame_never_beats_a_complete_one(burst_root,
+                                                                      tmp_path):
+    """
+    เคสที่ผู้ใช้ขอมาตรง ๆ: เดิม `top_sharp_files` เรียงตามความคมล้วน ⇒ ภาพที่
+    กระป๋องโผล่มาครึ่งใบตรงขอบเฟรม (ซึ่งมักคมกว่าเพราะขอบวัตถุตัดกับฉากหลัง)
+    ชนะภาพที่เห็นเต็มใบ. ทดสอบผ่าน `compute_metrics` ตัวจริงทั้งเส้นทาง
+    """
+    # ⚠️ ต้องมีเฟรมฉากหลังล้วนเป็นส่วนใหญ่ ไม่งั้นค่ามัธยฐาน (= ฉากหลัง) จะกลืน
+    # วัตถุที่อยู่ตำแหน่งเดิมซ้ำ ๆ เข้าไปด้วย แล้วหาวัตถุไม่เจอทั้งชุด
+    frames = ([_background_scene() for _ in range(6)]
+              + [_frame(0), _frame(1), _frame(2)]                    # ชิดขอบ = โดนตัด
+              + [_frame(W // 2 - OBJ_W // 2 + k) for k in (-1, 0, 1)])   # กลางเฟรม
+    name, _ = make_session(tmp_path, frames)
+    m = hb.compute_metrics(name)
+    fm = m["frames"]
+
+    empty = [fm["%05d.jpg" % i] for i in range(1, 7)]
+    clipped = [fm["%05d.jpg" % i] for i in (7, 8, 9)]
+    whole = [fm["%05d.jpg" % i] for i in (10, 11, 12)]
+    assert all(e["complete"] is None for e in empty), "ไม่มีวัตถุ = วัดไม่ได้ ไม่ใช่ 0"
+    assert all(c["complete"] == 0.0 for c in clipped), "ชิดขอบต้องได้ 0"
+    assert all((w["complete"] or 0) > 0.5 for w in whole), "กลางเฟรมต้องได้คะแนนสูง"
+
+    # ใบที่โดนขอบตัด "คมกว่า" จริง (ขอบวัตถุตัดกับฉากหลัง) — แต่ต้องไม่ถูกเลือก
+    picked = hb.top_files(name, 3)
+    assert set(picked) == {"00010.jpg", "00011.jpg", "00012.jpg"}, (
+        "ต้องเลือกเฉพาะใบที่เห็นเต็ม ไม่ใช่ใบที่คมกว่าแต่โดนขอบตัด")
+
+
+def test_gallery_can_sort_by_completeness_with_unknowns_last(burst_root, tmp_path):
+    """
+    "วัดไม่ได้" ต้องไปอยู่ท้ายสุด — ไม่ใช่ถูกมองเป็น 0 แล้วปนกับ "รู้ว่าไม่สมบูรณ์"
+    (สองอย่างนี้ผู้ตรวจต้องแยกออกจากกันได้)
+    """
+    frames = ([_background_scene() for _ in range(6)]
+              + [_frame(W // 2 - OBJ_W // 2), _frame(0)])
+    name, _ = make_session(tmp_path, frames)
+    hb.compute_metrics(name)
+    rows = hb.session_detail(name, sort="complete")["frames"]
+    vals = [r.get("complete") for r in rows]
+    known = [v for v in vals if v is not None]
+    assert known == sorted(known, reverse=True), "ที่วัดได้ต้องเรียงมาก→น้อย"
+    idx_unknown = [i for i, v in enumerate(vals) if v is None]
+    if idx_unknown:
+        assert min(idx_unknown) >= len(known), "ที่วัดไม่ได้ต้องอยู่ท้ายสุด"

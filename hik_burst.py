@@ -85,6 +85,15 @@ MIN_PC_SIDE = 16          # หน้าต่างที่เล็กกว�
 # เจอจริงบนสถานี: วัดได้ 0.53 px/เฟรม แล้วระบบไปสรุปว่า exposure สูงสุด = 217,391 µs
 # (0.22 วินาที!) พร้อมไฟเขียว "คมพอ" — ตัวเลขที่ไร้ความหมายแต่ดูน่าเชื่อถือ
 MIN_MEANINGFUL_SHIFT_PX = 2.0
+# ── คะแนน "ความสมบูรณ์" ของวัตถุในเฟรม ────────────────────────────────
+# ยืมเกณฑ์จาก `app._can_complete()` ของโหมด USB Frame Capture ซึ่งพิสูจน์
+# มาแล้วบนงานจริง: **กรอบของชิ้นงานต้องไม่แตะขอบเฟรม**. ต่างกันที่แหล่งของ
+# กรอบ — ฝั่ง USB ได้จากกล่อง `can` ที่โมเดลตรวจ ส่วนที่นี่ได้จาก `roi`
+# (การลบฉากหลัง) เพราะโหมดถ่ายรัว **ตั้งใจไม่เรียกโมเดลระหว่างถ่าย**
+COMPLETE_EDGE_MARGIN = 0.02        # เผื่อขอบ 2% เท่ากับ FRAME_CAPTURE_EDGE_MARGIN
+COMPLETE_MIN_AREA_FRAC = 0.55      # เล็กกว่านี้เทียบกับใบใหญ่สุดของชุด = ยังโผล่ไม่หมด
+COMPLETE_SHARP_WEIGHT = 0.5        # คะแนนรวม = สมบูรณ์ × (ความคมสัมพัทธ์ ^ น้ำหนักนี้)
+
 SHARP_REL_OK = 0.80       # คมเกิน 80% ของภาพที่คมที่สุดในชุด = ถือว่า "คม"
 # ความสว่างเฉลี่ยที่ "พอใช้งาน" สำหรับภาพ QC — ค่าเดียวกับ `diagnose_hikrobot.TARGET_MEAN`
 # (ถ้าแก้ที่หนึ่ง ต้องแก้อีกที่ ไม่งั้นเครื่องมือสองตัวจะแนะนำไฟคนละจำนวนเท่า)
@@ -411,6 +420,91 @@ def _thumb(path, filename, gray_or_bgr, width):
         pass
 
 
+def completeness(roi, frame_w, frame_h, max_area=None,
+                 margin=COMPLETE_EDGE_MARGIN):
+    """
+    คะแนน 0..1 ว่า "วัตถุอยู่ในเฟรมครบและอยู่กลางแค่ไหน" — คืน ``None`` เมื่อ
+    **ตอบไม่ได้** (ไม่พบวัตถุในเฟรมนั้น) ซึ่งต่างจาก 0.0 ที่แปลว่า *พบแล้วแต่
+    ไม่สมบูรณ์*. การรวมสองกรณีนี้เป็นค่าเดียวคือการเดา (กฎเหล็กข้อ 2).
+
+      ① แตะขอบเฟรม (เผื่อขอบ ``margin``) → **0.0 ทันที** — ชิ้นงานถูกตัด
+      ② เล็กกว่าใบใหญ่สุดของชุดมาก → ยังโผล่ไม่หมด (แม้ยังไม่แตะขอบ)
+      ③ ยิ่งใกล้กลางเฟรมยิ่งดี
+
+    ``max_area`` = พื้นที่กรอบที่ใหญ่ที่สุดที่พบในชุดนี้ = "วัตถุเต็มใบหน้าตาแบบนี้"
+    (ไม่ต้องรู้ขนาดชิ้นงานจริงล่วงหน้า). ไม่ส่งมา = ข้ามด่าน ②
+    """
+    if not roi or frame_w <= 0 or frame_h <= 0:
+        return None
+    try:
+        x, y, w, h = [float(v) for v in roi]
+    except (TypeError, ValueError):
+        return None
+    if w <= 0 or h <= 0:
+        return None
+
+    mx, my = frame_w * margin, frame_h * margin
+    if x <= mx or y <= my or (x + w) >= (frame_w - mx) or (y + h) >= (frame_h - my):
+        return 0.0                       # แตะขอบ = โดนตัด (เกณฑ์เดียวกับ USB)
+
+    score = 1.0
+    if max_area and max_area > 0:
+        frac = (w * h) / float(max_area)
+        if frac < COMPLETE_MIN_AREA_FRAC:
+            # โผล่มาแค่บางส่วน — ไล่ลงเป็นเส้นตรงจนเป็น 0 ที่ครึ่งของเกณฑ์
+            lo = COMPLETE_MIN_AREA_FRAC * 0.5
+            score *= max(0.0, (frac - lo) / max(1e-6, COMPLETE_MIN_AREA_FRAC - lo))
+
+    # ระยะจากกลางเฟรม: 1.0 ตรงกลางพอดี → 0.5 เมื่ออยู่สุดขอบที่เป็นไปได้
+    cx, cy = x + w / 2.0, y + h / 2.0
+    dx = abs(cx - frame_w / 2.0) / max(1e-6, frame_w / 2.0)
+    dy = abs(cy - frame_h / 2.0) / max(1e-6, frame_h / 2.0)
+    off = min(1.0, math.hypot(dx, dy) / math.sqrt(2.0))
+    return round(max(0.0, score * (1.0 - 0.5 * off)), 4)
+
+
+def _add_completeness(frames, meta):
+    """
+    เติม ``complete`` ให้ทุกเฟรมใน ``frames`` (แก้ dict ในที่).
+
+    ต้องทำ **หลังวัดครบทั้งชุด** เพราะด่าน ② ต้องรู้ว่ากรอบที่ใหญ่ที่สุดของชุด
+    ใหญ่แค่ไหน — เป็นตัวแทนของ "วัตถุเต็มใบ" โดยไม่ต้องรู้ขนาดชิ้นงานล่วงหน้า.
+    คืนจำนวนเฟรมที่ให้คะแนนได้ (ที่เหลือคือเฟรมที่หาวัตถุไม่เจอ = ``None``)
+    """
+    w, h = _size_of(meta)
+    if not w or not h:
+        return 0
+    areas = [r["roi"][2] * r["roi"][3] for r in frames.values()
+             if r.get("roi") and r.get("roi_src") == "moving"]
+    max_area = max(areas) if areas else None
+    scored = 0
+    for rec in frames.values():
+        c = (completeness(rec.get("roi"), w, h, max_area)
+             if rec.get("roi_src") == "moving" else None)
+        rec["complete"] = c
+        if c is not None:
+            scored += 1
+    return scored
+
+
+def rank_key(rec, best_sharp):
+    """
+    คะแนนรวมสำหรับ "ภาพที่ดีที่สุด" = **สมบูรณ์ก่อน แล้วค่อยคม**.
+
+    ⚠️ เฟรมที่ประเมินความสมบูรณ์ไม่ได้ (``complete is None``) **ไม่ถูกตัดทิ้ง**
+    แต่ถูกจัดให้อยู่หลังเฟรมที่รู้ว่าสมบูรณ์ — ถ้าทั้งชุดประเมินไม่ได้เลย
+    ลำดับจะกลายเป็น "เรียงตามความคม" เหมือนเดิมโดยอัตโนมัติ
+    """
+    sharp = float(rec.get("sharp") or 0.0)
+    rel = (sharp / best_sharp) if best_sharp and best_sharp > 0 else 0.0
+    rel = max(0.0, min(1.0, rel))
+    c = rec.get("complete")
+    if c is None:
+        # ไม่รู้ว่าสมบูรณ์ไหม ⇒ ใช้ความคมล้วน แต่หักลงให้ต่ำกว่าเฟรมที่รู้ว่าสมบูรณ์
+        return round(rel * (COMPLETE_MIN_AREA_FRAC ** COMPLETE_SHARP_WEIGHT) * 0.999, 6)
+    return round(float(c) * (rel ** COMPLETE_SHARP_WEIGHT), 6)
+
+
 def compute_metrics(name, job=None):
     """วัดทุกเฟรมของชุด แล้วเขียน ``metrics.json`` + สร้าง thumbnail."""
     if cv2 is None:
@@ -496,7 +590,11 @@ def compute_metrics(name, job=None):
         if job is not None:
             job.done = i + 2
 
+    # ต้องทำหลังวัดครบทั้งชุด — ด่าน "ยังโผล่ไม่หมด" ต้องรู้กรอบที่ใหญ่สุดของชุด
+    scored = _add_completeness(frames, meta)
+
     data = {"version": METRICS_VERSION, "count": len(frames),
+            "complete_scored": scored,
             "computed_at": time.strftime("%Y-%m-%d %H:%M:%S"),
             "mm_per_px": mm_per_px, "exposure_us": exposure_us,
             "frames": frames}
@@ -800,7 +898,16 @@ def session_detail(name, sort="sharp", limit=0, offset=0):
             row["infer_ms"] = d.get("infer_ms")
         rows.append(row)
 
-    if sort == "sharp" and fm:
+    if sort == "best" and fm:
+        best_sharp = max((v.get("sharp") or 0.0) for v in fm.values())
+        rows.sort(key=lambda r: rank_key(fm.get(r["file"], {}), best_sharp),
+                  reverse=True)
+    elif sort == "complete" and fm:
+        # ไม่รู้ (None) ต้องอยู่ท้ายสุด ไม่ใช่ถูกมองเป็น 0 ปนกับที่ "รู้ว่าไม่สมบูรณ์"
+        rows.sort(key=lambda r: (r.get("complete") is None,
+                                 -(r.get("complete") or 0.0),
+                                 -(r.get("sharp") or 0.0)))
+    elif sort == "sharp" and fm:
         rows.sort(key=lambda r: r.get("sharp") or -1.0, reverse=True)
     elif sort == "blur" and fm:
         rows.sort(key=lambda r: (r.get("blur_px") is None, r.get("blur_px") or 0.0))
@@ -815,17 +922,30 @@ def session_detail(name, sort="sharp", limit=0, offset=0):
             "diag": diagnose(meta), "free_mb": free_mb()}
 
 
-def top_sharp_files(name, count):
-    """ไฟล์ที่คมที่สุด N ใบ — ใช้เลือกภาพไปตรวจอัตโนมัติหลังถ่ายเสร็จ.
-    ถ้ายังไม่ได้วัด จะคืนลิสต์ว่าง (ไม่เดาโดยหยิบใบแรก ๆ มามั่ว)."""
+def top_files(name, count):
+    """
+    ไฟล์ที่ "ดีที่สุด" N ใบ = **สมบูรณ์ก่อน แล้วค่อยคม** — ใช้เลือกภาพไปตรวจ
+    อัตโนมัติหลังถ่ายเสร็จ.
+
+    เดิมเรียงตามความคมล้วน ⇒ ภาพที่กระป๋องโผล่มาครึ่งใบที่ขอบเฟรม ถ้าคมก็ชนะได้
+    ซึ่งเป็นภาพที่เอาไปตัดสินอะไรไม่ได้เลย.
+    ถ้ายังไม่ได้วัด จะคืนลิสต์ว่าง (ไม่เดาโดยหยิบใบแรก ๆ มามั่ว).
+    """
     metrics = load_metrics(name)
     if not metrics:
         return []
     path = session_dir(name)
     have = set(list_frames(path))
     fm = {k: v for k, v in (metrics.get("frames") or {}).items() if k in have}
-    ranked = sorted(fm, key=lambda k: fm[k].get("sharp") or 0.0, reverse=True)
+    if not fm:
+        return []
+    best_sharp = max((v.get("sharp") or 0.0) for v in fm.values())
+    ranked = sorted(fm, key=lambda k: rank_key(fm[k], best_sharp), reverse=True)
     return ranked[:max(0, int(count))]
+
+
+# ชื่อเดิม — คงไว้ให้โค้ด/เทสต์ที่อ้างถึงยังเรียกได้
+top_sharp_files = top_files
 
 
 def run_detect(name, files, detect_fn, job=None):
