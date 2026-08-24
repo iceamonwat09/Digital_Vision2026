@@ -5,6 +5,7 @@ Handles YOLOv8 model loading, inference, and defect classification.
 
 import cv2
 import logging
+import threading
 import numpy as np
 import os
 import time
@@ -107,6 +108,9 @@ class YOLODetector:
     YOLO-based defect detector for water bottles.
     Handles model loading, inference, and result processing.
     """
+    # เกินเท่านี้ถือว่า "รอคิวนาน" — แค่ log ระดับ debug ไม่รบกวนการทำงาน
+    _INFER_WAIT_WARN_MS = 50.0
+
     
     def __init__(self, model_path: str = None, mode_config=None):
         """
@@ -133,6 +137,16 @@ class YOLODetector:
         # Rolling inference-time accounting (throttled log every 30 frames)
         self._infer_count = 0
         self._infer_ms_accum = 0.0
+
+        # ── ทุกการเรียกโมเดลต้องผ่าน lock ตัวเดียว ────────────────────────
+        # `detector` เป็น object เดียวที่ถูกใช้จากหลายเธรดพร้อมกันจริง:
+        # inference_loop (สด) · ปุ่มถ่ายรูปตรวจ · /api/stream/infer ·
+        # งานตรวจเบื้องหลังของโหมดถ่ายรัว. ultralytics ไม่รับประกันว่า
+        # เรียกซ้อนกันได้ และบน iGPU ที่แชร์ RAM กับซีพียู การยิงพร้อมกัน
+        # ทำให้ทั้งสองฝั่งช้าลงกว่าการเข้าคิว (วัดได้เป็นภาพสดกระตุก).
+        # RLock เพราะเป็นการป้องกันเชิงโครงสร้าง — เรียกซ้อนในเธรดเดียวกัน
+        # ไม่ควรเกิด แต่ถ้าเกิดต้องไม่กลายเป็น deadlock ที่หยุดสายการผลิต.
+        self._infer_lock = threading.RLock()
 
     @property
     def is_bestx_mode(self) -> bool:
@@ -358,7 +372,8 @@ class YOLODetector:
             imgsz = getattr(config, "YOLO_IMGSZ", 480)
             dummy = np.zeros((480, 640, 3), dtype=np.uint8)
             extra = {"device": self.infer_device} if self.infer_device else {}
-            self.model(dummy, imgsz=imgsz, verbose=False, **extra)
+            with self._infer_lock:
+                self.model(dummy, imgsz=imgsz, verbose=False, **extra)
             return True
         except Exception as e:
             logger.warning(f"Accelerated backend smoke test failed ({e}).")
@@ -518,17 +533,27 @@ class YOLODetector:
             # every other backend gets the exact same call as before.
             extra = {"device": self.infer_device} if self.infer_device else {}
 
-            t0 = time.perf_counter()
-            results = self.model(
-                frame,
-                conf=model_conf,
-                iou=self.iou_threshold,
-                imgsz=imgsz if imgsz is not None else config.YOLO_IMGSZ,
-                max_det=config.YOLO_MAX_DET,
-                verbose=False,
-                **extra
-            )
-            infer_ms = (time.perf_counter() - t0) * 1000.0
+            # ⚠️ ถือ lock เฉพาะช่วง "คำนวณบน GPU/CPU" เท่านั้น — การถอดผล
+            # (.cpu() ด้านล่าง) เป็นการย้าย tensor ที่คำนวณเสร็จแล้ว ไม่แย่ง
+            # หน่วยประมวลผล จึงไม่ต้องอยู่ในคิวและไม่ควรถ่วงเธรดอื่น.
+            t_wait = time.perf_counter()
+            with self._infer_lock:
+                wait_ms = (time.perf_counter() - t_wait) * 1000.0
+                t0 = time.perf_counter()
+                results = self.model(
+                    frame,
+                    conf=model_conf,
+                    iou=self.iou_threshold,
+                    imgsz=imgsz if imgsz is not None else config.YOLO_IMGSZ,
+                    max_det=config.YOLO_MAX_DET,
+                    verbose=False,
+                    **extra
+                )
+                infer_ms = (time.perf_counter() - t0) * 1000.0
+            # ``infer_ms`` คงความหมายเดิม (เวลาของโมเดลล้วน) เพื่อไม่ให้ตัวเลข
+            # บนแถบ perf และ log เดิมเปลี่ยนความหมาย — เวลารอคิวรายงานแยก
+            if wait_ms > self._INFER_WAIT_WARN_MS:
+                logger.debug("รอคิวโมเดล %.0f ms ก่อนตรวจ (มีอีกเธรดใช้โมเดลอยู่)", wait_ms)
 
             detections: List[Dict] = []
             names = getattr(self.model, "names", {})

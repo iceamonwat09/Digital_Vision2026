@@ -577,6 +577,26 @@ def inference_loop():
     logger.info("Inference loop stopped")
 
 
+def _live_smooth():
+    """
+    โหมดแสดงผลของภาพสด: True = ใช้เฟรมดิบล่าสุดแล้ววาดกรอบล่าสุดทับ (ภาพลื่น),
+    False = ใช้เฟรมที่โมเดลตรวจจริง (กรอบเป๊ะ แต่ภาพรีเฟรชตามอัตราการตรวจ).
+
+    แยกออกมาเป็นฟังก์ชันเพื่อให้ **เทสต์เรียกตัวเดียวกับที่ ``generate_frames``
+    ใช้จริง** — เงื่อนไขนี้เคยอยู่ในตัว loop ซึ่งเทสต์เข้าถึงไม่ได้ ต้องเขียนซ้ำ
+    แล้วมีโอกาสเพี้ยนจากของจริงโดยไม่มีใครรู้.
+
+    เหตุผลของสาขากล้องอุตสาหกรรม: เฟรมใหญ่กว่า USB หลายเท่า ⇒ อัตราการตรวจ
+    ตกต่ำกว่าเพดานจอ (``STREAM_FPS``) ⇒ โหมด LOCKED ทำให้ "ภาพ" กระตุกตาม
+    การตรวจ. เปิด smooth เฉพาะแหล่งนี้ — USB/RTSP/STREAM ไม่ถูกแตะ และการนับ/
+    DB/verdict ยังใช้เฟรมที่โมเดลตรวจจริงเสมอ (นี่เป็นเรื่องการแสดงผลล้วน).
+    """
+    if frame_capture_enabled or getattr(config, "LIVE_SMOOTH_VIDEO", False):
+        return True
+    return bool(getattr(config, "HIK_LIVE_SMOOTH_VIDEO", False)
+                and _live_hik_camera() is not None)
+
+
 def generate_frames():
     """
     MJPEG generator for USB/RTSP. Two display modes (config.LIVE_SMOOTH_VIDEO):
@@ -610,7 +630,7 @@ def generate_frames():
         # Frame Capture ON forces SMOOTH live (accuracy comes from the frozen
         # best-frame instead), otherwise follow config.LIVE_SMOOTH_VIDEO (default
         # False = frame-locked, boxes pinned exactly to the inferred frame).
-        smooth = frame_capture_enabled or getattr(config, "LIVE_SMOOTH_VIDEO", False)
+        smooth = _live_smooth()
 
         # Frame Capture: when on and a fresh best-NG capture exists, freeze the
         # feed on it for `hold` seconds, then fall back to the normal live view.

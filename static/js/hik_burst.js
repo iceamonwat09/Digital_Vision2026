@@ -90,16 +90,31 @@
             });
     }
 
-    /** อ่าน fps + ขนาดภาพที่กล้องส่งจริง เพื่อให้ตัวประมาณไม่ใช่การเดา */
+    function applyShape(st) {
+        if (!st) { state.fps = null; state.megapixels = null; return; }
+        state.fps = st.fps || st.fps_avg || null;
+        var size = (st.size || '').split('x');
+        state.megapixels = (size.length === 2)
+            ? (Number(size[0]) * Number(size[1]) / 1e6) : null;
+    }
+
+    /**
+     * อ่าน fps + ขนาดภาพที่กล้องส่งจริง เพื่อให้ตัวประมาณไม่ใช่การเดา.
+     *
+     * ⚠️ **ใช้ค่าที่แถบสถานะ poll มาแล้วก่อนเสมอ** — ทุกคำขอ
+     * /api/camera/hik/status ไปจบที่ `net_stats()` ซึ่งต้องจับ lock ตัวเดียวกับ
+     * ที่เธรดจับภาพถือไว้ตลอดช่วงจับเฟรม+แปลงสี ⇒ poll ซ้ำซ้อน = ภาพสดสะดุด.
+     * เดิมโมดูลนี้ยิงเองทุก 4 วิ **ตลอดเวลาที่กล้องเปิด** แม้ไม่ได้ดูแผงนี้เลย.
+     * ยิงเองเฉพาะตอนแถบสถานะยังไม่มีค่าให้ (เช่นเพิ่งเปิดกล้อง)
+     */
     function pollCameraShape() {
+        var shared = (window.HikUI && window.HikUI.getStats)
+            ? window.HikUI.getStats(6000) : null;
+        if (shared) { applyShape(shared); refreshEstimate(); return; }
         fetch('/api/camera/hik/status')
             .then(function (r) { return r.json(); })
             .then(function (d) {
-                if (!d || !d.active || !d.stats) { state.fps = null; return; }
-                state.fps = d.stats.fps || d.stats.fps_avg || null;
-                var size = (d.stats.size || '').split('x');
-                state.megapixels = (size.length === 2)
-                    ? (Number(size[0]) * Number(size[1]) / 1e6) : null;
+                applyShape((d && d.active && d.stats) ? d.stats : null);
             })
             .catch(function () { /* เงียบได้ — เป็นแค่ตัวประมาณ */ })
             .finally(refreshEstimate);

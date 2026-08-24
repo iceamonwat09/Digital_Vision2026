@@ -397,6 +397,10 @@
         fetch('/api/camera/hik/status')
             .then(function (r) { return r.json(); })
             .then(function (d) {
+                // แชร์ให้โมดูลอื่น (ตัวประมาณของถ่ายรัว) แทนที่จะให้มันยิงเอง —
+                // ทุกคำขอสถานะต้องแย่ง lock ของกล้องกับเธรดจับภาพ
+                state.lastStats = (d && d.active && d.stats) ? d.stats : null;
+                state.lastStatsAt = Date.now();
                 var el = $('hikStats');
                 if (!el) { return; }
                 if (!d.active || !d.stats) { el.style.display = 'none'; return; }
@@ -435,6 +439,8 @@
 
     function stopPolling() {
         if (state.pollTimer) { clearInterval(state.pollTimer); state.pollTimer = null; }
+        state.lastStats = null;
+        state.lastStatsAt = 0;
         var el = $('hikStats');
         if (el) { el.style.display = 'none'; }
     }
@@ -501,6 +507,18 @@
             if (active) { startPolling(); } else { stopPolling(); }
         },
 
-        stopPolling: stopPolling
+        stopPolling: stopPolling,
+
+        /**
+         * สถิติล่าสุดที่แถบสถานะ poll มาแล้ว (null = ยังไม่มี/กล้องไม่ทำงาน).
+         * มีไว้ให้โมดูลอื่นใช้ค่าร่วมกัน **แทนการยิงคำขอของตัวเอง** — ทุกคำขอ
+         * /api/camera/hik/status ต้องแย่ง lock ของกล้องกับเธรดจับภาพ.
+         * `maxAgeMs` = ยอมรับค่าเก่าได้ไม่เกินกี่มิลลิวินาที (0 = ไม่จำกัด)
+         */
+        getStats: function (maxAgeMs) {
+            if (!state.lastStats) { return null; }
+            if (maxAgeMs && (Date.now() - state.lastStatsAt) > maxAgeMs) { return null; }
+            return state.lastStats;
+        }
     };
 })();

@@ -819,6 +819,10 @@
         padding: 4px 8px; border-radius: 6px; pointer-events: none;
         white-space: nowrap; max-width: calc(100% - 20px); overflow: hidden;
     }
+    /* บนแท็บกล้องอุตสาหกรรมมีสองแถบพร้อมกัน (#hikStats = ของกล้อง,
+       #liveStats = ของ pipeline) — ทั้งคู่ absolute ที่พิกัดเดียวกัน จึงต้อง
+       ดันแถบ perf ลงมาหนึ่งบรรทัด ไม่งั้นทับกันจนอ่านไม่ออกทั้งคู่ */
+    #liveStats.stacked { top: 38px; }
 </style>
 {% endblock %}
 
@@ -1368,10 +1372,14 @@
                 //   KB   = MJPEG frame payload
                 //   cam  = camera capture rate  · inf = YOLO inference (ms)
                 //   enc  = JPEG encode (ms)     · disp = new-frame display rate
-                // Shown only on the USB tab while detection runs — RTSP/STREAM
-                // and every other mode are untouched.
+                // Shown on the USB and Hikrobot tabs while detection runs —
+                // RTSP/STREAM and every other mode are untouched.
+                // ⚠️ กล้องอุตสาหกรรมถูกกันออกมาตั้งแต่แรกโดยไม่ตั้งใจ ทั้งที่เป็น
+                // แหล่งภาพที่ต้องการตัวเลขพวกนี้มากที่สุด (เฟรมใหญ่กว่า USB
+                // หลายเท่า) — ผู้ใช้จึง "รู้สึกว่ากระตุก" แต่ชี้ไม่ได้ว่าตรงไหน
                 const p = data.perf || {};
-                if (currentSource === 'usb' && isActive && p.inf_ms != null) {
+                if ((currentSource === 'usb' || currentSource === 'hik')
+                        && isActive && p.inf_ms != null) {
                     liveStats.textContent =
                         'FPS ' + (p.inf_fps != null ? p.inf_fps.toFixed(1) : '?') + ' · ' +
                         (p.jpg_kb != null ? Math.round(p.jpg_kb) : '?') + 'KB · ' +
@@ -1379,6 +1387,7 @@
                         ' / inf ' + Math.round(p.inf_ms) + 'ms' +
                         ' / enc ' + (p.enc_ms != null ? p.enc_ms.toFixed(1) : '?') + 'ms' +
                         ' / disp ' + (p.disp_fps != null ? Math.round(p.disp_fps) : '?') + 'fps';
+                    liveStats.classList.toggle('stacked', currentSource === 'hik');
                     liveStats.style.display = '';
                 } else {
                     liveStats.style.display = 'none';

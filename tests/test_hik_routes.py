@@ -642,3 +642,86 @@ def test_paused_inference_clears_the_boxes_instead_of_leaving_stale_ones(bclient
     finally:
         bclient.delete("/api/camera/hik/burst")
         bclient.post("/api/detection/stop")
+
+
+# ── ภาพสด: โหมด smooth ต้องผูกกับ "แหล่งภาพ" ไม่ใช่ทั้งระบบ ──────────
+# `generate_frames` โหมด LOCKED รีเฟรชจอตามอัตราการตรวจ — USB ไม่รู้สึกเพราะ
+# ตรวจเร็วกว่าเพดานจอ แต่กล้องอุตสาหกรรมส่งเฟรมใหญ่กว่าหลายเท่าจนตรวจช้ากว่า
+# ⇒ จอกระตุก. เปิด smooth เฉพาะแหล่งนี้ **ห้ามกระทบ USB/RTSP**
+def _smooth_now():
+    """เรียก **ฟังก์ชันตัวเดียวกับที่ generate_frames ใช้** — ไม่เขียนเงื่อนไขซ้ำ
+    (เงื่อนไขที่คัดลอกมาไว้ในเทสต์จะเพี้ยนจากของจริงโดยไม่มีใครรู้)."""
+    return appmod._live_smooth()
+
+
+def test_smooth_live_is_on_for_the_industrial_camera(client, monkeypatch):
+    monkeypatch.setattr(appmod.config, "LIVE_SMOOTH_VIDEO", False, raising=False)
+    monkeypatch.setattr(appmod.config, "HIK_LIVE_SMOOTH_VIDEO", True, raising=False)
+    r = client.post("/api/detection/start",
+                    json={"mode": "can_dent", "camera_index": "hik:DA4994130"})
+    assert r.status_code == 200, r.get_json()
+    try:
+        assert appmod._live_hik_camera() is not None
+        assert _smooth_now() is True
+    finally:
+        client.post("/api/detection/stop")
+
+
+def test_smooth_live_flag_does_not_leak_into_usb_or_rtsp(client, monkeypatch):
+    """กล้องที่กำลังใช้ไม่ใช่ Hikrobot ⇒ ต้องได้พฤติกรรมเดิมเป๊ะ (LOCKED)."""
+    monkeypatch.setattr(appmod.config, "LIVE_SMOOTH_VIDEO", False, raising=False)
+    monkeypatch.setattr(appmod.config, "HIK_LIVE_SMOOTH_VIDEO", True, raising=False)
+    monkeypatch.setattr(appmod, "camera", None, raising=False)
+    assert appmod._live_hik_camera() is None
+    assert _smooth_now() is False
+
+
+def test_smooth_live_can_be_turned_off_for_the_industrial_camera(client, monkeypatch):
+    """ปิด flag = กลับพฤติกรรมเดิม 100% แม้กล้องอุตสาหกรรมกำลังทำงาน."""
+    monkeypatch.setattr(appmod.config, "LIVE_SMOOTH_VIDEO", False, raising=False)
+    monkeypatch.setattr(appmod.config, "HIK_LIVE_SMOOTH_VIDEO", False, raising=False)
+    r = client.post("/api/detection/start",
+                    json={"mode": "can_dent", "camera_index": "hik:DA4994130"})
+    assert r.status_code == 200, r.get_json()
+    try:
+        assert appmod._live_hik_camera() is not None
+        assert _smooth_now() is False
+    finally:
+        client.post("/api/detection/stop")
+
+
+# ── lock ของโมเดล: ต้อง serialize จริง ไม่ใช่แค่มีตัวแปร ────────────
+def test_detector_serialises_concurrent_inference(client):
+    """
+    `detector` ตัวเดียวถูกเรียกจากหลายเธรด: inference_loop · ปุ่มถ่ายรูปตรวจ ·
+    /api/stream/infer · งานตรวจเบื้องหลังของถ่ายรัว. บน iGPU ที่แชร์ RAM
+    การยิงพร้อมกันทำให้ทั้งสองฝั่งช้าลงกว่าการเข้าคิว (ภาพสดกระตุก)
+    """
+    import threading
+    import numpy as np
+    from yolo_detector import YOLODetector
+
+    inside = {"n": 0, "max": 0}
+    guard = threading.Lock()
+
+    class SlowModel:
+        names = {0: "dent"}
+
+        def __call__(self, *a, **k):
+            with guard:
+                inside["n"] += 1
+                inside["max"] = max(inside["max"], inside["n"])
+            time.sleep(0.03)
+            with guard:
+                inside["n"] -= 1
+            return []
+
+    det = YOLODetector()
+    det.model = SlowModel()
+    frame = np.zeros((80, 80, 3), dtype=np.uint8)
+    threads = [threading.Thread(target=lambda: det.detect(frame)) for _ in range(6)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert inside["max"] == 1, "โมเดลถูกเรียกซ้อนกัน — lock ไม่ทำงาน"

@@ -901,6 +901,8 @@ class HikCamera(object):
         self._t_last = None
         self._mean = None
         self._clip_pct = None
+        self._net_cache = None          # ผล net_stats ล่าสุด (ดู net_stats())
+        self._net_cache_t = 0.0
         self._stat_every = max(1, int(_cfg("HIK_STATS_SAMPLE_EVERY", 10)))
         self._consec_fail = 0
         self._reconnects = 0
@@ -1151,6 +1153,9 @@ class HikCamera(object):
             self._release_locked()
 
     def _release_locked(self):
+        # แคชสถิติเครือข่ายเป็นของ handle ตัวเก่า — ล้างเสมอ ไม่งั้นหลังต่อใหม่
+        # หน้าเว็บจะเห็นตัวนับของการเชื่อมต่อก่อนหน้าไปอีกไม่กี่วินาที
+        self._net_cache, self._net_cache_t = None, 0.0
         self._stop_grabbing()
         if self._dataset is not None:
             self._dataset.stop()
@@ -1628,10 +1633,22 @@ class HikCamera(object):
 
     # ── ①ⓔ สถิติ / ชุดข้อมูล ────────────────────────────────
     def net_stats(self):
-        """แพ็กเก็ต/เฟรมที่หายในระดับเครือข่าย (GigE เท่านั้น) — 0 เท่านั้นที่ยอมรับได้."""
+        """
+        แพ็กเก็ต/เฟรมที่หายในระดับเครือข่าย (GigE เท่านั้น) — 0 เท่านั้นที่ยอมรับได้.
+
+        ⚠️ คำสั่งนี้ต้องจับ ``self._lock`` ซึ่ง ``_grab_once()`` ถือไว้ตลอดช่วง
+        จับเฟรม + แปลง Bayer→BGR ⇒ ทุกครั้งที่เรียก เธรดจับภาพจะสะดุด.
+        หน้าเว็บมีตัว poll สองตัว จึงแคชผลไว้สั้น ๆ ให้ใช้ค่าร่วมกัน
+        (ตัวนับเป็นค่าสะสม — ช้าไปไม่กี่วินาทีไม่ทำให้ตัดสินใจผิด).
+        ตั้ง ``HIK_NET_STATS_CACHE_S = 0`` เพื่อกลับพฤติกรรมเดิม 100%.
+        """
         mv = self._mv
         if mv is None or self._h is None:
             return None
+        ttl = float(_cfg("HIK_NET_STATS_CACHE_S", 2.0) or 0)
+        now = time.time()
+        if ttl > 0 and self._net_cache is not None and (now - self._net_cache_t) < ttl:
+            return self._net_cache
         try:
             all_cls = getattr(mv, "MV_ALL_MATCH_INFO", None)
             det_cls = getattr(mv, "MV_MATCH_INFO_NET_DETECT", None)
@@ -1646,9 +1663,11 @@ class HikCamera(object):
             with self._lock:
                 if self._h is None or self._h.MV_CC_GetGevAllMatchInfo(info) != 0:
                     return None
-            return {"recv_frames": int(getattr(det, "nNetRecvFrameCount", 0)),
-                    "lost_packets": int(getattr(det, "nLostPacketCount", 0)),
-                    "lost_frames": int(getattr(det, "nLostFrameCount", 0))}
+            out = {"recv_frames": int(getattr(det, "nNetRecvFrameCount", 0)),
+                   "lost_packets": int(getattr(det, "nLostPacketCount", 0)),
+                   "lost_frames": int(getattr(det, "nLostFrameCount", 0))}
+            self._net_cache, self._net_cache_t = out, now
+            return out
         except Exception:
             return None
 

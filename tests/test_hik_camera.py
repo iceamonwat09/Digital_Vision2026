@@ -169,7 +169,7 @@ def test_downscale_keeps_aspect_ratio():
     try:
         _, frame = cam.read_frame()
         h, w = frame.shape[:2]
-        assert w == 1280
+        assert w == hc.config.HIK_LIVE_MAX_WIDTH
         assert abs((w / h) - (2448 / 2048)) < 0.01
         assert cam.width == 2448 and cam.height == 2048   # ขนาดจริงจากกล้องยังถูกเก็บไว้
     finally:
@@ -248,7 +248,12 @@ def test_set_locked_param_restarts_stream_and_keeps_working():
         assert params["width"]["value"] == 1224 and params["height"]["value"] == 1024
         assert params["offset_x"]["value"] == 612 and params["offset_y"]["value"] == 512
         ok, frame = cam.read_frame()
-        assert ok and frame.shape[1] == 1224          # เล็กกว่าเพดานแล้วจึงไม่ถูกย่อ
+        # ⚠️ เดิมเทสต์นี้ยืนยันว่า "1224 เล็กกว่าเพดาน 1280 จึงไม่ถูกย่อ" —
+        # ซึ่งคือพฤติกรรมที่ทำให้ภาพสดกระตุกบนสถานี (เฟรม 4 เท่าของ USB
+        # ไหลเข้า pipeline). ตอนนี้ ROI ที่ใช้งานจริงต้อง **ถูกย่อ** จริง
+        assert ok
+        assert frame.shape[1] == hc.config.HIK_LIVE_MAX_WIDTH < 1224
+        assert cam.width == 1224 and cam.height == 1024   # ขนาดจริงยังถูกเก็บไว้
     finally:
         cam.release()
 
@@ -368,7 +373,7 @@ def test_stats_expose_the_numbers_needed_to_trust_the_feed(fake_sdk):
         assert st["dropped"] > 0, "เลขเฟรมกระโดดต้องถูกนับ ไม่ใช่ปล่อยผ่านเงียบ"
         assert st["lost_packets"] == 4
         assert st["size"] == "2448x2048"
-        assert st["sent_width"] == 1280
+        assert st["sent_width"] == hc.config.HIK_LIVE_MAX_WIDTH
     finally:
         cam.release()
 
@@ -531,3 +536,63 @@ def test_no_fixed_width_columns_wider_than_the_sidebar():
         fixed = [int(x) for x in re.findall(r"(\d+)px", m.group(1))]
         assert sum(fixed) <= 200, "คอลัมน์ตายตัวรวม %dpx กว้างเกินแถบข้าง: %s" % (
             sum(fixed), m.group(1))
+
+
+# ── แคชสถิติเครือข่าย (net_stats) ────────────────────────────────
+# ทุกคำขอสถานะจากหน้าเว็บจบที่ net_stats() ซึ่งต้องจับ lock ตัวเดียวกับที่
+# _grab_once() ถือไว้ตลอดช่วงจับเฟรม+แปลงสี ⇒ poll ซ้ำซ้อน = ภาพสดสะดุด
+def test_net_stats_is_cached_so_polling_does_not_fight_the_capture_thread(fake_sdk):
+    cam = open_cam()
+    try:
+        calls = []
+        real = cam._h.MV_CC_GetGevAllMatchInfo
+
+        def counting(info):
+            calls.append(1)
+            return real(info)
+
+        cam._h.MV_CC_GetGevAllMatchInfo = counting
+        a, b, c = cam.net_stats(), cam.net_stats(), cam.net_stats()
+        assert a is not None
+        assert a == b == c, "ค่าที่หน้าเว็บเห็นต้องไม่เปลี่ยนเพราะการแคช"
+        assert len(calls) == 1, "เรียก SDK ควรเหลือครั้งเดียว"
+    finally:
+        cam.release()
+
+
+def test_net_stats_cache_can_be_turned_off(fake_sdk, monkeypatch):
+    """ตั้ง 0 = กลับพฤติกรรมเดิม 100% (เรียก SDK ทุกครั้ง)"""
+    monkeypatch.setattr(hc.config, "HIK_NET_STATS_CACHE_S", 0, raising=False)
+    cam = open_cam()
+    try:
+        calls = []
+        real = cam._h.MV_CC_GetGevAllMatchInfo
+        cam._h.MV_CC_GetGevAllMatchInfo = \
+            lambda info: (calls.append(1), real(info))[1]
+        cam.net_stats()
+        cam.net_stats()
+        assert len(calls) == 2
+    finally:
+        cam.release()
+
+
+def test_net_stats_cache_is_dropped_when_the_camera_is_released(fake_sdk):
+    """แคชเป็นของ handle ตัวเก่า — ต่อใหม่แล้วต้องไม่เห็นตัวนับของรอบก่อน"""
+    cam = open_cam()
+    assert cam.net_stats() is not None
+    assert cam._net_cache is not None
+    cam.release()
+    assert cam._net_cache is None
+
+
+def test_live_max_width_actually_downscales_the_half_roi(fake_sdk):
+    """
+    กับดักที่เจอบนสถานี 24 ส.ค.: ค่าเดิม 1280 **ไม่เคยทำงาน** ที่ ROI ครึ่ง
+    1224x1024 (ย่อเมื่อ w > maxw เท่านั้น) ⇒ ภาพเต็มไหลเข้า pipeline ที่
+    ออกแบบไว้สำหรับ 640x480. ค่าเริ่มต้นต้องเล็กกว่า ROI ที่ใช้งานจริง
+    """
+    import config as appcfg
+    assert appcfg.HIK_LIVE_MAX_WIDTH < 1224, (
+        "ค่าเริ่มต้นต้องเล็กกว่า ROI ครึ่ง (1224) ไม่งั้นการย่อไม่เคยเกิดขึ้น")
+    # และต้องยังใหญ่กว่า imgsz ของโมเดล live เพื่อไม่ให้แลกความแม่นไปกับความเร็ว
+    assert appcfg.HIK_LIVE_MAX_WIDTH >= 2 * appcfg.YOLO_IMGSZ
