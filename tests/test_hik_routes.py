@@ -929,3 +929,88 @@ def test_window_mode_meta_lets_the_diagnosis_stay_correct(bclient, monkeypatch, 
             "อัตราของกล้องต้องมาจาก considered ไม่ใช่จำนวนไฟล์")
     finally:
         bclient.post("/api/detection/stop")
+
+
+# ── โหมด "ไม่ตรวจภาพสด" (viewfinder) ────────────────────────────────
+# ตอบคำถามของผู้ใช้: ระหว่างเล็งกล้องไม่ต้องตรวจ ⇒ ช็อตไม่ต้องรอคิวโมเดล
+# วัดจริงบน container: ถ่าย 1 เฟรมครบใน 1216 -> 525 ms (2.3 เท่า)
+def test_live_detect_toggle_round_trip(client):
+    r = client.post("/api/detection/start",
+                    json={"mode": "can_dent", "camera_index": "hik:DA4994130"})
+    assert r.status_code == 200, r.get_json()
+    try:
+        assert client.get("/api/camera/hik/live_detect").get_json()["enabled"] is True
+        d = client.post("/api/camera/hik/live_detect", json={"enabled": False}).get_json()
+        assert d["enabled"] is False
+        assert appmod._inference_paused() is True, "ต้องหยุดตรวจจริง ไม่ใช่แค่ตัวแปรเปลี่ยน"
+        d = client.post("/api/camera/hik/live_detect", json={"enabled": True}).get_json()
+        assert d["enabled"] is True
+        assert appmod._inference_paused() is False
+    finally:
+        appmod.hik_live_detect_off = False
+        client.post("/api/detection/stop")
+
+
+def test_live_detect_off_actually_stops_the_model(bclient, monkeypatch):
+    """พิสูจน์ว่าโมเดลหยุดจริง ด้วยการนับจำนวนครั้งที่ถูกเรียก"""
+    fake = _CountingDetector()
+    monkeypatch.setattr(appmod, "detector", fake, raising=False)
+    assert _start_hik(bclient).status_code == 200
+    try:
+        assert _wait_growth(fake) > 0, "ปกติต้องมีการตรวจเกิดขึ้น"
+        bclient.post("/api/camera/hik/live_detect", json={"enabled": False})
+        time.sleep(0.3)
+        assert _wait_growth(fake) == 0, "ปิดแล้วต้องไม่มีการตรวจเลย"
+        bclient.post("/api/camera/hik/live_detect", json={"enabled": True})
+        time.sleep(0.3)
+        assert _wait_growth(fake) > 0, "เปิดกลับแล้วต้องตรวจต่อ"
+    finally:
+        appmod.hik_live_detect_off = False
+        bclient.post("/api/detection/stop")
+
+
+def test_live_detect_is_reset_to_on_when_detection_starts(client):
+    """
+    ⚠️ ห้ามค้างในสภาพ "ไม่ตรวจ" ข้ามรอบ — ผู้ใช้กด Start แล้วต้องได้ระบบที่
+    ตรวจจริงเสมอ ไม่งั้นเป็นจุดบอด QC (กฎเหล็กข้อ 2)
+    """
+    appmod.hik_live_detect_off = True
+    r = client.post("/api/detection/start",
+                    json={"mode": "can_dent", "camera_index": "hik:DA4994130"})
+    assert r.status_code == 200, r.get_json()
+    try:
+        assert appmod.hik_live_detect_off is False
+    finally:
+        client.post("/api/detection/stop")
+
+
+def test_live_detect_off_does_not_touch_usb(client):
+    """ตั้งไว้ตอนใช้กล้องอุตสาหกรรม แล้วเปลี่ยนไป USB ⇒ ต้องตรวจตามปกติ"""
+    try:
+        appmod.hik_live_detect_off = True
+        appmod.camera = None                 # ไม่ได้ใช้กล้องอุตสาหกรรมแล้ว
+        assert appmod._inference_paused() is False
+    finally:
+        appmod.hik_live_detect_off = False
+
+
+def test_the_picture_keeps_updating_while_detection_is_paused(bclient, monkeypatch):
+    """
+    🐛 ระหว่างหยุดตรวจ `latest_det_frame` ไม่ถูกอัปเดต ⇒ โหมด LOCKED ของ
+    generate_frames ค้างที่เฟรมสุดท้ายที่ตรวจ = จอนิ่งสนิททั้งที่กล้องยังทำงาน
+    (มีมาตลอดตั้งแต่ทำ "หยุดโมเดลระหว่างถ่ายรัว" — เพิ่งเห็นตอนทำ viewfinder)
+    """
+    fake = _CountingDetector()
+    monkeypatch.setattr(appmod, "detector", fake, raising=False)
+    assert _start_hik(bclient).status_code == 200
+    try:
+        bclient.post("/api/camera/hik/live_detect", json={"enabled": False})
+        time.sleep(0.5)
+        first = appmod.latest_det_seq
+        time.sleep(0.6)
+        assert appmod.latest_det_seq > first, "ภาพต้องเดินต่อระหว่างหยุดตรวจ"
+        with appmod.det_lock:
+            assert appmod.latest_detections == [], "แต่ต้องไม่มีกรอบค้างอยู่"
+    finally:
+        appmod.hik_live_detect_off = False
+        bclient.post("/api/detection/stop")

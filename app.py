@@ -147,6 +147,14 @@ hik_live_smooth_override = None
 hik_shot_lock = threading.Lock()
 hik_shot_frame = None             # เฟรมความละเอียดเต็มของช็อตล่าสุด
 hik_shot_id = 0                   # กันเฟส ② ไปตรวจเฟรมของช็อตก่อนหน้า
+
+# ── โหมด "ภาพสดเป็นแค่ viewfinder" (ไม่ตรวจระหว่าง live) ────────────────────
+# ใช้กับเวิร์กโฟลว์ "ถ่าย 1 เฟรมแล้วค่อยตรวจ": ระหว่างเล็งกล้องไม่ต้องการผลตรวจสด
+# อยู่แล้ว และการตรวจสดกิน iGPU จนช็อตต้องรอคิว (วัดได้ 706 ms จาก 1,130 ms)
+# ⚠️ ระหว่างเปิดโหมดนี้ **การนับกระป๋องและการบันทึก DB หยุดด้วย** — หน้าเว็บ
+#    ต้องขึ้นคำเตือนตลอดช่วงนั้น และค่าถูกรีเซ็ตทุกครั้งที่กด Start Detection
+#    เพื่อไม่ให้ค้างในสภาพ "ไม่ตรวจ" ข้ามรอบโดยไม่มีใครรู้
+hik_live_detect_off = False
 latest_best_jpeg = None           # annotated JPEG of the sharpest NG frame
 latest_best_ts = 0.0              # time.time() when it was published
 best_lock = threading.Lock()
@@ -462,8 +470,20 @@ def inference_loop():
                     with det_lock:
                         latest_detections = []
                     detection_stats["current_defects"] = 0
-                    logger.info("[hik-burst] หยุดการตรวจชั่วคราวระหว่างถ่ายรัว")
-                time.sleep(0.02)
+                    logger.info("[hik] หยุดการตรวจภาพสดชั่วคราว "
+                                "(ถ่ายรัว / โหมด viewfinder) — การนับและ DB หยุดด้วย")
+                # ⚠️ ต้องเผยแพร่เฟรมดิบต่อไป ไม่งั้นโหมด LOCKED ของ generate_frames
+                # จะค้างอยู่ที่เฟรมสุดท้ายที่ตรวจ = จอนิ่งสนิททั้งที่กล้องยังทำงาน
+                # (ภาพค้างจริงระหว่างถ่ายรัวมาตลอด — เพิ่งเห็นตอนทำโหมด viewfinder)
+                with raw_lock:
+                    vf_frame, vf_seq = latest_raw_frame, raw_frame_seq
+                if vf_frame is not None and vf_seq != last_seq:
+                    last_seq = vf_seq
+                    with det_lock:
+                        latest_detections = []
+                        latest_det_frame = vf_frame
+                        latest_det_seq = vf_seq
+                time.sleep(0.005)
                 continue
             if paused:
                 paused = False
@@ -1156,6 +1176,30 @@ def _hik_shot_inspect(frame, imgsz):
     }
 
 
+@app.route('/api/camera/hik/live_detect', methods=['GET', 'POST'])
+def api_hik_live_detect():
+    """
+    เปิด/ปิด **การตรวจภาพสด** ของกล้องอุตสาหกรรม (ภาพยังสดอยู่ตามปกติ).
+
+    ใช้กับเวิร์กโฟลว์ "ถ่าย 1 เฟรมแล้วค่อยตรวจ" — ระหว่างเล็งกล้องไม่ต้องการ
+    ผลตรวจสดอยู่แล้ว และการตรวจสดกิน iGPU จนช็อตต้องรอคิว
+
+    ⚠️ **ปิดแล้วการนับกระป๋องและการบันทึก DB หยุดด้วย** (ใช้เส้นทางเดียวกับ
+    "หยุดโมเดลระหว่างถ่ายรัว") ⇒ หน้าเว็บต้องขึ้นคำเตือนตลอดช่วงที่ปิด.
+    ค่าถูกรีเซ็ตเป็น "ตรวจ" ทุกครั้งที่กด Start Detection.
+    """
+    global hik_live_detect_off
+    if hik_camera is None:
+        return _hik_unavailable()
+    if request.method == 'POST':
+        data = request.get_json(silent=True) or {}
+        hik_live_detect_off = not bool(data.get("enabled", True))
+        logger.info("[hik] การตรวจภาพสด = %s",
+                    "ปิด (viewfinder เท่านั้น — ไม่นับ ไม่บันทึก)"
+                    if hik_live_detect_off else "เปิด")
+    return jsonify({"status": "ok", "enabled": not hik_live_detect_off})
+
+
 @app.route('/api/camera/hik/shot/inspect', methods=['POST'])
 def api_hik_shot_inspect():
     """
@@ -1212,6 +1256,8 @@ def _inference_paused():
     (exception / กล้องหลุด / เบราว์เซอร์ปิด) การหยุดตรวจก็จะคลายเองเมื่อถึงเวลา
     ที่ตั้งไว้ + 3 วินาที — **เป็นไปไม่ได้ที่ระบบจะค้างในสภาพ "ไม่ตรวจ" ตลอดไป**
     """
+    if hik_live_detect_off and _live_hik_camera() is not None:
+        return True                       # ผู้ใช้สั่งให้ภาพสดเป็นแค่ viewfinder
     return bool(_hik_burst_pause_inf and _hik_burst_session is not None
                 and _hik_burst_deadline and time.time() < _hik_burst_deadline)
 
@@ -1631,7 +1677,7 @@ def start_detection():
     """Start defect detection with the selected camera."""
     global detection_active, capture_thread, inference_thread, camera
     global latest_raw_frame, raw_frame_seq, latest_detections
-    global latest_det_frame, latest_det_seq
+    global latest_det_frame, latest_det_seq, hik_live_detect_off
     global latest_best_jpeg, latest_best_ts
     global pool_best_frame, pool_best_score, pool_collecting
 
@@ -1716,6 +1762,11 @@ def start_detection():
         pool_best_score = -1.0
     pool_collecting = False
     _perf_reset()                      # fresh perf-badge stats for this session
+
+    # ⚠️ เริ่มรอบใหม่ = ต้องตรวจเสมอ. โหมด viewfinder หยุดการนับ/บันทึก DB
+    # ถ้าปล่อยให้ค้างข้ามรอบ ผู้ใช้จะกด Start แล้วคิดว่าระบบกำลังตรวจอยู่
+    # ทั้งที่ไม่ได้ตรวจเลย (จุดบอด QC — กฎเหล็กข้อ 2)
+    hik_live_detect_off = False
 
     detection_active = True
     capture_thread = threading.Thread(target=capture_loop, daemon=True)

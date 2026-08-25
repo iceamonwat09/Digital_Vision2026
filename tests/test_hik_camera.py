@@ -172,8 +172,9 @@ def test_downscale_keeps_aspect_ratio():
         _, frame = cam.read_frame()
         h, w = frame.shape[:2]
         assert w == hc.config.HIK_LIVE_MAX_WIDTH
-        assert abs((w / h) - (2448 / 2048)) < 0.01
-        assert cam.width == 2448 and cam.height == 2048   # ขนาดจริงจากกล้องยังถูกเก็บไว้
+        # อัตราส่วนต้องเท่ากับ ROI ที่กล้องกำลังส่งจริง ไม่ใช่ตัวเลขที่ hard-code
+        assert abs((w / h) - (cam.width / cam.height)) < 0.01
+        assert cam.width > w, "ขนาดจริงจากกล้องต้องใหญ่กว่าภาพที่ย่อแล้ว"
     finally:
         cam.release()
 
@@ -195,7 +196,9 @@ def test_snap_full_returns_unscaled_frame():
         t.join()
         full = result["frame"]
         assert full is not None
-        assert full.shape[1] == 2448 and full.shape[0] == 2048
+        # "เต็มความละเอียด" = ขนาด ROI ที่กล้องส่งจริง ไม่ใช่ภาพที่ย่อลงจอ
+        assert (full.shape[1], full.shape[0]) == (cam.width, cam.height)
+        assert full.shape[1] > hc.config.HIK_LIVE_MAX_WIDTH
     finally:
         cam.release()
 
@@ -357,7 +360,9 @@ def test_dataset_saves_full_resolution_images(tmp_path):
         assert files, "ไม่มีไฟล์ภาพถูกเขียนเลย"
         import cv2
         img = cv2.imread(files[0])
-        assert img.shape[1] == 2448, "ภาพชุดข้อมูลต้องเป็นความละเอียดเต็ม ไม่ใช่ภาพที่ย่อแล้ว"
+        assert img.shape[1] == cam.width, \
+            "ภาพชุดข้อมูลต้องเป็นความละเอียดเต็มของ ROI ไม่ใช่ภาพที่ย่อลงจอ"
+        assert img.shape[1] > hc.config.HIK_LIVE_MAX_WIDTH
     finally:
         cam.release()
 
@@ -374,7 +379,7 @@ def test_stats_expose_the_numbers_needed_to_trust_the_feed(fake_sdk):
         assert st["frames"] >= 10
         assert st["dropped"] > 0, "เลขเฟรมกระโดดต้องถูกนับ ไม่ใช่ปล่อยผ่านเงียบ"
         assert st["lost_packets"] == 4
-        assert st["size"] == "2448x2048"
+        assert st["size"] == "%dx%d" % (cam.width, cam.height)
         assert st["sent_width"] == hc.config.HIK_LIVE_MAX_WIDTH
     finally:
         cam.release()
@@ -769,3 +774,20 @@ def test_window_mode_beats_every_n_at_keeping_the_centred_frame(tmp_path, monkey
         "(หน้าต่าง %.0f%% vs every_n %.0f%%)"
         % (100 * centred(window), 100 * centred(every)))
     assert np.median(window) < np.median(every), "ระยะจากกลางเฟรมต้องน้อยกว่า"
+
+
+def test_default_roi_is_the_half_frame_measured_to_work_on_the_line(fake_sdk):
+    """
+    ROI ตั้งต้นต้องเป็นครึ่งกลาง 1224x1024 — วัดจริงบนสถานี 25 ส.ค.:
+      เต็มเฟรม 2448x2048 → 20.2 fps · encode 101.6 ms · ทิ้งเพราะดิสก์ 51%
+      ครึ่งกลาง 1224x1024 → 68.3 fps · encode 45.1 ms · ทิ้ง 0%
+    ⇒ เต็มเฟรมทำให้พังทุกด้านพร้อมกัน
+    """
+    d = hc.config.HIK_DEFAULTS
+    assert (d.get("width"), d.get("height")) == (1224, 1024)
+    assert d.get("roi_center") is True
+    cam = open_cam()
+    try:
+        assert (cam.width, cam.height) == (1224, 1024), "กล้องต้องเปิดที่ ROI ครึ่งกลาง"
+    finally:
+        cam.release()

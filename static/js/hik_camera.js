@@ -466,6 +466,41 @@
             .catch(function () { el.checked = !want; });
     }
 
+    // ── ตรวจภาพสด เปิด/ปิด (เวิร์กโฟลว์ "ถ่ายแล้วค่อยตรวจ") ──
+    // ⚠️ ปิดแล้ว **การนับและการบันทึก DB หยุดด้วย** ⇒ ต้องขึ้นคำเตือนตลอดช่วงนั้น
+    function showLiveDetect(enabled) {
+        var el = $('hikLiveDetectOff');
+        if (el) { el.checked = !enabled; }
+        var warn = $('hikLiveDetectWarn');
+        if (warn) { warn.style.display = enabled ? 'none' : ''; }
+    }
+
+    function loadLiveDetect() {
+        fetch('/api/camera/hik/live_detect')
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+                if (d && d.status === 'ok') { showLiveDetect(d.enabled); }
+            })
+            .catch(function () { /* เงียบได้ — ช่องติ๊กคงค่าเริ่มต้นของหน้า */ });
+    }
+
+    function toggleLiveDetect() {
+        var el = $('hikLiveDetectOff');
+        if (!el) { return; }
+        var want = !el.checked;                    // ติ๊ก = ไม่ตรวจ
+        fetch('/api/camera/hik/live_detect', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled: want })
+        })
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+                // ให้ช่องติ๊กตรงกับสิ่งที่เซิร์ฟเวอร์ใช้จริงเสมอ
+                if (d && d.status === 'ok') { showLiveDetect(d.enabled); }
+            })
+            .catch(function () { showLiveDetect(!want); });
+    }
+
     // ── สถิติสด ───────────────────────────────────────────
     function pollStats() {
         fetch('/api/camera/hik/status')
@@ -538,6 +573,9 @@
             var sm = $('hikSmoothToggle');
             if (sm) { sm.addEventListener('change', toggleSmooth); }
             loadSmooth();
+            var ld = $('hikLiveDetectOff');
+            if (ld) { ld.addEventListener('change', toggleLiveDetect); }
+            loadLiveDetect();
             var sh = $('hikShotBtn');
             if (sh) { sh.addEventListener('click', shot); }
             var close = $('hikShotClose');
@@ -581,7 +619,7 @@
             if (ds) { ds.disabled = !active; }        // เก็บภาพได้เฉพาะตอนกล้องทำงาน
             var sh = $('hikShotBtn');
             if (sh) { sh.disabled = !active; }
-            if (active) { startPolling(); } else { stopPolling(); }
+            if (active) { startPolling(); loadLiveDetect(); } else { stopPolling(); }
         },
 
         stopPolling: stopPolling,

@@ -145,6 +145,17 @@
                         วิธีทดสอบกับไลน์จริง: เก็บทุกใบที่วิ่งผ่าน แล้ววัดผลทีหลังด้วย
                         <code>hik_offline_eval.py</code></p>
 
+                    <label class="hik-check">
+                        <input type="checkbox" id="hikLiveDetectOff">
+                        ⏸️ <b>ไม่ต้องตรวจภาพสด</b> (ภาพยังสด — ตรวจเฉพาะตอนกดถ่าย)
+                    </label>
+                    <p class="control-hint" id="hikLiveDetectHint">ระหว่างเล็งกล้องไม่ต้องการผลตรวจสด
+                        อยู่แล้ว และการตรวจสดกิน iGPU จนช็อตต้องรอคิว ·
+                        <b>วัดได้: ถ่าย 1 เฟรมเร็วขึ้น 2.3 เท่า</b> (1,216 → 525 ms)</p>
+                    <div id="hikLiveDetectWarn" class="hik-warn-box" style="display:none">
+                        ⛔ <b>ไม่ได้ตรวจภาพสดอยู่</b> — การนับกระป๋องและการบันทึก DB หยุดด้วย
+                    </div>
+
                     <div class="hik-shot-row">
                         <select id="hikShotImgsz" class="camera-select hik-imgsz" title="ขนาดภาพที่โมเดลตรวจ">
                             <option value="1280" selected>1280 · ละเอียดสุด</option>
@@ -847,6 +858,9 @@
        #liveStats = ของ pipeline) — ทั้งคู่ absolute ที่พิกัดเดียวกัน จึงต้อง
        ดันแถบ perf ลงมาหนึ่งบรรทัด ไม่งั้นทับกันจนอ่านไม่ออกทั้งคู่ */
     #liveStats.stacked { top: 38px; }
+    .hik-warn-box { margin: 6px 0; padding: 6px 10px; border-radius: 6px;
+                    background: #fef2f2; border: 1px solid #fecaca; color: #b91c1c;
+                    font-size: 12px; line-height: 1.5; }
     .hik-win-ms { width: 70px; margin: 0 2px; padding: 1px 4px;
                   border: 1px solid var(--gray-300, #cbd5e1); border-radius: 4px; }
 </style>
