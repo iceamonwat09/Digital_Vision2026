@@ -1446,8 +1446,8 @@
                     }
                     liveStats.style.color = bk.downgraded ? '#fca5a5' : '';
                     liveStats.title = bk.downgraded
-                        ? ('⚠️ ตกไปใช้ backend ที่ช้ากว่าที่ตั้งไว้ — ' + (bk.note || '')
-                           + '\nตรวจ: py -3.9 -c "import openvino; print(openvino.__version__)"')
+                        ? ('⚠️ ตกไปใช้ backend ที่ช้ากว่าที่ตั้งไว้\n' + (bk.note || '')
+                           + '\n\nไล่หาต้นเหตุแบบละเอียด: py -3.9 diagnose_accel.py')
                         : '';
                     liveStats.classList.toggle('stacked', currentSource === 'hik');
                     liveStats.style.display = '';

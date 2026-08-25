@@ -183,27 +183,44 @@ class YOLODetector:
         return _COLORS
         
     @staticmethod
-    def _openvino_device_available(device: str) -> bool:
+    def _openvino_device_status(device: str):
         """
-        True when the OpenVINO device in ``device`` (e.g. "intel:gpu" → "GPU")
-        actually exists on this machine. Guards against OpenVINO's own silent
-        fallback (asking for GPU on a machine without one quietly runs AUTO/CPU
-        — accuracy-safe but slower than our ONNX path and very misleading when
-        reading speed numbers), so we skip OpenVINO entirely instead.
+        ตอบว่าอุปกรณ์ OpenVINO ที่ขอ (เช่น "intel:gpu" → "GPU") ใช้ได้ไหม
+        **พร้อมเหตุผลที่แยกสาเหตุออกจากกัน** → ``(ok, reason)``.
+
+        กันการที่ OpenVINO ถอยไป AUTO/CPU เองอย่างเงียบ ๆ เมื่อขอ GPU บนเครื่อง
+        ที่ไม่มี (ผลตรวจยังถูก แต่ช้ากว่าเส้นทาง ONNX ของเรา และทำให้ตัวเลข
+        ความเร็วบนจอ "โกหก") ⇒ เราข้าม OpenVINO ไปเลยแทน.
+
+        ⚠️ **ทำไมต้องแยกเหตุผล:** เดิมทุกความล้มเหลวถูกรายงานเป็นข้อความเดียว
+        ("ไม่พบอุปกรณ์นี้ในเครื่อง") ทั้งที่ต้นเหตุ 3 แบบนี้ **แก้คนละวิธี**:
+        แพ็กเกจหาย (ลง pip) · แพ็กเกจมีแต่ไม่เห็น GPU (ไดรเวอร์/OpenCL) ·
+        probe ระเบิดเอง. บอกรวม ๆ = ส่งผู้ใช้ไปแก้ของที่ไม่ได้พัง (กฎเหล็กข้อ 2)
         """
+        want = device.split(":", 1)[1].upper() if ":" in device else device.upper()
         try:
             import openvino as ov
-            want = device.split(":", 1)[1].upper() if ":" in device else device.upper()
-            avail = list(ov.Core().available_devices)
-            ok = any(d == want or d.startswith(want + ".") for d in avail)
-            if not ok:
-                logger.warning(
-                    f"OpenVINO device '{want}' not available (found: {avail}); "
-                    "skipping OpenVINO backend.")
-            return ok
         except Exception as e:
-            logger.warning(f"OpenVINO device probe failed ({e}); skipping OpenVINO backend.")
-            return False
+            return False, ("ไม่ได้ติดตั้งแพ็กเกจ openvino (import ล้มเหลว: %s) — แก้ด้วย "
+                           'py -3.9 -m pip install "openvino==2024.6.0"' % e)
+        ver = getattr(ov, "__version__", "?")
+        try:
+            avail = list(ov.Core().available_devices)
+        except Exception as e:
+            return False, "openvino %s อ่านรายชื่ออุปกรณ์ไม่ได้ (%s)" % (ver, e)
+        if any(d == want or d.startswith(want + ".") for d in avail):
+            return True, "openvino %s พบ %s" % (ver, want)
+        return False, ("openvino %s ติดตั้งแล้ว แต่ **ไม่เห็นอุปกรณ์ %s** "
+                       "(เห็นแค่ %s) — เป็นเรื่องไดรเวอร์ Intel Graphics/OpenCL "
+                       "ของเครื่อง ไม่ใช่เรื่องแพ็กเกจ" % (ver, want, avail or "ไม่มีเลย"))
+
+    @classmethod
+    def _openvino_device_available(cls, device: str) -> bool:
+        """คงชื่อเดิมไว้ให้ผู้เรียกอื่น — ตัดสินอย่างเดียว ไม่เอาเหตุผล."""
+        ok, why = cls._openvino_device_status(device)
+        if not ok:
+            logger.warning("OpenVINO ถูกข้าม: %s", why)
+        return ok
 
     def _note_skip(self, who, why):
         """จดว่าตัวเร่งตัวไหนถูกข้าม เพราะอะไร — ใช้บอกผู้ใช้ทีหลัง."""
@@ -314,9 +331,13 @@ class YOLODetector:
             return None
         if not pt_path.endswith(".pt") or not os.path.exists(pt_path):
             return None
-        if device and not self._openvino_device_available(device):
-            self._note_skip("OpenVINO@%s" % device, "ไม่พบอุปกรณ์นี้ในเครื่อง")
-            return None
+        if device:
+            ok, why = self._openvino_device_status(device)
+            if not ok:
+                logger.error("⚠️ ข้าม OpenVINO@%s — %s", device, why)
+                self._note_skip("OpenVINO@%s" % device, why)
+                return None
+            logger.info("OpenVINO device พร้อมใช้: %s", why)
         ov_dir = pt_path[:-3] + "_openvino_model"
         # The exported IR lives at <dir>/<stem>.xml — use its mtime for the
         # stale check (same quiet-correctness trap as ONNX: a retrained .pt

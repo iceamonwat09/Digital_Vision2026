@@ -193,3 +193,80 @@ def test_plain_pytorch_setup_is_not_flagged(monkeypatch):
     d = _det()
     d._check_downgraded("")
     assert d.backend_downgraded is False
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# `_openvino_device_status` — 3 ต้นเหตุที่หน้าตาเหมือนกันบนจอ แต่แก้คนละวิธี
+#
+# 🐛 ที่มา — สถานี 25 ส.ค. 2026: แถบ perf ขึ้น `ONNX 🐢` แต่เหตุผลที่บันทึกไว้
+#    เป็นข้อความเดียวตายตัว "ไม่พบอุปกรณ์นี้ในเครื่อง" ทั้งที่ต้นเหตุอาจเป็น
+#    "ไม่ได้ลง openvino" (แก้ด้วย pip) หรือ "ลงแล้วแต่ไดรเวอร์ไม่โผล่ GPU"
+#    (แก้ที่ไดรเวอร์) — คนละงานกันคนละวัน. บอกรวม ๆ = ส่งผู้ใช้ไปแก้ของที่ไม่พัง
+# ───────────────────────────────────────────────────────────────────────────
+def _fake_openvino(devices, version="2024.6.0"):
+    ov = _mod("openvino")
+    ov.__version__ = version
+
+    class _Core:
+        available_devices = list(devices)
+
+        def get_property(self, d, k):
+            return "Fake %s" % d
+
+    ov.Core = _Core
+    return ov
+
+
+def test_status_says_package_missing_when_import_fails(monkeypatch):
+    monkeypatch.setitem(sys.modules, "openvino", None)   # import openvino → ImportError
+    ok, why = YOLODetector._openvino_device_status("intel:gpu")
+    assert ok is False
+    assert "openvino" in why and "pip install" in why, why
+    assert "ไดรเวอร์" not in why, "แพ็กเกจหาย ≠ ไดรเวอร์มีปัญหา — ห้ามแนะนำผิดทาง"
+
+
+def test_status_blames_the_driver_when_package_is_there_but_gpu_is_not(monkeypatch):
+    monkeypatch.setitem(sys.modules, "openvino", _fake_openvino(["CPU"]))
+    ok, why = YOLODetector._openvino_device_status("intel:gpu")
+    assert ok is False
+    assert "2024.6.0" in why, "ต้องบอกว่ารุ่นไหนที่ติดตั้งอยู่ ไม่งั้นเดาต่อไม่ได้"
+    assert "GPU" in why and "CPU" in why, "ต้องบอกทั้งตัวที่ขอและตัวที่เห็นจริง"
+    assert "pip install" not in why, "ลงแล้ว — สั่งให้ลงซ้ำคือคำแนะนำที่ผิด"
+
+
+def test_status_accepts_enumerated_gpu_names(monkeypatch):
+    """OpenVINO เรียก iGPU ว่า `GPU.0` เมื่อมีการ์ดหลายตัว — ต้องนับว่าใช้ได้"""
+    monkeypatch.setitem(sys.modules, "openvino", _fake_openvino(["CPU", "GPU.0", "GPU.1"]))
+    ok, why = YOLODetector._openvino_device_status("intel:gpu")
+    assert ok is True, why
+
+
+def test_status_reports_a_probe_that_blows_up(monkeypatch):
+    ov = _fake_openvino(["GPU"])
+
+    class _Boom:
+        def __init__(self):
+            raise RuntimeError("core init failed")
+
+    ov.Core = _Boom
+    monkeypatch.setitem(sys.modules, "openvino", ov)
+    ok, why = YOLODetector._openvino_device_status("intel:gpu")
+    assert ok is False
+    assert "core init failed" in why, "ข้อความจริงของ error ต้องไปถึงผู้ใช้"
+
+
+def test_skip_reason_reaches_the_badge(monkeypatch, tmp_path):
+    """
+    ด่านตรวจอุปกรณ์ต้องส่ง **เหตุผลจริง** เข้า `backend_note` ไม่ใช่ข้อความตายตัว
+    (นี่คือสิ่งที่ผู้ใช้เห็นบนแถบ perf — ถ้าตายตัวก็ไล่ต่อไม่ได้)
+    """
+    import config as appcfg
+    monkeypatch.setattr(appcfg, "OPENVINO_DEVICE", "intel:gpu", raising=False)
+    monkeypatch.setitem(sys.modules, "openvino", _fake_openvino(["CPU"]))
+    pt = tmp_path / "bestX.pt"
+    pt.write_bytes(b"x" * 16)
+    d = _det()
+    assert d._maybe_openvino(str(pt)) is None
+    d._check_downgraded("ONNX")
+    assert d.backend_downgraded is True
+    assert "ไม่เห็นอุปกรณ์" in d.backend_note, d.backend_note
