@@ -206,6 +206,57 @@
                         <button id="hikBurstGalleryBtn" class="btn btn-secondary btn-block" type="button">🖼️ ภาพที่ถ่ายไว้ / ลบภาพ</button>
                         <div id="hikBurstMsg" class="control-hint"></div>
                     </div>
+                    <div class="hik-burst-box hik-tune-box">
+                        <div class="hik-burst-title">🎚️ จูนเร็ว — ปรับแล้วถ่ายซ้ำได้ทันที</div>
+                        <div class="hik-tune-readout">
+                            <div><b id="hikTuneUs">—</b><span>เวลารับแสง (µs)</span></div>
+                            <div><b id="hikTuneBlur">—</b><span id="hikTuneBlurCap">เบลอที่ไลน์ (px)</span></div>
+                        </div>
+                        <label class="hik-tune-row"><span>เวลารับแสง <i id="hikTuneUsHint"></i></span>
+                            <input id="hikTuneExp" type="range" min="0" max="1000" value="500"></label>
+                        <div class="hik-tune-nudge">
+                            <button type="button" data-mul="0.90">◀◀ ‑10%</button>
+                            <button type="button" data-mul="0.98">◀ ‑2%</button>
+                            <button type="button" data-mul="1.02">+2% ▶</button>
+                            <button type="button" data-mul="1.10">+10% ▶▶</button>
+                        </div>
+                        <label class="hik-tune-row"><span>เกน <i id="hikTuneGainHint"></i></span>
+                            <input id="hikTuneGain" type="range" min="0" max="240" value="0"></label>
+                        <button id="hikTuneAuto" class="btn btn-secondary btn-block" type="button">
+                            ⚖️ ชดเชยความสว่างอัตโนมัติ</button>
+                        <div id="hikTuneLive" class="hik-tune-live">—</div>
+                        <button id="hikTuneShot" class="btn btn-secondary btn-block" type="button" disabled>
+                            📸 ถ่ายทดสอบ + วัดความคม</button>
+                        <div id="hikTuneScore" class="hik-tune-score"></div>
+                        <img id="hikTuneImg" class="hik-tune-img" alt="ภาพทดสอบล่าสุด" style="display:none">
+                        <p class="control-hint">คะแนนความคมเทียบกันได้เมื่อ <b>เกนใกล้เคียงกัน</b> —
+                            เกนสูงขึ้นทำให้สัญญาณรบกวนดันคะแนนขึ้นได้เอง</p>
+                    </div>
+                    <div class="hik-burst-box hik-exp-box">
+                        <div class="hik-burst-title">🔦 ไล่ exposure (ไม่มีไฟ จะกดลงได้แค่ไหน)</div>
+                        <p class="control-hint">ความเบลอบนไลน์ = <b>ความเร็ว × exposure</b> ⇒ อยากได้ภาพคม
+                            ต้องกด exposure ลง ⇒ ภาพมืดลง ⇒ ไม่มีไฟก็ต้อง<b>ดัน gain ชดเชย</b>
+                            ⇒ แลกด้วยสัญญาณรบกวน. ปุ่มนี้ไล่ให้อัตโนมัติแล้วบอกว่า
+                            <b>กดลงถึงเท่าไรโมเดลยังเชื่อถือได้</b> — วางกระป๋อง <b>นิ่ง ๆ</b> ไม่ต้องเคลื่อนที่</p>
+                        <div class="hik-ds-opts">
+                            <label><span>กระป๋องที่วางอยู่</span>
+                                <select id="hikExpRole" class="camera-select">
+                                    <option value="ng">มีรอยบุบจริง (วัด "ยังเจอไหม")</option>
+                                    <option value="ok">กระป๋องดี (วัด "เจอของที่ไม่มีไหม")</option>
+                                </select></label>
+                            <label><span>เฟรม/ขั้น</span>
+                                <input id="hikExpFrames" type="number" min="3" max="15" value="5"></label>
+                        </div>
+                        <label class="hik-exp-list"><span>ค่า exposure ที่จะไล่ (µs)</span>
+                            <input id="hikExpList" type="text" placeholder="เว้นว่าง = ใช้ชุดมาตรฐาน"></label>
+                        <div id="hikExpEst" class="hik-burst-est">—</div>
+                        <button id="hikExpBtn" class="btn btn-secondary btn-block" type="button" disabled>🔦 เริ่มไล่ exposure</button>
+                        <button id="hikExpResultBtn" class="btn btn-secondary btn-block" type="button">📊 ผลที่วัดไว้</button>
+                        <div id="hikExpMsg" class="control-hint"></div>
+                        <p class="control-hint hik-warn">⚠️ โหมดนี้ <b>เปลี่ยนค่าในกล้องจริง</b> —
+                            การตรวจสด/การนับ/การบันทึก DB จะ<b>หยุดตลอดช่วงที่ไล่ค่า</b>
+                            แล้วคืนค่าเดิมให้อัตโนมัติเมื่อจบ (รวมถึงตอนกดยกเลิกหรือเกิดข้อผิดพลาด)</p>
+                    </div>
                     <p class="control-hint">เก็บที่ <b>อัตรากล้อง</b> แล้ว <b>ตรวจทีหลัง</b> —
                         ถ้าถ่ายสลับตรวจจะได้ ~2 ภาพ/วินาที ซึ่งวัดความเร็วของโมเดล
                         ไม่ใช่ความสามารถของกล้อง</p>
@@ -373,6 +424,22 @@
 </div>
 
 <!-- ── แกลเลอรีภาพถ่ายรัว: ดูทุกภาพที่เก็บได้ + ตัวเลขความเบลอ + ปุ่มลบ ── -->
+<div id="hikExpOverlay" class="snap-overlay" style="display:none">
+    <div class="snap-modal hik-exp-panel">
+        <div class="snap-modal-head">
+            <span>🔦 ผลไล่ exposure</span>
+            <select id="hikExpPick" class="camera-select hik-exp-pick"></select>
+            <button id="hikExpDelete" class="btn btn-danger-soft" type="button">ลบชุดนี้</button>
+            <button id="hikExpClose" class="snap-x" title="ปิด">&times;</button>
+        </div>
+        <div class="hik-exp-body">
+            <div id="hikExpVerdict" class="hik-exp-verdict">—</div>
+            <div id="hikExpTableWrap" class="hik-exp-table-wrap"></div>
+            <div id="hikExpShots" class="hik-exp-shots"></div>
+        </div>
+    </div>
+</div>
+
 <div id="hikBurstOverlay" class="snap-overlay" style="display:none">
     <div class="snap-modal hik-gal-modal">
         <div class="snap-modal-head">
@@ -643,6 +710,52 @@
     .btn-sm { padding: 6px 11px; font-size: 11.5px; border-radius: 7px; }
     /* ปุ่มลบ: ให้ "อ่านออกว่าอันตราย" โดยไม่ตะโกนกลบปุ่มอื่นทั้งแถบ
        (ปุ่มแดงทึบสงวนไว้ให้ Stop Detection ซึ่งเป็นปุ่มหลักของหน้า) */
+    /* ── แถบจูนเร็ว (exposure/gain) ─────────────────────────────── */
+    .hik-tune-box { border-color: #bfdbfe; background: #f0f7ff; }
+    .hik-tune-readout { display: flex; gap: 8px; margin: 4px 0 6px; }
+    .hik-tune-readout > div {
+        flex: 1; text-align: center; background: #fff; border-radius: var(--radius);
+        padding: 4px 2px; border: 1px solid var(--gray-200);
+    }
+    .hik-tune-readout b {
+        display: block; font-family: var(--font-mono); font-size: 17px; color: var(--navy);
+    }
+    .hik-tune-readout span { font-size: 10.5px; color: var(--gray-600); }
+    .hik-tune-readout.blur-ok b#hikTuneBlur { color: #1B5E20; }
+    .hik-tune-readout.blur-bad b#hikTuneBlur { color: #B3261E; }
+    .hik-tune-row { display: block; margin-top: 6px; }
+    .hik-tune-row span { display: block; font-size: 11.5px; color: var(--gray-600); }
+    .hik-tune-row i { font-style: normal; font-family: var(--font-mono); color: var(--gray-400); }
+    .hik-tune-row input[type=range] { width: 100%; }
+    .hik-tune-nudge { display: flex; gap: 3px; margin-top: 3px; }
+    .hik-tune-nudge button {
+        flex: 1; font-size: 10.5px; padding: 3px 0; cursor: pointer;
+        border: 1px solid var(--gray-300); background: #fff; border-radius: var(--radius);
+    }
+    .hik-tune-nudge button:hover { background: var(--gray-100); }
+    .hik-tune-live {
+        margin-top: 6px; font-family: var(--font-mono); font-size: 11.5px;
+        color: var(--gray-600); background: #fff; border-radius: var(--radius);
+        padding: 4px 6px; border: 1px solid var(--gray-200);
+    }
+    .hik-tune-score { margin-top: 5px; font-size: 12.5px; }
+    .hik-tune-img {
+        width: 100%; margin-top: 5px; border-radius: var(--radius);
+        border: 1px solid var(--gray-200); cursor: zoom-in;
+    }
+
+    /* ── โหมดไล่ exposure ─────────────────────────────────────────── */
+    .hik-exp-box { border-color: #c7d2fe; background: #f5f7ff; }
+    .hik-exp-list { display: block; margin-top: 6px; }
+    .hik-exp-list span { display: block; font-size: 11.5px; color: var(--gray-600); }
+    .hik-exp-list input { width: 100%; }
+    .hik-exp-chip {
+        display: inline-block; padding: 1px 6px; margin: 2px 3px 2px 0;
+        border-radius: var(--radius); font-family: var(--font-mono); font-size: 11.5px;
+        background: #E8F5E9; color: #1B5E20;
+    }
+    .hik-exp-chip.warn { background: #FFF8E1; color: #8D5B00; }
+    .hik-exp-chip.bad { background: #FDECEA; color: #B3261E; }
     .btn-danger-soft {
         background: var(--white); color: var(--danger);
         border: 1.5px solid #F5B5B4; box-shadow: none;
@@ -759,6 +872,55 @@
         display: flex; align-items: center; justify-content: center;
         padding: 20px;
     }
+    /* หน้าต่างผลไล่ exposure — **ต้องอยู่นอกบล็อกของแถบข้าง** ไม่งั้นเทสต์
+       ความกว้างคอลัมน์ของแถบข้างจะจับกริดของหน้าต่างนี้ไปด้วย (เจอจริง) */
+    /* ⚠️ ต้องใช้คู่กับ `.snap-modal` เสมอ — พื้นหลัง/เงา/มุมโค้งมาจากคลาสนั้น.
+       เคยเขียนเป็น `.snap-panel`/`.snap-head` ซึ่ง **ไม่มีอยู่จริงในไฟล์นี้**
+       ⇒ หน้าต่างผลกลายเป็นโปร่งใส เห็นแถบข้างทะลุขึ้นมาทับตาราง (เจอตอนขับ
+       ด้วยเบราว์เซอร์จริง — เทสต์ยูนิตมองไม่เห็นเลย) */
+    .hik-exp-panel { width: min(1180px, 96vw); }
+    .hik-exp-body { overflow: auto; }
+    .hik-exp-pick { max-width: 260px; margin-left: auto; }
+    .hik-exp-verdict { padding: 10px 14px; }
+    .hik-exp-head { font-family: var(--font-mono); font-size: 12px; color: var(--gray-600); }
+    .hik-exp-line { font-size: 15px; font-weight: 600; margin: 4px 0; }
+    .hik-exp-note {
+        margin-top: 6px; padding: 6px 9px; border-radius: var(--radius);
+        background: #FFF8E1; color: #8D5B00; font-size: 12.5px;
+    }
+    .hik-exp-combined {
+        margin-top: 8px; padding: 8px 10px; border-radius: var(--radius);
+        background: var(--navy); color: #fff; font-size: 13.5px;
+    }
+    .hik-exp-table-wrap { overflow-x: auto; padding: 0 14px; }
+    .hik-exp-table { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+    .hik-exp-table th, .hik-exp-table td {
+        border: 1px solid var(--gray-200); padding: 4px 8px; text-align: right;
+        font-family: var(--font-mono);
+    }
+    .hik-exp-table th { background: var(--gray-100); font-weight: 600; font-size: 11px; }
+    .hik-exp-table tr.ok td:first-child { border-left: 3px solid #2E7D32; }
+    .hik-exp-table tr.bad td:first-child { border-left: 3px solid #C62828; }
+    .hik-exp-table tr.warn td:first-child { border-left: 3px solid #F9A825; }
+    .hik-exp-table td.ok { color: #1B5E20; font-weight: 600; }
+    .hik-exp-table td.bad { color: #B3261E; font-weight: 600; }
+    .hik-exp-table td.dim { color: var(--gray-400); }
+    .hik-exp-cap { color: #B3261E; font-size: 10.5px; }
+    .hik-exp-shots { padding: 10px 14px 16px; }
+    .hik-exp-shot-grid {
+        display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+        grid-auto-rows: max-content; gap: 8px;
+    }
+    .hik-exp-shot-grid figure { margin: 0; }
+    .hik-exp-shot-grid img {
+        width: 100%; height: 150px; object-fit: cover;
+        border: 1px solid var(--gray-200); border-radius: var(--radius); cursor: zoom-in;
+    }
+    .hik-exp-shot-grid figcaption {
+        font-family: var(--font-mono); font-size: 11px; color: var(--gray-600);
+        text-align: center; margin-top: 2px;
+    }
+
     .snap-modal {
         background: #fff; border-radius: 14px; overflow: hidden;
         width: min(1100px, 96vw); max-height: 94vh;
@@ -880,6 +1042,7 @@
 <!-- แผงกล้องอุตสาหกรรม: โมดูลปิด เปิดออกมาแค่ window.HikUI (ดูเหตุผลในหัวไฟล์) -->
 <script src="{{ url_for('static', filename='js/hik_camera.js') }}"></script>
 <script src="{{ url_for('static', filename='js/hik_burst.js') }}"></script>
+<script src="{{ url_for('static', filename='js/hik_exposure.js') }}"></script>
 <script>
     const startBtn        = document.getElementById('startBtn');
     const stopBtn         = document.getElementById('stopBtn');
@@ -1404,6 +1567,7 @@
                 // "ถ่าย 1 เฟรม"/"เก็บชุดข้อมูล" เฉพาะตอนกล้องทำงานอยู่จริง
                 if (window.HikUI && currentSource === 'hik') { HikUI.setActive(isActive); }
                 if (window.HikBurst && currentSource === 'hik') { HikBurst.setActive(isActive); }
+                if (window.HikExposure && currentSource === 'hik') { HikExposure.setActive(isActive); }
 
                 // Snapshot is exclusive with live streaming (shared camera = slow),
                 // so it's only available when detection is stopped.
@@ -1863,6 +2027,7 @@
     // ── Init ──────────────────────────────────────────
     if (window.HikUI) { HikUI.init(); }
     if (window.HikBurst) { HikBurst.init(); }
+    if (window.HikExposure) { HikExposure.init(); }
     initModes();
     scanCameras();
     updateStatus();

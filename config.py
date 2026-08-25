@@ -9,7 +9,7 @@ import os
 # print it on startup and confirm it is actually executing the new code.
 # NOTE: shown on the navbar badge too — keep it short (<= ~28 chars) or it
 # gets ellipsized there (full value always visible in the footer / hover).
-CONFIG_VERSION = "2026.08.25-accelwhy"
+CONFIG_VERSION = "2026.08.25-expladder"
 
 # ====================
 # CAMERA CONFIGURATION
@@ -262,6 +262,20 @@ HIK_BURST_MM_PER_PX = None
 # ⚠️ เปิด flag นี้ยังไม่พอ — ต้องติ๊กในแผงถ่ายรัวต่อครั้งด้วย (กันเผลอ)
 HIK_BURST_PAUSE_INFERENCE = True
 
+# ── โหมด "ไล่ exposure" (exposure ladder) — ตอบว่าไม่มีไฟเพิ่มจะกดลงได้แค่ไหน ──
+# ความเบลอบนไลน์ขึ้นกับ exposure อย่างเดียว ⇒ อยากได้ภาพคมต้องกด exposure ลง
+# ⇒ ภาพมืดลง ⇒ ไม่มีไฟก็ต้องดัน gain ขึ้นชดเชย ⇒ **แลกมาด้วยสัญญาณรบกวน**.
+# คำถามที่เดาไม่ได้คือ "กดลงถึงเท่าไรแล้วโมเดลยังเชื่อถือได้" ⇒ ต้องวัด
+HIK_EXPOSURE_DIR = "data/hik_exposure"
+# กี่เฟรมต่อขั้น — ต้อง ≥ 3 ถึงจะวัดสัญญาณรบกวนตามเวลาได้ และยิ่งมากยิ่งเห็น
+# "ผลตรวจกะพริบ" ชัด (เจอ 5/5 กับ เจอ 1/5 คือคนละคำตอบ)
+HIK_EXPOSURE_FRAMES = 5
+# ความสว่างเป้าหมายที่ไล่ gain ไปหา — ต้องตรงกับ hik_burst.TARGET_MEAN
+HIK_EXPOSURE_TARGET_MEAN = 80.0
+# เกณฑ์ตัดสิน "เบลอที่ความเร็วไลน์" — 4 px = ครึ่งหนึ่งของ 8 px ที่วัดได้ว่าโมเดล
+# ทนได้ (blur_tolerance.py 21 ส.ค.) เผื่อไว้เพราะ IoU ของกรอบเริ่มเพี้ยนที่ 8 px
+HIK_EXPOSURE_BLUR_TARGET_PX = 4.0
+
 # ค่าที่ผู้ใช้บันทึกจากหน้าเว็บ (อยู่นอก git — ต่างเครื่องต่างค่าได้)
 HIK_SETTINGS_FILE = "data/hik_camera.json"
 
@@ -389,6 +403,21 @@ USE_OPENVINO = False
 # (GPU: IoU 0.98-0.99, Δconf ≤0.0053) + เร็วขึ้น ~2.2 เท่า (137ms vs 309ms @480).
 # ปิด = เปลี่ยนกลับเป็น None แล้วรีสตาร์ต (กลับ ONNX CPU เดิมทันที).
 OPENVINO_DEVICE = "intel:gpu"
+
+# ── ตรวจ "ไฟล์ IR ใช้ได้จริงไหม" ก่อนส่งให้ ultralytics (25 ส.ค. 2026) ──────
+# ที่มา: `bestX.pt` (segmentation) ได้ IR ที่มี **output เดียว** ทั้งที่ต้องมี 2
+# ⇒ OpenVINO โหลดผ่าน แล้วพังตอนตรวจภาพจริง ⇒ ตกไป ONNX/CPU **ถาวร** เพราะ
+# ลายนิ้วมือถูกจดไว้แล้วว่า "IR ตรงกับ .pt" จึงไม่มีการ export ใหม่อีกเลย
+# = อาการ "ONNX ทำงานเสมอทั้งที่ iGPU ควรใช้ได้"
+#
+#   OPENVINO_VALIDATE_IR  ตรวจจำนวน output ของ IR เทียบกับ task ของ .pt
+#                         ก่อนใช้งาน (ถูก/ผิดรู้ได้ทันทีโดยไม่ต้องรัน)
+#   OPENVINO_AUTO_REPAIR  พบว่าเสีย → ลบแล้ว export ใหม่ 1 รอบ · ถ้ายังเสีย
+#                         ให้สร้าง IR จากไฟล์ .onnx แทน (เส้นทางที่พิสูจน์แล้ว
+#                         ว่าให้ tensor เท่ากับ PyTorch ทุกหลัก)
+# ตั้งเป็น False ทั้งคู่ = กลับพฤติกรรมเดิมก่อน 25 ส.ค. 2026 ทุกประการ
+OPENVINO_VALIDATE_IR = True
+OPENVINO_AUTO_REPAIR = True
 
 # ── ONNX Runtime acceleration (เร่ง inference บน CPU โดยคงความแม่น FP32) ──
 # ทางที่ปลอดภัยกว่า OpenVINO บนสถานีนี้ (Windows + Python 3.9): export โมเดล .pt

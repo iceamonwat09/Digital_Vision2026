@@ -70,6 +70,13 @@ except Exception as _hb_err:                        # pragma: no cover
     hik_burst = None
     logger.error(f"Hikrobot burst module unavailable: {_hb_err}")
 
+# โหมด "ไล่ exposure" — ตัวเลขล้วน ๆ ไม่ import Flask/ultralytics จึงเทสต์แยกได้
+try:
+    import hik_exposure
+except Exception as _he_err:                        # pragma: no cover
+    hik_exposure = None
+    logger.error(f"Hikrobot exposure module unavailable: {_he_err}")
+
 # Artwork Proof Check (ตรวจสะกดคำ/ตัวเลขใน artwork ก่อนพิมพ์).
 # Fully isolated blueprint — a failure here only disables that one mode
 # and can never break Can Dent / Label / Label Paper.
@@ -1246,6 +1253,7 @@ def api_hik_shot_inspect():
 _hik_burst_session = None          # ชื่อชุดที่กำลังถ่ายอยู่ (None = ไม่ได้ถ่าย)
 _hik_burst_deadline = 0.0          # เวลาที่ควรจบ — กันเคส "ไม่มีเฟรมเข้ามาเลย"
 _hik_burst_pause_inf = False       # ผู้ใช้ขอหยุดโมเดลระหว่างถ่ายรัวรอบนี้หรือไม่
+_hik_ladder_deadline = 0.0         # ระหว่าง "ไล่ exposure" — หยุดตรวจสดเสมอ ไม่ใช่ opt-in
 
 
 def _inference_paused():
@@ -1258,6 +1266,11 @@ def _inference_paused():
     """
     if hik_live_detect_off and _live_hik_camera() is not None:
         return True                       # ผู้ใช้สั่งให้ภาพสดเป็นแค่ viewfinder
+    if _hik_ladder_deadline and time.time() < _hik_ladder_deadline:
+        # ⚠️ ระหว่างไล่ exposure **ต้องหยุดตรวจเสมอ ไม่ใช่ทางเลือก** — ภาพช่วงนั้น
+        # ถูกตั้งค่ามืด/สว่างผิดปกติโดยตั้งใจ ถ้าปล่อยให้ inference_loop ตรวจต่อ
+        # มันจะนับกระป๋องและ **เขียน NG ปลอมลง DB** จากภาพทดสอบ (กฎเหล็กข้อ 2)
+        return True
     return bool(_hik_burst_pause_inf and _hik_burst_session is not None
                 and _hik_burst_deadline and time.time() < _hik_burst_deadline)
 
@@ -1669,6 +1682,200 @@ def api_hik_burst_frame(name, filename):
     if not ok:
         return _burst_error("เข้ารหัสภาพไม่สำเร็จ", 500)
     return Response(buf.tobytes(), mimetype="image/jpeg")
+
+
+# ── โหมด "ไล่ exposure" (exposure ladder) ─────────────────────────────
+# ตอบคำถามที่ตัดสินโครงการ: **ไม่มีไฟเพิ่ม จะกด exposure ลงได้ต่ำสุดแค่ไหน
+# ก่อนที่โมเดลจะเชื่อไม่ได้** — เพราะความเบลอบนไลน์ขึ้นกับ exposure อย่างเดียว
+#
+# ⚠️ โหมดนี้ **เปลี่ยนค่าในกล้องจริง** (ต่างจากถ่ายรัวที่แค่บันทึกภาพ) จึงมี
+# ด่านความปลอดภัย 3 ชั้น: หยุดตรวจสดตลอดช่วง (กัน NG ปลอมลง DB) · คืนค่าเดิม
+# ทุกตัวใน finally ของ `hik_exposure.run_ladder` · deadline คลายการหยุดตรวจเอง
+
+def _hik_exposure_guard():
+    if hik_exposure is None:
+        return jsonify({"status": "error",
+                        "message": "โมดูลไล่ exposure โหลดไม่ได้ (ดู log ตอนเริ่มระบบ)"}), 500
+    if hik_burst is None:
+        return _hik_burst_unavailable()
+    return None
+
+
+def _hik_ladder_defect_fn(imgsz):
+    """คืนฟังก์ชันที่ให้ **เฉพาะกล่องตำหนิ** — `hik_exposure` จึงไม่ต้องรู้ชื่อคลาส."""
+    def _run(frame):
+        dets = detector.detect(frame, imgsz=imgsz)
+        return [d for d in dets if d["class_name"] not in _NON_DEFECT_CLASSES]
+    return _run
+
+
+def _hik_ladder_other_role(role, exclude):
+    """ชุดล่าสุดของอีกด้านหนึ่ง — ใช้สรุปคำตอบรวมที่ต้องมีครบทั้งสองด้าน."""
+    want = "ok" if role == "ng" else "ng"
+    for item in hik_exposure.list_sessions():
+        if item.get("role") == want and item.get("name") != exclude:
+            return hik_exposure.load_session(item["name"])
+    return None
+
+
+@app.route('/api/camera/hik/exposure', methods=['POST'])
+def api_hik_exposure_start():
+    """เริ่มไล่ exposure — วางกระป๋อง **นิ่ง ๆ** หน้ากล้องแล้วกดปุ่มเดียว."""
+    global _hik_ladder_deadline
+    bad = _hik_exposure_guard()
+    if bad:
+        return bad
+    if detector is None or detector.model is None:
+        return jsonify({"status": "error", "message": "ยังไม่ได้โหลดโมเดล"}), 400
+    live = _live_hik_camera()
+    if live is None:
+        return jsonify({"status": "error",
+                        "message": "ต้องเริ่มกล้องอุตสาหกรรมก่อน (กด Start Detection)"}), 409
+    if _hik_burst_session is not None or (live.stats() or {}).get("dataset"):
+        return jsonify({"status": "error",
+                        "message": "กำลังถ่ายรัว/เก็บชุดข้อมูลอยู่ — โหมดนี้เปลี่ยนค่าในกล้อง "
+                                   "จะทำให้ภาพชุดนั้นเป็นคนละค่ากันกลางคัน"}), 409
+
+    body = request.get_json(silent=True) or {}
+    role = body.get("role") if body.get("role") in hik_exposure.ROLES else "ng"
+    try:
+        frames = max(3, min(15, int(body.get("frames")
+                                    or getattr(config, "HIK_EXPOSURE_FRAMES", 5))))
+    except (TypeError, ValueError):
+        frames = 5
+    raw = body.get("exposures")
+    if isinstance(raw, str):
+        raw = [p for p in raw.replace(",", " ").split() if p]
+    try:
+        exposures = [float(v) for v in (raw or [])]
+    except (TypeError, ValueError):
+        exposures = []
+    if not exposures:
+        cur = ((live.get_params() or {}).get("exposure_us") or {}).get("value")
+        exposures = hik_exposure.default_exposures(cur)
+    exposures = [e for e in exposures if 1.0 <= e <= 1e7][:20]
+    if not exposures:
+        return jsonify({"status": "error", "message": "ไม่มีค่า exposure ที่ใช้ได้"}), 400
+
+    name = "%s_%s" % (datetime.now().strftime("%Y%m%d_%H%M%S"), role)
+    out_dir = os.path.join(hik_exposure.root_dir(), name)
+    imgsz = _snapshot_imgsz(body.get("imgsz"))
+    # ประเมินเวลาแบบเผื่อไว้ — deadline นี้เป็นตัวคลายการหยุดตรวจเอง
+    # ต่อให้งานเบื้องหลังพังทั้งหมด (กันระบบค้างในสภาพ "ไม่ตรวจ" ตลอดไป)
+    _hik_ladder_deadline = time.time() + len(exposures) * 30.0 + 30.0
+
+    def _work(job):
+        global _hik_ladder_deadline
+        try:
+            os.makedirs(out_dir, exist_ok=True)
+            rows, base = hik_exposure.run_ladder(
+                live, _hik_ladder_defect_fn(imgsz), exposures, role=role,
+                frames=frames,
+                target_mean=float(getattr(config, "HIK_EXPOSURE_TARGET_MEAN", 80.0)),
+                save_dir=out_dir,
+                # ⚠️ บันทึก **ความละเอียดเต็ม ไม่ย่อ** โดยตั้งใจ: การย่อภาพคือการ
+                # เฉลี่ยพิกเซล ซึ่ง **ลบสัญญาณรบกวนทิ้ง** — คือสิ่งที่กำลังวัดอยู่พอดี
+                annotate_fn=lambda f, d: detector.draw_detections(f.copy(), d),
+                job=job,
+                mm_per_px=getattr(config, "HIK_BURST_MM_PER_PX", None),
+                line_speed_px_s=getattr(config, "HIK_BURST_LINE_SPEED_PX_S", None))
+            summary = hik_exposure.summarize(
+                rows, role,
+                line_speed_px_s=getattr(config, "HIK_BURST_LINE_SPEED_PX_S", None),
+                mm_per_px=getattr(config, "HIK_BURST_MM_PER_PX", None),
+                blur_target_px=getattr(config, "HIK_EXPOSURE_BLUR_TARGET_PX", 4.0))
+            hik_exposure._write_json(os.path.join(out_dir, "ladder.json"), {
+                "name": name, "role": role, "frames": frames, "imgsz": imgsz,
+                "created": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "camera_before": base, "rows": rows, "summary": summary,
+                "cancelled": bool(job.cancelled),
+            })
+        finally:
+            _hik_ladder_deadline = 0.0      # คืนการตรวจสดทันทีที่งานจบ
+
+    ok, msg = hik_burst.start_job("exposure", name, _work)
+    if not ok:
+        _hik_ladder_deadline = 0.0
+        return jsonify({"status": "error", "message": msg}), 409
+    logger.info("[hik-exp] เริ่มไล่ exposure (%s) %d ค่า → %s", role, len(exposures), name)
+    return jsonify({"status": "ok", "session": name, "role": role,
+                    "exposures": exposures, "frames": frames})
+
+
+@app.route('/api/camera/hik/exposure', methods=['GET'])
+def api_hik_exposure_status():
+    bad = _hik_exposure_guard()
+    if bad:
+        return bad
+    return jsonify({"status": "ok", "job": hik_burst.job_status(),
+                    "paused_inference": _inference_paused()})
+
+
+@app.route('/api/camera/hik/exposure', methods=['DELETE'])
+def api_hik_exposure_cancel():
+    """ยกเลิกกลางคัน — ค่ากล้องถูกคืนใน finally ของ run_ladder เสมอ."""
+    bad = _hik_exposure_guard()
+    if bad:
+        return bad
+    hik_burst.cancel_job(wait=2.0)
+    return jsonify({"status": "ok"})
+
+
+@app.route('/api/camera/hik/exposures', methods=['GET'])
+def api_hik_exposure_list():
+    bad = _hik_exposure_guard()
+    if bad:
+        return bad
+    return jsonify({"status": "ok", "sessions": hik_exposure.list_sessions()})
+
+
+@app.route('/api/camera/hik/exposures/<name>', methods=['GET'])
+def api_hik_exposure_detail(name):
+    bad = _hik_exposure_guard()
+    if bad:
+        return bad
+    try:
+        data = hik_exposure.load_session(name)
+    except ValueError as e:
+        return _burst_error(e, 404)
+    if not data:
+        return _burst_error("ยังไม่มีผลของชุดนี้ (อาจกำลังวัดอยู่)", 404)
+    other = _hik_ladder_other_role(data.get("role"), name)
+    ng = data if data.get("role") == "ng" else (other or {})
+    ok = data if data.get("role") == "ok" else (other or {})
+    data["combined"] = hik_exposure.combine(ng.get("summary"), ok.get("summary"))
+    data["other_session"] = (other or {}).get("name")
+    return jsonify({"status": "ok", "session": data})
+
+
+@app.route('/api/camera/hik/exposures/<name>', methods=['DELETE'])
+def api_hik_exposure_delete(name):
+    bad = _hik_exposure_guard()
+    if bad:
+        return bad
+    try:
+        if hik_burst.job_running_on(name):
+            hik_burst.cancel_job(wait=3.0)   # ไม่งั้นงานจะเขียนไฟล์กลับลงโฟลเดอร์ที่ลบไปแล้ว
+        hik_exposure.delete_session(name)
+    except ValueError as e:
+        return _burst_error(e, 404)
+    return jsonify({"status": "ok"})
+
+
+@app.route('/api/camera/hik/exposures/<name>/image/<filename>', methods=['GET'])
+def api_hik_exposure_image(name, filename):
+    bad = _hik_exposure_guard()
+    if bad:
+        return bad
+    if os.path.basename(filename) != filename or not filename.endswith(".jpg"):
+        return _burst_error("ชื่อไฟล์ไม่ถูกต้อง", 400)
+    try:
+        path = os.path.join(hik_exposure.session_dir(name), filename)
+    except ValueError as e:
+        return _burst_error(e, 404)
+    if not os.path.isfile(path):
+        return _burst_error("ไม่พบภาพนี้", 404)
+    return _send_jpeg(path)
 
 
 @app.route('/api/detection/start', methods=['POST'])

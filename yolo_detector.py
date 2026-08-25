@@ -37,6 +37,22 @@ _BESTX_COLORS = {
 }
 
 
+# ── โครงสร้างที่ IR ของ OpenVINO ต้องมี — แยกตาม task ────────────────────────
+# วัดจริงด้วย ultralytics 8.4.41 + openvino 2024.6.0 (มีเทสต์ล็อกไว้ใน
+# tests/test_openvino_ir.py):
+#     detect / pose / obb / classify → **1 output**
+#     segment                        → **2 output**
+#                                      กล่อง (1, 4+nc+nm, N) + prototype (1, nm, H, W)
+#
+# ⚠️ **ทำไมต้องเช็คตัวเลขนี้:** IR ของโมเดล segment ที่มี output เดียวจะ
+# **โหลดผ่าน** (ไม่มี error ตอนโหลดเลย) แล้วไปพังตอน ultralytics ทำ ``preds[1]``
+# ⇒ ``index 1 is out of bounds for dimension 0 with size 1`` ซึ่งอ่านแล้ว
+# เดาต้นเหตุไม่ออก. เกิดจริงกับ `bestX.pt` บนสถานี 24-25 ส.ค. 2026 แล้วระบบ
+# **ตกไป ONNX/CPU ถาวร** เพราะลายนิ้วมือถูกจดไว้แล้วว่า "IR ตรงกับ .pt"
+# ⇒ ไม่มี export ใหม่อีกเลย = "ONNX ทำงานเสมอ" ทั้งที่ iGPU ใช้ได้
+_IR_OUTPUTS_BY_TASK = {"segment": 2, "detect": 1, "pose": 1, "obb": 1, "classify": 1}
+
+
 def _suppress_false_dent_spots(detections: list, good_conf_threshold: float = 0.90) -> list:
     """
     ลบ dented_spot ที่เป็น false positive ออก โดยใช้เงื่อนไข 3 ข้อพร้อมกัน:
@@ -312,6 +328,227 @@ class YOLODetector:
         except Exception:
             pass
 
+    # ─────────────────────────────────────────────────────────────────────
+    # ตรวจ "ไฟล์ IR ใช้ได้จริงไหม" ก่อนส่งให้ ultralytics
+    #
+    # บทเรียนสถานี 25 ส.ค. 2026: ด่านเดิมมีแค่ ``_smoke_test`` ซึ่งจับได้ถูกต้อง
+    # แต่ **จับได้ทีหลัง** — ตอนนั้นลายนิ้วมือถูกจดลง ``<xml>.src`` ไปแล้ว
+    # ⇒ รอบถัดไป ``_export_is_stale`` ตอบว่า "ตรงกัน ไม่ต้อง export ใหม่"
+    # ⇒ โหลด IR ที่เสียตัวเดิม → smoke test พังซ้ำ → ตกไป ONNX **ทุกครั้งตลอดไป**
+    # ตรงนี้จึงเพิ่ม 3 อย่าง: ตรวจโครงสร้าง IR ก่อน · จดลายนิ้วมือ **หลัง**
+    # ผ่านการตรวจเท่านั้น · ซ่อมเองได้เมื่อพบว่าเสีย
+    # ─────────────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _ov_paths(pt_path: str):
+        """คืน (โฟลเดอร์ IR, ไฟล์ .xml) ของโมเดลนี้ — ชื่อเดียวกับที่ exporter ใช้."""
+        stem = pt_path[:-3]
+        return stem + "_openvino_model", os.path.join(
+            stem + "_openvino_model", os.path.basename(stem) + ".xml")
+
+    @staticmethod
+    def _ir_output_shapes(xml_path: str):
+        """
+        รูปร่างของทุก output ใน IR — คืน ``None`` เมื่ออ่านไม่ได้ (ไม่ใช่ "เสีย").
+
+        แยก "อ่านไม่ได้" ออกจาก "อ่านได้แล้วผิด" โดยตั้งใจ: ถ้าเปิดไฟล์ไม่ได้เรา
+        **ไม่ตัดสิน** แล้วปล่อยให้ smoke test เป็นคนชี้ขาด — การเดาว่าเสียแล้วลบ
+        IR ที่ยังดีอยู่ทิ้ง เสียหายกว่าการปล่อยผ่าน
+        """
+        try:
+            import openvino as ov
+            model = ov.Core().read_model(xml_path)
+        except Exception:
+            return None
+        shapes = []
+        for out in model.outputs:
+            try:
+                shapes.append(str(out.get_partial_shape()))
+            except Exception:
+                shapes.append("?")
+        return shapes
+
+    def _validate_ir(self, pt_path: str, ov_dir: str):
+        """
+        ``(ok, reason)`` — IR ตัวนี้เข้ากับ task ของ ``.pt`` ไหม.
+
+        ตรวจ **จำนวน output เทียบกับ task** ซึ่งเป็นความผิดพลาดที่เกิดจริงและ
+        เป็นชนิดที่ ultralytics ตรวจไม่เจอตอนโหลด (ดู ``_IR_OUTPUTS_BY_TASK``).
+        อ่านไม่ได้/ไม่รู้ task = **ไม่ตัดสิน → ผ่าน** (smoke test เป็นด่านถัดไป)
+        """
+        if not getattr(config, "OPENVINO_VALIDATE_IR", True):
+            return True, "ปิดการตรวจ IR ไว้ (OPENVINO_VALIDATE_IR = False)"
+        _, xml = self._ov_paths(pt_path)
+        if not os.path.exists(xml):
+            return False, "ไม่พบไฟล์ IR (%s)" % os.path.basename(xml)
+        shapes = self._ir_output_shapes(xml)
+        if shapes is None:
+            return True, "ข้ามการตรวจ IR (เปิดไฟล์ด้วย openvino ไม่ได้)"
+        task = self._accel_task(pt_path, ov_dir)
+        want = _IR_OUTPUTS_BY_TASK.get(task or "")
+        if want is None:
+            return True, "IR มี %d output (ไม่รู้ task จึงไม่ตัดสิน)" % len(shapes)
+        if len(shapes) != want:
+            return False, ("IR ของโมเดล task=%s ต้องมี %d output แต่ไฟล์นี้มี %d "
+                           "(%s) ⇒ **ไฟล์ IR เสีย/ไม่ใช่ของโมเดลตัวนี้**"
+                           % (task, want, len(shapes), " · ".join(shapes)))
+        return True, "IR ถูกต้อง: task=%s · %d output (%s)" % (
+            task, len(shapes), " · ".join(shapes))
+
+    # ── เครื่องหมาย "IR ตัวนี้พิสูจน์แล้วว่าใช้ไม่ได้" ────────────────────────
+    # กันสองอาการที่ตรงข้ามกัน: (ก) ลองใหม่ทุกครั้งจน export ใหม่ทุกบูต (ช้า)
+    # (ข) ยอมแพ้ตั้งแต่ครั้งแรกจนกู้ไม่ขึ้นเอง. จึงให้ **ลองซ่อมได้ 1 รอบ**
+    # แล้วถ้ายังพังซ้ำกับเนื้อ .pt เดิม ค่อยหยุดลอง (ลบโฟลเดอร์ IR = เริ่มใหม่)
+
+    @staticmethod
+    def _bad_marker_path(ov_dir: str) -> str:
+        return ov_dir.rstrip("\\/") + ".badir"
+
+    def _read_bad_marker(self, ov_dir: str):
+        try:
+            with open(self._bad_marker_path(ov_dir), "r", encoding="utf-8") as f:
+                parts = f.read().split("\n")
+            return parts[0].strip(), int(parts[1].strip()), (parts[2] if len(parts) > 2 else "")
+        except Exception:
+            return None, 0, ""
+
+    def _write_bad_marker(self, ov_dir: str, digest, tries: int, reason: str) -> None:
+        try:
+            with open(self._bad_marker_path(ov_dir), "w", encoding="utf-8") as f:
+                f.write("%s\n%d\n%s" % (digest or "", tries, (reason or "")[:400]))
+        except Exception:
+            pass
+
+    def _clear_bad_marker(self, ov_dir: str) -> None:
+        try:
+            os.remove(self._bad_marker_path(ov_dir))
+        except Exception:
+            pass
+
+    @staticmethod
+    def _drop_stamp(export_path: str) -> None:
+        """
+        ลบลายนิ้วมือ ``<export>.src``.
+
+        ⚠️ **จำเป็น ไม่ใช่แค่ "ไม่เขียนเพิ่ม"** — ``_export_is_stale`` เองมีสาขาที่
+        **เขียน sidecar ให้อัตโนมัติ** (กรณีอัปเกรดจากเวอร์ชันที่ยังไม่มีระบบ hash
+        และไฟล์ export ใหม่กว่า .pt) ⇒ แค่ "ไม่จด" ไม่พอ IR ที่เสียจะถูกประทับ
+        ว่า "ตรงกับ .pt" โดยตัวตรวจ staleness เอง
+        """
+        try:
+            os.remove(export_path + ".src")
+        except Exception:
+            pass
+
+    def _ir_retry_pending(self, ov_dir: str, digest) -> bool:
+        """เคยพังไป 1 ครั้งกับเนื้อ .pt ตัวนี้ → รอบนี้ต้อง **บังคับ export ใหม่**."""
+        seen, tries, _ = self._read_bad_marker(ov_dir)
+        return bool(digest and seen == digest and tries == 1)
+
+    def _ir_given_up(self, ov_dir: str, digest) -> str:
+        """คืนเหตุผลถ้าเคยลองซ่อม IR ของเนื้อ .pt ตัวนี้แล้วไม่สำเร็จ — ไม่งั้นคืน ""."""
+        seen, tries, reason = self._read_bad_marker(ov_dir)
+        if digest and seen == digest and tries >= 2:
+            return reason or "เคยพิสูจน์แล้วว่า IR ของโมเดลนี้ใช้ไม่ได้"
+        return ""
+
+    def _ensure_onnx_file(self, pt_path: str) -> Optional[str]:
+        """
+        ไฟล์ ``.onnx`` ที่ตรงกับ ``.pt`` (export ให้ถ้ายังไม่มี) — **ไม่ขึ้นกับ
+        ``USE_ONNX``** เพราะใช้เป็นวัตถุดิบของการซ่อม IR เท่านั้น
+        """
+        onnx_path = pt_path[:-3] + ".onnx"
+        try:
+            if os.path.exists(onnx_path) and not self._export_is_stale(pt_path, onnx_path):
+                return onnx_path
+            kwargs = dict(format="onnx", dynamic=True, half=False)
+            opset = getattr(config, "ONNX_OPSET", None)
+            if opset:
+                kwargs["opset"] = int(opset)
+            try:
+                YOLO(pt_path).export(simplify=True, **kwargs)
+            except Exception:
+                YOLO(pt_path).export(simplify=False, **kwargs)
+            if os.path.exists(onnx_path):
+                self._remember_hash(onnx_path, self._weights_hash(pt_path))
+                return onnx_path
+        except Exception as e:
+            logger.warning("ซ่อม IR: export .onnx ไม่สำเร็จ (%s)", e)
+        return None
+
+    @staticmethod
+    def _sync_metadata_names(pt_path: str, meta_path: str):
+        """
+        ``metadata.yaml`` ต้องมี **ชื่อคลาสของ .pt ตัวนี้จริง ๆ** ก่อนจะซ่อม IR.
+
+        ⚠️ กับดักที่จะเกิดถ้าไม่ทำ: โฟลเดอร์ IR ที่เสียมักเป็นของ **โมเดลตัวอื่น**
+        (นั่นแหละสาเหตุที่ output ไม่ตรง) ⇒ ``metadata.yaml`` ในนั้นก็เป็นของ
+        โมเดลตัวอื่นด้วย. ซ่อมแต่ ``.xml``/``.bin`` แล้วปล่อยชื่อคลาสเดิมไว้ =
+        ระบบตรวจถูกแต่ **เรียกชื่อผิด** โดยไม่มี error เลย (กฎเหล็กข้อ 2)
+        """
+        try:
+            import yaml
+        except Exception as e:
+            return False, "ไม่มีแพ็กเกจ yaml จึงตรวจชื่อคลาสไม่ได้ — ไม่ซ่อม (%s)" % e
+        try:
+            y = YOLO(pt_path)
+            names = {int(k): str(v) for k, v in dict(y.names).items()}
+            task = y.task
+        except Exception as e:
+            return False, "อ่านชื่อคลาสจาก .pt ไม่ได้ — ไม่ซ่อม (%s)" % e
+        try:
+            with open(meta_path, "r", encoding="utf-8") as f:
+                md = yaml.safe_load(f) or {}
+        except Exception:
+            md = {}
+        cur = md.get("names")
+        if isinstance(cur, dict):
+            cur = {int(k): str(v) for k, v in cur.items()}
+        if cur == names and md.get("task") == task:
+            return True, "metadata.yaml ตรงกับ .pt อยู่แล้ว"
+        md["names"], md["task"] = names, task
+        try:
+            with open(meta_path, "w", encoding="utf-8") as f:
+                yaml.safe_dump(md, f, allow_unicode=True, sort_keys=False)
+        except Exception as e:
+            return False, "เขียน metadata.yaml ไม่ได้ — ไม่ซ่อม (%s)" % e
+        logger.warning("metadata.yaml ไม่ตรงกับ .pt (ชื่อคลาส/ task) — เขียนใหม่จาก %s",
+                       os.path.basename(pt_path))
+        return True, "เขียน metadata.yaml ใหม่จาก .pt"
+
+    def _repair_ir_from_onnx(self, pt_path: str, ov_dir: str):
+        """
+        เส้นทางสำรอง: สร้าง IR **จากไฟล์ .onnx** แทนการแปลงจาก PyTorch ตรง ๆ.
+
+        ``ultralytics.export(format="openvino")`` แปลงจาก **โมเดล PyTorch โดยตรง**
+        (``ov.convert_model(model, example_input=...)``) ไม่ได้ผ่าน ONNX เลย ⇒
+        ถ้าเส้นทางนั้นให้ IR ที่โครงสร้างผิด เส้นทาง ONNX → IR เป็นทางที่สอง
+        ซึ่ง **พิสูจน์แล้วว่าให้ tensor เท่ากันทุกหลัก** กับ PyTorch
+        (Δ สูงสุด 5e-5 บนกล่อง · 1e-8 บน prototype — มีเทสต์ล็อกตัวเลขนี้ไว้)
+
+        ⚠️ ทับเฉพาะ ``.xml``/``.bin`` ส่วน ``metadata.yaml`` (ที่เก็บ **ชื่อคลาส**)
+        ถูก *ตรวจและเขียนใหม่จาก ``.pt``* ด้วย ``_sync_metadata_names`` ก่อนเสมอ.
+        วัดจริงแล้วว่า **ไม่มีไฟล์นั้น ⇒ ชื่อคลาสกลายเป็น ``class0``/``class1``**
+        โดยไม่มี error เลย ⇒ ไม่มี metadata.yaml = **ไม่ซ่อม** (กฎเหล็กข้อ 2)
+        """
+        meta = os.path.join(ov_dir, "metadata.yaml")
+        if not os.path.exists(meta):
+            return False, "ไม่มี metadata.yaml (ชื่อคลาสจะหาย) — ไม่ซ่อม"
+        ok_meta, why_meta = self._sync_metadata_names(pt_path, meta)
+        if not ok_meta:
+            return False, why_meta
+        onnx_path = self._ensure_onnx_file(pt_path)
+        if not onnx_path:
+            return False, "ไม่มีไฟล์ .onnx ให้ใช้เป็นวัตถุดิบ"
+        _, xml = self._ov_paths(pt_path)
+        try:
+            import openvino as ov
+            logger.info("ซ่อม IR ด้วยเส้นทาง ONNX → OpenVINO: %s", onnx_path)
+            ov.save_model(ov.convert_model(onnx_path), xml, compress_to_fp16=False)
+        except Exception as e:
+            return False, "แปลง ONNX → IR ไม่สำเร็จ (%s)" % e
+        return self._validate_ir(pt_path, ov_dir)
+
     def _maybe_openvino(self, pt_path: str) -> Optional[str]:
         """
         Return a path to an OpenVINO model directory for ``pt_path`` (exporting it
@@ -338,24 +575,68 @@ class YOLODetector:
                 self._note_skip("OpenVINO@%s" % device, why)
                 return None
             logger.info("OpenVINO device พร้อมใช้: %s", why)
-        ov_dir = pt_path[:-3] + "_openvino_model"
-        # The exported IR lives at <dir>/<stem>.xml — use its mtime for the
-        # stale check (same quiet-correctness trap as ONNX: a retrained .pt
-        # must never keep running behind a stale export).
-        ov_xml = os.path.join(ov_dir, os.path.basename(pt_path)[:-3] + ".xml")
+        ov_dir, ov_xml = self._ov_paths(pt_path)
+        digest = self._weights_hash(pt_path)
+
+        # เคยลองซ่อม IR ของเนื้อ .pt ตัวนี้จนหมดทางแล้ว → ข้ามทันที ไม่ต้อง
+        # เสียเวลา export ซ้ำทุกครั้งที่เปิดโปรแกรม (ลบโฟลเดอร์ IR = เริ่มใหม่)
+        given_up = self._ir_given_up(ov_dir, digest)
+        if given_up:
+            logger.error("⚠️ ข้าม OpenVINO — %s", given_up)
+            self._note_skip("OpenVINO", given_up)
+            return None
+
         try:
             stale = self._export_is_stale(pt_path, ov_xml)
-            if not os.path.isdir(ov_dir) or not os.path.exists(ov_xml) or stale:
+            retry = self._ir_retry_pending(ov_dir, digest)
+            exported = False
+            if retry:
+                logger.info("รอบก่อน IR ตัวนี้ใช้ไม่ได้ — บังคับ export ใหม่ 1 รอบ")
+            if not os.path.isdir(ov_dir) or not os.path.exists(ov_xml) or stale or retry:
                 if stale and os.path.exists(ov_xml):
                     logger.info(f"OpenVINO export ไม่ตรงกับ .pt ปัจจุบัน — export ใหม่: {pt_path}")
                 else:
                     logger.info(f"Exporting OpenVINO model (one-time, FP32/dynamic): {pt_path}")
                 YOLO(pt_path).export(format="openvino", dynamic=True, half=False)
-            if os.path.isdir(ov_dir) and os.path.exists(ov_xml):
-                self._remember_hash(ov_xml, self._weights_hash(pt_path))
-                return ov_dir
-            logger.warning("OpenVINO export produced no model dir; using next backend.")
-            self._note_skip("OpenVINO", "export ไม่ได้สร้างโฟลเดอร์ IR")
+                exported = True
+            if not (os.path.isdir(ov_dir) and os.path.exists(ov_xml)):
+                logger.warning("OpenVINO export produced no model dir; using next backend.")
+                self._note_skip("OpenVINO", "export ไม่ได้สร้างโฟลเดอร์ IR")
+                return None
+
+            # ── ด่านใหม่: IR เข้ากับ task ของโมเดลไหม ────────────────────
+            ok, why = self._validate_ir(pt_path, ov_dir)
+            repair = bool(getattr(config, "OPENVINO_AUTO_REPAIR", True))
+            if not ok and not exported and repair:
+                # ยังไม่ได้ export ในรอบนี้ = กำลังใช้ IR เก่าที่เสีย → ทำใหม่
+                logger.error("⚠️ IR เดิมใช้ไม่ได้ (%s) — ลบแล้ว export ใหม่", why)
+                try:
+                    import shutil
+                    shutil.rmtree(ov_dir, ignore_errors=True)
+                except Exception:
+                    pass
+                YOLO(pt_path).export(format="openvino", dynamic=True, half=False)
+                ok, why = self._validate_ir(pt_path, ov_dir)
+            if not ok and repair:
+                logger.error("⚠️ IR ที่ export ใหม่ยังใช้ไม่ได้ (%s) — ลองเส้นทาง ONNX → IR", why)
+                ok, why = self._repair_ir_from_onnx(pt_path, ov_dir)
+            if not ok:
+                # ⚠️ **ห้ามจดลายนิ้วมือ** เมื่อยังไม่ผ่าน — นี่คือบั๊กเดิมที่ทำให้
+                # IR ที่เสียถูกมองว่า "ตรงกับ .pt" แล้วไม่มี export ใหม่อีกเลย
+                seen, tries, _ = self._read_bad_marker(ov_dir)
+                self._drop_stamp(ov_xml)
+                self._write_bad_marker(ov_dir, digest,
+                                       min((tries if seen == digest else 0) + 1, 2), why)
+                logger.error("⚠️ ข้าม OpenVINO — %s", why)
+                self._note_skip("OpenVINO", why)
+                return None
+
+            logger.info("IR ผ่านการตรวจโครงสร้าง: %s", why)
+            self._remember_hash(ov_xml, digest)
+            # ⚠️ **ยังไม่ล้างเครื่องหมาย "เคยพัง" ตรงนี้** — ล้างเมื่อ smoke test
+            # ผ่านใน ``load_model`` เท่านั้น ไม่งั้นตัวนับจะถูกรีเซ็ตทุกบูต แล้ว
+            # ระบบจะ export ใหม่ไม่รู้จบกับ IR ที่ซ่อมไม่ขึ้น
+            return ov_dir
         except Exception as e:
             logger.warning(f"OpenVINO unavailable ({e}); using next backend instead.")
             self._note_skip("OpenVINO", e)
@@ -484,6 +765,35 @@ class YOLODetector:
             logger.warning(f"Could not determine task from {pt_path}: {e}")
             return None
 
+    def _quarantine_ir(self, pt_path: str, ov_dir: str, err) -> None:
+        """
+        IR โหลดผ่านแต่ **ตรวจภาพจริงไม่ผ่าน** (smoke test) → เตรียม export ใหม่รอบหน้า.
+
+        ⚠️ นี่คือครึ่งหลังของบั๊ก "ONNX ทำงานเสมอ": เดิมลายนิ้วมือ ``<xml>.src``
+        ถูกจดไว้แล้วก่อนถึง smoke test ⇒ รอบถัดไป ``_export_is_stale`` ตอบว่า
+        "ตรงกัน" ⇒ โหลด IR ที่เสียตัวเดิมซ้ำ ⇒ ตกไป ONNX **ทุกครั้งตลอดไป**
+        โดยไม่มีอะไรพยายามซ่อมเลย.
+
+        ลบ sidecar ⇒ รอบหน้า export ใหม่ (ซ่อมตัวเองได้) และนับครั้งไว้ —
+        พังซ้ำกับเนื้อ ``.pt`` เดิมหลัง export ใหม่แล้ว = หยุดลอง (ไม่งั้นจะ
+        export ใหม่ทุกบูตซึ่งช้าและไม่ช่วยอะไร)
+        """
+        if not getattr(config, "OPENVINO_AUTO_REPAIR", True):
+            return                      # ปิดการซ่อม = พฤติกรรมเดิมทุกประการ
+        try:
+            if not os.path.isdir(ov_dir):
+                return
+            _, xml = self._ov_paths(pt_path)
+            digest = self._weights_hash(pt_path)
+            seen, tries, _ = self._read_bad_marker(ov_dir)
+            tries = tries + 1 if seen == digest else 1
+            self._write_bad_marker(ov_dir, digest, min(tries, 2),
+                                   "smoke test ไม่ผ่าน: %s" % err)
+            self._drop_stamp(xml)       # ⇒ รอบหน้าถูกบังคับให้ export ใหม่
+            logger.error("IR ถูกกักไว้เพื่อ export ใหม่ในรอบถัดไป (ครั้งที่ %d/2)", min(tries, 2))
+        except Exception:
+            pass
+
     def _smoke_test(self) -> bool:
         """
         Run ONE tiny inference to confirm the loaded backend actually executes
@@ -566,6 +876,9 @@ class YOLODetector:
                     # on an incompatible runtime — verify with a smoke test.
                     if accel and not self._smoke_test():
                         raise RuntimeError(f"{label} backend failed smoke test")
+                    if accel == "OpenVINO":
+                        # ผ่านครบทั้งโครงสร้างและการตรวจภาพจริงแล้ว → ล้างประวัติ
+                        self._clear_bad_marker(load_path)
                     break
                 except Exception as accel_err:
                     if accel:
@@ -573,6 +886,8 @@ class YOLODetector:
                         # เรื่องที่ผู้ใช้ต้องรู้ ไม่ใช่รายละเอียดที่ซ่อนได้
                         logger.error("⚠️ %s ใช้ไม่ได้ (%s) — ตกไป backend ถัดไป "
                                      "ซึ่ง**ช้ากว่าหลายเท่า**", label, accel_err)
+                        if accel == "OpenVINO":
+                            self._quarantine_ir(model_path, load_path, accel_err)
                         self.backend_downgraded = True
                         if not self.backend_note:
                             self.backend_note = "%s: %s" % (label, accel_err)
@@ -587,8 +902,8 @@ class YOLODetector:
                 logger.error(
                     "🐢 กำลังใช้ **%s** ซึ่งไม่ใช่ตัวที่เร็วที่สุดที่ตั้งไว้ "
                     "(%s) — inference จะช้ากว่าปกติหลายเท่า. "
-                    "ตรวจ: py -3.9 -c \"import openvino;print(openvino.__version__)\" "
-                    "· ต้องได้ 2024.6.0 · แล้วรัน verify_openvino.py",
+                    "หาสาเหตุที่แน่นอนด้วย: py -3.9 diagnose_igpu.py "
+                    "(เติม --fix เพื่อให้ซ่อม IR ให้อัตโนมัติ)",
                     accel_label, self.backend_note)
             else:
                 logger.info("YOLO model loaded successfully"

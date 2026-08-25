@@ -211,6 +211,117 @@ def knee(rows, keep_frac=KEEP_FRAC):
 
 
 # ════════════════════════════════════════════════════════════════════
+# ②ᴮ ทิศทางที่สอง: **NG ปลอม** (เจอรอยบุบบนกระป๋องที่ไม่มีรอยบุบ)
+# ════════════════════════════════════════════════════════════════════
+# ⚠️ ทำไมต้องมี: ชั้น ② วัดแค่ "ยังเจอไหม" (recall) ⇒ ได้ 100% ที่เบลอ 8 px
+# แล้วดูเหมือนใช้งานได้ **แต่ยังไม่ได้ตอบเลยว่าเบลอทำให้เจอของที่ไม่มีหรือเปล่า**
+# การเบลอสร้างเงายืดที่หน้าตาเหมือนรอยบุบได้ตรง ๆ
+#
+# 📊 หลักฐานจากไลน์จริง (ภาพหน้าจอระบบ vision เดิมบนไลน์ 6, ส.ค. 2026):
+#     TOT 40,062 · NG 0 · NG rate 0.00%
+# ⇒ มาตรฐานที่พนักงานหน้างานคุ้นเคยคือ **แทบไม่มี NG ปลอมเลย** ไม่ใช่ "ไม่กี่ %"
+# ⇒ ตัวจำกัดของงานนี้คือ **precision ไม่ใช่ recall** — กลับด้านกับที่วัดมาทั้งหมด
+
+FP_ALLOW = 0                # ยอมให้มี "ใบที่โดนทักเพิ่ม" จากฐานที่ไม่เบลอกี่ใบ
+
+
+def sweep_false(detect_fn, images, blurs=DEFAULT_BLURS, scales=(1.0,), angle=0.0,
+                progress=None):
+    """
+    ไล่ความเบลอเดียวกันบน **ภาพกระป๋องดี** แล้วนับว่าโมเดลทักผิดกี่ใบ.
+
+    คืน ``{scale: {"rows": [...], "images": n}}`` โดยแต่ละแถวมี
+    ``fp_images`` (จำนวนใบที่โดนทัก) · ``fp_boxes`` (จำนวนกรอบรวม) ·
+    ``fp_rate`` (สัดส่วนต่อใบ — เทียบกับ "NG rate %" ของไลน์ได้ตรง ๆ)
+
+    ⚠️ แถว ``blur = 0`` คือ **ฐาน**: NG ปลอมที่มีอยู่แล้วโดยไม่เกี่ยวกับความเบลอ
+    ต้องแยกออกจากที่ความเบลอเป็นคนทำให้เกิด ไม่งั้นจะโทษผิดตัว
+    """
+    out = {}
+    for scale in scales:
+        smalls = [rescale(img, scale) for img in images]
+        rows = []
+        for L in blurs:
+            hit, boxes, confs = 0, 0, []
+            for im in smalls:
+                test = motion_blur(im, L * scale, angle) if L else im
+                dets = defects_of(detect_fn(test))
+                if dets:
+                    hit += 1
+                    boxes += len(dets)
+                    confs.append(max(float(d.get("confidence", 0.0)) for d in dets))
+            rows.append({
+                "blur": L, "fp_images": hit, "fp_boxes": boxes,
+                "fp_rate": (hit / float(len(smalls))) if smalls else None,
+                "conf": float(np.mean(confs)) if confs else None,
+            })
+            if progress:
+                progress(scale, L)
+        out[scale] = {"rows": rows, "images": len(smalls)}
+    return out
+
+
+def false_knee(rows, allow=FP_ALLOW):
+    """
+    ความเบลอสูงสุดที่ยัง **ไม่เพิ่ม** NG ปลอมเกินฐานที่ไม่เบลอ.
+
+    ใช้กติกา "ต่อเนื่อง" แบบเดียวกับ ``knee()`` — ระดับที่ผ่านแบบฟลุ๊คหลังจาก
+    พังไปแล้วต้องไม่ถูกนับ. คืน ``None`` เมื่อไม่มีแถวให้ตัดสิน
+    """
+    rows = sorted([r for r in rows if r.get("fp_images") is not None],
+                  key=lambda r: r["blur"])
+    if not rows:
+        return None
+    base = rows[0]["fp_images"]
+    limit = None
+    for r in rows:
+        if r["fp_images"] <= base + allow:
+            limit = r["blur"]
+        else:
+            break
+    return limit
+
+
+def upper_bound_95(k, n):
+    """
+    เพดานบนของอัตราจริง (Clopper-Pearson ด้านเดียว 95%) จากที่สังเกต ``k`` ครั้ง
+    ใน ``n`` ใบ.
+
+    ⚠️ **นี่คือหัวใจของความซื่อสัตย์ของเครื่องมือนี้** — "ทดสอบ 30 ใบแล้วไม่เจอ
+    NG ปลอมเลย" **ไม่ได้แปลว่าอัตราเป็น 0**. มันแปลได้แค่ว่าอัตราจริง ≤ 9.5%
+    ที่ความเชื่อมั่น 95% ซึ่ง **ห่างจากมาตรฐานหน้างาน (0.0075%) อยู่ 1,270 เท่า**
+    ถ้าไม่บอกข้อนี้ ผู้ใช้จะสรุปว่า "ผ่าน" จากตัวอย่างที่เล็กเกินกว่าจะพิสูจน์อะไรได้
+    """
+    if n <= 0:
+        return None
+    if k <= 0:
+        return 1.0 - 0.05 ** (1.0 / n)
+    if k >= n:
+        return 1.0
+    from math import comb
+
+    def cdf(p):                       # P(X <= k)
+        return sum(comb(n, i) * p ** i * (1 - p) ** (n - i) for i in range(k + 1))
+
+    lo, hi = k / float(n), 1.0
+    for _ in range(60):
+        mid = (lo + hi) / 2.0
+        if cdf(mid) > 0.05:
+            lo = mid
+        else:
+            hi = mid
+    return (lo + hi) / 2.0
+
+
+def images_needed(target_rate):
+    """ต้องทดสอบกระป๋องดีกี่ใบ ถึงจะ *พิสูจน์* ได้ว่าอัตรา NG ปลอม ≤ target."""
+    if not target_rate or target_rate <= 0 or target_rate >= 1:
+        return None
+    import math
+    return int(math.ceil(math.log(0.05) / math.log(1.0 - target_rate)))
+
+
+# ════════════════════════════════════════════════════════════════════
 # ③ ชั้นแปลงเป็นสเปกที่ซื้อของได้
 # ════════════════════════════════════════════════════════════════════
 def exposure_advice(blur_px, mm_per_px, speed_mm_s, exposure_us=None,
@@ -351,6 +462,14 @@ def main():
     ap.add_argument("--exposure-us", type=float, default=None)
     ap.add_argument("--mean-brightness", type=float, default=None,
                     help="ความสว่างเฉลี่ยที่วัดได้ตอนนี้ (0-255)")
+    ap.add_argument("--ok-images",
+                    help="โฟลเดอร์ภาพ **กระป๋องดี** — วัด NG ปลอมที่ความเบลอเดียวกัน "
+                         "(ทิศทางที่ recall วัดแทนไม่ได้)")
+    ap.add_argument("--fp-allow", type=int, default=FP_ALLOW,
+                    help="ยอมให้มีใบที่โดนทักเพิ่มจากฐานกี่ใบ (ค่าเริ่มต้น 0 = เข้มที่สุด)")
+    ap.add_argument("--fp-target", type=float, default=0.000075,
+                    help="อัตรา NG ปลอมที่ต้องการพิสูจน์ (ค่าเริ่มต้น 0.0075%% = "
+                         "เพดานบนของระบบเดิมบนไลน์ที่ทำได้ 0/40,062)")
     ap.add_argument("--save-dir", help="เซฟภาพที่เบลอไว้ดูด้วยตา")
     ap.add_argument("--json", help="เขียนผลเป็นไฟล์ JSON")
     ap.add_argument("--selftest", action="store_true",
@@ -479,6 +598,77 @@ def main():
             report["scales"][str(scale)]["advice"] = adv
         else:
             print("     (ใส่ --mm-per-px --speed-mm-s --exposure-us เพื่อให้แปลงเป็น µs ให้)")
+
+    # ── ⑤ ทิศทางที่สอง: NG ปลอมบนกระป๋องดี ────────────────────────────
+    if args.ok_images:
+        ok_imgs, _ = load_images(args.ok_images, args.limit)
+        head("⑤ NG ปลอม — ภาพกระป๋องดีที่เบลอเท่ากัน")
+        if not ok_imgs:
+            print("  ไม่พบภาพใน %s" % args.ok_images)
+            code = max(code, 2)
+        else:
+            print("  โฟลเดอร์ : %s · %d ภาพ\n" % (args.ok_images, len(ok_imgs)))
+            fres = sweep_false(detect_fn, ok_imgs, blurs=blurs, scales=scales,
+                               angle=args.angle)
+            report["false_positive"] = {"images": args.ok_images,
+                                        "n_images": len(ok_imgs), "scales": {}}
+            for scale in scales:
+                fr = fres[scale]
+                rows = fr["rows"]
+                print("  สเกล %.2f" % scale)
+                print("  %-10s %-16s %-10s %s"
+                      % ("เบลอ(px)", "ใบที่โดนทัก", "กรอบรวม", "ความมั่นใจสูงสุด"))
+                for row in rows:
+                    print("  %-10s %-16s %-10s %s" % (
+                        row["blur"],
+                        "%d/%d (%.1f%%)" % (row["fp_images"], fr["images"],
+                                            (row["fp_rate"] or 0) * 100),
+                        row["fp_boxes"],
+                        "—" if row["conf"] is None else "%.2f" % row["conf"]))
+                flim = false_knee(rows, args.fp_allow)
+                base_fp = rows[0]["fp_images"] if rows else 0
+                report["false_positive"]["scales"][str(scale)] = {
+                    "rows": rows, "limit_px": flim, "base_fp_images": base_fp}
+                print()
+                if base_fp:
+                    print("  ⚠️ มี NG ปลอม %d/%d ใบ **ตั้งแต่ยังไม่เบลอ** ⇒ ปัญหานี้ไม่ได้"
+                          "เกิดจากความเบลอ" % (base_fp, fr["images"]))
+                    print("     แก้ที่โมเดล/เกณฑ์ conf ก่อน — ไม่ใช่ที่ exposure หรือไฟ")
+                    code = max(code, 1)
+                if flim is None:
+                    print("  ❌ สรุปเพดานด้าน NG ปลอมไม่ได้")
+                    code = max(code, 3)
+                else:
+                    print("  ⇒ **เบลอได้ ≤ %g พิกเซล โดยไม่เพิ่ม NG ปลอม**" % flim)
+                    lim_recall = report["scales"].get(str(scale), {}).get("limit_px")
+                    if lim_recall is not None:
+                        binding = min(flim, lim_recall)
+                        who = "NG ปลอม" if flim <= lim_recall else "ยังตรวจเจอ (recall)"
+                        print("     รวมสองด้าน: **≤ %g พิกเซล** (ตัวจำกัดคือ %s)"
+                              % (binding, who))
+                        report["false_positive"]["scales"][str(scale)]["binding_px"] = binding
+
+                # ── ความซื่อสัตย์ทางสถิติ: ตัวอย่างเท่านี้พิสูจน์อะไรได้แค่ไหน ──
+                worst = max(r["fp_images"] for r in rows) if rows else 0
+                ub = upper_bound_95(worst, fr["images"])
+                need = images_needed(args.fp_target)
+                print("\n  📐 ตัวอย่าง %d ใบ พิสูจน์ได้แค่ไหน" % fr["images"])
+                print("     แย่สุดที่วัดได้ %d/%d ⇒ อัตราจริง **≤ %.2f%%** (เชื่อมั่น 95%%)"
+                      % (worst, fr["images"], (ub or 0) * 100))
+                if need:
+                    print("     เป้าหมาย %.4f%% (ระบบเดิมบนไลน์ทำได้ 0/40,062) ต้องใช้ "
+                          "**≥ %s ใบ** จึงจะพิสูจน์ได้" % (args.fp_target * 100,
+                                                          format(need, ",")))
+                print("     ⇒ ชุดเล็กใช้ **เรียงลำดับว่าเบลอเท่าไรแย่ลง** ได้ "
+                      "แต่ **ยืนยันว่าผ่านมาตรฐานหน้างานไม่ได้**")
+    else:
+        head("⑤ NG ปลอม — ยังไม่ได้วัด")
+        print("  เครื่องมือนี้วัดแต่ \"ยังเจอไหม\" (recall) — **ยังไม่ได้ตอบว่า"
+              "ความเบลอทำให้เจอของที่ไม่มีหรือเปล่า**")
+        print("  ระบบ vision เดิมบนไลน์ทำได้ NG rate 0.00% (0/40,062) ⇒ ตัวจำกัดจริง"
+              "ของงานนี้คือ precision")
+        print("  เติม --ok-images <โฟลเดอร์ภาพกระป๋องดี> เพื่อปิดช่องนี้")
+        code = max(code, 1)
 
     if args.save_dir and imgs:
         os.makedirs(args.save_dir, exist_ok=True)
