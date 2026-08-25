@@ -206,6 +206,32 @@
                         <button id="hikBurstGalleryBtn" class="btn btn-secondary btn-block" type="button">🖼️ ภาพที่ถ่ายไว้ / ลบภาพ</button>
                         <div id="hikBurstMsg" class="control-hint"></div>
                     </div>
+                    <div class="hik-burst-box hik-tune-box">
+                        <div class="hik-burst-title">🎚️ จูนเร็ว — ปรับแล้วถ่ายซ้ำได้ทันที</div>
+                        <div class="hik-tune-readout">
+                            <div><b id="hikTuneUs">—</b><span>เวลารับแสง (µs)</span></div>
+                            <div><b id="hikTuneBlur">—</b><span id="hikTuneBlurCap">เบลอที่ไลน์ (px)</span></div>
+                        </div>
+                        <label class="hik-tune-row"><span>เวลารับแสง <i id="hikTuneUsHint"></i></span>
+                            <input id="hikTuneExp" type="range" min="0" max="1000" value="500"></label>
+                        <div class="hik-tune-nudge">
+                            <button type="button" data-mul="0.90">◀◀ ‑10%</button>
+                            <button type="button" data-mul="0.98">◀ ‑2%</button>
+                            <button type="button" data-mul="1.02">+2% ▶</button>
+                            <button type="button" data-mul="1.10">+10% ▶▶</button>
+                        </div>
+                        <label class="hik-tune-row"><span>เกน <i id="hikTuneGainHint"></i></span>
+                            <input id="hikTuneGain" type="range" min="0" max="240" value="0"></label>
+                        <button id="hikTuneAuto" class="btn btn-secondary btn-block" type="button">
+                            ⚖️ ชดเชยความสว่างอัตโนมัติ</button>
+                        <div id="hikTuneLive" class="hik-tune-live">—</div>
+                        <button id="hikTuneShot" class="btn btn-secondary btn-block" type="button" disabled>
+                            📸 ถ่ายทดสอบ + วัดความคม</button>
+                        <div id="hikTuneScore" class="hik-tune-score"></div>
+                        <img id="hikTuneImg" class="hik-tune-img" alt="ภาพทดสอบล่าสุด" style="display:none">
+                        <p class="control-hint">คะแนนความคมเทียบกันได้เมื่อ <b>เกนใกล้เคียงกัน</b> —
+                            เกนสูงขึ้นทำให้สัญญาณรบกวนดันคะแนนขึ้นได้เอง</p>
+                    </div>
                     <div class="hik-burst-box hik-exp-box">
                         <div class="hik-burst-title">🔦 ไล่ exposure (ไม่มีไฟ จะกดลงได้แค่ไหน)</div>
                         <p class="control-hint">ความเบลอบนไลน์ = <b>ความเร็ว × exposure</b> ⇒ อยากได้ภาพคม
@@ -684,6 +710,40 @@
     .btn-sm { padding: 6px 11px; font-size: 11.5px; border-radius: 7px; }
     /* ปุ่มลบ: ให้ "อ่านออกว่าอันตราย" โดยไม่ตะโกนกลบปุ่มอื่นทั้งแถบ
        (ปุ่มแดงทึบสงวนไว้ให้ Stop Detection ซึ่งเป็นปุ่มหลักของหน้า) */
+    /* ── แถบจูนเร็ว (exposure/gain) ─────────────────────────────── */
+    .hik-tune-box { border-color: #bfdbfe; background: #f0f7ff; }
+    .hik-tune-readout { display: flex; gap: 8px; margin: 4px 0 6px; }
+    .hik-tune-readout > div {
+        flex: 1; text-align: center; background: #fff; border-radius: var(--radius);
+        padding: 4px 2px; border: 1px solid var(--gray-200);
+    }
+    .hik-tune-readout b {
+        display: block; font-family: var(--font-mono); font-size: 17px; color: var(--navy);
+    }
+    .hik-tune-readout span { font-size: 10.5px; color: var(--gray-600); }
+    .hik-tune-readout.blur-ok b#hikTuneBlur { color: #1B5E20; }
+    .hik-tune-readout.blur-bad b#hikTuneBlur { color: #B3261E; }
+    .hik-tune-row { display: block; margin-top: 6px; }
+    .hik-tune-row span { display: block; font-size: 11.5px; color: var(--gray-600); }
+    .hik-tune-row i { font-style: normal; font-family: var(--font-mono); color: var(--gray-400); }
+    .hik-tune-row input[type=range] { width: 100%; }
+    .hik-tune-nudge { display: flex; gap: 3px; margin-top: 3px; }
+    .hik-tune-nudge button {
+        flex: 1; font-size: 10.5px; padding: 3px 0; cursor: pointer;
+        border: 1px solid var(--gray-300); background: #fff; border-radius: var(--radius);
+    }
+    .hik-tune-nudge button:hover { background: var(--gray-100); }
+    .hik-tune-live {
+        margin-top: 6px; font-family: var(--font-mono); font-size: 11.5px;
+        color: var(--gray-600); background: #fff; border-radius: var(--radius);
+        padding: 4px 6px; border: 1px solid var(--gray-200);
+    }
+    .hik-tune-score { margin-top: 5px; font-size: 12.5px; }
+    .hik-tune-img {
+        width: 100%; margin-top: 5px; border-radius: var(--radius);
+        border: 1px solid var(--gray-200); cursor: zoom-in;
+    }
+
     /* ── โหมดไล่ exposure ─────────────────────────────────────────── */
     .hik-exp-box { border-color: #c7d2fe; background: #f5f7ff; }
     .hik-exp-list { display: block; margin-top: 6px; }

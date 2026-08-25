@@ -15,8 +15,215 @@
     var $ = function (id) { return document.getElementById(id); };
     var LINE_PX_S = 7800.0;          // 450 ใบ/นาที ที่ 0.082 mm/px (ค่าเดียวกับฝั่ง Python)
     var BLUR_TARGET_PX = 4.0;
+    var TARGET_MEAN = 80.0;          // ต้องตรงกับ hik_exposure.TARGET_MEAN
 
     var state = { running: false, timer: null, session: null, sessions: [] };
+
+    // ── แถบจูนเร็ว ────────────────────────────────────────────────────
+    // เป้าหมาย: หน้างานจริง กล้องติดตั้งแล้ว ต้องการ "ปรับนิดเดียวแล้วถ่ายซ้ำ"
+    // โดยไม่ต้องเปิดแผงตั้งค่า 19 ตัวแล้วกดบันทึกทุกครั้ง
+    var TUNE_US_MIN = 50, TUNE_US_MAX = 20000;   // ช่วงที่มีความหมายกับงานนี้
+    var tune = {
+        us: null, gain: null, gmin: 0, gmax: 24,
+        umin: TUNE_US_MIN, umax: TUNE_US_MAX,
+        timer: null, lastScore: null, busy: false, ready: false
+    };
+
+    /** สไลเดอร์เป็น **log** — ช่วง 50-20,000 µs ถ้าเป็นเชิงเส้นจะจูนช่วงสั้นไม่ได้เลย */
+    function posToUs(pos) {
+        var r = Math.log(tune.umax / tune.umin);
+        return tune.umin * Math.exp(r * (pos / 1000));
+    }
+
+    function usToPos(us) {
+        var r = Math.log(tune.umax / tune.umin);
+        return Math.max(0, Math.min(1000, Math.round(
+            1000 * Math.log(Math.max(us, tune.umin) / tune.umin) / r)));
+    }
+
+    function blurPx(us) { return LINE_PX_S * us / 1e6; }
+
+    function paintTune() {
+        if (tune.us == null) { return; }
+        var b = blurPx(tune.us);
+        if ($('hikTuneUs')) { $('hikTuneUs').textContent = Math.round(tune.us); }
+        if ($('hikTuneBlur')) { $('hikTuneBlur').textContent = b.toFixed(1); }
+        var box = document.querySelector('.hik-tune-readout');
+        if (box) {
+            box.classList.toggle('blur-ok', b <= BLUR_TARGET_PX);
+            box.classList.toggle('blur-bad', b > BLUR_TARGET_PX * 2);
+        }
+        if ($('hikTuneUsHint')) {
+            $('hikTuneUsHint').textContent = Math.round(tune.umin) + '–'
+                + Math.round(tune.umax) + ' µs';
+        }
+        if ($('hikTuneGainHint') && tune.gain != null) {
+            $('hikTuneGainHint').textContent = tune.gain.toFixed(1) + ' dB (สูงสุด '
+                + tune.gmax.toFixed(1) + ')';
+        }
+        var e = $('hikTuneExp');
+        if (e && document.activeElement !== e) { e.value = usToPos(tune.us); }
+        var g = $('hikTuneGain');
+        if (g && tune.gain != null && document.activeElement !== g) {
+            g.value = Math.round(tune.gain * 10);
+        }
+    }
+
+    /**
+     * ส่งค่าลงกล้องแบบหน่วง — ลากสไลเดอร์ไม่ควรยิงคำสั่งทุกพิกเซล.
+     *
+     * ⚠️ ``save`` ต้องเป็น false ระหว่างลาก — ไฟล์ค่าตั้ง (`HIK_SETTINGS_FILE`)
+     * **ทับ `HIK_DEFAULTS` เสมอ** ถ้าเขียนทุกครั้งที่ขยับ ค่าที่ค้างไว้ตอนลากผ่าน
+     * จะกลายเป็นค่าถาวรของเครื่องนั้น. บันทึกจริงตอน **ปล่อยสไลเดอร์** เท่านั้น
+     */
+    function pushTune(save) {
+        clearTimeout(tune.timer);
+        tune.timer = setTimeout(function () {
+            var body = {};
+            if (tune.us != null) { body.exposure_us = Math.round(tune.us); }
+            if (tune.gain != null) { body.gain_db = Math.round(tune.gain * 100) / 100; }
+            fetch('/api/camera/hik/params', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ params: body, save: !!save })
+            }).then(function (r) { return r.json(); }).then(function (d) {
+                // กล้องปัดค่าเป็นขั้นของตัวเอง ⇒ อ่านค่าที่ **ตั้งได้จริง** กลับมาแสดง
+                //
+                // ⚠️ **เฉพาะตอนที่ผู้ใช้ปล่อยมือแล้วเท่านั้น** (save === true) —
+                // ถ้ารับค่าที่ปัดแล้วกลับมาระหว่างลาก สไลเดอร์จะกระโดดสู้กับนิ้ว
+                // ผู้ใช้ (เจอจริงตอนขับเบราว์เซอร์: ลากไป 1000 µs แล้วเด้งกลับ 5000)
+                if (!save) { return; }
+                var ap = (d && d.applied) || {};
+                if (ap.exposure_us && ap.exposure_us.value) { tune.us = ap.exposure_us.value; }
+                if (ap.gain_db && ap.gain_db.value != null) { tune.gain = ap.gain_db.value; }
+                paintTune();
+            }).catch(function () { /* แถบสถานะสดจะบอกเองว่ากล้องหลุด */ });
+        }, 220);
+    }
+
+    function loadTuneRanges() {
+        fetch('/api/camera/hik/params').then(function (r) { return r.json(); })
+            .then(function (d) {
+                var p = (d && d.params) || {};
+                var e = p.exposure_us, g = p.gain_db;
+                if (e && e.supported !== false) {
+                    tune.umin = Math.max(TUNE_US_MIN, e.min || TUNE_US_MIN);
+                    tune.umax = Math.min(TUNE_US_MAX, e.max || TUNE_US_MAX);
+                    tune.us = e.value;
+                }
+                if (g && g.supported !== false) {
+                    tune.gmin = g.min || 0;
+                    tune.gmax = g.max || 24;
+                    tune.gain = g.value;
+                    var gs = $('hikTuneGain');
+                    if (gs) { gs.min = Math.round(tune.gmin * 10); gs.max = Math.round(tune.gmax * 10); }
+                }
+                tune.ready = tune.us != null;
+                paintTune();
+            }).catch(function () { /* ยังไม่ได้เริ่มกล้อง */ });
+    }
+
+    /**
+     * ชดเชยความสว่างด้วยเกน — สูตรเดียวกับ `hik_exposure.gain_for()` ฝั่ง Python
+     * (20·log10) **แก้ที่เดียวไม่พอ ต้องแก้ทั้งสองฝั่ง** — มีเทสต์เทียบไว้
+     */
+    function autoGain() {
+        fetch('/api/camera/hik/status').then(function (r) { return r.json(); })
+            .then(function (d) {
+                var mean = d && d.stats && d.stats.mean_brightness;
+                if (!mean || mean <= 0.5 || tune.gain == null) {
+                    msgTune('ภาพมืดเกินกว่าจะคำนวณเกนได้ — เปิดรูรับแสงเลนส์ก่อน', 'bad');
+                    return;
+                }
+                var want = tune.gain + 20 * Math.log(TARGET_MEAN / mean) / Math.LN10;
+                var capped = want > tune.gmax;
+                tune.gain = Math.max(tune.gmin, Math.min(tune.gmax, want));
+                paintTune();
+                pushTune(true);
+                msgTune(capped
+                    ? '⚠️ ต้องใช้เกน ' + want.toFixed(1) + ' dB แต่เพดานอยู่ที่ '
+                      + tune.gmax.toFixed(1) + ' ⇒ ภาพจะยังมืดกว่าเป้า'
+                    : 'ตั้งเกนเป็น ' + tune.gain.toFixed(1) + ' dB แล้ว', capped ? 'bad' : 'good');
+            });
+    }
+
+    function msgTune(html, tone) {
+        var el = $('hikTuneScore');
+        if (!el) { return; }
+        el.innerHTML = html || '';
+        el.style.color = tone === 'bad' ? '#dc2626'
+            : (tone === 'good' ? '#15803d' : '#64748b');
+    }
+
+    /**
+     * คะแนนความคมของภาพที่เพิ่งถ่าย — ให้ตัวเลขเทียบได้แทนการ "ดูด้วยตา"
+     *
+     * ⚠️ ย่อ **1/2** ก่อนวัด: สัญญาณรบกวนเป็นความถี่สูง การย่อช่วยกดมันลง
+     * (ไม่งั้นดันเกนขึ้นแล้วคะแนนจะ "คมขึ้น" ทั้งที่ภาพแย่ลง = ตัวเลขที่หลอก)
+     * แต่ **ย่อมากกว่านี้ไม่ได้** — เบลอ 4 px บนเซนเซอร์ 2448 เหลือ ~2 px ในภาพ
+     * ที่ย่อลงจอ 1280 แล้ว ถ้าย่ออีก 4 เท่าจะกลืนหายพอดีกับสิ่งที่กำลังจะวัด
+     */
+    function sharpness(img) {
+        var w = Math.max(32, Math.round(img.naturalWidth / 2));
+        var h = Math.max(32, Math.round(img.naturalHeight / 2));
+        var c = document.createElement('canvas');
+        c.width = w; c.height = h;
+        var ctx = c.getContext('2d');
+        ctx.drawImage(img, 0, 0, w, h);
+        var x0 = Math.round(w * 0.2), x1 = Math.round(w * 0.8);
+        var y0 = Math.round(h * 0.2), y1 = Math.round(h * 0.8);
+        var d = ctx.getImageData(x0, y0, x1 - x0, y1 - y0).data;
+        var cw = x1 - x0, ch = y1 - y0, sum = 0, n = 0;
+        for (var y = 1; y < ch; y++) {
+            for (var x = 1; x < cw; x++) {
+                var i = (y * cw + x) * 4;
+                var g = d[i], gx = g - d[i - 4], gy = g - d[i - cw * 4];
+                sum += gx * gx + gy * gy;
+                n++;
+            }
+        }
+        return n ? sum / n : 0;
+    }
+
+    function testShot() {
+        if (tune.busy) { return; }
+        tune.busy = true;
+        msgTune('⏳ กำลังถ่าย…');
+        fetch('/api/camera/hik/shot', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ detect: false })
+        }).then(function (r) { return r.json(); }).then(function (d) {
+            tune.busy = false;
+            if (d.status !== 'ok') { msgTune('❌ ' + (d.message || 'ถ่ายไม่สำเร็จ'), 'bad'); return; }
+            var img = $('hikTuneImg');
+            img.onload = function () {
+                var score = sharpness(img);
+                if (score < 1.0) {
+                    tune.lastScore = null;
+                    msgTune('⚠️ ภาพแทบไม่มีรายละเอียดให้วัด (คะแนน '
+                        + score.toFixed(2) + ') — เปิดฝาเลนส์/รูรับแสง หรือเล็งให้ตรงกระป๋องก่อน',
+                        'bad');
+                    return;
+                }
+                var prev = tune.lastScore;
+                var arrow = '';
+                if (prev != null && prev > 0) {
+                    var pct = (score / prev - 1) * 100;
+                    arrow = Math.abs(pct) < 2 ? ' <b>=</b> เท่าเดิม'
+                        : (pct > 0 ? ' <b style="color:#15803d">▲ ' + pct.toFixed(0) + '%</b>'
+                                   : ' <b style="color:#dc2626">▼ ' + pct.toFixed(0) + '%</b>');
+                }
+                tune.lastScore = score;
+                msgTune('คะแนนคม <b>' + score.toFixed(0) + '</b>' + arrow
+                    + '<br><span class="control-hint">' + Math.round(tune.us) + ' µs · เกน '
+                    + (tune.gain != null ? tune.gain.toFixed(1) : '—') + ' dB</span>');
+            };
+            img.src = d.image;
+            img.style.display = 'block';
+        }).catch(function (e) { tune.busy = false; msgTune('❌ ' + e, 'bad'); });
+    }
+
 
     function msg(html, tone) {
         var el = $('hikExpMsg');
@@ -250,6 +457,46 @@
                         });
                 });
             }
+            var exp = $('hikTuneExp');
+            if (exp) {
+                exp.addEventListener('input', function () {
+                    tune.us = posToUs(parseFloat(exp.value));
+                    paintTune();
+                    pushTune(false);
+                });
+                exp.addEventListener('change', function () { pushTune(true); });
+            }
+            var gsl = $('hikTuneGain');
+            if (gsl) {
+                gsl.addEventListener('input', function () {
+                    tune.gain = parseFloat(gsl.value) / 10;
+                    paintTune();
+                    pushTune(false);
+                });
+                gsl.addEventListener('change', function () { pushTune(true); });
+            }
+            Array.prototype.forEach.call(
+                document.querySelectorAll('.hik-tune-nudge button'), function (b) {
+                    b.addEventListener('click', function () {
+                        if (tune.us == null) { return; }
+                        tune.us = Math.max(tune.umin, Math.min(tune.umax,
+                            tune.us * parseFloat(b.dataset.mul)));
+                        paintTune();
+                        pushTune(true);
+                    });
+                });
+            var ag = $('hikTuneAuto');
+            if (ag) { ag.addEventListener('click', autoGain); }
+            var ts = $('hikTuneShot');
+            if (ts) { ts.addEventListener('click', testShot); }
+            var ti = $('hikTuneImg');
+            if (ti) {
+                ti.addEventListener('click', function () {
+                    if (ti.src) { window.open(ti.src, '_blank'); }
+                });
+            }
+            paintTune();
+
             ['hikExpList', 'hikExpFrames'].forEach(function (id) {
                 var el = $(id);
                 if (el) { el.addEventListener('input', refreshEstimate); }
@@ -261,6 +508,34 @@
         setActive: function (active) {
             var b = $('hikExpBtn');
             if (b && !state.running) { b.disabled = !active; }
+            var t = $('hikTuneShot');
+            if (t) { t.disabled = !active; }
+            var live = $('hikTuneLive');
+            // ⚠️ หน้าหลักเรียก setActive() **ทุก 1 วินาที** จาก poll ของ
+            // /api/detection/status ⇒ ถ้า clearInterval/setInterval ทุกครั้ง
+            // ตัวจับเวลา 2 วินาทีจะถูกล้างทิ้งก่อนได้ทำงานเสมอ = แถบสถานะไม่เคย
+            // อัปเดตเลย (เจอจริงตอนขับเบราว์เซอร์). ทำงานเฉพาะตอน "สถานะเปลี่ยน"
+            if (!!active === !!tune.active) { return; }
+            tune.active = !!active;
+            if (active) {
+                loadTuneRanges();
+                clearInterval(tune.poll);
+                tune.poll = setInterval(function () {
+                    fetch('/api/camera/hik/status').then(function (r) { return r.json(); })
+                        .then(function (d) {
+                            var st = (d && d.stats) || {};
+                            if (!live) { return; }
+                            live.textContent = 'สว่างจริง '
+                                + (st.mean_brightness != null ? st.mean_brightness.toFixed(1) : '—')
+                                + '/255 · พิกเซลล้น '
+                                + (st.clip_pct != null ? st.clip_pct.toFixed(1) : '—') + '%'
+                                + ' · กล้อง ' + (st.fps != null ? st.fps.toFixed(1) : '—') + ' fps';
+                        }).catch(function () {});
+                }, 2000);
+            } else {
+                clearInterval(tune.poll);
+                if (live) { live.textContent = '— (ยังไม่ได้เริ่มกล้อง)'; }
+            }
         }
     };
 })();

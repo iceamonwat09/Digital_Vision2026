@@ -428,3 +428,47 @@ def test_the_ladder_marks_dark_frames(monkeypatch):
     rows, _ = hx.run_ladder(cam, detector_needs_snr(), [2000.0], frames=3)
     assert rows[0]["dark"] is True
     assert hx.summarize(rows, "ng").get("all_dark") is True
+
+
+# ── ค่าคงที่ที่ใช้ทั้ง Python และ JS ต้องไม่เพี้ยนข้ามไฟล์ ─────────────
+# แถบจูนเร็วคำนวณ "เบลอที่ไลน์" และ "เกนที่ต้องชดเชย" ฝั่งเบราว์เซอร์เอง
+# (ต้องตอบทันทีระหว่างลากสไลเดอร์) ⇒ ถ้าค่าไม่ตรงกับฝั่ง Python ผู้ใช้จะเห็น
+# ตัวเลขคนละชุดจากหน้าจอเดียวกัน แล้วไม่มีอะไรบอกเลยว่าอันไหนถูก
+def _js():
+    path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                        "static", "js", "hik_exposure.js")
+    with open(path, encoding="utf-8") as f:
+        return f.read()
+
+
+def test_js_line_speed_matches_config():
+    import re
+    import config
+    m = re.search(r"var LINE_PX_S = ([\d.]+)", _js())
+    assert m, "ไม่พบ LINE_PX_S ใน hik_exposure.js"
+    assert float(m.group(1)) == float(config.HIK_BURST_LINE_SPEED_PX_S)
+
+
+def test_js_target_mean_matches_python():
+    import re
+    m = re.search(r"var TARGET_MEAN = ([\d.]+)", _js())
+    assert m and float(m.group(1)) == hx.TARGET_MEAN
+
+
+def test_js_blur_target_matches_config():
+    import re
+    import config
+    m = re.search(r"var BLUR_TARGET_PX = ([\d.]+)", _js())
+    assert m and float(m.group(1)) == float(config.HIK_EXPOSURE_BLUR_TARGET_PX)
+
+
+def test_quick_tune_elements_exist_in_the_template():
+    """`$('id')` ที่ไม่มีจริงจะเงียบ — ฟีเจอร์หายไปเฉย ๆ (กับดักประจำของ repo นี้)"""
+    import re
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    with open(os.path.join(root, "templates", "index.html"), encoding="utf-8") as f:
+        html = f.read()
+    for el in sorted(set(re.findall(r"\$\('(hikTune\w+)'\)", _js()))):
+        assert 'id="%s"' % el in html, "JS อ้าง #%s แต่ไม่มีใน template" % el
+    assert ".hik-tune-nudge button" in _js()
+    assert 'class="hik-tune-nudge"' in html
