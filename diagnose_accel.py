@@ -133,6 +133,48 @@ def show_packages(dev):
 
 
 # ------------------------------------------------------- ③ ไฟล์ export บนดิสก์
+def _ir_report(pt_path):
+    """
+    เปิด IR ของ OpenVINO ดู **จำนวน output จริง** — หลักฐานตรง ๆ ว่า export เสียไหม.
+
+    ⚠️ ทำไมต้องดูตรงนี้: โมเดล **segmentation** ต้องมี 2 output
+    (กล่อง `(1,38,N)` + prototype mask `(1,32,H,W)`). ถ้า export ออกมาเหลือ
+    output เดียว OpenVINO จะ **โหลดสำเร็จ** แล้วไปพังตอน ultralytics ทำ
+    `preds[1]` ⇒ ข้อความ `index 1 is out of bounds for dimension 0 with size 1`
+    ซึ่งอ่านแล้วเดาต้นเหตุไม่ออกเลย. เกิดจริงกับ `bestX.pt` บนสถานี 25 ส.ค.
+    """
+    stem = os.path.basename(pt_path)[:-3]
+    xml = os.path.join(os.path.dirname(pt_path), stem + "_openvino_model", stem + ".xml")
+    if not os.path.exists(xml):
+        return
+    task = None
+    side = pt_path[:-3] + ".onnx.task"          # sidecar ที่ระบบจดไว้ (ไม่ต้องโหลด .pt)
+    try:
+        with open(side, "r", encoding="utf-8") as f:
+            task = f.read().strip() or None
+    except Exception:
+        pass
+    try:
+        import openvino as ov
+        outs = ov.Core().read_model(xml).outputs
+    except Exception as e:
+        kv("  └ IR outputs", "อ่านไม่ได้ (%s)" % e)
+        return
+    shapes = []
+    for o in outs:
+        try:
+            shapes.append(str(o.get_partial_shape()))
+        except Exception:
+            shapes.append("?")
+    kv("  └ IR outputs", "%d ตัว %s%s"
+       % (len(outs), " · ".join(shapes), (" · task=%s" % task) if task else ""))
+    if task == "segment" and len(outs) < 2:
+        print("     ❌ **IR เสีย** — โมเดล segmentation ต้องมี 2 output (กล่อง + prototype mask)")
+        print("        มีตัวเดียว ⇒ OpenVINO โหลดผ่านแต่ตรวจไม่ได้ (smoke test จะจับได้)")
+        print("        แก้: ลบโฟลเดอร์ %s แล้วเปิดระบบใหม่เพื่อ export ใหม่"
+              % os.path.basename(os.path.dirname(xml)))
+
+
 def _is_stale(pt_path, export_path):
     """ถามตรรกะตัวจริงว่า 'ต้อง export ใหม่ไหม' โดยไม่ต้องโหลดโมเดล."""
     D = _detector_cls()
@@ -174,6 +216,8 @@ def show_exports(pt_path):
             time.strftime("%Y-%m-%d %H:%M", time.localtime(os.path.getmtime(path))),
             mark, "— ตัดสินไม่ได้" if stale is None
             else ("จะ export ใหม่" if stale else "ใช้ของเดิมได้")))
+        if label == "OpenVINO IR":
+            _ir_report(pt_path)
 
 
 # --------------------------------------------------------- ④ เส้นทางจริง + เวลา
@@ -238,9 +282,18 @@ def verdict_one(pt_path, code, det, dev):
         print("       · เช็คว่า iGPU ไม่ถูกปิดใน BIOS / Device Manager")
         print("       · ถ้าเสียบจอผ่านการ์ดแยก iGPU อาจถูกปิดไว้")
     elif "smoke" in note or "failed" in note:
-        print("  ▶ ต้นเหตุ ③  เห็น GPU แต่ใช้งานจริงไม่ได้ (โหลด/smoke test ล้ม)")
-        print("       รุ่น openvino ไม่เข้ากับ py3.9/ultralytics — ลง 2024.6.0 แล้วลบ")
-        print("       โฟลเดอร์ *_openvino_model ทิ้งเพื่อบังคับ export ใหม่")
+        stem = os.path.basename(pt_path)[:-3]
+        print("  ▶ ต้นเหตุ ③  OpenVINO **โหลด IR สำเร็จ** แต่ตรวจภาพจริงไม่ผ่าน")
+        print("     ⇒ ไม่ใช่เรื่องไดรเวอร์/แพ็กเกจ (อีกสองโมเดลใช้ iGPU ได้อยู่)")
+        print("     ⇒ **ไฟล์ IR ของโมเดลตัวนี้เสีย** — ดู 'IR outputs' ในข้อ ③")
+        print("     แก้ (ทีละขั้น อย่าลบของตัวอื่น):")
+        print("       1) ปิด app.py")
+        print("       2) rmdir /s /q weights\\can_dent\\%s_openvino_model" % stem)
+        print("       3) py -3.9 diagnose_accel.py --weights weights\\can_dent\\%s.pt" % stem)
+        print("          (จะ export ใหม่ให้ แล้วบอกว่าผ่าน smoke test ไหม)")
+        print("       4) ผ่านแล้ว **ต้อง** ยืนยันความแม่นก่อนใช้งานจริง:")
+        print("          py -3.9 verify_openvino.py --weights weights\\can_dent\\%s.pt "
+              "--images <โฟลเดอร์ภาพ NG จริง>" % stem)
     else:
         print("  ▶ ดูบรรทัด 'ข้าม →' ในข้อ ④ ว่าชั้นไหนถูกข้ามเพราะอะไร")
     print()
