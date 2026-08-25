@@ -270,3 +270,37 @@ def test_skip_reason_reaches_the_badge(monkeypatch, tmp_path):
     d._check_downgraded("ONNX")
     assert d.backend_downgraded is True
     assert "ไม่เห็นอุปกรณ์" in d.backend_note, d.backend_note
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# diagnose_accel: ต้องตรวจ **ทุก .pt** ในโฟลเดอร์ ไม่ใช่แค่ config.MODEL_PATH
+#
+# 🐛 ที่มา — สถานี 25 ส.ค. 2026: สคริปต์ default ไปที่ `config.MODEL_PATH`
+#    (= best.pt) แล้วรายงาน "✅ OpenVINO@intel:gpu ตามที่ตั้งไว้" **ทั้งที่ระบบ
+#    กำลังวิ่ง bestX.pt บน ONNX/CPU อยู่** — โมเดลที่ใช้จริงมาจากตัวที่เลือกบน
+#    หน้าเว็บ และ **แต่ละ .pt มี export แยกของตัวเอง**. เครื่องมือวินิจฉัยที่ให้
+#    ไฟเขียวผิดตัว = คำตอบที่ผิดแบบมั่นใจ (กฎเหล็กข้อ 2) แย่กว่าไม่มีเครื่องมือ
+# ───────────────────────────────────────────────────────────────────────────
+def test_diagnose_defaults_to_every_weight_in_the_folder(tmp_path, monkeypatch):
+    import config as appcfg
+    import diagnose_accel as da
+    d = tmp_path / "can_dent"
+    d.mkdir()
+    for n in ("best.pt", "bestX.pt", "notes.txt"):
+        (d / n).write_bytes(b"x")
+    monkeypatch.setattr(appcfg, "MODEL_PATH", str(d / "best.pt"), raising=False)
+    got = [os.path.basename(p) for p in da._weight_files(None)]
+    assert got == ["bestX.pt", "best.pt"] or got == ["best.pt", "bestX.pt"], got
+    assert "notes.txt" not in got
+
+
+def test_diagnose_honours_explicit_weights(tmp_path, monkeypatch):
+    import config as appcfg
+    import diagnose_accel as da
+    d = tmp_path / "can_dent"
+    d.mkdir()
+    (d / "best.pt").write_bytes(b"x")
+    (d / "bestX.pt").write_bytes(b"x")
+    monkeypatch.setattr(appcfg, "MODEL_PATH", str(d / "best.pt"), raising=False)
+    got = da._weight_files([str(d / "bestX.pt")])
+    assert [os.path.basename(p) for p in got] == ["bestX.pt"]

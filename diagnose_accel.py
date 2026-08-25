@@ -142,7 +142,7 @@ def _is_stale(pt_path, export_path):
 
 
 def show_exports(pt_path):
-    head("③ ไฟล์ export บนดิสก์ (ตัวที่ทำให้ 'ต้อง export ใหม่ทุกครั้ง')")
+    print()
     D = _detector_cls()
     if D is None:
         return
@@ -178,8 +178,7 @@ def show_exports(pt_path):
 
 # --------------------------------------------------------- ④ เส้นทางจริง + เวลา
 def show_runtime(pt_path, rounds):
-    head("④ โหลดโมเดลด้วยเส้นทางเดียวกับ app.py แล้ววัดเวลาจริง")
-    print("  (ขั้นนี้อาจ export ใหม่ถ้าไฟล์ไม่ตรง — เหมือนตอนเปิด app.py ทุกประการ)\n")
+    print("\n  ── %s ──" % os.path.basename(pt_path))
     D = _detector_cls()
     if D is None:
         return 2, None
@@ -189,6 +188,10 @@ def show_runtime(pt_path, rounds):
     kv("load_model()", "%s · ใช้เวลา %.1f วิ" % ("สำเร็จ" if ok else "❌ ล้มเหลว", time.time() - t0))
     if not ok:
         return 2, det
+    try:
+        kv("คลาสของโมเดล", list(det.model.names.values()))
+    except Exception:
+        pass
     kv("backend ที่ใช้จริง", det.backend_label)
     kv("ตกไปตัวที่ช้ากว่าไหม", "🐢 ใช่" if det.backend_downgraded else "✅ ไม่")
     if det.backend_note:
@@ -214,20 +217,16 @@ def show_runtime(pt_path, rounds):
 
 
 # ----------------------------------------------------------------- ⑤ สรุป
-def verdict(code, det, dev):
-    head("⑤ สรุป")
+def verdict_one(pt_path, code, det, dev):
+    name = os.path.basename(pt_path)
     if code == 2 or det is None:
-        print("  ❌ โหลดโมเดลไม่สำเร็จ — ดูข้อความด้านบน")
+        print("  ❌ %-12s โหลดโมเดลไม่สำเร็จ — ดูข้อความด้านบน" % name)
         return
     if code == 0:
-        print("  ✅ ใช้ **%s** ตามที่ตั้งไว้ — ไม่มีการถอยไป backend ที่ช้ากว่า"
-              % det.backend_label)
-        if dev:
-            print("     ยืนยันความแม่นซ้ำได้ด้วย:")
-            print("       py -3.9 verify_openvino.py --weights <.pt> --images <โฟลเดอร์ภาพจริง>")
+        print("  ✅ %-12s ใช้ **%s** ตามที่ตั้งไว้" % (name, det.backend_label))
         return
     note = (det.backend_note or "").lower()
-    print("  🐢 ใช้ **%s** ซึ่งช้ากว่าที่ตั้งไว้" % det.backend_label)
+    print("  🐢 %s ใช้ **%s** ซึ่งช้ากว่าที่ตั้งไว้" % (name, det.backend_label))
     print("     เหตุผลที่ระบบบันทึกไว้: %s\n" % (det.backend_note or "ไม่ทราบ"))
     if "import ล้มเหลว" in det.backend_note or "ไม่ได้ติดตั้ง" in det.backend_note:
         print("  ▶ ต้นเหตุ ①  แพ็กเกจหาย — แก้:")
@@ -244,30 +243,77 @@ def verdict(code, det, dev):
         print("       โฟลเดอร์ *_openvino_model ทิ้งเพื่อบังคับ export ใหม่")
     else:
         print("  ▶ ดูบรรทัด 'ข้าม →' ในข้อ ④ ว่าชั้นไหนถูกข้ามเพราะอะไร")
+    print()
+
+
+def _weight_files(explicit):
+    """
+    ไฟล์ .pt ที่ต้องตรวจ.
+
+    ⚠️ **ค่าเริ่มต้นตรวจ *ทุกตัว* ในโฟลเดอร์ ไม่ใช่แค่ `config.MODEL_PATH`** —
+    โมเดลที่ระบบใช้จริงมาจาก **ตัวที่เลือกบนหน้าเว็บ** (`resolve_model_path`)
+    ไม่ใช่ค่าใน config, และ **แต่ละ .pt มี export ของตัวเองแยกกัน** ⇒ ตัวหนึ่ง
+    วิ่งบน iGPU อยู่ ขณะที่อีกตัวตกไป CPU ได้สบาย ๆ. ตรวจตัวเดียวแล้วสรุปว่า
+    "ปกติดี" = คำตอบที่ผิดแบบมั่นใจ (กฎเหล็กข้อ 2) — เกิดจริงบนสถานี 25 ส.ค.
+    (ตรวจ `best.pt` ได้ ✅ ทั้งที่ระบบกำลังวิ่ง `bestX.pt` บน ONNX/CPU)
+    """
+    if explicit:
+        out = []
+        for w in explicit:
+            out.append(w if os.path.isabs(w) else os.path.join(ROOT, w))
+        return out
+    base = getattr(config, "MODEL_PATH", "")
+    if base and not os.path.isabs(base):
+        base = os.path.join(ROOT, base)
+    d = os.path.dirname(base)
+    if not os.path.isdir(d):
+        return [base] if base else []
+    pts = sorted(os.path.join(d, f) for f in os.listdir(d) if f.lower().endswith(".pt"))
+    return pts or ([base] if base else [])
 
 
 def main():
     ap = argparse.ArgumentParser(description="ทำไมระบบไม่ใช้ iGPU — ไล่ทุกจุดตัดสิน")
-    ap.add_argument("--weights", default=None, help="ไฟล์ .pt (ค่าเริ่มต้น = config.MODEL_PATH)")
+    ap.add_argument("--weights", action="append", default=None,
+                    help="ไฟล์ .pt (ระบุซ้ำได้; ไม่ระบุ = ตรวจทุกตัวในโฟลเดอร์ weights)")
     ap.add_argument("--quick", action="store_true", help="ไม่โหลดโมเดล/ไม่ export")
     ap.add_argument("--rounds", type=int, default=8, help="จำนวนครั้งที่วัดเวลา (ค่าเริ่มต้น 8)")
     a = ap.parse_args()
 
-    pt = a.weights or getattr(config, "MODEL_PATH", "")
-    if pt and not os.path.isabs(pt):
-        pt = os.path.join(ROOT, pt)
+    pts = _weight_files(a.weights)
+    if not pts:
+        print("ไม่พบไฟล์ .pt ให้ตรวจ (ระบุด้วย --weights)")
+        return 2
 
     dev = show_config()
     show_packages(dev)
-    show_exports(pt)
+
+    head("③ ไฟล์ export บนดิสก์ (ตัวที่ทำให้ 'ต้อง export ใหม่ทุกครั้ง')")
+    print("  ⚠️ โมเดลที่ระบบใช้จริง = ตัวที่เลือกบนหน้าเว็บ ไม่ใช่ค่าใน config")
+    print("     ⇒ ตรวจ **ทุกตัว** ในโฟลเดอร์ เพราะแต่ละตัวมี export ของตัวเอง")
+    for pt in pts:
+        show_exports(pt)
     if a.quick:
         head("⑤ สรุป")
         print("  (โหมด --quick: ยังไม่ได้โหลดโมเดลจริง — รันซ้ำโดยไม่ใส่ --quick")
         print("   เพื่อดูว่า **สุดท้ายแล้วระบบใช้ backend ไหน** และเร็วแค่ไหน)")
         return 0
-    code, det = show_runtime(pt, max(1, a.rounds))
-    verdict(code, det, dev)
-    return code
+
+    head("④ โหลดโมเดลด้วยเส้นทางเดียวกับ app.py แล้ววัดเวลาจริง")
+    print("  (ขั้นนี้อาจ export ใหม่ถ้าไฟล์ไม่ตรง — เหมือนตอนเปิด app.py ทุกประการ)")
+    results = []
+    for pt in pts:
+        results.append((pt,) + tuple(show_runtime(pt, max(1, a.rounds))))
+
+    head("⑤ สรุป")
+    worst = 0
+    for pt, code, det in results:
+        verdict_one(pt, code, det, dev)
+        worst = max(worst, code)
+    if worst == 0 and dev:
+        print("  ยืนยันความแม่นซ้ำได้ด้วย:")
+        print("    py -3.9 verify_openvino.py --weights <.pt> --images <โฟลเดอร์ภาพจริง>")
+    return worst
 
 
 if __name__ == "__main__":
