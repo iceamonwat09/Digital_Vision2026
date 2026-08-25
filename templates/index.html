@@ -1437,6 +1437,18 @@
                         ' / inf ' + Math.round(p.inf_ms) + 'ms' +
                         ' / enc ' + (p.enc_ms != null ? p.enc_ms.toFixed(1) : '?') + 'ms' +
                         ' / disp ' + (p.disp_fps != null ? Math.round(p.disp_fps) : '?') + 'fps';
+                    // backend ที่ใช้จริง — ตกไปตัวที่ช้ากว่า = ต้องเห็นทันที ไม่ใช่
+                    // ต้องไปไล่อ่าน log บนคอนโซล (บทเรียนจากสถานี 25 ส.ค.)
+                    const bk = data.backend || {};
+                    if (bk.label) {
+                        liveStats.textContent += ' / ' + bk.label;
+                        if (bk.downgraded) { liveStats.textContent += ' 🐢'; }
+                    }
+                    liveStats.style.color = bk.downgraded ? '#fca5a5' : '';
+                    liveStats.title = bk.downgraded
+                        ? ('⚠️ ตกไปใช้ backend ที่ช้ากว่าที่ตั้งไว้ — ' + (bk.note || '')
+                           + '\nตรวจ: py -3.9 -c "import openvino; print(openvino.__version__)"')
+                        : '';
                     liveStats.classList.toggle('stacked', currentSource === 'hik');
                     liveStats.style.display = '';
                 } else {

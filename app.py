@@ -1837,6 +1837,13 @@ def get_detection_status():
         # Live-pipeline perf numbers for the USB stats badge (additive field —
         # older clients simply ignore it). Empty dict until the loops warm up.
         "perf": _perf_snapshot(),
+        # backend ที่ใช้จริง — ถ้าตกไปตัวที่ช้ากว่าโดยเงียบ ๆ ผู้ใช้จะเห็นแค่
+        # "ระบบช้าลง" โดยไม่รู้สาเหตุ (เกิดจริงบนสถานี 25 ส.ค.: 50 → 378 ms)
+        "backend": {
+            "label": getattr(detector, "backend_label", None) if detector else None,
+            "downgraded": bool(getattr(detector, "backend_downgraded", False)) if detector else False,
+            "note": getattr(detector, "backend_note", "") if detector else "",
+        },
         "camera_initialized": camera.is_initialized if camera else False,
         "detector_loaded": detector.model is not None if detector else False,
         "database_connected": db.is_connected if db else False,

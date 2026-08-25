@@ -24,15 +24,21 @@
 ## 🚦 อ่านตรงนี้ก่อน — สถานะล่าสุด 25 ส.ค. 2026 (สำหรับแชทใหม่)
 
 **Branch: `claude/can-dent-detection-hikrobot-test-3zhqg9`** · `CONFIG_VERSION` =
-**`2026.08.25-fpsceiling`** · pytest **784 ผ่าน / 5 fail เดิม** (Label Paper `FieldResult`)
+**`2026.08.25-accelfix`** · pytest **795 ผ่าน / 5 fail เดิม** (Label Paper `FieldResult`)
 
-### 🔴 งานเร่งด่วนอันดับ 1 — inference ช้าลง 3-8 เท่า (ยังไม่ได้แก้)
+### ✅ แก้แล้ว — inference ช้าลง 3-8 เท่า (`2026.08.25-accelfix`)
 
-`inf` บนแถบ perf วัดได้ **155-378 ms** ทั้งที่เคยได้ **45-50 ms** บน iGPU
-⇒ **แก้ข้อนี้ก่อนวัดอะไรต่อ** เพราะมันบีบทุกอย่าง (fps ของกล้อง · เฟรมที่ทิ้ง ·
-ความเร็ว "ถ่าย 1 เฟรม"). สมมติฐาน: หลังกู้ `bestX.pt` คืนมา ไฟล์ `.pt` ใหม่กว่า IR
-⇒ backend ตกไป ONNX CPU / PyTorch. รายละเอียด+วิธีตรวจอยู่ในหัวข้อ
-"🚨 ของถดถอยที่เจอจากผลนี้"
+`inf` วัดได้ **155-378 ms** ทั้งที่เคยได้ **45-50 ms** บน iGPU. ต้นเหตุคือ
+**ตัวตรวจ "export ล้าสมัย" ใช้ mtime** ⇒ การ *กู้ไฟล์ `bestX.pt` เดิมกลับมา*
+ทำให้ mtime = "ตอนนี้" ⇒ ใหม่กว่า IR ⇒ สั่ง re-export ทุกครั้งที่เปิดโปรแกรม
+พอ export ล้มเหลว ระบบ **ตกไปวิ่ง PyTorch/CPU อย่างเงียบ ๆ**
+
+**แก้ 3 ชั้น** (ดูหัวข้อ "🔧 แก้ต้นเหตุ inference ช้า")
+⇒ **ครั้งหน้าถ้าเกิดอีก จะเห็นทันทีบนแถบ perf: `... / PyTorch 🐢` เป็นสีแดง**
+
+▶️ **สิ่งที่ต้องทำบนสถานี:** `git pull` → `py -3.9 app.py` → ดูแถบ perf
+- ขึ้น **`OpenVINO@intel:gpu`** และ `inf ~50 ms` = จบ ✅
+- ขึ้น **`PyTorch 🐢`** = อ่าน tooltip/log ซึ่งจะบอกสาเหตุตรง ๆ แล้วแก้ตามนั้น
 
 ### 🎯 ค่าที่ควรใช้กับไลน์ (จากผลวัด 3 ROI)
 
@@ -798,6 +804,41 @@ py -3.9 verify_openvino.py --weights weights\can_dent\bestX.pt --images sample_c
 **เฟรมหาย 6,700 → 8,153 → 13,169** (ตัวนับสะสมตั้งแต่เปิดกล้อง ไม่ได้รีเซ็ตตอนเปลี่ยน ROI
 ⇒ เทียบข้าม ROI ตรง ๆ ไม่ได้) แต่การที่มันโตเร็วขนาดนี้ยืนยันว่า **กล้องผลิตเฟรมเร็วกว่า
 ที่เครื่องรับไหว** — อาการเดียวกับ inference ที่ช้า
+
+### 🔧 แก้ต้นเหตุ inference ช้า — mtime → hash + ทำให้การถดถอย "มองเห็นได้" (25 ส.ค. 2026)
+
+**ต้นเหตุ:** `_maybe_openvino()`/`_maybe_onnx()` ตัดสิน "ต้อง export ใหม่ไหม" ด้วย
+`os.path.getmtime(pt) > os.path.getmtime(export)` ⇒ **การคัดลอกไฟล์เดิมกลับมา**
+(กู้จากถังขยะ / คัดจากที่สำรอง) ทำให้ mtime กลายเป็น "ตอนนี้" ⇒ ใหม่กว่า IR เสมอ
+⇒ re-export ทุกครั้งที่เปิดโปรแกรม · ถ้า export ล้ม → **ตกไป CPU เงียบ ๆ**
+
+| ชั้น | แก้อะไร |
+|---|---|
+| **① ตัวตรวจ stale** | เทียบ **sha1 ของเนื้อ `.pt`** เก็บใน sidecar `<export>.src` แทน mtime ⇒ ไฟล์เนื้อเดิม = ไม่ export ใหม่ · เทรนใหม่จริง (เนื้อเปลี่ยน) = export ใหม่ตามเดิม |
+| **② การถดถอยต้องดัง** | ตกไป backend ที่ช้ากว่า = `logger.error` พร้อม **คำสั่งที่ต้องรันเพื่อแก้** (เดิมเป็น warning ที่จมอยู่ในคอนโซล) |
+| **③ มองเห็นบนหน้าเว็บ** | `detector.backend_label/backend_downgraded/backend_note` → `/api/detection/status` → **แถบ perf ต่อท้ายว่า `/ OpenVINO@intel:gpu` หรือ `/ PyTorch 🐢` (สีแดง + tooltip บอกเหตุผล)** |
+
+**⚠️ จุดที่เกือบพลาด — ธง `downgraded` ตอนแรกไม่ทำงาน:** เส้นทางที่พบบ่อยที่สุดคือ
+`_maybe_*` คืน `None` **ตั้งแต่ต้น** (import ไม่ได้ / ไม่พบอุปกรณ์ / export ล้ม) ซึ่ง
+**ไม่เคยผ่าน `except` ของลูปเลย** ⇒ ถ้าดูแค่ลูปจะรายงานว่า "ปกติดี" ทั้งที่ตกไป CPU แล้ว.
+แก้เป็น `_check_downgraded()` ที่เทียบกับ **สิ่งที่ config ขอไว้** ไม่ใช่ดูว่าลูปพังไหม
+
+**ยืนยันบน container (จำลองเคสสถานี):**
+```
+🐢 กำลังใช้ **PyTorch** ซึ่งไม่ใช่ตัวที่เร็วที่สุดที่ตั้งไว้
+   (OpenVINO@intel:gpu: ไม่พบอุปกรณ์นี้ในเครื่อง · ONNX: no export in container)
+   ตรวจ: py -3.9 -c "import openvino;print(openvino.__version__)" · ต้องได้ 2024.6.0
+แถบ perf: cam 265fps / inf 201ms / enc 1.6ms / disp 5fps / PyTorch 🐢   ← สีแดง
+```
+
+**4 เคสของตัวตรวจ stale ที่พิสูจน์แล้ว** (`tests/test_accel_backend.py` 11 ตัว):
+① export ตรงกัน → ไม่ทำใหม่ · ② **กู้ไฟล์เดิม (mtime ใหม่กว่า) → ไม่ทำใหม่** ✅ ·
+③ เทรนใหม่ (เนื้อเปลี่ยน) → ทำใหม่ · ④ อัปเกรดจากเวอร์ชันที่ยังไม่มี sidecar และ
+export ใหม่กว่า `.pt` → ไม่ทำใหม่ + จด sidecar ให้เลย
+
+> 🐛 **บั๊กที่สร้างเองในไฟล์เทสต์ใหม่:** stub `ultralytics` ด้วย `ModuleType` เปล่า
+> ซึ่ง `__spec__ is None` ⇒ `importlib.util.find_spec()` **โยน ValueError**
+> ⇒ `test_hik_routes.py` ทั้งไฟล์พังตอน collect. ต้องใส่ `ModuleSpec` ให้ stub เสมอ
 
 ### ⏸️ หยุดโมเดลระหว่างถ่ายรัว (`HIK_BURST_PAUSE_INFERENCE`, default **ปิด**)
 
@@ -2117,7 +2158,7 @@ A, B, C, …) ⇒ ทุกกลุ่มมีสมาชิก 1 ตัว �
   ถ้า N8N ผูกเฉพาะ IPv4 จะต่อไม่ติดโดยไม่มี error ที่อ่านออก. ย้ายเครื่องเมื่อไรตั้ง env ทับได้
   ไม่ต้องแก้โค้ด. ⚠️ **IP `172.32.201.106` ที่เหลือใน `generate_cert.py`/README = IP ของสถานีเอง
   สำหรับใบรับรอง HTTPS ห้ามเปลี่ยนเป็น 127.0.0.1** ไม่งั้นเครื่องอื่นเปิดเว็บไม่ได้.
-- Tests: `pytest tests/` — **784 ผ่าน / 5 fail (pre-existing)** (artwork/label/barcode/auth —
+- Tests: `pytest tests/` — **795 ผ่าน / 5 fail (pre-existing)** (artwork/label/barcode/auth —
   **ตอนนี้ครอบคลุมกล้อง Hikrobot แล้วผ่าน SDK ปลอม แต่ยังไม่ครอบคลุม live loop ของ USB/RTSP**).
   เพิ่มล่าสุด: **`tests/test_blur_tolerance.py` 27 ตัว** (เครื่องมือวัดเกณฑ์ความเบลอ —
   เน้นกันเครื่องมือ "โกหก": ภาพที่โมเดลไม่เคยเห็นตำหนิต้องไม่ถูกนับว่าทน),
@@ -2136,7 +2177,7 @@ A, B, C, …) ⇒ ทุกกลุ่มมีสมาชิก 1 ตัว �
   `tests/test_artwork_ownership.py` 30 ตัว (สิทธิ์เห็นประวัติ + ชื่อผู้ตรวจ).
   ⚠️ `tests/test_inspection_golden.py` **fail 5 ตัวอยู่แล้ว** (pre-existing, `NameError: FieldResult`
   ในโมดูล Label Paper) — ไม่เกี่ยวกับ artwork. ยืนยันด้วย `git stash` ก่อนโทษการแก้ของตัวเอง.
-- CONFIG_VERSION ปัจจุบัน: **`2026.08.25-fpsceiling`** (เช็คที่ footer ว่ารันโค้ดใหม่จริง).
+- CONFIG_VERSION ปัจจุบัน: **`2026.08.25-accelfix`** (เช็คที่ footer ว่ารันโค้ดใหม่จริง).
 
 ---
 
