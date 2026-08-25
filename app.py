@@ -1326,12 +1326,24 @@ def api_hik_burst_start():
     except (TypeError, ValueError):
         every_n = 1
 
+    # โหมด "คัดใบที่ดีที่สุดต่อหน้าต่างเวลา" — เปิดได้ต่อครั้งจากหน้าเว็บ แต่ต้อง
+    # ไม่เกินเพดานของ config (0 ใน config = ปิดทั้งระบบ = พฤติกรรมเดิม 100%)
+    cfg_window = int(getattr(config, "HIK_BURST_WINDOW_MS", 0) or 0)
+    try:
+        want_window = int(body.get("window_ms") or 0)
+    except (TypeError, ValueError):
+        want_window = 0
+    window_ms = max(0, min(5000, want_window)) if cfg_window > 0 else 0
+    if window_ms:
+        every_n = 1              # สองอย่างทำงานเดียวกัน — ใช้พร้อมกันได้ผลแย่ที่สุดของทั้งคู่
+
     status = live.start_dataset(
         root=getattr(config, "HIK_BURST_DIR", "data/hik_burst"),
         max_frames=int(getattr(config, "HIK_BURST_MAX_FRAMES", 3000)),
         every_n=every_n, duration_s=seconds,
         jpeg_quality=int(getattr(config, "HIK_BURST_JPEG_QUALITY", 95)),
         meta=_hik_burst_meta(live, seconds),
+        window_ms=window_ms,
     )
     if not status or (status.get("error") and not status.get("active")):
         return jsonify({"status": "error",
@@ -1402,7 +1414,9 @@ def api_hik_bursts():
                     "mm_per_px": getattr(config, "HIK_BURST_MM_PER_PX", None),
                     "autodetect_top": int(getattr(config, "HIK_BURST_AUTODETECT_TOP", 12)),
                     "can_pause_inference": bool(
-                        getattr(config, "HIK_BURST_PAUSE_INFERENCE", False))})
+                        getattr(config, "HIK_BURST_PAUSE_INFERENCE", False)),
+                    "window_ms_default": int(
+                        getattr(config, "HIK_BURST_WINDOW_MS", 0) or 0)})
 
 
 @app.route('/api/camera/hik/bursts/<name>', methods=['GET'])

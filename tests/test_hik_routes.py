@@ -867,3 +867,65 @@ def test_shot_without_detect_flag_keeps_the_old_one_call_behaviour(shotclient):
         assert d["verdict"] in ("ok", "ng")
         assert d["pending_detect"] is False
         assert d["image"].startswith("data:image/jpeg;base64,")
+
+
+# ── โหมด "คัดใบที่ดีที่สุดต่อหน้าต่างเวลา" ระดับ HTTP ────────────────
+def test_window_mode_is_off_unless_config_enables_it(bclient, monkeypatch):
+    """opt-in สองชั้น: config ต้องเปิด ไม่งั้นหน้าเว็บสั่งมาก็ไม่มีผล"""
+    monkeypatch.setattr(appmod.config, "HIK_BURST_WINDOW_MS", 0, raising=False)
+    assert _start_hik(bclient).status_code == 200
+    try:
+        r = bclient.post("/api/camera/hik/burst",
+                         json={"seconds": 2, "window_ms": 133})
+        assert r.status_code == 200, r.get_json()
+        assert appmod.camera._dataset.window_ms == 0, "config ปิดอยู่ ⇒ ต้องไม่เปิดให้"
+        bclient.delete("/api/camera/hik/burst")
+    finally:
+        bclient.post("/api/detection/stop")
+
+
+def test_window_mode_turns_on_and_disables_every_n(bclient, monkeypatch):
+    """เปิดโหมดหน้าต่างแล้ว every_n ต้องถูกละเว้น (สองอย่างทำงานเดียวกัน)"""
+    monkeypatch.setattr(appmod.config, "HIK_BURST_WINDOW_MS", 133, raising=False)
+    assert _start_hik(bclient).status_code == 200
+    try:
+        r = bclient.post("/api/camera/hik/burst",
+                         json={"seconds": 2, "window_ms": 133, "every_n": 7})
+        assert r.status_code == 200, r.get_json()
+        ds = appmod.camera._dataset
+        assert ds.window_ms == 133
+        assert ds.every_n == 1, "every_n ต้องถูกละเว้นเมื่ออยู่โหมดหน้าต่าง"
+        bclient.delete("/api/camera/hik/burst")
+    finally:
+        bclient.post("/api/detection/stop")
+
+
+def test_bursts_endpoint_advertises_the_window_default(bclient, monkeypatch):
+    monkeypatch.setattr(appmod.config, "HIK_BURST_WINDOW_MS", 200, raising=False)
+    d = bclient.get("/api/camera/hik/bursts").get_json()
+    assert d["window_ms_default"] == 200
+
+
+def test_window_mode_meta_lets_the_diagnosis_stay_correct(bclient, monkeypatch, tmp_path):
+    """
+    ⚠️ ในโหมดหน้าต่าง `saved × every_n` ใช้ประมาณอัตรากล้องไม่ได้อีกต่อไป
+    ⇒ meta ต้องมี `considered` และ diagnose ต้องใช้ค่านั้น ไม่งั้นระบบจะไป
+    กล่าวหาว่ากล้อง/สายช้าทั้งที่กล้องส่งมาเต็มอัตรา (คำแนะนำที่ผิดแบบมั่นใจ)
+    """
+    monkeypatch.setattr(appmod.config, "HIK_BURST_WINDOW_MS", 100, raising=False)
+    assert _start_hik(bclient).status_code == 200
+    try:
+        r = bclient.post("/api/camera/hik/burst",
+                         json={"seconds": 2, "window_ms": 100})
+        name = r.get_json()["session"]
+        time.sleep(2.5)
+        bclient.delete("/api/camera/hik/burst")
+        time.sleep(0.6)
+        meta = json.loads((tmp_path / "burst" / name / "meta.json").read_text("utf-8"))
+        assert meta["window_ms"] == 100
+        assert meta["considered"] > meta["saved"], "ต้องนับทุกเฟรมที่กล้องส่งมา"
+        g = hbmod.diagnose(meta)
+        assert g["delivered_fps"] > g["saved"] / max(0.1, g["elapsed_s"]), (
+            "อัตราของกล้องต้องมาจาก considered ไม่ใช่จำนวนไฟล์")
+    finally:
+        bclient.post("/api/detection/stop")

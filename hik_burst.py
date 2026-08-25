@@ -733,7 +733,11 @@ def diagnose(meta):
 
     every_n = max(1, int(meta.get("every_n") or 1))
     offered = saved + dropped                          # เฟรมที่ผ่านตัวกรอง every_n มาแล้ว
-    delivered = offered * every_n                      # เฟรมที่กล้องส่งถึงเราจริง
+    # เฟรมที่กล้องส่งถึงเราจริง. `considered` (ถ้ามี) คือจำนวนที่ **นับไว้จริง**
+    # ในเธรดจับภาพ — แม่นกว่าการคูณกลับด้วย every_n และเป็นทางเดียวที่ถูกต้อง
+    # ในโหมด "คัดต่อหน้าต่าง" ซึ่งจำนวนไฟล์ไม่ได้สัมพันธ์กับ every_n เลย
+    considered = meta.get("considered")
+    delivered = int(considered) if considered else offered * every_n
     delivered_fps = delivered / elapsed
 
     def delta(key):
@@ -756,6 +760,7 @@ def diagnose(meta):
         "timeouts": timeouts, "elapsed_s": round(elapsed, 1),
         "cam_fps": b.get("cam_fps") or a.get("cam_fps"),
         "stage_ms": meta.get("stage_ms") or {},
+        "window_ms": meta.get("window_ms") or 0,
         "framerate_enable": meta.get("framerate_enable"),
         "framerate": meta.get("framerate"),
         "packet_size": meta.get("packet_size"),

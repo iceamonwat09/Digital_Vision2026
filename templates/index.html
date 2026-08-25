@@ -169,6 +169,18 @@
                             <button type="button" data-every="7">1 ใน 7</button>
                             <button type="button" data-every="14">1 ใน 14</button>
                         </div>
+                        <label class="hik-check hik-window-row" id="hikBurstWindowRow" style="display:none">
+                            <input type="checkbox" id="hikBurstWindow">
+                            <span>🏆 เก็บ <b>ใบที่ดีที่สุดต่อช่วงเวลา</b> แทน "1 ใน N"
+                                <input id="hikBurstWindowMs" type="number" min="20" max="5000"
+                                       step="10" value="133" class="hik-win-ms"> ms</span>
+                        </label>
+                        <p class="control-hint" id="hikBurstWindowHint">"1 ใน N" ทิ้งเฟรมตามลำดับ
+                            ⇒ <b>ใบที่ดีที่สุดอาจเป็นใบที่ถูกทิ้งพอดี</b> · โหมดนี้ให้กล้องวิ่งเต็มอัตรา
+                            แล้วเก็บเฉพาะใบที่คมที่สุดในแต่ละช่วง ⇒ ได้ไฟล์เท่ากันแต่เป็นใบที่ดีกว่า ·
+                            ตั้งเท่าคาบของกระป๋อง 1 ใบ = ได้ ~1 ภาพต่อใบ
+                            (<b>450 ใบ/นาที = 133 ms</b> · 300 ใบ/นาที = 200 ms)</p>
+
                         <label class="hik-check hik-pause-row" id="hikBurstPauseRow" style="display:none">
                             <input type="checkbox" id="hikBurstPause">
                             <span>⏸️ หยุดโมเดลระหว่างถ่ายรัว
@@ -835,6 +847,8 @@
        #liveStats = ของ pipeline) — ทั้งคู่ absolute ที่พิกัดเดียวกัน จึงต้อง
        ดันแถบ perf ลงมาหนึ่งบรรทัด ไม่งั้นทับกันจนอ่านไม่ออกทั้งคู่ */
     #liveStats.stacked { top: 38px; }
+    .hik-win-ms { width: 70px; margin: 0 2px; padding: 1px 4px;
+                  border: 1px solid var(--gray-300, #cbd5e1); border-radius: 4px; }
 </style>
 {% endblock %}
 

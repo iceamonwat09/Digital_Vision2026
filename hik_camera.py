@@ -630,7 +630,8 @@ class _DatasetWriter(object):
 
     def __init__(self, root, max_frames=2000, jpeg_quality=95, every_n=1,
                  duration_s=0, min_free_mb=2048, meta=None,
-                 counters_cb=None, net_cb=None):
+                 counters_cb=None, net_cb=None,
+                 window_ms=0, window_crop=0.6):
         self.root = root
         # ค่าตั้งกล้อง ณ วินาทีที่เริ่มเก็บ — เขียนลง meta.json ข้าง ๆ ภาพ.
         # ถ้าไม่เก็บไว้ เปิดโฟลเดอร์ดูทีหลังจะไม่มีทางรู้ว่าถ่ายที่ exposure เท่าไร
@@ -666,6 +667,28 @@ class _DatasetWriter(object):
         self._stop = threading.Event()
         self._thread = None
 
+        # ── โหมด "คัดใบที่ดีที่สุดต่อหน้าต่างเวลา" ────────────────────────────
+        # ปัญหาของ ``every_n``: มันทิ้ง N-1 ใน N เฟรม **ตามลำดับ** ⇒ ใบที่ดีที่สุด
+        # ของกระป๋องใบนั้นอาจเป็นใบที่ถูกทิ้งพอดี. โหมดนี้ให้กล้องวิ่งเต็มอัตรา
+        # เหมือนเดิม แต่ **เก็บเฉพาะใบที่คมที่สุดในแต่ละช่วงเวลา** ⇒ จำนวนไฟล์
+        # เท่ากับ ``every_n`` แต่ได้ใบที่ดีกว่า และภาระดิสก์ลดลงเท่ากัน.
+        #
+        # ⚠️ ใช้ RAM แค่ **1 เฟรม** (ใบที่ดีที่สุดจนถึงตอนนี้) ไม่ใช่ ring buffer —
+        #    "ดีที่สุดจนถึงตอนนี้" ไม่ต้องเก็บใบที่แพ้ไปแล้ว
+        # ⚠️ การให้คะแนนทำใน **เธรดจับภาพ** จึงต้องถูกมาก (ย่อ 1/4 แล้ว Sobel)
+        # ⚠️ **ไม่ใช่ตัวกรองที่ทิ้งทั้งหน้าต่าง** — ทุกหน้าต่างเขียน 1 ใบเสมอ
+        #    ⇒ ถ้าคะแนนตัดสินผิด อย่างแย่ที่สุดคือได้ใบรอง ไม่ใช่ได้ศูนย์
+        # 0 = ปิด = พฤติกรรมเดิมทุกประการ (ใช้ ``every_n`` ตามเดิม)
+        self.window_ms = max(0, int(window_ms or 0))
+        self.window_crop = float(window_crop or 0.6)
+        self.considered = 0            # เฟรมที่กล้องส่งมาถึงตัวเขียนจริง (ทุกใบ)
+        self.windows = 0               # จำนวนหน้าต่างที่ปิดไปแล้ว
+        self._win_lock = threading.Lock()
+        self._win_frame = None         # ใบที่ดีที่สุดของหน้าต่างปัจจุบัน
+        self._win_score = -1.0
+        self._win_ts = 0.0
+        self._win_start = 0.0
+
     def start(self):
         stamp = time.strftime("%Y%m%d_%H%M%S")
         self.dir = os.path.join(self.root, stamp)
@@ -682,6 +705,8 @@ class _DatasetWriter(object):
         self._t0 = time.time()
         self.meta.setdefault("started_at", time.strftime("%Y-%m-%d %H:%M:%S"))
         self.meta["every_n"] = self.every_n
+        self.meta["window_ms"] = self.window_ms
+        self.meta["window_crop"] = self.window_crop if self.window_ms else None
         self.meta["jpeg_quality"] = self.jpeg_quality
         self.meta["diag_start"] = self._snapshot(net=True)
         self._write_meta()
@@ -714,6 +739,10 @@ class _DatasetWriter(object):
             data["frame_ts"] = [round(t, 6) for t in ts]
             data["saved"] = self.saved
             data["dropped"] = self.dropped
+            # เฟรมที่กล้องส่งถึงตัวเขียน "ทุกใบ" — โหมดหน้าต่างทำให้ saved × every_n
+            # ใช้ประมาณอัตราของกล้องไม่ได้อีกต่อไป จึงต้องบันทึกจำนวนจริงไว้
+            data["considered"] = self.considered
+            data["windows"] = self.windows
             data["finished_reason"] = self.finished_reason
             data["ended_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
             data["diag_end"] = self._snapshot(net=True)
@@ -744,27 +773,94 @@ class _DatasetWriter(object):
         except Exception:
             return None
 
+    @staticmethod
+    def _sharpness(frame, crop=0.6):
+        """
+        คะแนนความคมแบบถูกที่สุดที่ยังมีความหมาย — ใช้ในเธรดจับภาพ.
+
+        ย่อ 1/4 ก่อน (ลดงาน 16 เท่า) แล้ววัดพลังงานขอบด้วย Sobel เฉพาะ
+        **กลางเฟรม** ตามสัดส่วน ``crop``: วัตถุที่โผล่มาแค่ริมเฟรมจะแทบไม่เพิ่ม
+        พลังงานตรงกลาง ⇒ เป็นตัวแทนหยาบ ๆ ของ "เข้ามาอยู่กลางเฟรมแล้วและคม".
+        คืน ``-1.0`` เมื่อคำนวณไม่ได้ (จะถูกจัดว่าแพ้ทุกใบที่คำนวณได้)
+        """
+        if cv2 is None or frame is None:
+            return -1.0
+        try:
+            h, w = frame.shape[:2]
+            if crop and 0.1 <= crop < 1.0:
+                cw, ch = int(w * crop), int(h * crop)
+                x0, y0 = (w - cw) // 2, (h - ch) // 2
+                frame = frame[y0:y0 + ch, x0:x0 + cw]
+            small = cv2.resize(frame, (0, 0), fx=0.25, fy=0.25,
+                               interpolation=cv2.INTER_AREA)
+            if small.ndim == 3:
+                small = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
+            gx = cv2.Sobel(small, cv2.CV_32F, 1, 0, ksize=3)
+            gy = cv2.Sobel(small, cv2.CV_32F, 0, 1, ksize=3)
+            return float(np.mean(gx * gx + gy * gy))
+        except Exception:
+            return -1.0
+
+    def _enqueue(self, frame, ts):
+        """ส่งเฟรมเข้าคิวเขียน — จุดเดียวที่แตะคิว (ทั้งโหมดปกติและโหมดหน้าต่าง)."""
+        try:
+            self._q.put_nowait(frame)
+            self._ts.append(ts)
+        except queue.Full:
+            self.dropped += 1
+
+    def _flush_window(self, now):
+        """ปิดหน้าต่างปัจจุบัน: เขียนใบที่ดีที่สุด แล้วเริ่มหน้าต่างใหม่."""
+        with self._win_lock:
+            frame, ts = self._win_frame, self._win_ts
+            self._win_frame, self._win_score = None, -1.0
+            self._win_start = now
+        if frame is not None:
+            self.windows += 1
+            self._enqueue(frame, ts)
+
     def put(self, frame):
         """
         รับเฟรมจากเธรดจับภาพ — **ห้ามบล็อกเด็ดขาด** เพราะการจับภาพช้าลง = ผลตรวจเปลี่ยน.
         เฟรมที่คิวเต็มจะถูกทิ้งแล้วนับไว้ (ผู้ใช้ต้องเห็นตัวเลขนี้ ไม่ใช่หายเงียบ).
+
+        สองโหมด:
+          • ``window_ms == 0`` (ตั้งต้น) — เขียนทุกเฟรมที่ผ่าน ``every_n``
+          • ``window_ms > 0``  — เก็บ **ใบที่คมที่สุดของแต่ละช่วงเวลา** ใบเดียว
         """
         if self._thread is None:
             return
         self._seen += 1
-        if self.every_n > 1 and (self._seen % self.every_n) != 0:
-            return                                    # เก็บทุก N เฟรม (ลดภาระดิสก์)
+        self.considered += 1
+        now = time.time()
         if self.saved >= self.max_frames:
             self._finish("ครบจำนวนเฟรมที่ตั้งไว้ (%d)" % self.max_frames)
             return
-        if self.duration_s and (time.time() - self._t0) >= self.duration_s:
+        if self.duration_s and (now - self._t0) >= self.duration_s:
             self._finish("ครบเวลาที่ตั้งไว้ (%.0f วินาที)" % self.duration_s)
             return
-        try:
-            self._q.put_nowait(frame)
-            self._ts.append(time.time())
-        except queue.Full:
-            self.dropped += 1
+
+        if self.window_ms <= 0:
+            # ── โหมดเดิม ────────────────────────────────────────────────
+            if self.every_n > 1 and (self._seen % self.every_n) != 0:
+                return                                # เก็บทุก N เฟรม (ลดภาระดิสก์)
+            self._enqueue(frame, now)
+            return
+
+        # ── โหมดคัดต่อหน้าต่าง ──────────────────────────────────────────
+        # ⚠️ ``every_n`` ถูกละเว้นโดยตั้งใจ — สองอย่างนี้ทำงานเดียวกัน (ลดจำนวนไฟล์)
+        #    ถ้าใช้พร้อมกันจะกลายเป็นคัดจากเฟรมที่ถูกสุ่มทิ้งไปแล้ว = แย่ที่สุดของทั้งคู่
+        if not self._win_start:
+            self._win_start = now
+        score = self._sharpness(frame, self.window_crop)
+        with self._win_lock:
+            if score > self._win_score:
+                self._win_score = score
+                self._win_frame = frame
+                self._win_ts = now
+            due = (now - self._win_start) * 1000.0 >= self.window_ms
+        if due:
+            self._flush_window(now)
 
     def _finish(self, reason):
         if self.finished_reason is None:
@@ -818,6 +914,9 @@ class _DatasetWriter(object):
         self._finish_meta()
 
     def stop(self):
+        # ปิดหน้าต่างที่ค้างอยู่ก่อน ไม่งั้น **ใบสุดท้ายหายไปเงียบ ๆ** ทุกครั้ง
+        if self.window_ms > 0 and self._thread is not None:
+            self._flush_window(time.time())
         self._stop.set()
         t = self._thread
         self._thread = None
@@ -830,6 +929,8 @@ class _DatasetWriter(object):
         mb = self.bytes / (1024.0 * 1024.0)
         return {"dir": self.dir, "saved": self.saved, "dropped": self.dropped,
                 "max_frames": self.max_frames, "every_n": self.every_n,
+                "window_ms": self.window_ms, "windows": self.windows,
+                "considered": self.considered,
                 "duration_s": self.duration_s, "error": self.error,
                 "elapsed_s": round(elapsed, 1) if self._t0 else 0,
                 "mb": round(mb, 1), "mb_per_s": round(mb / elapsed, 1) if elapsed else 0,
@@ -1695,7 +1796,7 @@ class HikCamera(object):
         return st
 
     def start_dataset(self, root=None, max_frames=None, every_n=1, duration_s=0,
-                      jpeg_quality=None, meta=None):
+                      jpeg_quality=None, meta=None, window_ms=0, window_crop=None):
         if self._dataset is not None:
             return self._dataset.status()
         root = root or _cfg("HIK_DATASET_DIR") or os.path.join("data", "hik_dataset")
@@ -1708,6 +1809,9 @@ class HikCamera(object):
                            every_n=every_n, duration_s=duration_s,
                            min_free_mb=_cfg("HIK_DATASET_MIN_FREE_MB", 2048),
                            meta=meta,
+                           window_ms=window_ms,
+                           window_crop=(window_crop if window_crop is not None
+                                        else _cfg("HIK_BURST_WINDOW_CROP", 0.6)),
                            # อ่านตัวแปรของตัวเองล้วน ๆ — ไม่แตะ SDK ไม่ต้องรอ lock
                            # จึงเรียกถี่ได้โดยไม่ทำให้การจับภาพช้าลง
                            counters_cb=lambda: {

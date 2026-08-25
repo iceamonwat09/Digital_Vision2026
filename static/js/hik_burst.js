@@ -70,17 +70,36 @@
             el.innerHTML = 'กด Start Detection ก่อน แล้วระบบจะบอกว่าจะได้กี่ภาพ';
             return;
         }
-        var shots = Math.round(fps * secs / every);
+        // โหมดหน้าต่าง: จำนวนภาพ = จำนวนหน้าต่าง (ไม่ขึ้นกับ every_n เลย)
+        var win = windowMs();
+        var shots, gap, how;
+        if (win > 0) {
+            shots = Math.round(secs * 1000 / win);
+            gap = win / 1000;
+            how = ' (ใบที่ดีที่สุดทุก ' + win + ' ms · คัดจาก '
+                + Math.max(1, Math.round(fps * win / 1000)) + ' เฟรม)';
+        } else {
+            shots = Math.round(fps * secs / every);
+            gap = every / fps;                 // เวลาระหว่างภาพที่เก็บจริง
+            how = (every > 1 ? ' (เก็บ 1 ใน ' + every + ' เฟรม)' : '');
+        }
         var mb = mp ? Math.round(shots * mp * EST_KB_PER_MP / 1024) : null;
-        var gap = every / fps;                 // เวลาระหว่างภาพที่เก็บจริง
         var warn = mb !== null && mb > 400;
         el.className = 'hik-burst-est' + (warn ? ' warn' : '');
         el.innerHTML = 'จะได้ราว <b>' + shots + '</b> ภาพ'
             + (mb !== null ? ' · <b>' + mb + '</b> MB' : '')
             + ' · ห่างกัน <b>' + Math.round(gap * 1000) + '</b> ms'
-            + (every > 1 ? ' (เก็บ 1 ใน ' + every + ' เฟรม)' : '')
-            + (warn ? '<br>⚠️ ไฟล์เยอะ — เพิ่ม “เก็บ 1 ใน N” เพื่อลดจำนวนภาพ '
+            + how
+            + (warn ? '<br>⚠️ ไฟล์เยอะ — เพิ่มช่วงเวลา หรือ “เก็บ 1 ใน N” เพื่อลดจำนวนภาพ '
                 + 'โดยที่ <b>ความเบลอของแต่ละภาพไม่เปลี่ยน</b>' : '');
+    }
+
+    /** 0 = ไม่ได้เปิดโหมดหน้าต่าง (ใช้ "1 ใน N" ตามเดิม) */
+    function windowMs() {
+        var ck = $('hikBurstWindow');
+        if (!ck || !ck.checked) { return 0; }
+        var v = Number(($('hikBurstWindowMs') || {}).value);
+        return (v >= 20 && v <= 5000) ? Math.round(v) : 0;
     }
 
     function markPresets(every) {
@@ -132,7 +151,8 @@
             body: JSON.stringify({
                 seconds: seconds,
                 every_n: num('hikBurstEveryN', 1),
-                pause_inference: !!($('hikBurstPause') || {}).checked
+                pause_inference: !!($('hikBurstPause') || {}).checked,
+                window_ms: windowMs()
             })
         })
             .then(function (r) { return r.json(); })
@@ -292,15 +312,44 @@
         loadSessions(name);
     }
 
+    /**
+     * เปิด/ปิดแถวของฟีเจอร์ที่ config อนุญาต.
+     *
+     * ⚠️ เดิมทำอยู่ใน `loadSessions()` อย่างเดียว ซึ่งถูกเรียก **เฉพาะตอนเปิด
+     * แกลเลอรี** ⇒ ช่องติ๊ก "หยุดโมเดลระหว่างถ่ายรัว" **ไม่โผล่เลย** จนกว่าจะ
+     * เผลอไปเปิดแกลเลอรีก่อน (จับได้ตอนขับด้วยเบราว์เซอร์จริง เทสต์ยูนิตมองไม่เห็น)
+     */
+    function applyCaps(d) {
+        if (!d) { return; }
+        if (d.autodetect_top) { state.autoTop = d.autodetect_top; }
+        var pr = $('hikBurstPauseRow');
+        if (pr) { pr.style.display = d.can_pause_inference ? '' : 'none'; }
+        var wr = $('hikBurstWindowRow');
+        var wh = $('hikBurstWindowHint');
+        var on = (d.window_ms_default || 0) > 0;
+        if (wr) { wr.style.display = on ? '' : 'none'; }
+        if (wh) { wh.style.display = on ? '' : 'none'; }
+        if (on) {
+            var ms = $('hikBurstWindowMs');
+            if (ms && !ms.dataset.touched) { ms.value = d.window_ms_default; }
+        }
+        var btn = $('hikGalDetectTopBtn');
+        if (btn) { btn.textContent = '🔍 ตรวจ ' + state.autoTop + ' ใบที่ดีที่สุด'; }
+    }
+
+    function loadCaps() {
+        fetch('/api/camera/hik/bursts')
+            .then(function (r) { return r.json(); })
+            .then(applyCaps)
+            .catch(function () { /* เงียบได้ — แถวจะยังซ่อนอยู่ตามเดิม */ })
+            .finally(refreshEstimate);
+    }
+
     function loadSessions(select) {
         fetch('/api/camera/hik/bursts')
             .then(function (r) { return r.json(); })
             .then(function (d) {
-                if (d.autodetect_top) { state.autoTop = d.autodetect_top; }
-                var pr = $('hikBurstPauseRow');
-                if (pr) { pr.style.display = d.can_pause_inference ? '' : 'none'; }
-                var btn = $('hikGalDetectTopBtn');
-                if (btn) { btn.textContent = '🔍 ตรวจ ' + state.autoTop + ' ใบที่ดีที่สุด'; }
+                applyCaps(d);
                 renderSessions(d.sessions || [], d.capturing);
                 var disk = $('hikGalDisk');
                 if (disk) {
@@ -774,6 +823,18 @@
                 });
             refreshEstimate();
 
+            loadCaps();          // แถวของฟีเจอร์ต้องโผล่ตั้งแต่เปิดหน้า ไม่ใช่หลังเปิดแกลเลอรี
+
+            var wck = $('hikBurstWindow');
+            if (wck) { wck.addEventListener('change', refreshEstimate); }
+            var wms = $('hikBurstWindowMs');
+            if (wms) {
+                wms.addEventListener('input', function () {
+                    wms.dataset.touched = '1';       // อย่าทับค่าที่ผู้ใช้พิมพ์เอง
+                    refreshEstimate();
+                });
+            }
+
             var pause = $('hikBurstPause');
             if (pause) {
                 // ⚠️ ค่าตั้งต้น = **ติ๊ก** — ระหว่างเก็บข้อมูลเราไม่ต้องการผลตรวจสด
@@ -847,6 +908,7 @@
             if (b && !state.capturing) { b.disabled = !active; }
             clearInterval(state.shapeTimer);
             if (active) {
+                loadCaps();
                 pollCameraShape();
                 // fps ขยับตาม ROI/exposure ที่ผู้ใช้แก้ระหว่างทาง ⇒ ตัวประมาณต้องตามด้วย
                 state.shapeTimer = setInterval(pollCameraShape, 4000);
