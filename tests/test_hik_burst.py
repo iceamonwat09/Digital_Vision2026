@@ -11,6 +11,7 @@
 
 import json
 import os
+import re
 import sys
 import time
 
@@ -24,6 +25,13 @@ np = pytest.importorskip("numpy")
 cv2 = pytest.importorskip("cv2")
 
 import hik_burst as hb                                # noqa: E402
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _read(rel):
+    with open(os.path.join(ROOT, rel), encoding="utf-8") as f:
+        return f.read()
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -1023,3 +1031,23 @@ def test_disk_advice_offers_the_window_mode_only_when_it_is_off(burst_root):
     on = hb.diagnose(meta)
     fix2 = [i for i in on["issues"] if i["cause"] == "disk"][0]["fix"]
     assert "ต่อช่วงเวลา" not in fix2, "เปิดอยู่แล้ว ⇒ ต้องไม่เสนอซ้ำ"
+
+
+def test_gige_constants_match_between_python_and_the_web_page():
+    """
+    ตัวเลขเพดานสาย GigE ถูกคำนวณสองที่: `hik_burst.diagnose()` (หลังถ่ายเสร็จ)
+    และ `hik_camera.js` (ตอนตั้งค่า ก่อนถ่าย). **ถ้าสองที่ไม่ตรงกัน ผู้ใช้จะเห็น
+    เพดานคนละตัวเลขจากหน้าจอเดียวกัน** แล้วไม่รู้ว่าจะเชื่ออันไหน
+    """
+    js = _read("static/js/hik_camera.js")
+    for name, want in (("GIGE_MB_S", hb.GIGE_MB_S),
+                       ("GIGE_EFF_JUMBO", hb.GIGE_EFF_JUMBO),
+                       ("GIGE_EFF_SMALL", hb.GIGE_EFF_SMALL)):
+        m = re.search(r"var\s+" + name + r"\s*=\s*([0-9.]+)", js)
+        assert m, "ไม่พบ %s ใน hik_camera.js" % name
+        assert float(m.group(1)) == float(want), (
+            "%s ไม่ตรงกัน: python %s vs js %s" % (name, want, m.group(1)))
+    # เกณฑ์ "Jumbo หรือยัง" ต้องเป็นค่าเดียวกันด้วย
+    m = re.search(r"pkt\s*>=\s*(\d+)\s*\?\s*GIGE_EFF_JUMBO", js)
+    assert m and int(m.group(1)) == hb.JUMBO_MIN_PACKET, (
+        "เกณฑ์ Jumbo ไม่ตรงกับ hik_burst.JUMBO_MIN_PACKET (%s)" % hb.JUMBO_MIN_PACKET)

@@ -105,9 +105,13 @@
                         <button class="btn btn-mini" data-roi="full" type="button">เต็มเฟรม</button>
                         <button class="btn btn-mini" data-roi="half" type="button">ครึ่งกลาง</button>
                         <button class="btn btn-mini" data-roi="quarter" type="button">¼ กลาง</button>
+                        <button class="btn btn-mini" data-roi="wide" type="button">กว้าง-เตี้ย</button>
+                        <button class="btn btn-mini" data-roi="fast" type="button">เร็วสุด</button>
                     </div>
                     <p class="control-hint">ROI เล็กลง = เร็วขึ้นมาก และฝากระป๋องกินเฟรมมากขึ้น<br>
-                        <b>วัดจริง:</b> เต็มเฟรม 23.6 fps · ครึ่งกลาง 69 fps</p>
+                        <b>วัดจริง:</b> เต็มเฟรม 23.6 fps · ครึ่งกลาง 69 fps<br>
+                        💡 <b>ความสูงสำคัญกว่าความกว้าง</b> — เซนเซอร์อ่านทีละแถว
+                        ส่วนความกว้างมีผลเฉพาะปริมาณข้อมูลบนสายแลน</p>
 
                     <details id="hikSettings" class="hik-box">
                         <summary>⚙️ ตั้งค่ากล้อง (ช่วงค่ามาจากตัวกล้องจริง)</summary>
@@ -858,6 +862,12 @@
        #liveStats = ของ pipeline) — ทั้งคู่ absolute ที่พิกัดเดียวกัน จึงต้อง
        ดันแถบ perf ลงมาหนึ่งบรรทัด ไม่งั้นทับกันจนอ่านไม่ออกทั้งคู่ */
     #liveStats.stacked { top: 38px; }
+    .hik-ceiling { margin-top: 6px; padding: 6px 9px; border-radius: 6px;
+                   background: #f1f5f9; border: 1px solid #e2e8f0;
+                   font-size: 11.5px; line-height: 1.6; color: #334155; }
+    .hik-ceiling-rows span { display: inline-block; padding: 0 4px; opacity: .6; }
+    .hik-ceiling-rows span.bind { opacity: 1; color: #b45309; font-weight: 600;
+                                  background: #fef3c7; border-radius: 4px; }
     .hik-warn-box { margin: 6px 0; padding: 6px 10px; border-radius: 6px;
                     background: #fef2f2; border: 1px solid #fecaca; color: #b91c1c;
                     font-size: 12px; line-height: 1.5; }

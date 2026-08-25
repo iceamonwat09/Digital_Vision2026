@@ -235,9 +235,6 @@
 
         // ค่าที่อ่านอย่างเดียวแต่ต้องเห็น
         var extras = [];
-        if (params.resulting_framerate) {
-            extras.push('อัตราเฟรมที่กล้องคำนวณได้ ' + fmtNum(params.resulting_framerate.value) + ' fps');
-        }
         if (params.width_max && params.height_max) {
             extras.push('เซนเซอร์เต็ม ' + params.width_max.value + '×' + params.height_max.value);
         }
@@ -247,6 +244,79 @@
             note.textContent = extras.join(' · ');
             box.appendChild(note);
         }
+        renderCeiling(params, box);
+    }
+
+    // ── "อะไรคือตัวจำกัด fps ของค่าที่ตั้งอยู่ตอนนี้" ────────────
+    // fps ที่ได้จริง = ค่าต่ำสุดของ 3 เพดาน. รู้ว่าตัวไหนบีบอยู่ = รู้ว่าต้องแก้อะไร
+    // (ปรับผิดตัว = เสียเวลาโดยไม่ได้อะไรเลย)
+    var GIGE_MB_S = 125.0;              // GigE 1 Gbit/s
+    var GIGE_EFF_JUMBO = 0.90;          // ประสิทธิภาพจริงที่ packet 8164
+    var GIGE_EFF_SMALL = 0.70;          // ที่ packet 1500 (ค่าโรงงาน)
+    var BYTES_PER_PX = {                // ต่อพิกเซล ตามรูปแบบภาพ
+        'BayerRG8': 1, 'BayerGR8': 1, 'BayerGB8': 1, 'BayerBG8': 1, 'Mono8': 1,
+        'BayerRG12': 2, 'BayerRG12Packed': 1.5, 'Mono12': 2, 'Mono12Packed': 1.5,
+        'RGB8Packed': 3, 'BGR8Packed': 3, 'YUV422_8': 2, 'YUV422_8_UYVY': 2
+    };
+
+    function renderCeiling(params, box) {
+        var w = params.width && params.width.value;
+        var h = params.height && params.height.value;
+        if (!w || !h) { return; }
+
+        var fmtName = (params.pixel_format && params.pixel_format.symbolic) || 'BayerRG8';
+        var bpp = BYTES_PER_PX[fmtName] || 1;
+        var pkt = (params.packet_size && params.packet_size.value) || 0;
+        var eff = pkt >= 4000 ? GIGE_EFF_JUMBO : GIGE_EFF_SMALL;
+        var mbPerFrame = w * h * bpp / 1e6;
+        var wire = GIGE_MB_S * eff / mbPerFrame;
+
+        var exp = params.exposure_us && params.exposure_us.value;
+        var expCap = exp ? 1e6 / exp : null;
+
+        var cam = params.resulting_framerate && params.resulting_framerate.value;
+        var capped = params.framerate_enable && params.framerate_enable.value
+            && params.framerate && params.framerate.value;
+
+        // ตัวจำกัดจริง = ค่าต่ำสุด. "กล้องคำนวณได้" รวมข้อจำกัดของเซนเซอร์ไว้แล้ว
+        var items = [['สายแลน (GigE)', wire], ['exposure', expCap],
+                     ['กล้องบอกเอง', cam], ['จำกัดเอง', capped ? params.framerate.value : null]];
+        var real = null, who = '';
+        items.forEach(function (it) {
+            if (it[1] && (real === null || it[1] < real)) { real = it[1]; who = it[0]; }
+        });
+        if (real === null) { return; }
+
+        var el = document.createElement('div');
+        el.className = 'hik-ceiling';
+        var rows = items.filter(function (it) { return it[1]; }).map(function (it) {
+            var bind = (it[0] === who);
+            return '<span class="' + (bind ? 'bind' : '') + '">' + it[0] + ' <b>'
+                + Math.round(it[1]) + '</b></span>';
+        }).join(' · ');
+        el.innerHTML = '⚡ <b>เพดาน ' + Math.round(real) + ' fps</b> — ตัวจำกัดคือ <b>'
+            + who + '</b><br><span class="hik-ceiling-rows">' + rows + '</span>'
+            + '<br>' + ceilingHint(who, w, h, bpp, pkt, exp);
+        box.appendChild(el);
+    }
+
+    function ceilingHint(who, w, h, bpp, pkt, exp) {
+        if (who === 'สายแลน (GigE)') {
+            return (pkt < 4000
+                ? '👉 <b>packet size ยังเป็นค่าโรงงาน (' + pkt + ')</b> — ตั้งเป็น 8164 '
+                  + 'และเปิด Jumbo Frame ที่ NIC จะได้เพิ่มทันที ~29%'
+                : '👉 ติดที่<b>ปริมาณข้อมูล</b> — ลด ROI (พิกเซลน้อยลงเท่าไร fps ขึ้นเท่านั้น) '
+                  + (bpp > 1 ? 'หรือใช้รูปแบบภาพ 8 บิต (ตอนนี้ ' + bpp + ' ไบต์/พิกเซล)' : ''));
+        }
+        if (who === 'exposure') {
+            return '👉 exposure ' + Math.round(exp) + ' µs เองที่บีบอยู่ — ลด exposure '
+                + '(ต้องเพิ่มไฟชดเชย) จะปลดเพดานนี้';
+        }
+        if (who === 'จำกัดเอง') {
+            return '👉 <b>ปิด "จำกัดอัตราเฟรม"</b> (AcquisitionFrameRate) แล้วเพดานนี้จะหายไป';
+        }
+        return '👉 ติดที่<b>การอ่านเซนเซอร์</b> — ลด <b>ความสูง (Height)</b> ช่วยมากที่สุด '
+            + 'เพราะเซนเซอร์อ่านทีละแถว (ลดความกว้างช่วยเฉพาะฝั่งสายแลน)';
     }
 
     // ── รวบรวมเฉพาะค่าที่ "ผู้ใช้แก้จริง" แล้วส่ง ───────────────
@@ -308,11 +378,20 @@
             return;
         }
         var wmax = p.width_max.value, hmax = p.height_max.value;
-        var frac = kind === 'half' ? 0.5 : (kind === 'quarter' ? 0.25 : 1.0);
         var winc = (p.width && p.width.inc) || 1;
         var hinc = (p.height && p.height.inc) || 1;
-        var w = Math.max(winc, Math.floor((wmax * frac) / winc) * winc);
-        var h = Math.max(hinc, Math.floor((hmax * frac) / hinc) * hinc);
+        // สัดส่วน (กว้าง, สูง) แยกกัน — เซนเซอร์อ่านทีละแถว ⇒ "เตี้ย" ให้ fps
+        // มากกว่า "แคบ" ที่จำนวนพิกเซลเท่ากัน
+        var FRACS = {
+            full: [1.0, 1.0],
+            half: [0.5, 0.5],
+            quarter: [0.5, 0.25],
+            wide: [1.0, 0.5],       // เห็นกว้างเต็มเซนเซอร์ แต่เตี้ยลงครึ่ง
+            fast: [0.5, 0.2]        // เตี้ยมาก — สำหรับไล่หา fps สูงสุด
+        };
+        var fr = FRACS[kind] || FRACS.full;
+        var w = Math.max(winc, Math.floor((wmax * fr[0]) / winc) * winc);
+        var h = Math.max(hinc, Math.floor((hmax * fr[1]) / hinc) * hinc);
         postParams({ width: w, height: h, roi_center: true },
             'ตั้ง ROI ' + w + '×' + h + ' แล้ว');
     }
