@@ -4,7 +4,9 @@ Handles YOLOv8 model loading, inference, and defect classification.
 """
 
 import cv2
+import hashlib
 import logging
+import threading
 import numpy as np
 import os
 import time
@@ -107,6 +109,9 @@ class YOLODetector:
     YOLO-based defect detector for water bottles.
     Handles model loading, inference, and result processing.
     """
+    # เกินเท่านี้ถือว่า "รอคิวนาน" — แค่ log ระดับ debug ไม่รบกวนการทำงาน
+    _INFER_WAIT_WARN_MS = 50.0
+
     
     def __init__(self, model_path: str = None, mode_config=None):
         """
@@ -134,6 +139,26 @@ class YOLODetector:
         self._infer_count = 0
         self._infer_ms_accum = 0.0
 
+        # ── ทุกการเรียกโมเดลต้องผ่าน lock ตัวเดียว ────────────────────────
+        # `detector` เป็น object เดียวที่ถูกใช้จากหลายเธรดพร้อมกันจริง:
+        # inference_loop (สด) · ปุ่มถ่ายรูปตรวจ · /api/stream/infer ·
+        # งานตรวจเบื้องหลังของโหมดถ่ายรัว. ultralytics ไม่รับประกันว่า
+        # เรียกซ้อนกันได้ และบน iGPU ที่แชร์ RAM กับซีพียู การยิงพร้อมกัน
+        # ทำให้ทั้งสองฝั่งช้าลงกว่าการเข้าคิว (วัดได้เป็นภาพสดกระตุก).
+        # RLock เพราะเป็นการป้องกันเชิงโครงสร้าง — เรียกซ้อนในเธรดเดียวกัน
+        # ไม่ควรเกิด แต่ถ้าเกิดต้องไม่กลายเป็น deadlock ที่หยุดสายการผลิต.
+        self._infer_lock = threading.RLock()
+        # เวลารอคิวโมเดลของการเรียกครั้งล่าสุด (ms) — ให้ route รายงานแยกจาก
+        # เวลาของโมเดลเอง ไม่งั้น "ตรวจช้า" กับ "รอคิวนาน" แยกกันไม่ออก
+        self.last_wait_ms = 0.0
+        # backend ที่ **ใช้จริง** หลังไล่ fallback เสร็จ + เหตุผลที่ตัวที่เร็วกว่าใช้ไม่ได้
+        # ⚠️ เดิมรู้ได้จาก log บนคอนโซลเท่านั้น ⇒ ถ้าตกไป CPU แบบเงียบ ๆ ผู้ใช้จะเห็น
+        # แค่ "ระบบช้าลง" โดยไม่รู้สาเหตุ (เกิดจริงบนสถานี 25 ส.ค.: 50 → 378 ms)
+        self.backend_label = "PyTorch"
+        self.backend_downgraded = False
+        self.backend_note = ""
+        self._accel_skips = []          # เหตุผลที่ตัวเร่งแต่ละตัวถูกข้าม
+
     @property
     def is_bestx_mode(self) -> bool:
         """True when the loaded model file is bestX.pt."""
@@ -158,27 +183,134 @@ class YOLODetector:
         return _COLORS
         
     @staticmethod
-    def _openvino_device_available(device: str) -> bool:
+    def _openvino_device_status(device: str):
         """
-        True when the OpenVINO device in ``device`` (e.g. "intel:gpu" → "GPU")
-        actually exists on this machine. Guards against OpenVINO's own silent
-        fallback (asking for GPU on a machine without one quietly runs AUTO/CPU
-        — accuracy-safe but slower than our ONNX path and very misleading when
-        reading speed numbers), so we skip OpenVINO entirely instead.
+        ตอบว่าอุปกรณ์ OpenVINO ที่ขอ (เช่น "intel:gpu" → "GPU") ใช้ได้ไหม
+        **พร้อมเหตุผลที่แยกสาเหตุออกจากกัน** → ``(ok, reason)``.
+
+        กันการที่ OpenVINO ถอยไป AUTO/CPU เองอย่างเงียบ ๆ เมื่อขอ GPU บนเครื่อง
+        ที่ไม่มี (ผลตรวจยังถูก แต่ช้ากว่าเส้นทาง ONNX ของเรา และทำให้ตัวเลข
+        ความเร็วบนจอ "โกหก") ⇒ เราข้าม OpenVINO ไปเลยแทน.
+
+        ⚠️ **ทำไมต้องแยกเหตุผล:** เดิมทุกความล้มเหลวถูกรายงานเป็นข้อความเดียว
+        ("ไม่พบอุปกรณ์นี้ในเครื่อง") ทั้งที่ต้นเหตุ 3 แบบนี้ **แก้คนละวิธี**:
+        แพ็กเกจหาย (ลง pip) · แพ็กเกจมีแต่ไม่เห็น GPU (ไดรเวอร์/OpenCL) ·
+        probe ระเบิดเอง. บอกรวม ๆ = ส่งผู้ใช้ไปแก้ของที่ไม่ได้พัง (กฎเหล็กข้อ 2)
         """
+        want = device.split(":", 1)[1].upper() if ":" in device else device.upper()
         try:
             import openvino as ov
-            want = device.split(":", 1)[1].upper() if ":" in device else device.upper()
-            avail = list(ov.Core().available_devices)
-            ok = any(d == want or d.startswith(want + ".") for d in avail)
-            if not ok:
-                logger.warning(
-                    f"OpenVINO device '{want}' not available (found: {avail}); "
-                    "skipping OpenVINO backend.")
-            return ok
         except Exception as e:
-            logger.warning(f"OpenVINO device probe failed ({e}); skipping OpenVINO backend.")
-            return False
+            return False, ("ไม่ได้ติดตั้งแพ็กเกจ openvino (import ล้มเหลว: %s) — แก้ด้วย "
+                           'py -3.9 -m pip install "openvino==2024.6.0"' % e)
+        ver = getattr(ov, "__version__", "?")
+        try:
+            avail = list(ov.Core().available_devices)
+        except Exception as e:
+            return False, "openvino %s อ่านรายชื่ออุปกรณ์ไม่ได้ (%s)" % (ver, e)
+        if any(d == want or d.startswith(want + ".") for d in avail):
+            return True, "openvino %s พบ %s" % (ver, want)
+        return False, ("openvino %s ติดตั้งแล้ว แต่ **ไม่เห็นอุปกรณ์ %s** "
+                       "(เห็นแค่ %s) — เป็นเรื่องไดรเวอร์ Intel Graphics/OpenCL "
+                       "ของเครื่อง ไม่ใช่เรื่องแพ็กเกจ" % (ver, want, avail or "ไม่มีเลย"))
+
+    @classmethod
+    def _openvino_device_available(cls, device: str) -> bool:
+        """คงชื่อเดิมไว้ให้ผู้เรียกอื่น — ตัดสินอย่างเดียว ไม่เอาเหตุผล."""
+        ok, why = cls._openvino_device_status(device)
+        if not ok:
+            logger.warning("OpenVINO ถูกข้าม: %s", why)
+        return ok
+
+    def _note_skip(self, who, why):
+        """จดว่าตัวเร่งตัวไหนถูกข้าม เพราะอะไร — ใช้บอกผู้ใช้ทีหลัง."""
+        try:
+            self._accel_skips.append("%s: %s" % (who, why))
+        except Exception:
+            pass
+
+    def _check_downgraded(self, accel):
+        """
+        ตั้งธง "ได้ backend ที่ช้ากว่าที่ตั้งไว้" — เทียบกับ **สิ่งที่ config ขอ**.
+
+        ⚠️ เส้นทางที่พบบ่อยที่สุดคือ ``_maybe_openvino``/``_maybe_onnx`` คืน None
+        ตั้งแต่ต้น (import ไม่ได้ / ไม่พบอุปกรณ์ / export ล้ม) ซึ่ง **ไม่ผ่าน
+        except ของลูปเลย** ⇒ ถ้าดูแค่ลูปจะรายงานว่า "ปกติดี" ทั้งที่ตกไป CPU แล้ว
+        """
+        want_ov = bool(getattr(config, "OPENVINO_DEVICE", None)
+                       or getattr(config, "USE_OPENVINO", False))
+        want_onnx = bool(getattr(config, "USE_ONNX", False))
+        if want_ov and accel != "OpenVINO":
+            self.backend_downgraded = True
+        elif want_onnx and accel not in ("ONNX", "OpenVINO"):
+            self.backend_downgraded = True
+        if self.backend_downgraded and not self.backend_note:
+            self.backend_note = " · ".join(self._accel_skips[:3]) or "ไม่ทราบสาเหตุ"
+
+    @staticmethod
+    def _weights_hash(pt_path: str) -> Optional[str]:
+        """
+        ลายนิ้วมือของ **เนื้อไฟล์** ``.pt`` (sha1) — คำนวณครั้งเดียวตอนเริ่มระบบ.
+        คืน ``None`` เมื่ออ่านไม่ได้ (ผู้เรียกจะถอยไปใช้ mtime แบบเดิม)
+        """
+        try:
+            h = hashlib.sha1()
+            with open(pt_path, "rb") as f:
+                for chunk in iter(lambda: f.read(1 << 20), b""):
+                    h.update(chunk)
+            return h.hexdigest()
+        except Exception:
+            return None
+
+    def _export_is_stale(self, pt_path: str, export_path: str) -> bool:
+        """
+        ต้อง export ใหม่ไหม — ตัดสินจาก **เนื้อของ .pt** ไม่ใช่เวลาแก้ไขไฟล์.
+
+        ⚠️ **ทำไมถึงเลิกใช้ mtime:** การ *คัดลอกไฟล์เดิมกลับมา* (กู้จากถังขยะ /
+        คัดลอกจากที่สำรองไว้) ทำให้ mtime กลายเป็น "ตอนนี้" ⇒ ใหม่กว่า IR เสมอ
+        ⇒ สั่ง re-export ทุกครั้งที่เปิดโปรแกรม. ถ้า export ล้มเหลว (เช่นไม่มี
+        openvino ในรอบนั้น) ระบบจะ **ตกไปวิ่งบน CPU ช้ากว่า 6 เท่าอย่างเงียบ ๆ**
+        — เกิดจริงบนสถานี 25 ส.ค. 2026 หลังผู้ใช้กู้ `bestX.pt` คืนมา
+        (`inf` 45-50 ms → 155-378 ms).
+
+        เนื้อไฟล์เหมือนเดิม = โมเดลตัวเดิม = export เดิมยังใช้ได้ ⇒ ไม่ต้องทำใหม่.
+        เทรนใหม่จริง = เนื้อเปลี่ยน = export ใหม่ (ความถูกต้องยังคงอยู่ครบ)
+        """
+        if not os.path.exists(export_path):
+            return True
+        side = export_path + ".src"
+        cur = self._weights_hash(pt_path)
+        if cur is None:                       # อ่าน .pt ไม่ได้ → ใช้เกณฑ์เดิม
+            try:
+                return os.path.getmtime(pt_path) > os.path.getmtime(export_path)
+            except Exception:
+                return True
+        try:
+            with open(side, "r", encoding="utf-8") as f:
+                if f.read().strip() == cur:
+                    return False              # เนื้อเดิมเป๊ะ → export เดิมใช้ได้
+        except Exception:
+            pass
+        # ยังไม่มี sidecar: อย่าเพิ่งด่วน re-export ถ้า export ใหม่กว่า .pt อยู่แล้ว
+        # (กรณีอัปเกรดจากเวอร์ชันก่อนที่ยังไม่มีระบบ hash) — แค่จดลายนิ้วมือไว้
+        try:
+            if os.path.getmtime(export_path) >= os.path.getmtime(pt_path):
+                self._remember_hash(export_path, cur)
+                return False
+        except Exception:
+            pass
+        return True
+
+    @staticmethod
+    def _remember_hash(export_path: str, digest: Optional[str]) -> None:
+        """จดลายนิ้วมือของ .pt ที่ใช้ export ครั้งนี้ไว้ข้าง ๆ ไฟล์ export."""
+        if not digest:
+            return
+        try:
+            with open(export_path + ".src", "w", encoding="utf-8") as f:
+                f.write(digest)
+        except Exception:
+            pass
 
     def _maybe_openvino(self, pt_path: str) -> Optional[str]:
         """
@@ -199,27 +331,34 @@ class YOLODetector:
             return None
         if not pt_path.endswith(".pt") or not os.path.exists(pt_path):
             return None
-        if device and not self._openvino_device_available(device):
-            return None
+        if device:
+            ok, why = self._openvino_device_status(device)
+            if not ok:
+                logger.error("⚠️ ข้าม OpenVINO@%s — %s", device, why)
+                self._note_skip("OpenVINO@%s" % device, why)
+                return None
+            logger.info("OpenVINO device พร้อมใช้: %s", why)
         ov_dir = pt_path[:-3] + "_openvino_model"
         # The exported IR lives at <dir>/<stem>.xml — use its mtime for the
         # stale check (same quiet-correctness trap as ONNX: a retrained .pt
         # must never keep running behind a stale export).
         ov_xml = os.path.join(ov_dir, os.path.basename(pt_path)[:-3] + ".xml")
         try:
-            stale = (os.path.exists(ov_xml)
-                     and os.path.getmtime(pt_path) > os.path.getmtime(ov_xml))
+            stale = self._export_is_stale(pt_path, ov_xml)
             if not os.path.isdir(ov_dir) or not os.path.exists(ov_xml) or stale:
-                if stale:
-                    logger.info(f"OpenVINO export is older than .pt — re-exporting: {pt_path}")
+                if stale and os.path.exists(ov_xml):
+                    logger.info(f"OpenVINO export ไม่ตรงกับ .pt ปัจจุบัน — export ใหม่: {pt_path}")
                 else:
                     logger.info(f"Exporting OpenVINO model (one-time, FP32/dynamic): {pt_path}")
                 YOLO(pt_path).export(format="openvino", dynamic=True, half=False)
             if os.path.isdir(ov_dir) and os.path.exists(ov_xml):
+                self._remember_hash(ov_xml, self._weights_hash(pt_path))
                 return ov_dir
             logger.warning("OpenVINO export produced no model dir; using next backend.")
+            self._note_skip("OpenVINO", "export ไม่ได้สร้างโฟลเดอร์ IR")
         except Exception as e:
             logger.warning(f"OpenVINO unavailable ({e}); using next backend instead.")
+            self._note_skip("OpenVINO", e)
         return None
 
     def _maybe_onnx(self, pt_path: str) -> Optional[str]:
@@ -246,11 +385,10 @@ class YOLODetector:
             # Re-export when the .onnx is missing OR older than the .pt — otherwise
             # retraining/replacing best.pt would silently keep running the stale
             # ONNX model (a quiet correctness trap).
-            stale = (os.path.exists(onnx_path)
-                     and os.path.getmtime(pt_path) > os.path.getmtime(onnx_path))
+            stale = self._export_is_stale(pt_path, onnx_path)
             if not os.path.exists(onnx_path) or stale:
-                if stale:
-                    logger.info(f"ONNX is older than .pt — re-exporting: {pt_path}")
+                if stale and os.path.exists(onnx_path):
+                    logger.info(f"ONNX ไม่ตรงกับ .pt ปัจจุบัน — export ใหม่: {pt_path}")
                 else:
                     logger.info(f"Exporting ONNX model (one-time, FP32/dynamic): {pt_path}")
                 export_kwargs = dict(format="onnx", dynamic=True, half=False)
@@ -267,10 +405,13 @@ class YOLODetector:
                                    "retrying without simplify.")
                     YOLO(pt_path).export(simplify=False, **export_kwargs)
             if os.path.exists(onnx_path):
+                self._remember_hash(onnx_path, self._weights_hash(pt_path))
                 return onnx_path
             logger.warning("ONNX export produced no file; using PyTorch.")
+            self._note_skip("ONNX", "export ไม่ได้สร้างไฟล์")
         except Exception as e:
             logger.warning(f"ONNX unavailable ({e}); using PyTorch instead.")
+            self._note_skip("ONNX", e)
         return None
 
     def _select_backend(self, model_path: str):
@@ -358,7 +499,8 @@ class YOLODetector:
             imgsz = getattr(config, "YOLO_IMGSZ", 480)
             dummy = np.zeros((480, 640, 3), dtype=np.uint8)
             extra = {"device": self.infer_device} if self.infer_device else {}
-            self.model(dummy, imgsz=imgsz, verbose=False, **extra)
+            with self._infer_lock:
+                self.model(dummy, imgsz=imgsz, verbose=False, **extra)
             return True
         except Exception as e:
             logger.warning(f"Accelerated backend smoke test failed ({e}).")
@@ -427,15 +569,30 @@ class YOLODetector:
                     break
                 except Exception as accel_err:
                     if accel:
-                        logger.warning(f"{label} backend unusable ({accel_err}); "
-                                       "trying next backend.")
+                        # ⚠️ ERROR ไม่ใช่ warning — การตกไป backend ที่ช้ากว่าคือ
+                        # เรื่องที่ผู้ใช้ต้องรู้ ไม่ใช่รายละเอียดที่ซ่อนได้
+                        logger.error("⚠️ %s ใช้ไม่ได้ (%s) — ตกไป backend ถัดไป "
+                                     "ซึ่ง**ช้ากว่าหลายเท่า**", label, accel_err)
+                        self.backend_downgraded = True
+                        if not self.backend_note:
+                            self.backend_note = "%s: %s" % (label, accel_err)
                         self.model = None
                         continue
                     raise   # plain .pt itself failed → real error, surface it
 
-            accel_label = f"{accel}@{device}" if device else accel
-            logger.info("YOLO model loaded successfully"
-                        + (f" ({accel_label} acceleration)" if accel else ""))
+            accel_label = (f"{accel}@{device}" if device else accel) or "PyTorch"
+            self.backend_label = accel_label
+            self._check_downgraded(accel)
+            if self.backend_downgraded:
+                logger.error(
+                    "🐢 กำลังใช้ **%s** ซึ่งไม่ใช่ตัวที่เร็วที่สุดที่ตั้งไว้ "
+                    "(%s) — inference จะช้ากว่าปกติหลายเท่า. "
+                    "ตรวจ: py -3.9 -c \"import openvino;print(openvino.__version__)\" "
+                    "· ต้องได้ 2024.6.0 · แล้วรัน verify_openvino.py",
+                    accel_label, self.backend_note)
+            else:
+                logger.info("YOLO model loaded successfully"
+                            + (f" ({accel_label} acceleration)" if accel else ""))
 
             if hasattr(self.model, 'names'):
                 logger.info(f"Model classes ({len(self.model.names)}): {list(self.model.names.values())}")
@@ -518,17 +675,28 @@ class YOLODetector:
             # every other backend gets the exact same call as before.
             extra = {"device": self.infer_device} if self.infer_device else {}
 
-            t0 = time.perf_counter()
-            results = self.model(
-                frame,
-                conf=model_conf,
-                iou=self.iou_threshold,
-                imgsz=imgsz if imgsz is not None else config.YOLO_IMGSZ,
-                max_det=config.YOLO_MAX_DET,
-                verbose=False,
-                **extra
-            )
-            infer_ms = (time.perf_counter() - t0) * 1000.0
+            # ⚠️ ถือ lock เฉพาะช่วง "คำนวณบน GPU/CPU" เท่านั้น — การถอดผล
+            # (.cpu() ด้านล่าง) เป็นการย้าย tensor ที่คำนวณเสร็จแล้ว ไม่แย่ง
+            # หน่วยประมวลผล จึงไม่ต้องอยู่ในคิวและไม่ควรถ่วงเธรดอื่น.
+            t_wait = time.perf_counter()
+            with self._infer_lock:
+                wait_ms = (time.perf_counter() - t_wait) * 1000.0
+                self.last_wait_ms = round(wait_ms, 1)
+                t0 = time.perf_counter()
+                results = self.model(
+                    frame,
+                    conf=model_conf,
+                    iou=self.iou_threshold,
+                    imgsz=imgsz if imgsz is not None else config.YOLO_IMGSZ,
+                    max_det=config.YOLO_MAX_DET,
+                    verbose=False,
+                    **extra
+                )
+                infer_ms = (time.perf_counter() - t0) * 1000.0
+            # ``infer_ms`` คงความหมายเดิม (เวลาของโมเดลล้วน) เพื่อไม่ให้ตัวเลข
+            # บนแถบ perf และ log เดิมเปลี่ยนความหมาย — เวลารอคิวรายงานแยก
+            if wait_ms > self._INFER_WAIT_WARN_MS:
+                logger.debug("รอคิวโมเดล %.0f ms ก่อนตรวจ (มีอีกเธรดใช้โมเดลอยู่)", wait_ms)
 
             detections: List[Dict] = []
             names = getattr(self.model, "names", {})

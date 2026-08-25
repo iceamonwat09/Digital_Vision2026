@@ -1,0 +1,1098 @@
+"""
+hik_burst.py — โหมด **"ถ่ายรัว"** ของแท็บกล้องอุตสาหกรรม (เครื่องมือทดสอบล้วน)
+
+โจทย์ที่โมดูลนี้ตอบ
+-------------------
+*"เลื่อนวัตถุผ่านหน้ากล้อง แล้วกล้องจับภาพที่ **ไม่เบลอ** ได้ไหม"*
+
+หลักการที่ยึด (และเหตุผลที่ยึด)
+--------------------------------
+1. **การถ่ายต้องวิ่งที่อัตราของกล้อง ไม่ใช่อัตราของโมเดล.** ถ้าทำเป็น
+   ``ถ่าย → ตรวจ → ถ่าย → ตรวจ`` จะได้ ~2 ภาพ/วินาที (detect imgsz 1280 =
+   370-468 ms) ⇒ วัตถุขยับ ~270 mm ระหว่างสองภาพ = วัด "ความเร็วของ bestX"
+   ไม่ใช่ "ความสามารถของกล้อง". โมดูลนี้จึง **เก็บภาพก่อน ตรวจทีหลัง**.
+2. **ตัวเลขความคมต้องวัดที่ "วัตถุที่เคลื่อนไหว" ไม่ใช่ทั้งเฟรม.** ถ้าโบกวัตถุ
+   หน้าฉากหลังที่คมและนิ่ง ค่าความคมของทั้งเฟรมแทบไม่ขยับ ⇒ ระบบจะรายงานว่า
+   "คม" ทั้งที่วัตถุเละ = **คำตอบที่ผิดแบบมั่นใจ** (กฎเหล็กข้อ 2 ห้ามตรง ๆ).
+   จึงประมาณฉากหลังจากค่ามัธยฐานของทั้งชุด แล้ววัดเฉพาะบริเวณที่ต่างจากฉากหลัง.
+3. **ไม่มั่นใจ = ไม่แสดงตัวเลข.** การจับคู่ตำแหน่ง (phase correlation) ที่คะแนน
+   ต่ำจะคืน ``None`` แทนการเดา — ผู้ใช้จะเห็น "—" ไม่ใช่เลขที่ดูน่าเชื่อถือแต่มั่ว.
+4. **คำนวณตัวเลขตอนเปิดดู ไม่ใช่ตอนถ่าย.** เธรดเขียนไฟล์ที่ช้าลง = เฟรมถูกทิ้ง
+   = กระป๋องหายไปจากชุดทดสอบ. ตอนถ่ายจึงบันทึกแค่ภาพ + เวลาที่เฟรมมาถึง.
+
+โมดูลนี้ **ไม่ import Flask และไม่ import ultralytics** — การตรวจถูกฉีดเข้ามา
+เป็นฟังก์ชัน (``detect_fn``) จาก ``app.py`` จึงเทสต์ได้ตรง ๆ บนเครื่องที่ไม่มีโมเดล.
+"""
+
+import json
+import math
+import os
+import re
+import shutil
+import threading
+import time
+
+import numpy as np
+
+try:
+    import cv2
+except Exception:                                    # pragma: no cover - อยู่ใน requirements
+    cv2 = None
+
+try:
+    import config
+except Exception:                                    # pragma: no cover
+    config = None
+
+try:
+    from logger import setup_logger
+    logger = setup_logger(__name__)
+except Exception:                                    # pragma: no cover
+    import logging
+    logger = logging.getLogger(__name__)
+
+
+def _cfg(name, default=None):
+    return getattr(config, name, default) if config is not None else default
+
+
+# ── ค่าคงที่ของการวัด (อธิบายเหตุผลไว้ตรงจุด) ──────────────────────────
+ANALYSIS_SCALE = 0.5      # หาบริเวณที่เคลื่อนไหวบนภาพย่อครึ่ง (เร็วขึ้น 4 เท่า,
+                          # ตำแหน่งระดับ ±2 px พอสำหรับการ "เลือกกรอบ")
+BG_SAMPLE = 25            # จำนวนเฟรมที่สุ่มมาหาค่ามัธยฐานเป็นฉากหลัง
+MIN_DIFF_THR = 18.0       # ต่างจากฉากหลังอย่างน้อยเท่านี้จึงนับว่า "เคลื่อนไหว"
+MIN_MOVE_FRAC = 0.004     # บริเวณเล็กกว่า 0.4% ของเฟรม = สัญญาณรบกวน ไม่ใช่วัตถุ
+MAX_MOVE_FRAC = 0.80      # ใหญ่กว่า 80% = กล้องสั่น/ไฟกระพริบทั้งเฟรม ไม่ใช่วัตถุ
+MIN_PC_RESPONSE = 0.12    # คะแนน phase correlation ต่ำกว่านี้ = ไม่รู้ ⇒ ไม่รายงาน
+# ⚠️ คะแนนอย่างเดียวเชื่อไม่ได้: วัดแล้วภาพสุ่มสองใบที่ไม่เกี่ยวกันเลยได้ 0.265
+# ขณะที่การเลื่อนจริง 25 px ได้ 0.289 ⇒ ตั้งเกณฑ์คะแนนให้แยกสองเคสนี้ไม่ได้.
+# จึงต้อง **ตรวจซ้ำด้วยการวัดที่เป็นอิสระจากกัน**: ระยะที่จุดกึ่งกลางกรอบวัตถุ
+# ขยับ (หยาบ ±ไม่กี่พิกเซล แต่ไม่ขึ้นกับ phase correlation เลย). ถ้าสองค่าไม่ตรงกัน
+# = ไม่รู้จริง ⇒ ไม่รายงาน. (แนวคิดเดียวกับ `_verify_boxes` ของชั้นกรอบแดง)
+# 💡 ไอเดียที่ **วัดแล้วปฏิเสธ**: เช็คความสมมาตร a→b กับ b→a — cv2.phaseCorrelate
+#    ให้ผลตรงข้ามกันเป๊ะเสมอ (คลาดเคลื่อน 0.000 ทุกเคสรวมทั้งภาพสุ่ม) = ใช้แยกไม่ได้
+# 💡 อีกไอเดียที่ **วัดแล้วปฏิเสธ**: ลบฉากหลังออกก่อนจับคู่ (absdiff กับฉากหลัง)
+#    ฟังดูควรช่วย แต่วัดแล้วแย่ลงมาก (เลื่อนจริง 24 px อ่านได้ 1.7 px) เพราะภาพ
+#    ผลต่างของวัตถุ ณ สองตำแหน่งมี "ลายข้างใน" ไม่เหมือนกัน (ฉากหลังใต้วัตถุคนละที่)
+#    ⇒ ไม่ใช่การเลื่อนของภาพเดียวกันอีกต่อไป. ภาพดิบให้ผลแม่นทุกระยะที่ทดสอบ
+#    (6/12/24/40/60 px อ่านได้ 5.4/10.9/24.7/40.9/59.9) ตราบใดที่หน้าต่างรัดวัตถุ.
+PC_TOL_PX = 6.0           # กรอบวัตถุคลาดได้เองราวนี้ (ขอบที่ threshold ได้มาไม่นิ่ง)
+PC_TOL_FRAC = 0.6
+MIN_PC_SIDE = 16          # หน้าต่างที่เล็กกว่านี้จับคู่ตำแหน่งไม่ได้
+# ⚠️ ต่ำกว่านี้ = **วัดความเร็วไม่ได้จริง** ไม่ใช่ "วัดได้ว่าช้า"
+# ด่านตรวจซ้ำยอมให้คลาดได้ ±PC_TOL_PX (6 px) ⇒ การเลื่อนที่เล็กกว่า ~2 px/เฟรม
+# ตกอยู่ในช่วงที่ตัวตรวจซ้ำแยกไม่ออกระหว่าง "ขยับจริง" กับ "สั่น/สัญญาณรบกวน".
+# เจอจริงบนสถานี: วัดได้ 0.53 px/เฟรม แล้วระบบไปสรุปว่า exposure สูงสุด = 217,391 µs
+# (0.22 วินาที!) พร้อมไฟเขียว "คมพอ" — ตัวเลขที่ไร้ความหมายแต่ดูน่าเชื่อถือ
+MIN_MEANINGFUL_SHIFT_PX = 2.0
+# ── คะแนน "ความสมบูรณ์" ของวัตถุในเฟรม ────────────────────────────────
+# ยืมเกณฑ์จาก `app._can_complete()` ของโหมด USB Frame Capture ซึ่งพิสูจน์
+# มาแล้วบนงานจริง: **กรอบของชิ้นงานต้องไม่แตะขอบเฟรม**. ต่างกันที่แหล่งของ
+# กรอบ — ฝั่ง USB ได้จากกล่อง `can` ที่โมเดลตรวจ ส่วนที่นี่ได้จาก `roi`
+# (การลบฉากหลัง) เพราะโหมดถ่ายรัว **ตั้งใจไม่เรียกโมเดลระหว่างถ่าย**
+COMPLETE_EDGE_MARGIN = 0.02        # เผื่อขอบ 2% เท่ากับ FRAME_CAPTURE_EDGE_MARGIN
+COMPLETE_MIN_AREA_FRAC = 0.55      # เล็กกว่านี้เทียบกับใบใหญ่สุดของชุด = ยังโผล่ไม่หมด
+COMPLETE_SHARP_WEIGHT = 0.5        # คะแนนรวม = สมบูรณ์ × (ความคมสัมพัทธ์ ^ น้ำหนักนี้)
+
+SHARP_REL_OK = 0.80       # คมเกิน 80% ของภาพที่คมที่สุดในชุด = ถือว่า "คม"
+# ความสว่างเฉลี่ยที่ "พอใช้งาน" สำหรับภาพ QC — ค่าเดียวกับ `diagnose_hikrobot.TARGET_MEAN`
+# (ถ้าแก้ที่หนึ่ง ต้องแก้อีกที่ ไม่งั้นเครื่องมือสองตัวจะแนะนำไฟคนละจำนวนเท่า)
+TARGET_MEAN = 80.0
+DIR_RATIO_MARGIN = 0.70   # อัตราส่วนแกนต่างจากฐานเกินเท่านี้จึงกล้าบอกทิศทางเบลอ
+
+# ── การวินิจฉัย "เฟรมหายไปไหน" ──────────────────────────────────────
+# GigE 1 Gbit/s = 125 MB/s ตามทฤษฎี. ประสิทธิภาพจริงขึ้นกับขนาดแพ็กเก็ต:
+# แพ็กเก็ต 1500 ไบต์ (ค่าโรงงาน) เสีย overhead มากกว่า Jumbo 8164 ไบต์มาก
+# ⇒ ใช้เทียบว่า fps ที่ได้ "ชนเพดานสาย" หรือ "ต่ำกว่าเพดานมาก" (คนละสาเหตุ)
+GIGE_MB_S = 125.0
+GIGE_EFF_JUMBO = 0.90
+GIGE_EFF_SMALL = 0.70
+JUMBO_MIN_PACKET = 4000       # ต่ำกว่านี้ถือว่ายังไม่ได้เปิด Jumbo Frame
+
+METRICS_FILE = "metrics.json"
+DETECT_FILE = "detect.json"
+META_FILE = "meta.json"
+THUMB_DIR = "_thumbs"
+METRICS_VERSION = 2
+
+_NAME_RE = re.compile(r"^[0-9A-Za-z_.-]{1,64}$")
+_FRAME_RE = re.compile(r"^[0-9]{1,8}\.jpg$")
+
+
+# ════════════════════════════════════════════════════════════════════
+# เส้นทางไฟล์ — ทุกทางเข้าต้องผ่าน session_dir()/frame_path()
+# (ชื่อชุด/ชื่อไฟล์มาจาก URL ⇒ ถือเป็นข้อมูลที่ไม่น่าเชื่อถือเสมอ)
+# ════════════════════════════════════════════════════════════════════
+def burst_root():
+    root = _cfg("HIK_BURST_DIR") or os.path.join("data", "hik_burst")
+    if not os.path.isabs(root):
+        base = _cfg("BASE_DIR") or os.path.dirname(os.path.abspath(__file__))
+        root = os.path.join(base, root)
+    return root
+
+
+def session_dir(name, must_exist=True):
+    """คืน path เต็มของชุดภาพ — โยน ``ValueError`` ถ้าชื่อไม่ปลอดภัย/ไม่มีอยู่."""
+    if not isinstance(name, str) or not _NAME_RE.match(name) or name in (".", ".."):
+        raise ValueError("ชื่อชุดภาพไม่ถูกต้อง")
+    path = os.path.join(burst_root(), name)
+    # ด่านที่สอง: ยืนยันด้วย path ที่ resolve แล้ว ไม่ใช่เชื่อ regex อย่างเดียว
+    if os.path.dirname(os.path.abspath(path)) != os.path.abspath(burst_root()):
+        raise ValueError("ชื่อชุดภาพไม่ถูกต้อง")
+    if must_exist and not os.path.isdir(path):
+        raise ValueError("ไม่พบชุดภาพนี้ (อาจถูกลบไปแล้ว)")
+    return path
+
+
+def frame_path(name, filename):
+    if not isinstance(filename, str) or not _FRAME_RE.match(filename):
+        raise ValueError("ชื่อไฟล์ภาพไม่ถูกต้อง")
+    return os.path.join(session_dir(name), filename)
+
+
+def list_frames(path):
+    try:
+        names = [f for f in os.listdir(path) if _FRAME_RE.match(f)]
+    except OSError:
+        return []
+    return sorted(names)
+
+
+def _read_json(path, default=None):
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return default if default is not None else {}
+
+
+def _write_json(path, data):
+    tmp = path + ".tmp"
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False)
+        os.replace(tmp, path)
+        return True
+    except Exception as e:                            # pragma: no cover - ดิสก์/สิทธิ์
+        logger.warning("[hik-burst] เขียน %s ไม่สำเร็จ: %s", path, e)
+        return False
+
+
+def free_mb():
+    try:
+        root = burst_root()
+        os.makedirs(root, exist_ok=True)
+        return int(shutil.disk_usage(root).free / (1024 * 1024))
+    except Exception:
+        return None
+
+
+def _frame_index(filename):
+    """ลำดับของเฟรมจากชื่อไฟล์ (ฐาน 0) — ใช้จับคู่กับ ``frame_ts`` ใน meta.json.
+    ใช้ชื่อไฟล์ ไม่ใช่ตำแหน่งในลิสต์ เพราะผู้ใช้ลบภาพทิ้งได้ระหว่างทาง."""
+    try:
+        return int(os.path.splitext(filename)[0]) - 1
+    except ValueError:                                # pragma: no cover - กัน regex เปลี่ยน
+        return -1
+
+
+# ════════════════════════════════════════════════════════════════════
+# รายการชุดภาพ
+# ════════════════════════════════════════════════════════════════════
+def _dir_bytes(path, files):
+    total = 0
+    for f in files:
+        try:
+            total += os.path.getsize(os.path.join(path, f))
+        except OSError:
+            pass
+    return total
+
+
+def session_brief(name):
+    path = session_dir(name)
+    files = list_frames(path)
+    meta = _read_json(os.path.join(path, META_FILE))
+    metrics = _read_json(os.path.join(path, METRICS_FILE))
+    detect = _read_json(os.path.join(path, DETECT_FILE))
+    summary = (metrics.get("summary") or {}) if isinstance(metrics, dict) else {}
+    ng = sum(1 for v in detect.values() if isinstance(v, dict) and v.get("verdict") == "ng")
+    return {
+        "name": name,
+        "frames": len(files),
+        "mb": round(_dir_bytes(path, files) / (1024.0 * 1024.0), 1),
+        "started_at": meta.get("started_at"),
+        "exposure_us": meta.get("exposure_us"),
+        "gain_db": meta.get("gain_db"),
+        "size": meta.get("size"),
+        "seconds": meta.get("seconds"),
+        "saved": meta.get("saved"),
+        "dropped": meta.get("dropped"),
+        "finished_reason": meta.get("finished_reason"),
+        "metrics_ready": bool(summary) and metrics.get("version") == METRICS_VERSION,
+        "summary": summary,
+        "detected": len(detect),
+        "ng": ng,
+        "diag": diagnose(meta),
+    }
+
+
+def list_sessions():
+    root = burst_root()
+    try:
+        names = [d for d in os.listdir(root)
+                 if _NAME_RE.match(d) and os.path.isdir(os.path.join(root, d))]
+    except OSError:
+        return []
+    out = []
+    for n in sorted(names, reverse=True):
+        try:
+            out.append(session_brief(n))
+        except Exception as e:                        # pragma: no cover
+            logger.warning("[hik-burst] อ่านชุด %s ไม่ได้: %s", n, e)
+    return out
+
+
+def delete_session(name):
+    path = session_dir(name)
+    shutil.rmtree(path)
+    logger.info("[hik-burst] ลบชุดภาพ %s", name)
+    return True
+
+
+def delete_frames(name, files):
+    """ลบภาพทีละใบ + ล้าง thumbnail/ผลตรวจของใบนั้นให้ตรงกัน.
+    ไม่แตะ ``metrics.json`` — รายการที่ไม่มีไฟล์แล้วจะถูกข้ามตอนอ่าน จึงไม่
+    ต้องเขียนไฟล์ใหญ่ใหม่ทุกครั้งที่ลบ 1 ภาพ."""
+    path = session_dir(name)
+    removed = []
+    for f in files or []:
+        try:
+            fp = frame_path(name, f)
+        except ValueError:
+            continue
+        try:
+            os.remove(fp)
+            removed.append(f)
+        except OSError:
+            continue
+        try:
+            os.remove(os.path.join(path, THUMB_DIR, f))
+        except OSError:
+            pass
+    if removed:
+        det = _read_json(os.path.join(path, DETECT_FILE))
+        if isinstance(det, dict) and any(f in det for f in removed):
+            for f in removed:
+                det.pop(f, None)
+            _write_json(os.path.join(path, DETECT_FILE), det)
+        logger.info("[hik-burst] ลบ %d ภาพจากชุด %s", len(removed), name)
+    return removed
+
+
+# ════════════════════════════════════════════════════════════════════
+# ชั้นวัดผล — ความคม / ทิศทางความเบลอ / ความเร็ว / ระยะเบลอ
+# ════════════════════════════════════════════════════════════════════
+def _gray(path):
+    img = cv2.imread(path, cv2.IMREAD_GRAYSCALE)
+    return img
+
+
+def _scores(gray):
+    """ความคม (Tenengrad) + พลังงานขอบแยกแกน.
+
+    ทำไมไม่ใช้ variance ของ Laplacian อย่างเดียวเหมือนที่อื่นในโปรเจกต์:
+    Laplacian เป็น **isotropic** ⇒ แยก "เบลอเพราะเคลื่อนที่" (เบลอแกนเดียว)
+    ออกจาก "โฟกัสหลุด" (เบลอทั้งสองแกน) ไม่ได้เลย ซึ่งคือคำถามหลักของหน้านี้.
+    """
+    g = gray.astype(np.float32)
+    gx = cv2.Sobel(g, cv2.CV_32F, 1, 0, ksize=3)
+    gy = cv2.Sobel(g, cv2.CV_32F, 0, 1, ksize=3)
+    sharp = float(np.mean(gx * gx + gy * gy))
+    return sharp, float(np.mean(np.abs(gx))), float(np.mean(np.abs(gy)))
+
+
+def _background(path, files, scale=ANALYSIS_SCALE, sample=BG_SAMPLE):
+    """ฉากหลังโดยประมาณ = ค่ามัธยฐานของเฟรมที่สุ่มมา (วัตถุที่วิ่งผ่านจะถูก
+    มัธยฐานกลืนหายไป เหลือแต่ของที่นิ่ง)."""
+    if not files:
+        return None
+    step = max(1, len(files) // max(1, sample))
+    stack = []
+    for f in files[::step][:sample]:
+        g = _gray(os.path.join(path, f))
+        if g is None:
+            continue
+        stack.append(cv2.resize(g, (0, 0), fx=scale, fy=scale,
+                                interpolation=cv2.INTER_AREA))
+    if len(stack) < 3:
+        return None
+    shapes = {s.shape for s in stack}
+    if len(shapes) != 1:                              # ROI ถูกเปลี่ยนกลางชุด
+        return None
+    return np.median(np.stack(stack), axis=0).astype(np.uint8)
+
+
+def _moving_rect(g_small, bg):
+    """กรอบของ "ของที่ไม่ได้อยู่ในฉากหลัง" (พิกัดบนภาพย่อ) — None เมื่อไม่พบ."""
+    if bg is None or g_small.shape != bg.shape:
+        return None
+    diff = cv2.absdiff(g_small, bg)
+    diff = cv2.GaussianBlur(diff, (5, 5), 0)
+    otsu, _ = cv2.threshold(diff, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    mask = (diff >= max(MIN_DIFF_THR, float(otsu))).astype(np.uint8)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+    n, _lbl, stats, _c = cv2.connectedComponentsWithStats(mask, 8)
+    if n <= 1:
+        return None
+    areas = stats[1:, cv2.CC_STAT_AREA]
+    i = int(np.argmax(areas)) + 1
+    frac = float(stats[i, cv2.CC_STAT_AREA]) / float(mask.size)
+    if frac < MIN_MOVE_FRAC or frac > MAX_MOVE_FRAC:
+        return None
+    x, y, w, h = (int(stats[i, cv2.CC_STAT_LEFT]), int(stats[i, cv2.CC_STAT_TOP]),
+                  int(stats[i, cv2.CC_STAT_WIDTH]), int(stats[i, cv2.CC_STAT_HEIGHT]))
+    pad = 4
+    x0, y0 = max(0, x - pad), max(0, y - pad)
+    x1 = min(mask.shape[1], x + w + pad)
+    y1 = min(mask.shape[0], y + h + pad)
+    return (x0, y0, x1 - x0, y1 - y0)
+
+
+def _union(a, b):
+    ax, ay, aw, ah = a
+    bx, by, bw, bh = b
+    x0, y0 = min(ax, bx), min(ay, by)
+    x1, y1 = max(ax + aw, bx + bw), max(ay + ah, by + bh)
+    return (x0, y0, x1 - x0, y1 - y0)
+
+
+def _centre_shift(a, b, scale=ANALYSIS_SCALE):
+    """ระยะที่ **จุดกึ่งกลางกรอบวัตถุ** ขยับ (พิกเซลของภาพเต็ม).
+    หยาบกว่า phase correlation มาก แต่ได้มาคนละทาง จึงใช้เป็นตัวตรวจซ้ำได้."""
+    ax, ay, aw, ah = a
+    bx, by, bw, bh = b
+    return math.hypot((bx + bw / 2.0) - (ax + aw / 2.0),
+                      (by + bh / 2.0) - (ay + ah / 2.0)) / scale
+
+
+def _shift(prev_small, cur_small, rect, expect_px=None, scale=ANALYSIS_SCALE):
+    """ระยะที่เนื้อหาในกรอบเลื่อนไประหว่างสองเฟรม (พิกเซลของภาพเต็ม).
+
+    คืน ``None`` เมื่อคะแนนจับคู่ต่ำ **หรือ** ค่าที่ได้ขัดกับ ``expect_px``
+    (ระยะที่วัดจากกรอบวัตถุ) — เดาไม่ได้ก็ไม่เดา (กฎเหล็กข้อ 2).
+    """
+    x, y, w, h = rect
+    a = prev_small[y:y + h, x:x + w]
+    b = cur_small[y:y + h, x:x + w]
+    if a.shape != b.shape or min(a.shape[:2]) < MIN_PC_SIDE:
+        return None
+    af = a.astype(np.float32)
+    bf = b.astype(np.float32)
+    try:
+        win = cv2.createHanningWindow((af.shape[1], af.shape[0]), cv2.CV_32F)
+        (dx, dy), resp = cv2.phaseCorrelate(af, bf, win)
+    except Exception:
+        return None
+    if resp is None or float(resp) < MIN_PC_RESPONSE:
+        return None
+    shift = math.hypot(float(dx), float(dy)) / scale
+    if expect_px is not None:
+        tol = max(PC_TOL_PX, PC_TOL_FRAC * float(expect_px))
+        if abs(shift - float(expect_px)) > tol:
+            return None
+    return shift
+
+
+def _thumb(path, filename, gray_or_bgr, width):
+    tdir = os.path.join(path, THUMB_DIR)
+    try:
+        os.makedirs(tdir, exist_ok=True)
+        h, w = gray_or_bgr.shape[:2]
+        if w > width:
+            small = cv2.resize(gray_or_bgr, (width, max(1, int(h * width / float(w)))),
+                               interpolation=cv2.INTER_AREA)
+        else:
+            small = gray_or_bgr
+        cv2.imwrite(os.path.join(tdir, filename), small,
+                    [int(cv2.IMWRITE_JPEG_QUALITY), 78])
+    except Exception:                                 # pragma: no cover
+        pass
+
+
+def completeness(roi, frame_w, frame_h, max_area=None,
+                 margin=COMPLETE_EDGE_MARGIN):
+    """
+    คะแนน 0..1 ว่า "วัตถุอยู่ในเฟรมครบและอยู่กลางแค่ไหน" — คืน ``None`` เมื่อ
+    **ตอบไม่ได้** (ไม่พบวัตถุในเฟรมนั้น) ซึ่งต่างจาก 0.0 ที่แปลว่า *พบแล้วแต่
+    ไม่สมบูรณ์*. การรวมสองกรณีนี้เป็นค่าเดียวคือการเดา (กฎเหล็กข้อ 2).
+
+      ① แตะขอบเฟรม (เผื่อขอบ ``margin``) → **0.0 ทันที** — ชิ้นงานถูกตัด
+      ② เล็กกว่าใบใหญ่สุดของชุดมาก → ยังโผล่ไม่หมด (แม้ยังไม่แตะขอบ)
+      ③ ยิ่งใกล้กลางเฟรมยิ่งดี
+
+    ``max_area`` = พื้นที่กรอบที่ใหญ่ที่สุดที่พบในชุดนี้ = "วัตถุเต็มใบหน้าตาแบบนี้"
+    (ไม่ต้องรู้ขนาดชิ้นงานจริงล่วงหน้า). ไม่ส่งมา = ข้ามด่าน ②
+    """
+    if not roi or frame_w <= 0 or frame_h <= 0:
+        return None
+    try:
+        x, y, w, h = [float(v) for v in roi]
+    except (TypeError, ValueError):
+        return None
+    if w <= 0 or h <= 0:
+        return None
+
+    mx, my = frame_w * margin, frame_h * margin
+    if x <= mx or y <= my or (x + w) >= (frame_w - mx) or (y + h) >= (frame_h - my):
+        return 0.0                       # แตะขอบ = โดนตัด (เกณฑ์เดียวกับ USB)
+
+    score = 1.0
+    if max_area and max_area > 0:
+        frac = (w * h) / float(max_area)
+        if frac < COMPLETE_MIN_AREA_FRAC:
+            # โผล่มาแค่บางส่วน — ไล่ลงเป็นเส้นตรงจนเป็น 0 ที่ครึ่งของเกณฑ์
+            lo = COMPLETE_MIN_AREA_FRAC * 0.5
+            score *= max(0.0, (frac - lo) / max(1e-6, COMPLETE_MIN_AREA_FRAC - lo))
+
+    # ระยะจากกลางเฟรม: 1.0 ตรงกลางพอดี → 0.5 เมื่ออยู่สุดขอบที่เป็นไปได้
+    cx, cy = x + w / 2.0, y + h / 2.0
+    dx = abs(cx - frame_w / 2.0) / max(1e-6, frame_w / 2.0)
+    dy = abs(cy - frame_h / 2.0) / max(1e-6, frame_h / 2.0)
+    off = min(1.0, math.hypot(dx, dy) / math.sqrt(2.0))
+    return round(max(0.0, score * (1.0 - 0.5 * off)), 4)
+
+
+def _add_completeness(frames, meta):
+    """
+    เติม ``complete`` ให้ทุกเฟรมใน ``frames`` (แก้ dict ในที่).
+
+    ต้องทำ **หลังวัดครบทั้งชุด** เพราะด่าน ② ต้องรู้ว่ากรอบที่ใหญ่ที่สุดของชุด
+    ใหญ่แค่ไหน — เป็นตัวแทนของ "วัตถุเต็มใบ" โดยไม่ต้องรู้ขนาดชิ้นงานล่วงหน้า.
+    คืนจำนวนเฟรมที่ให้คะแนนได้ (ที่เหลือคือเฟรมที่หาวัตถุไม่เจอ = ``None``)
+    """
+    w, h = _size_of(meta)
+    if not w or not h:
+        return 0
+    areas = [r["roi"][2] * r["roi"][3] for r in frames.values()
+             if r.get("roi") and r.get("roi_src") == "moving"]
+    max_area = max(areas) if areas else None
+    scored = 0
+    for rec in frames.values():
+        c = (completeness(rec.get("roi"), w, h, max_area)
+             if rec.get("roi_src") == "moving" else None)
+        rec["complete"] = c
+        if c is not None:
+            scored += 1
+    return scored
+
+
+# เฟรมที่ประเมินความสมบูรณ์ไม่ได้ ถูกจัดอยู่ระดับนี้ — สูงกว่า "รู้ว่าโดนขอบตัด"
+# (ซึ่งใช้ไม่ได้แน่นอน) แต่ต่ำกว่าเฟรมที่รู้ว่าเห็นเต็มใบ
+UNKNOWN_COMPLETE_TIER = 0.74
+
+
+def rank_key(rec, best_sharp):
+    """
+    คะแนนรวมสำหรับ "ภาพที่ดีที่สุด" = **สมบูรณ์ก่อน แล้วค่อยคม**.
+
+    คืน **tuple** ``(ระดับความสมบูรณ์, ความคมสัมพัทธ์)`` เพื่อให้ความคมเป็น
+    ตัวตัดสินเสมอเมื่อความสมบูรณ์เท่ากัน.
+
+    ⚠️ เดิมคืน float เดียวคือ ``c × rel^0.5`` ⇒ เมื่อ ``c = 0`` (โดนขอบตัด)
+    **ทุกเฟรมได้ 0 เท่ากันหมด** แล้วลำดับกลายเป็น "ตามชื่อไฟล์" ไม่ใช่ตามคุณภาพ.
+    เจอบนสถานี 25 ส.ค.: 4 ใบแรกของแกลเลอรีเป็น 00037-00040 เรียงกันเป๊ะ
+    ทั้งที่คะแนนคมคือ 435/1519/1876/1855 (ไม่ได้เรียงเลย)
+
+    ⚠️ เฟรมที่ประเมินความสมบูรณ์ไม่ได้ (``complete is None``) **ไม่ถูกตัดทิ้ง** —
+    ถ้าทั้งชุดประเมินไม่ได้เลย ลำดับจะกลายเป็น "เรียงตามความคม" โดยอัตโนมัติ
+    """
+    sharp = float(rec.get("sharp") or 0.0)
+    rel = (sharp / best_sharp) if best_sharp and best_sharp > 0 else 0.0
+    rel = max(0.0, min(1.0, rel))
+    c = rec.get("complete")
+    tier = UNKNOWN_COMPLETE_TIER if c is None else float(c)
+    return (round(tier, 4), round(rel, 6))
+
+
+def compute_metrics(name, job=None):
+    """วัดทุกเฟรมของชุด แล้วเขียน ``metrics.json`` + สร้าง thumbnail."""
+    if cv2 is None:
+        raise RuntimeError("ไม่มี OpenCV — วัดความคมไม่ได้")
+    path = session_dir(name)
+    files = list_frames(path)
+    if not files:
+        raise RuntimeError("ชุดนี้ไม่มีภาพเหลืออยู่")
+
+    meta = _read_json(os.path.join(path, META_FILE))
+    ts = meta.get("frame_ts") or []
+    exposure_us = meta.get("exposure_us")
+    mm_per_px = _cfg("HIK_BURST_MM_PER_PX")
+    thumb_w = int(_cfg("HIK_BURST_THUMB_WIDTH", 260) or 260)
+
+    if job is not None:
+        job.total = len(files) + 1
+    bg = _background(path, files)
+    if job is not None:
+        job.done = 1
+
+    frames = {}
+    prev_small = prev_rect = None
+    prev_ts = None
+    for i, fn in enumerate(files):
+        if job is not None and job.cancelled:
+            break
+        g = _gray(os.path.join(path, fn))
+        if g is None:
+            if job is not None:
+                job.done = i + 2
+            continue
+        small = cv2.resize(g, (0, 0), fx=ANALYSIS_SCALE, fy=ANALYSIS_SCALE,
+                           interpolation=cv2.INTER_AREA)
+        rect = _moving_rect(small, bg)
+
+        if rect is not None:
+            x, y, w, h = rect
+            inv = int(1.0 / ANALYSIS_SCALE)
+            fx0, fy0 = x * inv, y * inv
+            fx1 = min(g.shape[1], (x + w) * inv)
+            fy1 = min(g.shape[0], (y + h) * inv)
+            crop = g[fy0:fy1, fx0:fx1]
+            roi_src = "moving"
+            roi = [fx0, fy0, int(fx1 - fx0), int(fy1 - fy0)]
+        else:
+            crop = g
+            roi_src = "frame"
+            roi = None
+        if crop.size == 0 or min(crop.shape[:2]) < 8:
+            crop, roi_src, roi = g, "frame", None
+
+        sharp, sx, sy = _scores(crop)
+        rec = {"sharp": round(sharp, 1), "sx": round(sx, 3), "sy": round(sy, 3),
+               "ratio": round(sx / sy, 3) if sy > 1e-6 else None,
+               "mean": round(float(np.mean(crop)), 1),
+               "roi": roi, "roi_src": roi_src}
+
+        idx = _frame_index(fn)
+        cur_ts = ts[idx] if 0 <= idx < len(ts) else None
+        shift = None
+        if prev_small is not None and rect is not None and prev_rect is not None:
+            win = _union(prev_rect, rect)
+            wx, wy, ww, wh = win
+            if (ww * wh) / float(small.size) <= MAX_MOVE_FRAC:
+                shift = _shift(prev_small, small, win,
+                               expect_px=_centre_shift(prev_rect, rect))
+        if shift is not None:
+            rec["shift_px"] = round(shift, 2)
+            if cur_ts is not None and prev_ts is not None and cur_ts > prev_ts:
+                dt = cur_ts - prev_ts
+                rec["dt_ms"] = round(dt * 1000.0, 2)
+                speed = shift / dt
+                rec["speed_px_s"] = round(speed, 1)
+                if exposure_us:
+                    rec["blur_px"] = round(speed * (float(exposure_us) / 1e6), 2)
+                if mm_per_px:
+                    rec["speed_mm_s"] = round(speed * float(mm_per_px), 1)
+
+        frames[fn] = rec
+        _thumb(path, fn, g, thumb_w)
+        prev_small, prev_rect, prev_ts = small, rect, cur_ts
+        if job is not None:
+            job.done = i + 2
+
+    # ต้องทำหลังวัดครบทั้งชุด — ด่าน "ยังโผล่ไม่หมด" ต้องรู้กรอบที่ใหญ่สุดของชุด
+    scored = _add_completeness(frames, meta)
+
+    data = {"version": METRICS_VERSION, "count": len(frames),
+            "complete_scored": scored,
+            "computed_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "mm_per_px": mm_per_px, "exposure_us": exposure_us,
+            "frames": frames}
+    data["summary"] = _summarize(frames, exposure_us, mm_per_px)
+    _annotate_directions(frames, data["summary"])
+    _write_json(os.path.join(path, METRICS_FILE), data)
+    return data
+
+
+def _median(vals):
+    vals = sorted(v for v in vals if v is not None)
+    if not vals:
+        return None
+    n = len(vals)
+    return vals[n // 2] if n % 2 else (vals[n // 2 - 1] + vals[n // 2]) / 2.0
+
+
+def _summarize(frames, exposure_us, mm_per_px):
+    if not frames:
+        return {}
+    best_file = max(frames, key=lambda k: frames[k].get("sharp") or 0.0)
+    best_sharp = frames[best_file].get("sharp") or 0.0
+    moving = [v for v in frames.values() if v.get("roi_src") == "moving"]
+    speeds = [v.get("speed_px_s") for v in frames.values()]
+    blurs = [v.get("blur_px") for v in frames.values()]
+    dts = [v.get("dt_ms") for v in frames.values()]
+
+    # ฐานของ "อัตราส่วนแกน" ต้องมาจากภาพที่คมที่สุดในชุดเดียวกัน ไม่ใช่ค่าคงที่ 1.0 —
+    # ฉากที่มีลายตั้งเยอะจะได้ sx/sy สูงกว่า 1 อยู่แล้วโดยไม่เกี่ยวกับความเบลอ
+    sharp_ratios = [v.get("ratio") for v in frames.values()
+                    if v.get("ratio") and (v.get("sharp") or 0) >= best_sharp * SHARP_REL_OK]
+    base_ratio = _median(sharp_ratios)
+
+    speed_med = _median(speeds)
+    shift_med = _median([v.get("shift_px") for v in frames.values()])
+    mean_med = _median([v.get("mean") for v in frames.values()])
+    # "ขยับน้อยเกินกว่าจะวัดได้" ต่างจาก "ขยับช้า" — อย่างแรกแปลว่าเรา *ไม่รู้*
+    moving_enough = bool(shift_med is not None and shift_med >= MIN_MEANINGFUL_SHIFT_PX)
+    out = {
+        "mean_median": round(mean_med, 1) if mean_med is not None else None,
+        "shift_px_median": round(shift_med, 2) if shift_med is not None else None,
+        "motion": ("ok" if moving_enough
+                   else ("negligible" if shift_med is not None else "unknown")),
+        "min_shift_px": MIN_MEANINGFUL_SHIFT_PX,
+        "best_file": best_file,
+        "best_sharp": best_sharp,
+        "moving_frames": len(moving),
+        "total_frames": len(frames),
+        "base_ratio": round(base_ratio, 3) if base_ratio else None,
+        "exposure_us": exposure_us,
+        "dt_ms_median": round(_median(dts), 2) if _median(dts) else None,
+        "speed_px_s": round(speed_med, 1) if speed_med else None,
+        "blur_px_median": round(_median(blurs), 2) if _median(blurs) is not None else None,
+        "blur_px_min": round(min([b for b in blurs if b is not None]), 2) if any(
+            b is not None for b in blurs) else None,
+    }
+    if out["dt_ms_median"]:
+        out["fps_measured"] = round(1000.0 / out["dt_ms_median"], 1)
+    if speed_med and speed_med > 0 and moving_enough:
+        # exposure สูงสุดที่จะได้เบลอ ≤ 1 พิกเซล ที่ความเร็ว **ที่วัดได้จริง**
+        # ⚠️ คำนวณต่อเฉพาะเมื่อวัตถุขยับพอที่จะวัดได้ ไม่งั้นจะได้ค่ามหาศาลไร้ความหมาย
+        max_us = 1.0 / speed_med * 1e6
+        out["max_exposure_us_1px"] = round(max_us, 1)
+        if exposure_us:
+            # ① ลด exposure ลงเท่านี้เท่า ⇒ ภาพมืดลงเท่านี้เท่า ⇒ ต้องเพิ่มไฟเท่านี้เท่า
+            #    **เพื่อให้ภาพสว่างเท่าเดิม** — ไม่ใช่ "เท่านี้แล้วใช้งานได้"
+            factor = float(exposure_us) / max_us
+            out["light_factor_needed"] = round(factor, 1)
+            # ② ถ้าภาพ *ตอนนี้* ก็มืดเกินไปอยู่แล้ว ต้องเพิ่มอีกชั้นหนึ่ง.
+            #    รายงานแยกกันโดยตั้งใจ: ตัวเลข ① อย่างเดียวทำให้เข้าใจผิดว่า
+            #    "เพิ่มไฟ 21 เท่าแล้วจบ" ทั้งที่ของจริงต้องมากกว่านั้นหลายเท่า
+            if mean_med and mean_med > 0.5:
+                out["light_factor_usable"] = round(factor * TARGET_MEAN / mean_med, 1)
+                out["target_mean"] = TARGET_MEAN
+        if mm_per_px:
+            out["speed_mm_s"] = round(speed_med * float(mm_per_px), 1)
+
+    # ── เทียบกับ "ไลน์จริง" ──────────────────────────────────────────────
+    # ⚠️ ข้อสำคัญที่สุดของหน้านี้: ผลที่วัดได้เป็นจริง **เฉพาะที่ความเร็วที่ทดสอบ**.
+    # 25 ส.ค. 2026 ผู้ใช้โบกกระป๋องได้ 74 px/วิ แล้วระบบขึ้นไฟเขียว
+    # "กล้องหยุดการเคลื่อนที่ได้" — จริงที่ 74 px/วิ แต่ไลน์เร็วกว่า **105 เท่า**
+    # ⇒ คำตอบที่ผิดแบบมั่นใจ (กฎเหล็กข้อ 2)
+    #
+    # คำนวณ **นอก** เงื่อนไข moving_enough โดยตั้งใจ: "exposure นี้จะให้เบลอกี่
+    # พิกเซลที่ความเร็วไลน์" ขึ้นกับ exposure อย่างเดียว ⇒ ตอบได้แม้วัตถุจะนิ่งสนิท
+    line = _cfg("HIK_BURST_LINE_SPEED_PX_S")
+    try:
+        line = float(line) if line else 0.0
+    except (TypeError, ValueError):
+        line = 0.0
+    if line > 0:
+        out["line_speed_px_s"] = round(line, 1)
+        out["max_exposure_us_at_line"] = round(1.0 / line * 1e6, 1)
+        if exposure_us:
+            out["blur_at_line_px"] = round(line * (float(exposure_us) / 1e6), 2)
+        if speed_med and moving_enough:
+            ratio = speed_med / line
+            out["speed_ratio"] = round(ratio, 4)
+            out["line_tested"] = bool(
+                ratio >= float(_cfg("HIK_BURST_LINE_SPEED_MIN_RATIO", 0.25) or 0.25))
+        else:
+            out["speed_ratio"] = None
+            out["line_tested"] = False
+    return out
+
+
+def _annotate_directions(frames, summary):
+    """ติดป้าย "เบลอแบบไหน" เฉพาะเมื่อหลักฐานชัดพอ — ไม่ชัดให้เว้นว่างไว้.
+
+    ⚠️ ถ้าทั้งชุดไม่มีการเคลื่อนที่ที่วัดได้ **ห้ามติดป้ายทิศทางเลย** — ความต่าง
+    เล็ก ๆ ของอัตราส่วนแกนบนภาพนิ่งจะกลายเป็นป้าย "เบลอแนวตั้ง" ที่ไม่มีมูล
+    (เจอจริงบนสถานี: ภาพฝากระป๋องที่วางนิ่งได้ป้าย "เบลอแนวตั้ง" ทั้งชุด)
+    """
+    best = summary.get("best_sharp") or 0.0
+    base = summary.get("base_ratio")
+    if summary.get("motion") != "ok":
+        for v in frames.values():
+            sharp = v.get("sharp") or 0.0
+            v["blur_kind"] = "sharp" if (best > 0 and sharp >= best * SHARP_REL_OK) else None
+        return frames
+    for v in frames.values():
+        sharp = v.get("sharp") or 0.0
+        if best > 0 and sharp >= best * SHARP_REL_OK:
+            v["blur_kind"] = "sharp"
+            continue
+        r = v.get("ratio")
+        if not base or not r:
+            v["blur_kind"] = None
+            continue
+        if r < base * DIR_RATIO_MARGIN:
+            v["blur_kind"] = "motion_x"               # ขอบแนวตั้งหายไป = เบลอแนวนอน
+        elif r > base / DIR_RATIO_MARGIN:
+            v["blur_kind"] = "motion_y"
+        else:
+            v["blur_kind"] = "isotropic"              # เบลอทั้งสองแกน = น่าจะโฟกัส
+    return frames
+
+
+def diagnose(meta):
+    """
+    ตอบคำถามเดียว: **เฟรมที่ควรได้ หายไปตรงไหน**
+
+    แยกให้ชัด 3 สาเหตุ เพราะ **วิธีแก้คนละเรื่องกันโดยสิ้นเชิง**:
+      ① เฟรมหายระหว่างทาง  → เลขเฟรมของกล้องกระโดด / แพ็กเก็ตหาย
+                              แก้ที่ packet size + Jumbo Frame — หรือถ้าสองอย่างนั้น
+                              ตั้งถูกแล้ว ให้ไปที่ฝั่งรับ (Receive Buffers ของ NIC)
+      ② ดิสก์เขียนไม่ทัน    → เฟรมมาถึงแล้วแต่คิวเต็ม
+                              แก้ที่ "เก็บ 1 ใน N" · ลด ROI · หยุดโมเดลระหว่างถ่าย
+      ③ กล้องส่งมาช้าเอง    → ไม่มีเฟรมหาย ไม่มีการทิ้ง แต่อัตราต่ำ
+                              แก้ที่ AcquisitionFrameRate / exposure / packet size
+
+    คืน ``None`` เมื่อข้อมูลไม่พอจะสรุป — ไม่เดา (กฎเหล็กข้อ 2)
+    """
+    if not isinstance(meta, dict):
+        return None
+    a = meta.get("diag_start") or {}
+    b = meta.get("diag_end") or {}
+    saved = int(meta.get("saved") or 0)
+    dropped = int(meta.get("dropped") or 0)
+    elapsed = float(meta.get("elapsed_s") or 0)
+    if not elapsed or (saved + dropped) == 0:
+        return None
+
+    every_n = max(1, int(meta.get("every_n") or 1))
+    offered = saved + dropped                          # เฟรมที่ผ่านตัวกรอง every_n มาแล้ว
+    # เฟรมที่กล้องส่งถึงเราจริง. `considered` (ถ้ามี) คือจำนวนที่ **นับไว้จริง**
+    # ในเธรดจับภาพ — แม่นกว่าการคูณกลับด้วย every_n และเป็นทางเดียวที่ถูกต้อง
+    # ในโหมด "คัดต่อหน้าต่าง" ซึ่งจำนวนไฟล์ไม่ได้สัมพันธ์กับ every_n เลย
+    considered = meta.get("considered")
+    delivered = int(considered) if considered else offered * every_n
+    delivered_fps = delivered / elapsed
+
+    def delta(key):
+        x, y = a.get(key), b.get(key)
+        if x is None or y is None:
+            return None
+        return max(0, int(y) - int(x))
+
+    lost_transport = delta("cam_dropped")
+    timeouts = delta("cam_timeouts")
+    net_a = (a.get("net") or {}) if isinstance(a.get("net"), dict) else {}
+    net_b = (b.get("net") or {}) if isinstance(b.get("net"), dict) else {}
+    lost_packets = (int(net_b["lost_packets"]) - int(net_a["lost_packets"])) \
+        if ("lost_packets" in net_a and "lost_packets" in net_b) else None
+
+    out = {
+        "delivered_fps": round(delivered_fps, 1),
+        "saved": saved, "dropped_disk": dropped,
+        "lost_transport": lost_transport, "lost_packets": lost_packets,
+        "timeouts": timeouts, "elapsed_s": round(elapsed, 1),
+        "cam_fps": b.get("cam_fps") or a.get("cam_fps"),
+        "stage_ms": meta.get("stage_ms") or {},
+        "window_ms": meta.get("window_ms") or 0,
+        "framerate_enable": meta.get("framerate_enable"),
+        "framerate": meta.get("framerate"),
+        "packet_size": meta.get("packet_size"),
+    }
+
+    # เพดานของสาย GigE ที่ ROI + รูปแบบพิกเซลนี้ (ไบต์ต่อพิกเซลของ Bayer = 1)
+    w, h = _size_of(meta)
+    if w and h:
+        mb = w * h / 1e6
+        eff = GIGE_EFF_JUMBO if (meta.get("packet_size") or 0) >= JUMBO_MIN_PACKET \
+            else GIGE_EFF_SMALL
+        out["gige_ceiling_fps"] = round(GIGE_MB_S * eff / mb, 1)
+        out["jumbo"] = bool((meta.get("packet_size") or 0) >= JUMBO_MIN_PACKET)
+
+    # ── ตัดสิน ──
+    # ⚠️ ต้องรายงาน **ทุกสาเหตุที่พบ** ไม่ใช่หยุดที่ข้อแรก: เคสจริงบนสถานี
+    #    (16.5 fps + ทิ้ง 127 เฟรม) มีปัญหาสองข้อพร้อมกัน — ถ้ารายงานแค่ "ดิสก์"
+    #    ผู้ใช้จะไปแก้ดิสก์แล้วยังติดที่ 16.5 fps อยู่ดี
+    # ลำดับหัวข้อหลัก = ลำดับที่ควรลงมือแก้: เฟรมที่ "ไม่เคยมี" ต้องแก้ก่อน
+    # เฟรมที่ "มีแล้วเขียนไม่ทัน" (เพราะพอแก้ให้กล้องเร็วขึ้น ดิสก์จะยิ่งตามไม่ทัน)
+    issues = []
+
+    def _transport_fix(pct):
+        """
+        คำแนะนำของสาเหตุ "เฟรมหายระหว่างทาง" ต้องอ่านหลักฐานที่ตัวเองเก็บมา.
+
+        เดิมบอกให้ "ตั้ง packet size + เปิด Jumbo Frame" ทุกครั้ง — บนสถานีที่
+        packet = 8164 และ Jumbo เปิดอยู่แล้ว นั่นคือการส่งผู้ใช้ไปแก้ของที่ไม่ได้พัง
+        (กฎเหล็กข้อ 2) และปิดบังสาเหตุจริงซึ่งอยู่ที่ **ฝั่งรับ** ไม่ใช่ขนาดแพ็กเก็ต.
+        """
+        if not out.get("jumbo"):
+            return ("ตั้ง packet size ให้ใหญ่ขึ้นและเปิด Jumbo Frame บน NIC "
+                    "— การหยุดโมเดลหรือลดจำนวนภาพจะไม่ช่วยเลย")
+        head = ("แพ็กเก็ตตั้งถูกแล้ว (Jumbo เปิด, packet %s) ⇒ ไม่ใช่เรื่องขนาดแพ็กเก็ต. "
+                % (out.get("packet_size") or "?"))
+        tail = ("สาเหตุที่เหลืออยู่ที่ **ฝั่งรับ**: เพิ่ม Receive Buffers ของ NIC "
+                "(Device Manager → การ์ดแลน → Advanced → Receive Buffers = 2048) · "
+                "ตั้ง packet delay (GevSCPD) เล็กน้อยเพื่อลดความกระชาก · "
+                "ลดภาระ CPU ระหว่างถ่าย")
+        if pct is not None and pct < 1.0:
+            # หายเศษเสี้ยวเปอร์เซ็นต์ = ยังไม่ใช่ปัญหาที่ควรไล่ตอนนี้ — บอกให้ชัด
+            # ไม่งั้นผู้ใช้จะเสียเวลาไล่ของที่กระทบผลตรวจน้อยกว่าเรื่องอื่นมาก
+            return head + ("หายเพียง %.1f%% ⇒ ยังไม่ใช่ปัญหาที่ต้องไล่ตอนนี้. "
+                           "ถ้าจะรีดให้เป็น 0: " % pct) + tail
+        return head + tail
+
+    if lost_transport:
+        pct = lost_transport * 100.0 / max(1, delivered + lost_transport)
+        issues.append({
+            "cause": "transport",
+            "text": ("เฟรมหายระหว่างทาง %d เฟรม (%.1f%% ของที่กล้องส่ง "
+                     "— เลขเฟรมของกล้องกระโดด)" % (lost_transport, pct)),
+            "fix": _transport_fix(pct)})
+    elif lost_packets:
+        issues.append({
+            "cause": "transport",
+            "text": "แพ็กเก็ตหาย %d ระหว่างถ่าย" % lost_packets,
+            "fix": _transport_fix(None)})
+
+    if meta.get("framerate_enable") and meta.get("framerate"):
+        issues.append({
+            "cause": "framerate_cap",
+            "text": ("กล้องถูกจำกัดอัตราเฟรมไว้เองที่ %.1f fps "
+                     "(AcquisitionFrameRate เปิดอยู่)" % float(meta["framerate"])),
+            "fix": "ปิด \"จำกัดอัตราเฟรม\" ในแผงตั้งค่ากล้อง แล้วถ่ายใหม่"})
+    elif out.get("gige_ceiling_fps") and delivered_fps < out["gige_ceiling_fps"] * 0.5:
+        # คำแนะนำต้องเปลี่ยนตามหลักฐาน: ถ้า packet size ใหญ่และ Jumbo เปิดอยู่แล้ว
+        # การบอกให้ไป "เช็ค packet size" คือส่งผู้ใช้ไปแก้ของที่ไม่ได้พัง
+        if out.get("jumbo"):
+            fix = ("แพ็กเก็ตตั้งถูกแล้ว (Jumbo เปิด, packet %s) ⇒ คอขวดอยู่ที่ **เครื่อง** "
+                   "ไม่ใช่สาย: โมเดลที่วิ่งสด + การส่งภาพ MJPEG ขึ้นหน้าเว็บ + JPEG encode "
+                   "แย่งซีพียู/แบนด์วิดท์ RAM กัน. ลองติ๊ก \"หยุดโมเดลระหว่างถ่ายรัว\" "
+                   "และปิดหน้าเว็บที่แสดงภาพสดไว้ระหว่างถ่าย แล้วเทียบตัวเลขกัน"
+                   % (out.get("packet_size") or "?"))
+        else:
+            fix = ("เช็ค packet size (ค่าโรงงาน 1500 ทำให้ได้ 15-17 fps) · "
+                   "เปิด Jumbo Frame ที่ NIC · exposure ที่ยาวเกิน · AcquisitionFrameRate")
+        issues.append({
+            "cause": "camera_rate",
+            "text": ("กล้องส่งมาแค่ %.1f fps ทั้งที่สายรับได้ราว %.0f fps "
+                     "และไม่มีเฟรมหาย/ไม่มีการทิ้งระหว่างทาง"
+                     % (delivered_fps, out["gige_ceiling_fps"])),
+            "fix": fix})
+
+    if dropped:
+        issues.append({
+            "cause": "disk",
+            "text": ("ดิสก์เขียนไม่ทัน — ทิ้ง %d เฟรม (%.0f%% ของที่มาถึง)"
+                     % (dropped, dropped * 100.0 / offered)),
+            "fix": (("เปิด \"เก็บใบที่ดีที่สุดต่อช่วงเวลา\" (ได้ไฟล์น้อยลงโดย"
+                     "**ไม่ทิ้งใบที่ดีที่สุด** ต่างจาก \"1 ใน N\") · "
+                     if not meta.get("window_ms") else "")
+                    + "ลด ROI · ลดคุณภาพ JPEG · "
+                    "เปิด \"หยุดโมเดลระหว่างถ่ายรัว\" · "
+                    "ตั้ง \"เก็บ 1 ใน N\" ให้สูงขึ้น")})
+
+    if not issues:
+        issues.append({"cause": "ok", "text": "ไม่พบเฟรมหายและไม่มีการทิ้ง", "fix": ""})
+
+    out["issues"] = issues
+    out["cause"] = issues[0]["cause"]
+    out["text"] = issues[0]["text"]
+    out["fix"] = issues[0]["fix"]
+    return out
+
+
+def _size_of(meta):
+    try:
+        w, h = str(meta.get("size") or "").lower().split("x")
+        return int(w), int(h)
+    except Exception:
+        return None, None
+
+
+def load_metrics(name):
+    data = _read_json(os.path.join(session_dir(name), METRICS_FILE))
+    if not isinstance(data, dict) or data.get("version") != METRICS_VERSION:
+        return None
+    return data
+
+
+def load_detect(name):
+    data = _read_json(os.path.join(session_dir(name), DETECT_FILE))
+    return data if isinstance(data, dict) else {}
+
+
+def session_detail(name, sort="sharp", limit=0, offset=0):
+    path = session_dir(name)
+    files = list_frames(path)
+    meta = _read_json(os.path.join(path, META_FILE))
+    metrics = load_metrics(name) or {}
+    fm = metrics.get("frames") or {}
+    det = load_detect(name)
+
+    rows = []
+    for f in files:
+        row = {"file": f}
+        row.update(fm.get(f) or {})
+        d = det.get(f)
+        if isinstance(d, dict):
+            row["verdict"] = d.get("verdict")
+            row["dent_count"] = d.get("dent_count")
+            row["max_confidence"] = d.get("max_confidence")
+            row["infer_ms"] = d.get("infer_ms")
+        rows.append(row)
+
+    if sort == "best" and fm:
+        best_sharp = max((v.get("sharp") or 0.0) for v in fm.values())
+        rows.sort(key=lambda r: rank_key(fm.get(r["file"], {}), best_sharp),
+                  reverse=True)
+    elif sort == "complete" and fm:
+        # ไม่รู้ (None) ต้องอยู่ท้ายสุด ไม่ใช่ถูกมองเป็น 0 ปนกับที่ "รู้ว่าไม่สมบูรณ์"
+        rows.sort(key=lambda r: (r.get("complete") is None,
+                                 -(r.get("complete") or 0.0),
+                                 -(r.get("sharp") or 0.0)))
+    elif sort == "sharp" and fm:
+        rows.sort(key=lambda r: r.get("sharp") or -1.0, reverse=True)
+    elif sort == "blur" and fm:
+        rows.sort(key=lambda r: (r.get("blur_px") is None, r.get("blur_px") or 0.0))
+    else:
+        rows.sort(key=lambda r: r["file"])
+
+    total = len(rows)
+    if limit:
+        rows = rows[offset:offset + limit]
+    return {"name": name, "meta": meta, "summary": metrics.get("summary") or {},
+            "metrics_ready": bool(fm), "total": total, "frames": rows,
+            "diag": diagnose(meta), "free_mb": free_mb()}
+
+
+def top_files(name, count):
+    """
+    ไฟล์ที่ "ดีที่สุด" N ใบ = **สมบูรณ์ก่อน แล้วค่อยคม** — ใช้เลือกภาพไปตรวจ
+    อัตโนมัติหลังถ่ายเสร็จ.
+
+    เดิมเรียงตามความคมล้วน ⇒ ภาพที่กระป๋องโผล่มาครึ่งใบที่ขอบเฟรม ถ้าคมก็ชนะได้
+    ซึ่งเป็นภาพที่เอาไปตัดสินอะไรไม่ได้เลย.
+    ถ้ายังไม่ได้วัด จะคืนลิสต์ว่าง (ไม่เดาโดยหยิบใบแรก ๆ มามั่ว).
+    """
+    metrics = load_metrics(name)
+    if not metrics:
+        return []
+    path = session_dir(name)
+    have = set(list_frames(path))
+    fm = {k: v for k, v in (metrics.get("frames") or {}).items() if k in have}
+    if not fm:
+        return []
+    best_sharp = max((v.get("sharp") or 0.0) for v in fm.values())
+    ranked = sorted(fm, key=lambda k: rank_key(fm[k], best_sharp), reverse=True)
+    return ranked[:max(0, int(count))]
+
+
+# ชื่อเดิม — คงไว้ให้โค้ด/เทสต์ที่อ้างถึงยังเรียกได้
+top_sharp_files = top_files
+
+
+def run_detect(name, files, detect_fn, job=None):
+    """ตรวจภาพที่ระบุด้วยฟังก์ชันที่ถูกฉีดเข้ามา แล้วเก็บผลลง ``detect.json``.
+
+    ``detect_fn(path) -> dict`` — ``app.py`` เป็นคนรู้จักโมเดล ไม่ใช่โมดูลนี้.
+    ผลเขียนลงดิสก์ระหว่างทางเป็นระยะ ⇒ ปิดหน้าเว็บกลางคันแล้วผลที่ตรวจไปแล้วไม่หาย.
+    """
+    path = session_dir(name)
+    have = set(list_frames(path))
+    todo = [f for f in (files or []) if f in have]
+    det = load_detect(name)
+    if job is not None:
+        job.total = len(todo)
+        job.done = 0
+    for i, f in enumerate(todo):
+        if job is not None and job.cancelled:
+            break
+        try:
+            det[f] = detect_fn(os.path.join(path, f))
+        except Exception as e:
+            det[f] = {"error": str(e)}
+            logger.warning("[hik-burst] ตรวจ %s/%s ไม่สำเร็จ: %s", name, f, e)
+        if job is not None:
+            job.done = i + 1
+        if (i + 1) % 10 == 0:
+            _write_json(os.path.join(path, DETECT_FILE), det)
+    _write_json(os.path.join(path, DETECT_FILE), det)
+    return det
+
+
+# ════════════════════════════════════════════════════════════════════
+# งานเบื้องหลัง — ทีละงานเท่านั้น (วัดผล/ตรวจ กินซีพียูทั้งคู่ และแข่งกับ
+# เธรดจับภาพของกล้อง ⇒ ปล่อยให้ชนกันเองไม่ได้)
+# ════════════════════════════════════════════════════════════════════
+class Job(object):
+    def __init__(self, kind, session):
+        self.kind = kind
+        self.session = session
+        self.total = 0
+        self.done = 0
+        self.error = None
+        self.cancelled = False
+        self.started = time.time()
+        self.finished = None
+
+    def status(self):
+        return {"kind": self.kind, "session": self.session,
+                "done": self.done, "total": self.total,
+                "running": self.finished is None and not self.cancelled,
+                "cancelled": self.cancelled, "error": self.error,
+                "elapsed_s": round((self.finished or time.time()) - self.started, 1)}
+
+
+_job = None
+_job_lock = threading.Lock()
+
+
+def job_status():
+    j = _job
+    return j.status() if j is not None else None
+
+
+def job_running_on(session):
+    """งานที่กำลังทำอยู่กับชุดนี้หรือไม่ — ใช้ก่อนลบ ไม่งั้นงานที่ยังวิ่งอยู่จะ
+    **สร้างโฟลเดอร์กลับขึ้นมาใหม่** หลังลบไปแล้ว (เจอจริงตอนทดสอบด้วยเบราว์เซอร์:
+    ลบชุดทิ้งแล้วเหลือ `_thumbs/` + `metrics.json` เป็นซากที่ไม่มีภาพสักใบ)."""
+    j = _job
+    return bool(j is not None and j.finished is None and not j.cancelled
+                and j.session == session)
+
+
+def cancel_job(wait=0.0):
+    """สั่งยกเลิกงานเบื้องหลัง — ``wait`` = รอให้หยุดจริงกี่วินาที (0 = ไม่รอ)."""
+    j = _job
+    if j is None:
+        return False
+    j.cancelled = True
+    deadline = time.time() + float(wait or 0)
+    while wait and j.finished is None and time.time() < deadline:
+        time.sleep(0.05)
+    return j.finished is not None or not wait
+
+
+def start_job(kind, session, fn):
+    """เริ่มงานเบื้องหลัง — คืน ``(ok, message)``. ปฏิเสธถ้ามีงานค้างอยู่."""
+    global _job
+    with _job_lock:
+        if _job is not None and _job.finished is None and not _job.cancelled:
+            return False, "มีงานทำอยู่ (%s) — รอให้เสร็จก่อน" % _job.kind
+        job = Job(kind, session)
+        _job = job
+
+    def _run():
+        try:
+            fn(job)
+        except Exception as e:
+            job.error = str(e)
+            logger.warning("[hik-burst] งาน %s ล้มเหลว: %s", kind, e)
+        finally:
+            job.finished = time.time()
+
+    threading.Thread(target=_run, daemon=True).start()
+    return True, None

@@ -14,7 +14,9 @@
 
 import os
 import sys
+import time
 
+import numpy as np
 import pytest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -169,9 +171,10 @@ def test_downscale_keeps_aspect_ratio():
     try:
         _, frame = cam.read_frame()
         h, w = frame.shape[:2]
-        assert w == 1280
-        assert abs((w / h) - (2448 / 2048)) < 0.01
-        assert cam.width == 2448 and cam.height == 2048   # ขนาดจริงจากกล้องยังถูกเก็บไว้
+        assert w == hc.config.HIK_LIVE_MAX_WIDTH
+        # อัตราส่วนต้องเท่ากับ ROI ที่กล้องกำลังส่งจริง ไม่ใช่ตัวเลขที่ hard-code
+        assert abs((w / h) - (cam.width / cam.height)) < 0.01
+        assert cam.width > w, "ขนาดจริงจากกล้องต้องใหญ่กว่าภาพที่ย่อแล้ว"
     finally:
         cam.release()
 
@@ -193,7 +196,9 @@ def test_snap_full_returns_unscaled_frame():
         t.join()
         full = result["frame"]
         assert full is not None
-        assert full.shape[1] == 2448 and full.shape[0] == 2048
+        # "เต็มความละเอียด" = ขนาด ROI ที่กล้องส่งจริง ไม่ใช่ภาพที่ย่อลงจอ
+        assert (full.shape[1], full.shape[0]) == (cam.width, cam.height)
+        assert full.shape[1] > hc.config.HIK_LIVE_MAX_WIDTH
     finally:
         cam.release()
 
@@ -248,7 +253,12 @@ def test_set_locked_param_restarts_stream_and_keeps_working():
         assert params["width"]["value"] == 1224 and params["height"]["value"] == 1024
         assert params["offset_x"]["value"] == 612 and params["offset_y"]["value"] == 512
         ok, frame = cam.read_frame()
-        assert ok and frame.shape[1] == 1224          # เล็กกว่าเพดานแล้วจึงไม่ถูกย่อ
+        # ⚠️ เดิมเทสต์นี้ยืนยันว่า "1224 เล็กกว่าเพดาน 1280 จึงไม่ถูกย่อ" —
+        # ซึ่งคือพฤติกรรมที่ทำให้ภาพสดกระตุกบนสถานี (เฟรม 4 เท่าของ USB
+        # ไหลเข้า pipeline). ตอนนี้ ROI ที่ใช้งานจริงต้อง **ถูกย่อ** จริง
+        assert ok
+        assert frame.shape[1] == hc.config.HIK_LIVE_MAX_WIDTH < 1224
+        assert cam.width == 1224 and cam.height == 1024   # ขนาดจริงยังถูกเก็บไว้
     finally:
         cam.release()
 
@@ -350,7 +360,9 @@ def test_dataset_saves_full_resolution_images(tmp_path):
         assert files, "ไม่มีไฟล์ภาพถูกเขียนเลย"
         import cv2
         img = cv2.imread(files[0])
-        assert img.shape[1] == 2448, "ภาพชุดข้อมูลต้องเป็นความละเอียดเต็ม ไม่ใช่ภาพที่ย่อแล้ว"
+        assert img.shape[1] == cam.width, \
+            "ภาพชุดข้อมูลต้องเป็นความละเอียดเต็มของ ROI ไม่ใช่ภาพที่ย่อลงจอ"
+        assert img.shape[1] > hc.config.HIK_LIVE_MAX_WIDTH
     finally:
         cam.release()
 
@@ -367,8 +379,8 @@ def test_stats_expose_the_numbers_needed_to_trust_the_feed(fake_sdk):
         assert st["frames"] >= 10
         assert st["dropped"] > 0, "เลขเฟรมกระโดดต้องถูกนับ ไม่ใช่ปล่อยผ่านเงียบ"
         assert st["lost_packets"] == 4
-        assert st["size"] == "2448x2048"
-        assert st["sent_width"] == 1280
+        assert st["size"] == "%dx%d" % (cam.width, cam.height)
+        assert st["sent_width"] == hc.config.HIK_LIVE_MAX_WIDTH
     finally:
         cam.release()
 
@@ -531,3 +543,251 @@ def test_no_fixed_width_columns_wider_than_the_sidebar():
         fixed = [int(x) for x in re.findall(r"(\d+)px", m.group(1))]
         assert sum(fixed) <= 200, "คอลัมน์ตายตัวรวม %dpx กว้างเกินแถบข้าง: %s" % (
             sum(fixed), m.group(1))
+
+
+# ── แคชสถิติเครือข่าย (net_stats) ────────────────────────────────
+# ทุกคำขอสถานะจากหน้าเว็บจบที่ net_stats() ซึ่งต้องจับ lock ตัวเดียวกับที่
+# _grab_once() ถือไว้ตลอดช่วงจับเฟรม+แปลงสี ⇒ poll ซ้ำซ้อน = ภาพสดสะดุด
+def test_net_stats_is_cached_so_polling_does_not_fight_the_capture_thread(fake_sdk):
+    cam = open_cam()
+    try:
+        calls = []
+        real = cam._h.MV_CC_GetGevAllMatchInfo
+
+        def counting(info):
+            calls.append(1)
+            return real(info)
+
+        cam._h.MV_CC_GetGevAllMatchInfo = counting
+        a, b, c = cam.net_stats(), cam.net_stats(), cam.net_stats()
+        assert a is not None
+        assert a == b == c, "ค่าที่หน้าเว็บเห็นต้องไม่เปลี่ยนเพราะการแคช"
+        assert len(calls) == 1, "เรียก SDK ควรเหลือครั้งเดียว"
+    finally:
+        cam.release()
+
+
+def test_net_stats_cache_can_be_turned_off(fake_sdk, monkeypatch):
+    """ตั้ง 0 = กลับพฤติกรรมเดิม 100% (เรียก SDK ทุกครั้ง)"""
+    monkeypatch.setattr(hc.config, "HIK_NET_STATS_CACHE_S", 0, raising=False)
+    cam = open_cam()
+    try:
+        calls = []
+        real = cam._h.MV_CC_GetGevAllMatchInfo
+        cam._h.MV_CC_GetGevAllMatchInfo = \
+            lambda info: (calls.append(1), real(info))[1]
+        cam.net_stats()
+        cam.net_stats()
+        assert len(calls) == 2
+    finally:
+        cam.release()
+
+
+def test_net_stats_cache_is_dropped_when_the_camera_is_released(fake_sdk):
+    """แคชเป็นของ handle ตัวเก่า — ต่อใหม่แล้วต้องไม่เห็นตัวนับของรอบก่อน"""
+    cam = open_cam()
+    assert cam.net_stats() is not None
+    assert cam._net_cache is not None
+    cam.release()
+    assert cam._net_cache is None
+
+
+def test_live_max_width_actually_downscales_the_half_roi(fake_sdk):
+    """
+    กับดักที่เจอบนสถานี 24 ส.ค.: ค่าเดิม 1280 **ไม่เคยทำงาน** ที่ ROI ครึ่ง
+    1224x1024 (ย่อเมื่อ w > maxw เท่านั้น) ⇒ ภาพเต็มไหลเข้า pipeline ที่
+    ออกแบบไว้สำหรับ 640x480. ค่าเริ่มต้นต้องเล็กกว่า ROI ที่ใช้งานจริง
+    """
+    import config as appcfg
+    assert appcfg.HIK_LIVE_MAX_WIDTH < 1224, (
+        "ค่าเริ่มต้นต้องเล็กกว่า ROI ครึ่ง (1224) ไม่งั้นการย่อไม่เคยเกิดขึ้น")
+    # และต้องยังใหญ่กว่า imgsz ของโมเดล live เพื่อไม่ให้แลกความแม่นไปกับความเร็ว
+    assert appcfg.HIK_LIVE_MAX_WIDTH >= 2 * appcfg.YOLO_IMGSZ
+
+
+# ── โหมด "คัดใบที่ดีที่สุดต่อหน้าต่างเวลา" ──────────────────────────
+# `every_n` ทิ้งเฟรมตามลำดับ ⇒ ใบที่ดีที่สุดอาจเป็นใบที่ถูกทิ้งพอดี
+def _writer(tmp_path, **kw):
+    kw.setdefault("max_frames", 1000)
+    kw.setdefault("min_free_mb", 0)
+    w = hc._DatasetWriter(str(tmp_path / "w"), **kw)
+    assert w.start(), w.error
+    return w
+
+
+def _img(sharpness):
+    """ภาพที่ 'คม' ตามค่าที่สั่ง — ลายตารางถี่ = ขอบเยอะ = คะแนนสูง"""
+    a = np.zeros((240, 320, 3), np.uint8)
+    if sharpness > 0:
+        step = max(2, 20 - sharpness)          # ถี่ขึ้น = คมขึ้น
+        a[:, ::step] = 255
+        a[::step, :] = 255
+    return a
+
+
+def test_window_mode_keeps_the_sharpest_frame_of_each_window(tmp_path):
+    w = _writer(tmp_path, window_ms=60, window_crop=0)
+    try:
+        # หน้าต่างเดียว: ป้อน 3 ใบ ใบกลางคมที่สุด
+        w.put(_img(1))
+        w.put(_img(16))                        # ← ใบนี้ต้องชนะ
+        w.put(_img(2))
+        best = w._win_frame
+        assert best is not None
+        assert hc._DatasetWriter._sharpness(best, 0) == \
+            max(hc._DatasetWriter._sharpness(_img(k), 0) for k in (1, 16, 2))
+    finally:
+        w.stop()
+
+
+def test_window_mode_writes_exactly_one_frame_per_window(tmp_path):
+    w = _writer(tmp_path, window_ms=40, window_crop=0)
+    try:
+        for _ in range(3):
+            for k in (1, 8, 3):
+                w.put(_img(k))
+            time.sleep(0.05)                   # ปิดหน้าต่าง
+            w.put(_img(1))                     # ใบแรกของหน้าต่างถัดไป → flush ใบก่อน
+        w.stop()
+        files = sorted(os.listdir(w.dir))
+        jpgs = [f for f in files if f.endswith(".jpg")]
+        # 3 หน้าต่างที่ปิดครบ + ใบที่ค้างตอน stop
+        assert 3 <= len(jpgs) <= 4, jpgs
+        assert w.windows >= 3
+    finally:
+        if w._thread:
+            w.stop()
+
+
+def test_window_mode_never_loses_the_last_object(tmp_path):
+    """
+    ⚠️ ใบที่ค้างอยู่ในหน้าต่างสุดท้ายต้องถูกเขียนตอน stop() — ไม่งั้นวัตถุใบสุดท้าย
+    ของทุกรอบจะหายไปเงียบ ๆ (ซึ่งบนไลน์จริงคือกระป๋องที่ไม่มีภาพเลย)
+    """
+    w = _writer(tmp_path, window_ms=5000, window_crop=0)   # หน้าต่างยาวมาก
+    w.put(_img(8))
+    assert w.windows == 0, "ยังไม่ครบหน้าต่าง จึงยังไม่ควรเขียน"
+    w.stop()
+    jpgs = [f for f in os.listdir(w.dir) if f.endswith(".jpg")]
+    assert len(jpgs) == 1, "ใบที่ค้างต้องถูกเขียนตอนหยุด"
+
+
+def test_window_mode_off_is_the_old_behaviour_exactly(tmp_path):
+    """window_ms = 0 ⇒ เขียนทุกเฟรมที่ผ่าน every_n เหมือนเดิมทุกประการ"""
+    w = _writer(tmp_path, window_ms=0, every_n=2)
+    try:
+        for _ in range(6):
+            w.put(_img(4))
+        time.sleep(0.5)
+        w.stop()
+        jpgs = [f for f in os.listdir(w.dir) if f.endswith(".jpg")]
+        assert len(jpgs) == 3, "6 เฟรม every_n=2 ⇒ 3 ไฟล์"
+        assert w.windows == 0
+    finally:
+        if w._thread:
+            w.stop()
+
+
+def test_window_mode_counts_every_frame_the_camera_delivered(tmp_path):
+    """
+    `considered` ต้องนับ **ทุกเฟรม** ไม่ใช่แค่ที่เขียน — ไม่งั้นการวินิจฉัยจะคิดว่า
+    กล้องส่งมาแค่ไม่กี่เฟรมแล้วไปกล่าวหาว่ากล้อง/สายช้า
+    """
+    w = _writer(tmp_path, window_ms=5000, window_crop=0)
+    try:
+        for _ in range(10):
+            w.put(_img(4))
+        assert w.considered == 10
+        assert w.saved <= 1
+        assert w.status()["considered"] == 10
+    finally:
+        w.stop()
+
+
+def test_sharpness_score_prefers_a_centred_object_when_cropping(tmp_path):
+    """
+    crop กลางเฟรมทำให้วัตถุที่โผล่มาแค่ริมเฟรมได้คะแนนต่ำ — เป็นตัวแทนหยาบ ๆ
+    ของ "เข้ามาอยู่กลางเฟรมแล้ว" โดยไม่ต้องเรียกโมเดล
+    """
+    edge = np.zeros((240, 320, 3), np.uint8)
+    edge[:, 0:20] = 255                        # แถบขาวชิดขอบซ้าย
+    centre = np.zeros((240, 320, 3), np.uint8)
+    centre[:, 150:170] = 255                   # แถบขาวกลางเฟรม
+    assert (hc._DatasetWriter._sharpness(centre, 0.6)
+            > hc._DatasetWriter._sharpness(edge, 0.6))
+
+
+def test_sharpness_never_raises_on_bad_input():
+    assert hc._DatasetWriter._sharpness(None) == -1.0
+    assert hc._DatasetWriter._sharpness(np.zeros((2, 2, 3), np.uint8)) >= -1.0
+
+
+def test_window_mode_beats_every_n_at_keeping_the_centred_frame(tmp_path, monkeypatch):
+    """
+    เหตุผลทั้งหมดของฟีเจอร์นี้ — จำลองกระป๋องวิ่งผ่านเฟรมที่ 450 CPM:
+
+    `every_n` ทิ้งเฟรม **ตามลำดับ** ⇒ ใบที่เก็บได้เป็นใบไหนก็ได้ในคาบนั้น
+    โหมดหน้าต่างเก็บ **ใบที่คะแนนสูงสุดของคาบ** ⇒ ได้ใบที่กระป๋องอยู่กลางเฟรม
+
+    ใช้เวลาปลอมเพื่อให้ผลคงที่ (เทสต์ที่พึ่งเวลาจริงจะแกว่งตามภาระเครื่อง)
+    """
+    import cv2
+    W_F, H_F, R = 640, 480, 70
+    FPS, PERIOD_MS = 68.3, 133.3
+
+    def frame_at(t_ms):
+        phase = (t_ms % PERIOD_MS) / PERIOD_MS
+        x = int(-R + phase * (W_F + 2 * R))
+        img = np.full((H_F, W_F, 3), 40, np.uint8)
+        cv2.circle(img, (x, H_F // 2), R, (200, 200, 200), -1)
+        for r in (50, 32, 16):
+            cv2.circle(img, (x, H_F // 2), r, (110, 110, 110), 2)
+        return img, abs(x - W_F // 2)
+
+    def collect(**kw):
+        clock = {"t": 1000.0}
+        monkeypatch.setattr(hc.time, "time", lambda: clock["t"])
+        w = hc._DatasetWriter(str(tmp_path / ("w%d" % len(kw))),
+                              max_frames=10000, min_free_mb=0, **kw)
+        assert w.start(), w.error
+        offs = []
+        real = w._enqueue
+        w._enqueue = lambda f, ts: (offs.append(off_of[id(f)]), real(f, ts))[1]
+        off_of = {}
+        for i in range(int(FPS * 3)):
+            clock["t"] = 1000.0 + i / FPS
+            img, off = frame_at(i * 1000.0 / FPS)
+            off_of[id(img)] = off
+            w.put(img)
+        w._flush_window(clock["t"])
+        w._stop.set()
+        w._thread = None
+        return offs
+
+    every = collect(every_n=4)
+    window = collect(window_ms=int(PERIOD_MS), window_crop=0.6)
+
+    centred = lambda offs: sum(1 for o in offs if o <= R) / float(max(1, len(offs)))
+    assert len(window) < len(every), "ต้องได้ไฟล์น้อยกว่าหรือเท่า (ภาระดิสก์ไม่เพิ่ม)"
+    assert centred(window) > centred(every) * 1.5, (
+        "โหมดหน้าต่างต้องได้ใบที่กระป๋องอยู่กลางเฟรมมากกว่าอย่างมีนัย "
+        "(หน้าต่าง %.0f%% vs every_n %.0f%%)"
+        % (100 * centred(window), 100 * centred(every)))
+    assert np.median(window) < np.median(every), "ระยะจากกลางเฟรมต้องน้อยกว่า"
+
+
+def test_default_roi_is_the_half_frame_measured_to_work_on_the_line(fake_sdk):
+    """
+    ROI ตั้งต้นต้องเป็นครึ่งกลาง 1224x1024 — วัดจริงบนสถานี 25 ส.ค.:
+      เต็มเฟรม 2448x2048 → 20.2 fps · encode 101.6 ms · ทิ้งเพราะดิสก์ 51%
+      ครึ่งกลาง 1224x1024 → 68.3 fps · encode 45.1 ms · ทิ้ง 0%
+    ⇒ เต็มเฟรมทำให้พังทุกด้านพร้อมกัน
+    """
+    d = hc.config.HIK_DEFAULTS
+    assert (d.get("width"), d.get("height")) == (1224, 1024)
+    assert d.get("roi_center") is True
+    cam = open_cam()
+    try:
+        assert (cam.width, cam.height) == (1224, 1024), "กล้องต้องเปิดที่ ROI ครึ่งกลาง"
+    finally:
+        cam.release()

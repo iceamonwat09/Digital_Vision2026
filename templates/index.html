@@ -105,9 +105,13 @@
                         <button class="btn btn-mini" data-roi="full" type="button">เต็มเฟรม</button>
                         <button class="btn btn-mini" data-roi="half" type="button">ครึ่งกลาง</button>
                         <button class="btn btn-mini" data-roi="quarter" type="button">¼ กลาง</button>
+                        <button class="btn btn-mini" data-roi="wide" type="button">กว้าง-เตี้ย</button>
+                        <button class="btn btn-mini" data-roi="fast" type="button">เร็วสุด</button>
                     </div>
                     <p class="control-hint">ROI เล็กลง = เร็วขึ้นมาก และฝากระป๋องกินเฟรมมากขึ้น<br>
-                        <b>วัดจริง:</b> เต็มเฟรม 23.6 fps · ครึ่งกลาง 69 fps</p>
+                        <b>วัดจริง:</b> เต็มเฟรม 23.6 fps · ครึ่งกลาง 69 fps<br>
+                        💡 <b>ความสูงสำคัญกว่าความกว้าง</b> — เซนเซอร์อ่านทีละแถว
+                        ส่วนความกว้างมีผลเฉพาะปริมาณข้อมูลบนสายแลน</p>
 
                     <details id="hikSettings" class="hik-box">
                         <summary>⚙️ ตั้งค่ากล้อง (ช่วงค่ามาจากตัวกล้องจริง)</summary>
@@ -118,6 +122,16 @@
                         </div>
                         <div id="hikApplyMsg" class="control-hint" style="text-align:left"></div>
                     </details>
+
+                    <label class="hik-check">
+                        <input type="checkbox" id="hikSmoothToggle">
+                        🎞️ ภาพลื่นขึ้น <b>แลกกับกรอบตามช้า</b>
+                    </label>
+                    <p class="control-hint" id="hikSmoothHint">ปิดไว้ = ภาพคือเฟรมที่โมเดลตรวจจริง
+                        ⇒ <b>กรอบล็อกเป๊ะกับกระป๋อง</b> แต่ภาพอัปเดตตามอัตราการตรวจ ·
+                        เปิด = ภาพลื่นตามกล้อง <b>แต่กรอบจะตามภาพไม่ทันตอนวัตถุขยับ</b>
+                        (ใช้ตอนดูภาพ/จัดมุมกล้องเท่านั้น) ·
+                        <b>ไม่กระทบการนับ/บันทึก/ผลตรวจ</b> ไม่ว่าจะเลือกแบบไหน</p>
 
                     <label class="hik-check">
                         <input type="checkbox" id="hikDatasetToggle" disabled>
@@ -135,6 +149,17 @@
                         วิธีทดสอบกับไลน์จริง: เก็บทุกใบที่วิ่งผ่าน แล้ววัดผลทีหลังด้วย
                         <code>hik_offline_eval.py</code></p>
 
+                    <label class="hik-check">
+                        <input type="checkbox" id="hikLiveDetectOff">
+                        ⏸️ <b>ไม่ต้องตรวจภาพสด</b> (ภาพยังสด — ตรวจเฉพาะตอนกดถ่าย)
+                    </label>
+                    <p class="control-hint" id="hikLiveDetectHint">ระหว่างเล็งกล้องไม่ต้องการผลตรวจสด
+                        อยู่แล้ว และการตรวจสดกิน iGPU จนช็อตต้องรอคิว ·
+                        <b>วัดได้: ถ่าย 1 เฟรมเร็วขึ้น 2.3 เท่า</b> (1,216 → 525 ms)</p>
+                    <div id="hikLiveDetectWarn" class="hik-warn-box" style="display:none">
+                        ⛔ <b>ไม่ได้ตรวจภาพสดอยู่</b> — การนับกระป๋องและการบันทึก DB หยุดด้วย
+                    </div>
+
                     <div class="hik-shot-row">
                         <select id="hikShotImgsz" class="camera-select hik-imgsz" title="ขนาดภาพที่โมเดลตรวจ">
                             <option value="1280" selected>1280 · ละเอียดสุด</option>
@@ -145,6 +170,46 @@
                     </div>
                     <p class="control-hint">ภาพสดถูกย่อก่อนเข้าโมเดลเพื่อความลื่น —
                         ปุ่มนี้ตรวจภาพ <b>เต็มความละเอียด</b> ครั้งเดียว (ไม่นับ ไม่ลงฐานข้อมูล)</p>
+                    <div class="hik-burst-box">
+                        <div class="hik-burst-title">🎬 ถ่ายรัว (ทดสอบความเบลอ)</div>
+                        <div class="hik-ds-opts">
+                            <label><span>นาน (วินาที)</span>
+                                <input id="hikBurstSeconds" type="number" min="1" max="60" value="10"></label>
+                            <label><span>เก็บ 1 ใน (เฟรม)</span>
+                                <input id="hikBurstEveryN" type="number" min="1" max="20" value="1"></label>
+                        </div>
+                        <div class="hik-every-presets" id="hikEveryPresets">
+                            <button type="button" data-every="1">ทุกเฟรม</button>
+                            <button type="button" data-every="3">1 ใน 3</button>
+                            <button type="button" data-every="7">1 ใน 7</button>
+                            <button type="button" data-every="14">1 ใน 14</button>
+                        </div>
+                        <label class="hik-check hik-window-row" id="hikBurstWindowRow" style="display:none">
+                            <input type="checkbox" id="hikBurstWindow">
+                            <span>🏆 เก็บ <b>ใบที่ดีที่สุดต่อช่วงเวลา</b> แทน "1 ใน N"
+                                <input id="hikBurstWindowMs" type="number" min="20" max="5000"
+                                       step="10" value="133" class="hik-win-ms"> ms</span>
+                        </label>
+                        <p class="control-hint" id="hikBurstWindowHint">"1 ใน N" ทิ้งเฟรมตามลำดับ
+                            ⇒ <b>ใบที่ดีที่สุดอาจเป็นใบที่ถูกทิ้งพอดี</b> · โหมดนี้ให้กล้องวิ่งเต็มอัตรา
+                            แล้วเก็บเฉพาะใบที่คมที่สุดในแต่ละช่วง ⇒ ได้ไฟล์เท่ากันแต่เป็นใบที่ดีกว่า ·
+                            ตั้งเท่าคาบของกระป๋อง 1 ใบ = ได้ ~1 ภาพต่อใบ
+                            (<b>450 ใบ/นาที = 133 ms</b> · 300 ใบ/นาที = 200 ms)</p>
+
+                        <label class="hik-check hik-pause-row" id="hikBurstPauseRow" style="display:none">
+                            <input type="checkbox" id="hikBurstPause">
+                            <span>⏸️ หยุดโมเดลระหว่างถ่ายรัว
+                                <b class="hik-pause-warn">— การนับและการบันทึก DB จะหยุดด้วย</b></span>
+                        </label>
+                        <div id="hikBurstEst" class="hik-burst-est">—</div>
+                        <button id="hikBurstBtn" class="btn btn-secondary btn-block" type="button" disabled>🎬 เริ่มถ่ายรัว</button>
+                        <button id="hikBurstGalleryBtn" class="btn btn-secondary btn-block" type="button">🖼️ ภาพที่ถ่ายไว้ / ลบภาพ</button>
+                        <div id="hikBurstMsg" class="control-hint"></div>
+                    </div>
+                    <p class="control-hint">เก็บที่ <b>อัตรากล้อง</b> แล้ว <b>ตรวจทีหลัง</b> —
+                        ถ้าถ่ายสลับตรวจจะได้ ~2 ภาพ/วินาที ซึ่งวัดความเร็วของโมเดล
+                        ไม่ใช่ความสามารถของกล้อง</p>
+
                     <p class="control-hint hik-warn">
                         ⚠️ <b>โหมดทดสอบ (free-running)</b> — ตัวนับใช้ช่องว่างระหว่างใบเป็นตัวแบ่ง
                         จึงเชื่อได้เฉพาะกระป๋องที่นิ่ง/เคลื่อนช้า <b>ยังใช้กับไลน์ผลิตจริงไม่ได้</b>
@@ -307,6 +372,68 @@
     </div>
 </div>
 
+<!-- ── แกลเลอรีภาพถ่ายรัว: ดูทุกภาพที่เก็บได้ + ตัวเลขความเบลอ + ปุ่มลบ ── -->
+<div id="hikBurstOverlay" class="snap-overlay" style="display:none">
+    <div class="snap-modal hik-gal-modal">
+        <div class="snap-modal-head">
+            <span>🎬 ภาพถ่ายรัว — <span id="hikGalTitle">เลือกชุด</span></span>
+            <button id="hikGalClose" class="snap-x" title="ปิด">&times;</button>
+        </div>
+        <div class="hik-gal-body">
+            <aside class="hik-gal-side">
+                <div class="hik-gal-side-head">ชุดที่ถ่ายไว้</div>
+                <div id="hikGalSessions" class="hik-gal-list">—</div>
+                <div id="hikGalDisk" class="hik-gal-disk"></div>
+            </aside>
+            <section class="hik-gal-main">
+                <div id="hikGalKpis" class="hik-kpis"></div>
+                <div id="hikGalSummary" class="hik-note info">เลือกชุดภาพทางซ้าย</div>
+                <div id="hikGalDrop" class="hik-note bad" style="display:none"></div>
+                <div id="hikGalDiag" class="hik-note info" style="display:none"></div>
+                <div class="hik-gal-bar">
+                    <select id="hikGalSort" class="camera-select" title="เรียงลำดับภาพ">
+                        <option value="best" selected>เรียง: ดีที่สุด (สมบูรณ์ + คม)</option>
+                        <option value="complete">เรียง: สมบูรณ์ที่สุดก่อน</option>
+                        <option value="sharp">เรียง: คมที่สุดก่อน</option>
+                        <option value="blur">เรียง: เบลอน้อยที่สุดก่อน</option>
+                        <option value="name">เรียง: ตามเวลา</option>
+                    </select>
+                    <div class="hik-gal-group">
+                        <button id="hikGalMetricsBtn" class="btn btn-secondary btn-sm" type="button">📏 วัดความคม/ความเบลอ</button>
+                        <button id="hikGalDetectTopBtn" class="btn btn-secondary btn-sm" type="button">🔍 ตรวจ 12 ใบที่ดีที่สุด</button>
+                        <button id="hikGalDetectAllBtn" class="btn btn-secondary btn-sm" type="button">🔍 ตรวจทั้งชุด</button>
+                    </div>
+                    <div class="hik-gal-group right">
+                        <button id="hikGalSelAll" class="btn btn-secondary btn-sm" type="button">☑ เลือกทั้งหน้า</button>
+                        <button id="hikGalDelSel" class="btn btn-danger-soft btn-sm" type="button">🗑 ลบที่เลือก</button>
+                        <button id="hikGalDelAll" class="btn btn-danger-soft btn-sm" type="button">🗑 ลบทั้งชุด</button>
+                    </div>
+                </div>
+                <div id="hikGalJob" class="hik-gal-job" style="display:none"></div>
+                <div id="hikGalGrid" class="hik-gal-grid"></div>
+                <div id="hikGalMore" class="hik-gal-more" style="display:none">
+                    <button id="hikGalMoreBtn" class="btn btn-secondary btn-sm" type="button">โหลดเพิ่ม</button>
+                </div>
+            </section>
+        </div>
+    </div>
+</div>
+
+<!-- ภาพขยายของ 1 เฟรม -->
+<div id="hikFrameOverlay" class="snap-overlay" style="display:none">
+    <div class="snap-modal hik-frame-modal">
+        <div class="snap-modal-head">
+            <span id="hikFrameTitle">ภาพ</span>
+            <button id="hikFrameClose" class="snap-x" title="ปิด">&times;</button>
+        </div>
+        <div class="hik-frame-body">
+            <img id="hikFrameImg" alt="ภาพเฟรมเดียวจากชุดถ่ายรัว">
+            <div id="hikFrameKpis" class="hik-kpis"></div>
+            <div id="hikFrameMeta" class="control-hint"></div>
+        </div>
+    </div>
+</div>
+
 <style>
     /* ── กล้องอุตสาหกรรม (Hikrobot) ─────────────────────────────
        ข้อจำกัดที่ต้องออกแบบรอบ: แถบข้างกว้าง 300px (เหลือใช้จริง ~263px)
@@ -389,6 +516,225 @@
         border: 1px solid #cbd5e1; border-radius: 6px;
     }
 
+    /* ══ ถ่ายรัว: แผงในแถบข้าง ══════════════════════════════════
+       ใช้โทเคนของหน้าหลัก (--blue / --gray-* / --radius / --shadow-*)
+       ทั้งหมด เพื่อให้แท็บนี้เป็นส่วนหนึ่งของหน้าเดียวกัน ไม่ใช่ของแปะเพิ่ม */
+    .hik-burst-box {
+        margin-top: 12px; padding: 11px 12px;
+        border: 1.5px solid var(--gray-200); border-radius: var(--radius);
+        background: var(--gray-50);
+    }
+    .hik-burst-title {
+        font-size: 12px; font-weight: 700; color: var(--navy);
+        margin-bottom: 8px; display: flex; align-items: center; gap: 6px;
+    }
+    .hik-burst-box .btn-block { width: 100%; margin-top: 7px; }
+    .hik-burst-box.is-recording {
+        border-color: var(--danger); background: #FEF2F2;
+        box-shadow: 0 0 0 3px rgba(229,57,53,.10);
+    }
+    .hik-burst-est {
+        margin-top: 7px; padding: 6px 8px; border-radius: 7px;
+        background: var(--blue-pale); color: var(--navy);
+        font-size: 11px; line-height: 1.5;
+    }
+    .hik-burst-est b { font-family: var(--font-mono); font-size: 12.5px; }
+    .hik-burst-est.warn { background: #FFF8E1; color: #8D5B00; }
+    .hik-pause-row { margin-top: 8px; font-size: 11.5px; align-items: flex-start; }
+    .hik-pause-warn { color: var(--danger); font-weight: 600; }
+    .hik-diag-grid {
+        display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        gap: 4px 14px; margin-top: 6px; font-size: 11.5px;
+    }
+    .hik-diag-grid span { color: var(--gray-600); }
+    .hik-diag-grid b { font-family: var(--font-mono); color: var(--gray-800); }
+    .hik-every-presets { display: flex; gap: 4px; margin-top: 6px; }
+    .hik-every-presets button {
+        flex: 1 1 0; min-width: 0; padding: 4px 2px; font-size: 10.5px;
+        border: 1px solid var(--gray-200); background: var(--white);
+        color: var(--gray-600); border-radius: 6px; cursor: pointer;
+        font-family: inherit; transition: .15s;
+    }
+    .hik-every-presets button:hover { border-color: var(--blue-light); color: var(--blue); }
+    .hik-every-presets button.on {
+        background: var(--blue); border-color: var(--blue); color: #fff; font-weight: 700;
+    }
+
+    /* ══ ถ่ายรัว: แกลเลอรี ══════════════════════════════════════ */
+    .hik-gal-modal { width: min(1560px, 97vw); }
+    /* ⚠️ min-height:0 ทุกชั้นของ flex ที่ห่อ grid — ถ้าขาดแม้ชั้นเดียว
+       การ์ดในกริดจะถูกบีบจนสูงเหลือ ~26px แล้วถูก overflow:hidden ตัดทิ้ง
+       (เจอจริงบนสถานี: เห็นเป็นแถบเทาบาง ๆ ไม่มีทั้งภาพและตัวเลข) */
+    .hik-gal-body { display: flex; gap: 14px; align-items: stretch; min-height: 0; }
+    .hik-gal-side {
+        flex: 0 0 236px; min-width: 0; min-height: 0;
+        display: flex; flex-direction: column;
+        border-right: 1.5px solid var(--gray-200); padding-right: 12px;
+    }
+    .hik-gal-side-head {
+        font-size: 10px; font-weight: 700; color: var(--gray-400);
+        text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px;
+    }
+    .hik-gal-list { overflow-y: auto; min-height: 0; flex: 1 1 auto; }
+    .hik-gal-sess {
+        padding: 9px 10px; border: 1.5px solid var(--gray-200); border-radius: 9px;
+        margin-bottom: 7px; cursor: pointer; background: var(--white);
+        transition: border-color .15s, box-shadow .15s;
+    }
+    .hik-gal-sess:hover { border-color: var(--blue-light); box-shadow: var(--shadow-sm); }
+    .hik-gal-sess.active {
+        border-color: var(--blue); background: var(--blue-pale);
+        box-shadow: 0 0 0 1px var(--blue) inset;
+    }
+    .hik-gal-sess b { display: block; font-size: 12px; color: var(--gray-800); font-weight: 700; }
+    .hik-gal-sess .sub {
+        display: block; margin-top: 3px; font-size: 11px; color: var(--gray-600);
+        font-family: var(--font-mono);
+    }
+    .hik-gal-sess .drop { display: block; margin-top: 2px; font-size: 10.5px; color: var(--danger); font-weight: 600; }
+    .hik-gal-disk {
+        margin-top: 10px; padding-top: 9px; border-top: 1px solid var(--gray-200);
+        font-size: 11px; color: var(--gray-600);
+    }
+    .hik-gal-main { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+
+    /* KPI — รูปแบบเดียวกับการ์ดสถิติของหน้าหลัก */
+    .hik-kpis {
+        display: grid; grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+        gap: 8px; margin-bottom: 10px;
+    }
+    .hik-kpi {
+        background: var(--white); border: 1.5px solid var(--gray-200);
+        border-radius: 10px; padding: 9px 11px; min-width: 0;
+    }
+    .hik-kpi .k {
+        font-size: 9.5px; font-weight: 700; color: var(--gray-400);
+        text-transform: uppercase; letter-spacing: .8px;
+    }
+    .hik-kpi .v {
+        font-family: var(--font-mono); font-size: 19px; font-weight: 700;
+        color: var(--blue); line-height: 1.25; margin-top: 3px;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .hik-kpi .u { font-size: 11px; font-weight: 600; color: var(--gray-400); }
+    .hik-kpi.good .v { color: var(--success); }
+    .hik-kpi.warn .v { color: #B26A00; }
+    .hik-kpi.bad  .v { color: var(--danger); }
+    .hik-kpi.muted .v { color: var(--gray-400); }
+
+    .hik-note {
+        border-radius: 9px; padding: 9px 12px; font-size: 12px; line-height: 1.65;
+        margin-bottom: 10px; border: 1.5px solid transparent;
+    }
+    .hik-note b { font-weight: 700; }
+    .hik-note.info { background: var(--blue-pale); border-color: #BBDEFB; color: var(--navy); }
+    .hik-note.good { background: #E8F5E9; border-color: #C8E6C9; color: #1B5E20; }
+    .hik-note.warn { background: #FFF8E1; border-color: #FFE0A3; color: #8D5B00; }
+    .hik-note.bad  { background: #FEF2F2; border-color: #FECACA; color: #A31515; }
+
+    .hik-gal-bar {
+        display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 10px;
+    }
+    .hik-gal-bar .camera-select { width: auto; min-width: 150px; height: 32px; padding: 3px 8px; }
+    .hik-gal-group { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+    /* margin-left:auto ทำให้กลุ่มปุ่มลบชิดขวา **แม้ตอนที่แถบตัดขึ้นบรรทัดใหม่**
+       (spacer อย่างเดียวใช้ไม่ได้เมื่อ wrap แล้ว) */
+    .hik-gal-group.right { margin-left: auto; }
+    .btn-sm { padding: 6px 11px; font-size: 11.5px; border-radius: 7px; }
+    /* ปุ่มลบ: ให้ "อ่านออกว่าอันตราย" โดยไม่ตะโกนกลบปุ่มอื่นทั้งแถบ
+       (ปุ่มแดงทึบสงวนไว้ให้ Stop Detection ซึ่งเป็นปุ่มหลักของหน้า) */
+    .btn-danger-soft {
+        background: var(--white); color: var(--danger);
+        border: 1.5px solid #F5B5B4; box-shadow: none;
+    }
+    .btn-danger-soft:hover:not(:disabled) {
+        background: #FEF2F2; border-color: var(--danger); color: #B71C1C;
+    }
+    .hik-gal-job {
+        display: flex; align-items: center; gap: 10px; margin-bottom: 10px;
+        font-size: 12px; color: var(--navy); background: var(--blue-pale);
+        border: 1.5px solid #BBDEFB; border-radius: 9px; padding: 8px 11px;
+    }
+    .hik-progress {
+        flex: 1 1 auto; height: 6px; border-radius: 3px; background: #fff;
+        overflow: hidden; min-width: 60px;
+    }
+    .hik-progress i { display: block; height: 100%; background: var(--blue); transition: width .3s; }
+
+    /* กริดภาพ — align-content:start กันไม่ให้แถวถูกยืด/บีบตามความสูงของกล่อง */
+    .hik-gal-grid {
+        display: grid; grid-template-columns: repeat(auto-fill, minmax(196px, 1fr));
+        /* grid-auto-rows: max-content คือตัวที่ทำให้แถวสูงเท่าเนื้อหาจริง —
+           ถ้าปล่อยเป็น auto ในกริดที่ความสูง "ถูกกำหนดมาแล้ว" จากชั้น flex
+           แถวจะถูกบีบเหลือ ~48px แต่การ์ดยังสูง 277px ⇒ **การ์ดซ้อนทับกัน**
+           เห็นเป็นแถบเทายาวมีแต่ปุ่มกากบาท ไม่มีตัวเลขสักตัว (เจอจริงบนสถานี) */
+        grid-auto-rows: max-content;
+        align-content: start; gap: 10px; overflow-y: auto; min-height: 0;
+        flex: 1 1 auto; padding: 2px 4px 2px 2px;
+    }
+    .hik-card {
+        align-self: start; border: 1.5px solid var(--gray-200); border-radius: 10px;
+        background: var(--white); overflow: hidden; transition: border-color .15s, box-shadow .15s;
+    }
+    .hik-card:hover { border-color: var(--blue-light); box-shadow: var(--shadow-sm); }
+    .hik-card.sel { border-color: var(--blue); box-shadow: 0 0 0 2px var(--blue-light); }
+    /* ⚠️ ความสูงของภาพย่อเป็น px คงที่โดยตั้งใจ — ไม่ใช้ aspect-ratio + width:100%
+       เพราะความสูงจะขึ้นกับความกว้างของคอลัมน์ ซึ่งยังไม่รู้ค่าตอนที่กริดคำนวณ
+       ความสูงของแถว ⇒ ภาพนับเป็น 0 แล้วแถวถูกบีบ (ต้นเหตุของบั๊กการ์ดซ้อนทับ) */
+    .hik-shot-wrap { position: relative; height: 152px; background: var(--gray-800); }
+    .hik-card img {
+        display: block; width: 100%; height: 100%; object-fit: cover;
+        cursor: zoom-in; background: var(--gray-800);
+    }
+    .hik-card-top {
+        position: absolute; top: 6px; left: 6px; right: 6px;
+        display: flex; gap: 6px; align-items: flex-start;
+    }
+    .hik-card-top input { margin: 0; cursor: pointer; width: 15px; height: 15px; accent-color: var(--blue); }
+    .hik-x {
+        margin-left: auto; border: none; background: rgba(15,23,42,.62); color: #fff;
+        border-radius: 6px; width: 22px; height: 22px; line-height: 20px;
+        cursor: pointer; font-size: 14px; padding: 0; transition: background .15s;
+    }
+    .hik-x:hover { background: var(--danger); }
+    .hik-card-tags {
+        position: absolute; left: 6px; bottom: 6px; right: 6px;
+        display: flex; gap: 4px; flex-wrap: wrap;
+    }
+    .hik-badge {
+        display: inline-block; padding: 1px 6px; border-radius: 5px;
+        font-size: 9.5px; font-weight: 700; color: #fff; letter-spacing: .2px;
+    }
+    .hik-badge.ng { background: var(--danger); }
+    .hik-badge.ok { background: var(--success); }
+    .hik-badge.sharp { background: #0F766E; }
+    .hik-badge.motion { background: #B26A00; }
+    .hik-badge.iso { background: #6D28D9; }
+    .hik-card-info { padding: 7px 9px 8px; }
+    .hik-card-name {
+        font-family: var(--font-mono); font-size: 11px; color: var(--gray-800);
+        font-weight: 600; margin-bottom: 4px;
+    }
+    .hik-kv { display: grid; grid-template-columns: auto 1fr; gap: 1px 7px; font-size: 10.5px; }
+    .hik-kv dt { color: var(--gray-400); }
+    .hik-kv dd { font-family: var(--font-mono); color: var(--gray-600); text-align: right; }
+    .hik-kv dd.hl { color: var(--gray-800); font-weight: 700; }
+    .hik-empty { color: var(--gray-400); font-size: 12px; padding: 24px; text-align: center; }
+    .hik-gal-more { text-align: center; margin-top: 10px; flex: 0 0 auto; }
+    .hik-frame-modal { width: min(1320px, 94vw); }
+    .hik-frame-body img {
+        width: 100%; border-radius: 10px; background: var(--gray-800);
+        border: 1.5px solid var(--gray-200);
+    }
+    .hik-frame-body .hik-kpis { margin-top: 10px; margin-bottom: 0; }
+    @media (max-width: 980px) {
+        .hik-gal-body { flex-direction: column; }
+        .hik-gal-side {
+            flex: 0 0 auto; border-right: none; border-bottom: 1.5px solid var(--gray-200);
+            padding-right: 0; padding-bottom: 10px;
+        }
+        .hik-gal-list { max-height: 20vh; }
+    }
     .hik-shot-row { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
     .hik-shot-row .btn { width: 100%; }
     .hik-imgsz { width: 100%; }
@@ -512,12 +858,28 @@
         padding: 4px 8px; border-radius: 6px; pointer-events: none;
         white-space: nowrap; max-width: calc(100% - 20px); overflow: hidden;
     }
+    /* บนแท็บกล้องอุตสาหกรรมมีสองแถบพร้อมกัน (#hikStats = ของกล้อง,
+       #liveStats = ของ pipeline) — ทั้งคู่ absolute ที่พิกัดเดียวกัน จึงต้อง
+       ดันแถบ perf ลงมาหนึ่งบรรทัด ไม่งั้นทับกันจนอ่านไม่ออกทั้งคู่ */
+    #liveStats.stacked { top: 38px; }
+    .hik-ceiling { margin-top: 6px; padding: 6px 9px; border-radius: 6px;
+                   background: #f1f5f9; border: 1px solid #e2e8f0;
+                   font-size: 11.5px; line-height: 1.6; color: #334155; }
+    .hik-ceiling-rows span { display: inline-block; padding: 0 4px; opacity: .6; }
+    .hik-ceiling-rows span.bind { opacity: 1; color: #b45309; font-weight: 600;
+                                  background: #fef3c7; border-radius: 4px; }
+    .hik-warn-box { margin: 6px 0; padding: 6px 10px; border-radius: 6px;
+                    background: #fef2f2; border: 1px solid #fecaca; color: #b91c1c;
+                    font-size: 12px; line-height: 1.5; }
+    .hik-win-ms { width: 70px; margin: 0 2px; padding: 1px 4px;
+                  border: 1px solid var(--gray-300, #cbd5e1); border-radius: 4px; }
 </style>
 {% endblock %}
 
 {% block extra_js %}
 <!-- แผงกล้องอุตสาหกรรม: โมดูลปิด เปิดออกมาแค่ window.HikUI (ดูเหตุผลในหัวไฟล์) -->
 <script src="{{ url_for('static', filename='js/hik_camera.js') }}"></script>
+<script src="{{ url_for('static', filename='js/hik_burst.js') }}"></script>
 <script>
     const startBtn        = document.getElementById('startBtn');
     const stopBtn         = document.getElementById('stopBtn');
@@ -1041,6 +1403,7 @@
                 // กล้องอุตสาหกรรม: ล็อกการเลือกกล้อง/ค้นหาระหว่างตรวจ และเปิดปุ่ม
                 // "ถ่าย 1 เฟรม"/"เก็บชุดข้อมูล" เฉพาะตอนกล้องทำงานอยู่จริง
                 if (window.HikUI && currentSource === 'hik') { HikUI.setActive(isActive); }
+                if (window.HikBurst && currentSource === 'hik') { HikBurst.setActive(isActive); }
 
                 // Snapshot is exclusive with live streaming (shared camera = slow),
                 // so it's only available when detection is stopped.
@@ -1059,10 +1422,14 @@
                 //   KB   = MJPEG frame payload
                 //   cam  = camera capture rate  · inf = YOLO inference (ms)
                 //   enc  = JPEG encode (ms)     · disp = new-frame display rate
-                // Shown only on the USB tab while detection runs — RTSP/STREAM
-                // and every other mode are untouched.
+                // Shown on the USB and Hikrobot tabs while detection runs —
+                // RTSP/STREAM and every other mode are untouched.
+                // ⚠️ กล้องอุตสาหกรรมถูกกันออกมาตั้งแต่แรกโดยไม่ตั้งใจ ทั้งที่เป็น
+                // แหล่งภาพที่ต้องการตัวเลขพวกนี้มากที่สุด (เฟรมใหญ่กว่า USB
+                // หลายเท่า) — ผู้ใช้จึง "รู้สึกว่ากระตุก" แต่ชี้ไม่ได้ว่าตรงไหน
                 const p = data.perf || {};
-                if (currentSource === 'usb' && isActive && p.inf_ms != null) {
+                if ((currentSource === 'usb' || currentSource === 'hik')
+                        && isActive && p.inf_ms != null) {
                     liveStats.textContent =
                         'FPS ' + (p.inf_fps != null ? p.inf_fps.toFixed(1) : '?') + ' · ' +
                         (p.jpg_kb != null ? Math.round(p.jpg_kb) : '?') + 'KB · ' +
@@ -1070,6 +1437,19 @@
                         ' / inf ' + Math.round(p.inf_ms) + 'ms' +
                         ' / enc ' + (p.enc_ms != null ? p.enc_ms.toFixed(1) : '?') + 'ms' +
                         ' / disp ' + (p.disp_fps != null ? Math.round(p.disp_fps) : '?') + 'fps';
+                    // backend ที่ใช้จริง — ตกไปตัวที่ช้ากว่า = ต้องเห็นทันที ไม่ใช่
+                    // ต้องไปไล่อ่าน log บนคอนโซล (บทเรียนจากสถานี 25 ส.ค.)
+                    const bk = data.backend || {};
+                    if (bk.label) {
+                        liveStats.textContent += ' / ' + bk.label;
+                        if (bk.downgraded) { liveStats.textContent += ' 🐢'; }
+                    }
+                    liveStats.style.color = bk.downgraded ? '#fca5a5' : '';
+                    liveStats.title = bk.downgraded
+                        ? ('⚠️ ตกไปใช้ backend ที่ช้ากว่าที่ตั้งไว้\n' + (bk.note || '')
+                           + '\n\nไล่หาต้นเหตุแบบละเอียด: py -3.9 diagnose_accel.py')
+                        : '';
+                    liveStats.classList.toggle('stacked', currentSource === 'hik');
                     liveStats.style.display = '';
                 } else {
                     liveStats.style.display = 'none';
@@ -1482,6 +1862,7 @@
 
     // ── Init ──────────────────────────────────────────
     if (window.HikUI) { HikUI.init(); }
+    if (window.HikBurst) { HikBurst.init(); }
     initModes();
     scanCameras();
     updateStatus();

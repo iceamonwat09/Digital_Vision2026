@@ -78,5 +78,6 @@ TEST/
 # กล้องอุตสาหกรรม Hikrobot — ของเฉพาะเครื่อง ห้ามเข้า repo
 data/hik_camera.json          # ค่าตั้งกล้องของเครื่องนั้น ๆ (ต่างสถานีต่างค่า)
 data/hik_dataset/             # ภาพความละเอียดเต็มที่เก็บไว้เทรน (ใหญ่มาก)
+data/hik_burst/               # ภาพจากโหมด "ถ่ายรัว" (10 วิ ≈ 200 MB — ลบได้จากหน้าเว็บ)
 hik_shots/                    # ภาพตัวอย่างจาก diagnose_hikrobot.py --save-dir
 hik*.json                     # ผลจาก diagnose_hikrobot.py --json

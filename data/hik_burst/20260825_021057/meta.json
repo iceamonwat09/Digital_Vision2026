@@ -1,0 +1,127 @@
+{
+  "seconds": 4,
+  "source": "hik:DA4994130",
+  "identity": {
+    "model": "MV-CS050-10GC",
+    "serial": "DA4994130",
+    "firmware": "V4.0.42 231212 1170605",
+    "vendor": "Hikrobot",
+    "user_name": "",
+    "kind": "GigE",
+    "mac": "34:BD:20:54:48:3B",
+    "nic": "172.32.1.9",
+    "ip": "172.32.1.253"
+  },
+  "exposure_us": 5000.0,
+  "gain_db": 0.0,
+  "exposure_auto": "Off",
+  "framerate_enable": false,
+  "framerate": 20.100000381469727,
+  "packet_size": 8164,
+  "packet_delay": 0,
+  "pixel_format": "BayerRG8",
+  "trigger_mode": "Off",
+  "size": "2448x2048",
+  "fps_at_start": 72.75,
+  "mean_brightness_at_start": 0.0,
+  "started_at": "2026-08-25 02:10:57",
+  "every_n": 1,
+  "window_ms": 133,
+  "window_crop": 0.6,
+  "jpeg_quality": 90,
+  "diag_start": {
+    "t": 1787623857.131,
+    "cam_frames": 360,
+    "cam_dropped": 0,
+    "cam_timeouts": 0,
+    "cam_fps": 72.75,
+    "net": {
+      "recv_frames": 266,
+      "lost_packets": 0,
+      "lost_frames": 0
+    }
+  },
+  "frame_ts": [
+    1787623857.235265,
+    1787623857.400101,
+    1787623857.568505,
+    1787623857.742679,
+    1787623857.875047,
+    1787623858.025058,
+    1787623858.17085,
+    1787623858.312795,
+    1787623858.450935,
+    1787623858.598524,
+    1787623858.754625,
+    1787623858.895519,
+    1787623859.034784,
+    1787623859.182219,
+    1787623859.315121,
+    1787623859.460228,
+    1787623859.60829,
+    1787623859.753339,
+    1787623859.895621,
+    1787623860.052849,
+    1787623860.199924,
+    1787623860.337947,
+    1787623860.472087,
+    1787623860.609347,
+    1787623860.748592,
+    1787623860.898327
+  ],
+  "saved": 26,
+  "dropped": 0,
+  "considered": 200,
+  "windows": 26,
+  "finished_reason": "ครบเวลาที่ตั้งไว้ (4 วินาที)",
+  "ended_at": "2026-08-25 02:11:01",
+  "diag_end": {
+    "t": 1787623861.339,
+    "cam_frames": 560,
+    "cam_dropped": 0,
+    "cam_timeouts": 0,
+    "cam_fps": 68.88,
+    "net": {
+      "recv_frames": 490,
+      "lost_packets": 0,
+      "lost_frames": 0
+    }
+  },
+  "elapsed_s": 4.208,
+  "fps_series": [
+    {
+      "t": 1787623857.393,
+      "cam_frames": 362,
+      "cam_dropped": 0,
+      "cam_timeouts": 0,
+      "cam_fps": 54.72
+    },
+    {
+      "t": 1787623858.451,
+      "cam_frames": 402,
+      "cam_dropped": 0,
+      "cam_timeouts": 0,
+      "cam_fps": 50.69
+    },
+    {
+      "t": 1787623859.47,
+      "cam_frames": 458,
+      "cam_dropped": 0,
+      "cam_timeouts": 0,
+      "cam_fps": 56.18
+    },
+    {
+      "t": 1787623860.471,
+      "cam_frames": 510,
+      "cam_dropped": 0,
+      "cam_timeouts": 0,
+      "cam_fps": 53.39
+    }
+  ],
+  "stage_ms": {
+    "encode": 17.48,
+    "write": 1.86,
+    "encode_max": 27.8,
+    "write_max": 15.06
+  }
+}

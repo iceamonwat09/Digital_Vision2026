@@ -235,9 +235,6 @@
 
         // ค่าที่อ่านอย่างเดียวแต่ต้องเห็น
         var extras = [];
-        if (params.resulting_framerate) {
-            extras.push('อัตราเฟรมที่กล้องคำนวณได้ ' + fmtNum(params.resulting_framerate.value) + ' fps');
-        }
         if (params.width_max && params.height_max) {
             extras.push('เซนเซอร์เต็ม ' + params.width_max.value + '×' + params.height_max.value);
         }
@@ -247,6 +244,79 @@
             note.textContent = extras.join(' · ');
             box.appendChild(note);
         }
+        renderCeiling(params, box);
+    }
+
+    // ── "อะไรคือตัวจำกัด fps ของค่าที่ตั้งอยู่ตอนนี้" ────────────
+    // fps ที่ได้จริง = ค่าต่ำสุดของ 3 เพดาน. รู้ว่าตัวไหนบีบอยู่ = รู้ว่าต้องแก้อะไร
+    // (ปรับผิดตัว = เสียเวลาโดยไม่ได้อะไรเลย)
+    var GIGE_MB_S = 125.0;              // GigE 1 Gbit/s
+    var GIGE_EFF_JUMBO = 0.90;          // ประสิทธิภาพจริงที่ packet 8164
+    var GIGE_EFF_SMALL = 0.70;          // ที่ packet 1500 (ค่าโรงงาน)
+    var BYTES_PER_PX = {                // ต่อพิกเซล ตามรูปแบบภาพ
+        'BayerRG8': 1, 'BayerGR8': 1, 'BayerGB8': 1, 'BayerBG8': 1, 'Mono8': 1,
+        'BayerRG12': 2, 'BayerRG12Packed': 1.5, 'Mono12': 2, 'Mono12Packed': 1.5,
+        'RGB8Packed': 3, 'BGR8Packed': 3, 'YUV422_8': 2, 'YUV422_8_UYVY': 2
+    };
+
+    function renderCeiling(params, box) {
+        var w = params.width && params.width.value;
+        var h = params.height && params.height.value;
+        if (!w || !h) { return; }
+
+        var fmtName = (params.pixel_format && params.pixel_format.symbolic) || 'BayerRG8';
+        var bpp = BYTES_PER_PX[fmtName] || 1;
+        var pkt = (params.packet_size && params.packet_size.value) || 0;
+        var eff = pkt >= 4000 ? GIGE_EFF_JUMBO : GIGE_EFF_SMALL;
+        var mbPerFrame = w * h * bpp / 1e6;
+        var wire = GIGE_MB_S * eff / mbPerFrame;
+
+        var exp = params.exposure_us && params.exposure_us.value;
+        var expCap = exp ? 1e6 / exp : null;
+
+        var cam = params.resulting_framerate && params.resulting_framerate.value;
+        var capped = params.framerate_enable && params.framerate_enable.value
+            && params.framerate && params.framerate.value;
+
+        // ตัวจำกัดจริง = ค่าต่ำสุด. "กล้องคำนวณได้" รวมข้อจำกัดของเซนเซอร์ไว้แล้ว
+        var items = [['สายแลน (GigE)', wire], ['exposure', expCap],
+                     ['กล้องบอกเอง', cam], ['จำกัดเอง', capped ? params.framerate.value : null]];
+        var real = null, who = '';
+        items.forEach(function (it) {
+            if (it[1] && (real === null || it[1] < real)) { real = it[1]; who = it[0]; }
+        });
+        if (real === null) { return; }
+
+        var el = document.createElement('div');
+        el.className = 'hik-ceiling';
+        var rows = items.filter(function (it) { return it[1]; }).map(function (it) {
+            var bind = (it[0] === who);
+            return '<span class="' + (bind ? 'bind' : '') + '">' + it[0] + ' <b>'
+                + Math.round(it[1]) + '</b></span>';
+        }).join(' · ');
+        el.innerHTML = '⚡ <b>เพดาน ' + Math.round(real) + ' fps</b> — ตัวจำกัดคือ <b>'
+            + who + '</b><br><span class="hik-ceiling-rows">' + rows + '</span>'
+            + '<br>' + ceilingHint(who, w, h, bpp, pkt, exp);
+        box.appendChild(el);
+    }
+
+    function ceilingHint(who, w, h, bpp, pkt, exp) {
+        if (who === 'สายแลน (GigE)') {
+            return (pkt < 4000
+                ? '👉 <b>packet size ยังเป็นค่าโรงงาน (' + pkt + ')</b> — ตั้งเป็น 8164 '
+                  + 'และเปิด Jumbo Frame ที่ NIC จะได้เพิ่มทันที ~29%'
+                : '👉 ติดที่<b>ปริมาณข้อมูล</b> — ลด ROI (พิกเซลน้อยลงเท่าไร fps ขึ้นเท่านั้น) '
+                  + (bpp > 1 ? 'หรือใช้รูปแบบภาพ 8 บิต (ตอนนี้ ' + bpp + ' ไบต์/พิกเซล)' : ''));
+        }
+        if (who === 'exposure') {
+            return '👉 exposure ' + Math.round(exp) + ' µs เองที่บีบอยู่ — ลด exposure '
+                + '(ต้องเพิ่มไฟชดเชย) จะปลดเพดานนี้';
+        }
+        if (who === 'จำกัดเอง') {
+            return '👉 <b>ปิด "จำกัดอัตราเฟรม"</b> (AcquisitionFrameRate) แล้วเพดานนี้จะหายไป';
+        }
+        return '👉 ติดที่<b>การอ่านเซนเซอร์</b> — ลด <b>ความสูง (Height)</b> ช่วยมากที่สุด '
+            + 'เพราะเซนเซอร์อ่านทีละแถว (ลดความกว้างช่วยเฉพาะฝั่งสายแลน)';
     }
 
     // ── รวบรวมเฉพาะค่าที่ "ผู้ใช้แก้จริง" แล้วส่ง ───────────────
@@ -308,11 +378,20 @@
             return;
         }
         var wmax = p.width_max.value, hmax = p.height_max.value;
-        var frac = kind === 'half' ? 0.5 : (kind === 'quarter' ? 0.25 : 1.0);
         var winc = (p.width && p.width.inc) || 1;
         var hinc = (p.height && p.height.inc) || 1;
-        var w = Math.max(winc, Math.floor((wmax * frac) / winc) * winc);
-        var h = Math.max(hinc, Math.floor((hmax * frac) / hinc) * hinc);
+        // สัดส่วน (กว้าง, สูง) แยกกัน — เซนเซอร์อ่านทีละแถว ⇒ "เตี้ย" ให้ fps
+        // มากกว่า "แคบ" ที่จำนวนพิกเซลเท่ากัน
+        var FRACS = {
+            full: [1.0, 1.0],
+            half: [0.5, 0.5],
+            quarter: [0.5, 0.25],
+            wide: [1.0, 0.5],       // เห็นกว้างเต็มเซนเซอร์ แต่เตี้ยลงครึ่ง
+            fast: [0.5, 0.2]        // เตี้ยมาก — สำหรับไล่หา fps สูงสุด
+        };
+        var fr = FRACS[kind] || FRACS.full;
+        var w = Math.max(winc, Math.floor((wmax * fr[0]) / winc) * winc);
+        var h = Math.max(hinc, Math.floor((hmax * fr[1]) / hinc) * hinc);
         postParams({ width: w, height: h, roi_center: true },
             'ตั้ง ROI ' + w + '×' + h + ' แล้ว');
     }
@@ -358,19 +437,28 @@
     }
 
     // ── ถ่าย 1 เฟรมความละเอียดเต็ม แล้วตรวจ ──────────────────
+    /**
+     * ถ่าย 1 เฟรม — **2 เฟส**: ① คืนรูปทันที ② ค่อยตรวจ
+     *
+     * เดิมเป็นคำขอเดียว ⇒ ผู้ใช้ไม่เห็นรูปเลยจนกว่าโมเดลจะเสร็จ (imgsz 1280
+     * บนสถานี ~420 ms) ทั้งที่ตัวการ "ถ่าย" ใช้เวลาแค่ ~15 ms
+     */
     function shot() {
         var btn = $('hikShotBtn');
         var imgszSel = $('hikShotImgsz');
+        var imgsz = imgszSel ? Number(imgszSel.value) : undefined;
         if (btn) { btn.disabled = true; btn.textContent = 'กำลังถ่าย…'; }
         fetch('/api/camera/hik/shot', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ imgsz: imgszSel ? Number(imgszSel.value) : undefined })
+            body: JSON.stringify({ detect: false })
         })
             .then(function (r) { return r.json(); })
             .then(function (d) {
                 if (d.status !== 'ok') { throw new Error(d.message || 'ถ่ายไม่สำเร็จ'); }
-                showShot(d);
+                showShot(d);                       // ← รูปขึ้นตรงนี้ ไม่รอโมเดล
+                if (btn) { btn.textContent = 'กำลังตรวจ…'; }
+                return inspectShot(d.shot_id, imgsz);
             })
             .catch(function (e) { setMsg('❌ ' + e.message, 'bad'); })
             .finally(function () {
@@ -378,18 +466,118 @@
             });
     }
 
+    function inspectShot(shotId, imgsz) {
+        return fetch('/api/camera/hik/shot/inspect', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ shot_id: shotId, imgsz: imgsz })
+        })
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+                if (d.status !== 'ok') { throw new Error(d.message || 'ตรวจไม่สำเร็จ'); }
+                showShot(d);                       // เติมกรอบ + ผลตรวจทับของเดิม
+            })
+            .catch(function (e) {
+                // ⚠️ ห้ามปล่อยให้ค้างที่ "กำลังตรวจ…" — ต้องบอกว่าตรวจไม่สำเร็จ
+                var v = $('hikShotVerdict');
+                if (v) {
+                    v.textContent = '⚠️ ตรวจไม่สำเร็จ — ' + e.message;
+                    v.className = 'hik-shot-verdict';
+                }
+            });
+    }
+
     function showShot(d) {
         var ov = $('hikShotOverlay');
         if (!ov) { return; }
-        $('hikShotImg').src = d.image;
-        var ng = d.verdict === 'ng';
+        if (d.image) { $('hikShotImg').src = d.image; }
         var v = $('hikShotVerdict');
+        var meta = ['ภาพ ' + d.capture_size];
+        if (d.capture_ms != null) { meta.push('จับภาพ ' + d.capture_ms + ' ms'); }
+
+        if (d.pending_detect) {
+            // ⚠️ ยังไม่รู้ผล — ต้องบอกว่ายังไม่รู้ ห้ามแสดงอะไรที่ดูเหมือนผลตรวจ
+            v.textContent = '⏳ กำลังตรวจ…';
+            v.className = 'hik-shot-verdict';
+            $('hikShotMeta').textContent = meta.join(' · ');
+            ov.style.display = '';
+            return;
+        }
+
+        var ng = d.verdict === 'ng';
         v.textContent = ng ? ('NG — พบ ' + d.dent_count + ' จุด') : 'OK — ไม่พบรอยบุบ';
         v.className = 'hik-shot-verdict ' + (ng ? 'ng' : 'ok');
-        $('hikShotMeta').textContent = 'ภาพ ' + d.capture_size + ' · ตรวจที่ imgsz '
-            + d.infer_imgsz + ' · ใช้เวลา ' + d.infer_ms + ' ms'
-            + (ng ? (' · ความมั่นใจสูงสุด ' + d.max_confidence) : '');
+        meta.push('ตรวจที่ imgsz ' + d.infer_imgsz + ' · โมเดล ' + d.infer_ms + ' ms');
+        // รอคิวนาน = การตรวจสดกำลังใช้ iGPU อยู่ (คนละเรื่องกับโมเดลหนัก)
+        if (d.wait_ms > 20) { meta.push('รอคิวโมเดล ' + Math.round(d.wait_ms) + ' ms'); }
+        if (d.encode_ms != null) { meta.push('แสดงผล ' + d.encode_ms + ' ms'); }
+        if (ng) { meta.push('ความมั่นใจสูงสุด ' + d.max_confidence); }
+        $('hikShotMeta').textContent = meta.join(' · ');
         ov.style.display = '';
+    }
+
+    // ── โหมดแสดงผลของภาพสด (กรอบล็อก vs ภาพลื่น) ─────────
+    // ⚠️ แสดงผลล้วน — การนับ/บันทึก DB/verdict ใช้เฟรมที่โมเดลตรวจจริงเสมอ
+    function loadSmooth() {
+        fetch('/api/camera/hik/live_smooth')
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+                var el = $('hikSmoothToggle');
+                if (el && d && d.status === 'ok') { el.checked = !!d.smooth; }
+            })
+            .catch(function () { /* เงียบได้ — ช่องติ๊กจะคงค่าเริ่มต้นของหน้า */ });
+    }
+
+    function toggleSmooth() {
+        var el = $('hikSmoothToggle');
+        if (!el) { return; }
+        var want = !!el.checked;
+        fetch('/api/camera/hik/live_smooth', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ smooth: want })
+        })
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+                // ให้ช่องติ๊กตรงกับสิ่งที่เซิร์ฟเวอร์ใช้จริงเสมอ ไม่ใช่สิ่งที่กดไป
+                if (d && d.status === 'ok') { el.checked = !!d.smooth; }
+            })
+            .catch(function () { el.checked = !want; });
+    }
+
+    // ── ตรวจภาพสด เปิด/ปิด (เวิร์กโฟลว์ "ถ่ายแล้วค่อยตรวจ") ──
+    // ⚠️ ปิดแล้ว **การนับและการบันทึก DB หยุดด้วย** ⇒ ต้องขึ้นคำเตือนตลอดช่วงนั้น
+    function showLiveDetect(enabled) {
+        var el = $('hikLiveDetectOff');
+        if (el) { el.checked = !enabled; }
+        var warn = $('hikLiveDetectWarn');
+        if (warn) { warn.style.display = enabled ? 'none' : ''; }
+    }
+
+    function loadLiveDetect() {
+        fetch('/api/camera/hik/live_detect')
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+                if (d && d.status === 'ok') { showLiveDetect(d.enabled); }
+            })
+            .catch(function () { /* เงียบได้ — ช่องติ๊กคงค่าเริ่มต้นของหน้า */ });
+    }
+
+    function toggleLiveDetect() {
+        var el = $('hikLiveDetectOff');
+        if (!el) { return; }
+        var want = !el.checked;                    // ติ๊ก = ไม่ตรวจ
+        fetch('/api/camera/hik/live_detect', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled: want })
+        })
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+                // ให้ช่องติ๊กตรงกับสิ่งที่เซิร์ฟเวอร์ใช้จริงเสมอ
+                if (d && d.status === 'ok') { showLiveDetect(d.enabled); }
+            })
+            .catch(function () { showLiveDetect(!want); });
     }
 
     // ── สถิติสด ───────────────────────────────────────────
@@ -397,6 +585,10 @@
         fetch('/api/camera/hik/status')
             .then(function (r) { return r.json(); })
             .then(function (d) {
+                // แชร์ให้โมดูลอื่น (ตัวประมาณของถ่ายรัว) แทนที่จะให้มันยิงเอง —
+                // ทุกคำขอสถานะต้องแย่ง lock ของกล้องกับเธรดจับภาพ
+                state.lastStats = (d && d.active && d.stats) ? d.stats : null;
+                state.lastStatsAt = Date.now();
                 var el = $('hikStats');
                 if (!el) { return; }
                 if (!d.active || !d.stats) { el.style.display = 'none'; return; }
@@ -435,6 +627,8 @@
 
     function stopPolling() {
         if (state.pollTimer) { clearInterval(state.pollTimer); state.pollTimer = null; }
+        state.lastStats = null;
+        state.lastStatsAt = 0;
         var el = $('hikStats');
         if (el) { el.style.display = 'none'; }
     }
@@ -455,6 +649,12 @@
             if (reload) { reload.addEventListener('click', loadParams); }
             var ds = $('hikDatasetToggle');
             if (ds) { ds.addEventListener('change', toggleDataset); }
+            var sm = $('hikSmoothToggle');
+            if (sm) { sm.addEventListener('change', toggleSmooth); }
+            loadSmooth();
+            var ld = $('hikLiveDetectOff');
+            if (ld) { ld.addEventListener('change', toggleLiveDetect); }
+            loadLiveDetect();
             var sh = $('hikShotBtn');
             if (sh) { sh.addEventListener('click', shot); }
             var close = $('hikShotClose');
@@ -498,9 +698,21 @@
             if (ds) { ds.disabled = !active; }        // เก็บภาพได้เฉพาะตอนกล้องทำงาน
             var sh = $('hikShotBtn');
             if (sh) { sh.disabled = !active; }
-            if (active) { startPolling(); } else { stopPolling(); }
+            if (active) { startPolling(); loadLiveDetect(); } else { stopPolling(); }
         },
 
-        stopPolling: stopPolling
+        stopPolling: stopPolling,
+
+        /**
+         * สถิติล่าสุดที่แถบสถานะ poll มาแล้ว (null = ยังไม่มี/กล้องไม่ทำงาน).
+         * มีไว้ให้โมดูลอื่นใช้ค่าร่วมกัน **แทนการยิงคำขอของตัวเอง** — ทุกคำขอ
+         * /api/camera/hik/status ต้องแย่ง lock ของกล้องกับเธรดจับภาพ.
+         * `maxAgeMs` = ยอมรับค่าเก่าได้ไม่เกินกี่มิลลิวินาที (0 = ไม่จำกัด)
+         */
+        getStats: function (maxAgeMs) {
+            if (!state.lastStats) { return null; }
+            if (maxAgeMs && (Date.now() - state.lastStatsAt) > maxAgeMs) { return null; }
+            return state.lastStats;
+        }
     };
 })();
