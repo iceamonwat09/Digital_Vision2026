@@ -269,7 +269,8 @@ def _can_complete(detections, frame_shape, margin=0.02):
     try:
         h, w = frame_shape[:2]
         mx, my = w * margin, h * margin
-        body = [d for d in detections if d["class_name"] in _NON_DEFECT_CLASSES]
+        non_defect = _non_defect_classes()
+        body = [d for d in detections if d["class_name"] in non_defect]
         if not body:
             return False
         for d in body:
@@ -526,7 +527,8 @@ def inference_loop():
             # (nothing). A new inspection begins on empty → OK/NG; the same can is
             # never re-counted/re-logged; the can is "gone" only after a few empty
             # frames (debounce). "good"/"can" are never defects.
-            defects = [d for d in detections if d["class_name"] not in _NON_DEFECT_CLASSES]
+            non_defect = _non_defect_classes()
+            defects = [d for d in detections if d["class_name"] not in non_defect]
             detection_stats["current_defects"] = len(defects)
 
             if not detections:
@@ -551,7 +553,7 @@ def inference_loop():
                                 sharp_dets = detector.detect(sharp)
                             except Exception:
                                 sharp_dets = []
-                            has_defect = any(d["class_name"] not in _NON_DEFECT_CLASSES
+                            has_defect = any(d["class_name"] not in non_defect
                                              for d in sharp_dets)
                             complete = _can_complete(
                                 sharp_dets, sharp.shape,
@@ -1161,7 +1163,8 @@ def _hik_shot_inspect(frame, imgsz):
     # แยก "รอคิว" ออกจาก "เวลาของโมเดล" — ไม่งั้นตัวเลขเดียวจะบอกไม่ได้ว่าช้า
     # เพราะโมเดลหนัก หรือเพราะการตรวจสดกำลังใช้ iGPU อยู่ (วิธีแก้คนละเรื่อง)
     wait_ms = float(getattr(detector, "last_wait_ms", 0.0) or 0.0)
-    dents = [d for d in detections if d["class_name"] not in _NON_DEFECT_CLASSES]
+    non_defect = _non_defect_classes()
+    dents = [d for d in detections if d["class_name"] not in non_defect]
 
     t_enc = time.perf_counter()
     disp_frame, disp_dets = _scale_for_display(frame, detections, _SNAPSHOT_DISPLAY_MAX_W)
@@ -1561,7 +1564,8 @@ def _burst_detect_one(path):
     t0 = time.perf_counter()
     detections = detector.detect(frame, imgsz=imgsz)
     infer_ms = round((time.perf_counter() - t0) * 1000.0, 1)
-    dents = [d for d in detections if d["class_name"] not in _NON_DEFECT_CLASSES]
+    non_defect = _non_defect_classes()
+    dents = [d for d in detections if d["class_name"] not in non_defect]
     return {"verdict": "ng" if dents else "ok", "dent_count": len(dents),
             "max_confidence": round(max((d["confidence"] for d in dents), default=0.0), 2),
             "infer_ms": infer_ms, "imgsz": imgsz,
@@ -1705,7 +1709,8 @@ def _hik_ladder_defect_fn(imgsz):
     """คืนฟังก์ชันที่ให้ **เฉพาะกล่องตำหนิ** — `hik_exposure` จึงไม่ต้องรู้ชื่อคลาส."""
     def _run(frame):
         dets = detector.detect(frame, imgsz=imgsz)
-        return [d for d in dets if d["class_name"] not in _NON_DEFECT_CLASSES]
+        non_defect = _non_defect_classes()
+        return [d for d in dets if d["class_name"] not in non_defect]
     return _run
 
 
@@ -2051,6 +2056,14 @@ def get_detection_status():
             "downgraded": bool(getattr(detector, "backend_downgraded", False)) if detector else False,
             "note": getattr(detector, "backend_note", "") if detector else "",
         },
+        # คลาสของโมเดลที่โหลดอยู่ + บทบาทของแต่ละคลาส และคำเตือนที่ต้องให้
+        # ผู้ใช้เห็น (เช่น "คลาสนี้ระบบไม่รู้จัก ⇒ ถูกนับเป็นตำหนิ").
+        # ⚠️ ผู้ใช้เลือกไฟล์ .pt เองจากหน้าเว็บ ⇒ ถ้าคลาสไม่ตรงกับที่ระบบคาดไว้
+        # ผลตรวจจะเปลี่ยนความหมายแบบเงียบ ๆ — ต้องมองเห็นได้บนหน้าจอ
+        "classes": {
+            "items": detector.class_role_table() if detector else [],
+            "warnings": list(getattr(detector, "class_warnings", [])) if detector else [],
+        },
         "camera_initialized": camera.is_initialized if camera else False,
         "detector_loaded": detector.model is not None if detector else False,
         "database_connected": db.is_connected if db else False,
@@ -2069,8 +2082,27 @@ def get_detection_status():
 # exclusive with live detection (single camera handle) and reuses the pure
 # detect()/draw_detections() helpers — the live streaming threads are untouched.
 
-# Classes that are NOT a dent defect (a "good"/"can" box is never an NG reason).
-_NON_DEFECT_CLASSES = {"good", "can"}
+# ── คลาสที่ "ไม่ใช่ตำหนิ" (กล่องทั้งใบไม่เคยเป็นเหตุ NG) ─────────────────────
+# ⚠️ **แหล่งความจริงคือ ``modes/<mode>.py: NON_DEFECT_CLASSES``** — ชุดนี้เป็น
+# ค่าถอยเมื่อยังไม่มี detector/โหมดไม่ได้ประกาศไว้ (= ค่าเดิมของระบบเป๊ะ)
+_NON_DEFECT_FALLBACK = {"good", "can"}
+
+
+def _non_defect_classes() -> set:
+    """คลาสที่ไม่ใช่ตำหนิของ **โหมดที่ใช้งานอยู่จริงตอนนี้**.
+
+    เดิมเป็นค่าคงที่ในไฟล์นี้ ⇒ โมเดลที่ตั้งชื่อคลาส "ทั้งใบ" เป็นอย่างอื่น
+    (เช่น body/ok) จะถูกนับเป็นตำหนิเงียบ ๆ = NG ปลอมทุกใบ. ตอนนี้อ่านจาก
+    โหมดที่เดียวกับที่ ``YOLODetector`` ใช้แบ่งบทบาท ⇒ ไม่มีทางไม่ตรงกัน.
+    """
+    try:
+        if detector is not None:
+            return detector.non_defect_classes()
+    except Exception:
+        pass
+    return set(_NON_DEFECT_FALLBACK)
+
+
 
 
 def _parse_camera_index(camera_index_raw):
@@ -2307,7 +2339,8 @@ def api_snapshot():
         detections = detector.detect(frame, imgsz=imgsz)
         infer_ms = round((time.perf_counter() - t0) * 1000.0, 1)
 
-        dents = [d for d in detections if d["class_name"] not in _NON_DEFECT_CLASSES]
+        non_defect = _non_defect_classes()
+        dents = [d for d in detections if d["class_name"] not in non_defect]
         verdict = "ng" if dents else "ok"
         max_conf = max((d["confidence"] for d in dents), default=0.0)
 
@@ -2367,7 +2400,8 @@ def api_stream_snapshot():
         detections = detector.detect(frame, imgsz=imgsz)
         infer_ms = round((time.perf_counter() - t0) * 1000.0, 1)
 
-        dents = [d for d in detections if d["class_name"] not in _NON_DEFECT_CLASSES]
+        non_defect = _non_defect_classes()
+        dents = [d for d in detections if d["class_name"] not in non_defect]
         verdict = "ng" if dents else "ok"
         max_conf = max((d["confidence"] for d in dents), default=0.0)
 
@@ -2468,6 +2502,7 @@ def api_stream_infer():
             pass
 
         out = []
+        non_defect = _non_defect_classes()
         for d in detections:
             cn = d["class_name"]
             bgr = palette.get(cn, (0, 0, 220))
@@ -2477,7 +2512,7 @@ def api_stream_infer():
                 "confidence": round(float(d["confidence"]), 2),
                 "label": names.get(cn, cn),
                 "color": [int(bgr[2]), int(bgr[1]), int(bgr[0])],  # RGB for canvas
-                "is_defect": cn not in _NON_DEFECT_CLASSES,
+                "is_defect": cn not in non_defect,
             })
 
         dents = [d for d in out if d["is_defect"]]

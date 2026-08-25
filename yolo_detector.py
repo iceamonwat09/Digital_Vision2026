@@ -26,14 +26,38 @@ _COLORS = {
 }
 _COLOR_DEFAULT = (0, 165, 255)      # ส้ม fallback
 
-# ── bestX.pt — two-class model: "dent" + "can" only ──────────────────────────
-_BESTX_CLASS_NAMES = {
-    "dent": "Can Dent",
-    "can":  "Can Good",
+# ── บทบาทของคลาส: "ตำหนิ" vs "ชิ้นงานทั้งใบ" ────────────────────────────────
+# ⚠️ **แหล่งความจริงคือ ``model.names`` ของโมเดลเอง ไม่ใช่ชื่อไฟล์**
+#
+# เดิมตรรกะทั้งชุดของ `bestX.pt` (ป้าย NG/OK · ซ่อนกรอบทั้งใบตอน NG · ชื่อ/สี)
+# ถูกเปิดด้วยเงื่อนไข ``basename == "bestx.pt"`` ⇒ โมเดลเนื้อเดียวกันที่ตั้งชื่อ
+# อื่นจะ **ตรวจไม่เจออะไรเลยแบบเงียบ ๆ** เพราะตัวกรองคลาสใน ``detect()`` ใช้
+# ชุดชื่อของโหมด (dented/dented_spot/good) มาคัดทิ้ง คลาส dent/can จึงหายหมด
+# — ไม่มี error ไม่มี log ระดับปกติ (กฎเหล็กข้อ 2 ในรูปแบบที่แย่ที่สุด).
+#
+# ตอนนี้แบ่งบทบาทจากรายชื่อคลาสจริงของโมเดล:
+#   อยู่ใน NON_DEFECT_CLASSES ของโหมด → "body" (ชิ้นงานทั้งใบ ไม่ใช่เหตุ NG)
+#   ที่เหลือทั้งหมด                    → "defect" (นับเป็นตำหนิ + ขึ้นเตือน)
+ROLE_DEFECT = "defect"
+ROLE_BODY   = "body"
+
+# ใช้เมื่อโหมดไม่ได้ประกาศ NON_DEFECT_CLASSES ไว้เอง (= พฤติกรรมเดิมของ app.py)
+DEFAULT_NON_DEFECT_CLASSES = {"good", "can"}
+
+# ชื่อที่แสดงกลาง — ใช้เมื่อโหมดไม่ได้ตั้งชื่อคลาสนั้นไว้
+# ⚠️ ไม่ใช่ "รายการคลาสที่อนุญาต" — คลาสที่ไม่อยู่ในนี้ยังถูกตรวจและแสดงเสมอ
+_LABEL_FALLBACKS = {
+    "dent":        "Can Dent",
+    "dented":      "Can Dent",
+    "dented_spot": "Dent Area",
+    "can":         "Can Good",
+    "good":        "Can Good",
 }
-_BESTX_COLORS = {
-    "dent": (0,   0, 220),   # red
-    "can":  (80, 200,   0),  # green
+
+# สีตามบทบาท (ใช้เมื่อโหมดไม่ได้กำหนดสีของคลาสนั้นไว้)
+_ROLE_COLORS = {
+    ROLE_DEFECT: (0,   0, 220),   # แดง
+    ROLE_BODY:   (80, 200,   0),  # เขียว
 }
 
 
@@ -104,9 +128,9 @@ def _draw_corner_marks(frame: np.ndarray, x1: int, y1: int, x2: int, y2: int,
         cv2.line(frame, p1, p2, color, thickness)
 
 
-def _draw_bestx_verdict(frame: np.ndarray, verdict: Optional[str]) -> None:
-    """Draw NG / OK verdict badge in the top-right corner (bestX.pt mode only).
-    verdict=None → no can detected yet, so draw nothing."""
+def _draw_verdict_badge(frame: np.ndarray, verdict: Optional[str]) -> None:
+    """วาดป้าย NG / OK ที่มุมขวาบน (โหมดที่เปิด ``VERDICT_BADGE``).
+    verdict=None → ยังไม่เจอชิ้นงาน ⇒ ไม่วาดอะไรเลย (ห้ามเดา)."""
     if verdict is None:
         return
     text  = "NG" if verdict == "ng" else "OK"
@@ -175,28 +199,183 @@ class YOLODetector:
         self.backend_note = ""
         self._accel_skips = []          # เหตุผลที่ตัวเร่งแต่ละตัวถูกข้าม
 
+        # ── บทบาทของคลาส — เติมจาก model.names ตอน load_model() ────────────
+        # ว่างไว้ก่อนโหลด ⇒ ``role_of()`` ตกไปใช้รายการของโหมดตัดสินแทน
+        self.model_class_names = []     # ชื่อคลาสจริงของโมเดล (ตัวเล็ก)
+        self.class_roles = {}           # ชื่อคลาส → ROLE_DEFECT / ROLE_BODY
+        self.class_warnings = []        # ข้อความที่ต้องขึ้นบนหน้าเว็บ (ไม่ใช่แค่ log)
+        # True = ไฟล์ .pt ที่ผู้ใช้เลือก "ไม่มีอยู่จริง" แล้วระบบถอยไปโหลด
+        # yolov8n (COCO) แทน ⇒ ไม่ใช่โมเดลของงานนี้เลย
+        self.using_fallback_weights = False
+
+    # ── บทบาทของคลาส (ตัวแทนของเงื่อนไข is_bestx_mode เดิม) ────────────────
+    def _mode_map(self, attr: str) -> dict:
+        """ดึง dict จาก mode_config อย่างปลอดภัย (คืน {} เมื่อไม่มี)."""
+        if self.mode_config is not None:
+            return dict(getattr(self.mode_config, attr, None) or {})
+        return {}
+
+    def non_defect_classes(self) -> set:
+        """คลาสที่ **ไม่ใช่ตำหนิ** ของโหมดนี้ (กล่อง "ชิ้นงานทั้งใบ").
+
+        โหมดที่ไม่ประกาศไว้ → ค่าเดิมของระบบ ``{"good", "can"}`` ⇒
+        พฤติกรรมเท่าเดิมทุกประการ.
+        """
+        declared = getattr(self.mode_config, "NON_DEFECT_CLASSES", None) \
+            if self.mode_config is not None else None
+        if declared:
+            return {str(x).lower() for x in declared}
+        return set(DEFAULT_NON_DEFECT_CLASSES)
+
+    def role_of(self, class_name: str) -> str:
+        """บทบาทของคลาสหนึ่ง — ``ROLE_BODY`` หรือ ``ROLE_DEFECT``.
+
+        ตอบได้แม้ยังไม่ได้โหลดโมเดล (ใช้รายการของโหมดตัดสิน) ⇒ เส้นทาง
+        ที่เรียกก่อนโหลดเสร็จจะไม่ได้คำตอบที่ผิด.
+        """
+        cn = str(class_name).lower()
+        role = self.class_roles.get(cn)
+        if role:
+            return role
+        return ROLE_BODY if cn in self.non_defect_classes() else ROLE_DEFECT
+
     @property
-    def is_bestx_mode(self) -> bool:
-        """True when the loaded model file is bestX.pt."""
-        return os.path.basename(self.model_path).lower() == "bestx.pt"
+    def verdict_badge(self) -> bool:
+        """โหมดนี้แสดงป้าย NG/OK + ซ่อนกรอบทั้งใบตอน NG หรือไม่.
+
+        เดิมผูกกับชื่อไฟล์ ``bestX.pt`` ⇒ ตอนนี้เป็นคุณสมบัติของ **โหมด**
+        ⇒ ทุกไฟล์ ``.pt`` ในโหมดเดียวกันทำงานเหมือนกันหมด.
+        """
+        if self.mode_config is not None:
+            return bool(getattr(self.mode_config, "VERDICT_BADGE", False))
+        return True      # ไม่มี mode_config = เส้นทางเดิมของ can_dent
+
+    def _build_class_roles(self) -> None:
+        """อ่าน ``model.names`` แล้วสร้างตารางบทบาท + คำเตือนที่ต้องให้ผู้ใช้เห็น.
+
+        ⚠️ **คำเตือนต้องไปถึงหน้าเว็บ ไม่ใช่จมอยู่ใน log** — ผู้ใช้เลือกไฟล์
+        ``.pt`` เองจากหน้าเว็บ ถ้าโมเดลมีคลาสที่ระบบไม่รู้จัก ผลตรวจจะเปลี่ยน
+        ความหมายไปเงียบ ๆ (คลาสนั้นถูกนับเป็นตำหนิ = NG).
+        """
+        self.class_roles = {}
+        self.model_class_names = []
+        self.class_warnings = []
+
+        names = getattr(self.model, "names", None) if self.model is not None else None
+        if isinstance(names, dict):
+            raw = [names[k] for k in sorted(names)]
+        elif isinstance(names, (list, tuple)):
+            raw = list(names)
+        else:
+            raw = []
+        self.model_class_names = [str(n).lower() for n in raw]
+
+        non_defect = self.non_defect_classes()
+        known_labels = self._mode_map("CLASS_NAMES")
+        # โหมดที่ปล่อย CLASS_NAMES ว่างไว้ = "รับทุกคลาสที่โมเดลมี" โดยตั้งใจ
+        # (โหมด Label) ⇒ ไม่ต้องเตือนเรื่องคลาสแปลกหน้า
+        vet_names = bool(known_labels)
+
+        unknown = []
+        for cn in self.model_class_names:
+            if cn in non_defect:
+                self.class_roles[cn] = ROLE_BODY
+                continue
+            self.class_roles[cn] = ROLE_DEFECT
+            if vet_names and cn not in known_labels and cn not in _LABEL_FALLBACKS:
+                unknown.append(cn)
+
+        if not self.model_class_names:
+            return
+
+        # โมเดลสำรอง (COCO) ไม่ใช่โมเดลของงานนี้ ⇒ ต้องบอกก่อนเรื่องอื่นทั้งหมด
+        # และ **ล้างตารางบทบาททิ้ง** — ไม่มีการตรวจเกิดขึ้นจริงจากคลาสพวกนี้
+        # (detect() คืนลิสต์ว่าง) ⇒ ถ้ายังโชว์ 80 คลาสบนหน้าเว็บ = บอกผู้ใช้ว่า
+        # ระบบกำลังมองหาของพวกนั้นอยู่ ซึ่งไม่จริง
+        if self.using_fallback_weights and self.verdict_badge:
+            self.class_roles = {}
+            self.model_class_names = []
+            msg = ("ไม่พบไฟล์โมเดลที่เลือก — ระบบกำลังใช้ yolov8n (COCO) แทน "
+                   "ซึ่งไม่ใช่โมเดลของงานนี้ ⇒ ปิดการรายงานผลตรวจไว้ "
+                   "(ถ้าปล่อยไว้ ระบบจะนับคน/ขวด/รถ เป็นตำหนิแล้วบันทึกลง DB). "
+                   "วางไฟล์ .pt ของงานลงในโฟลเดอร์ weights แล้วรีสตาร์ต")
+            self.class_warnings.append(msg)
+            logger.error(msg)
+            return
+
+        bodies = [c for c, r in self.class_roles.items() if r == ROLE_BODY]
+        defects = [c for c, r in self.class_roles.items() if r == ROLE_DEFECT]
+        logger.info("Class roles: %s",
+                    " · ".join(f"{c}={'ตำหนิ' if r == ROLE_DEFECT else 'ทั้งใบ'}"
+                               for c, r in self.class_roles.items()))
+
+        if unknown:
+            # ⚠️ ข้อความนี้ถูกแสดงบนหน้าเว็บแบบ escape ⇒ ห้ามใส่ ** หรือแท็ก
+            # (จะโผล่เป็นดอกจันบนหน้าจอ — เคยเกิดจริงตอนขับเบราว์เซอร์ดู)
+            # และต้องตัดให้สั้น — โมเดลแปลกปลอมอาจมี 80 คลาส (COCO)
+            shown = ", ".join(unknown[:6])
+            if len(unknown) > 6:
+                shown += " และอีก %d คลาส" % (len(unknown) - 6)
+            msg = ("โมเดลนี้มีคลาสที่ระบบไม่รู้จัก: %s — ถูกนับเป็น \"ตำหนิ\" (NG). "
+                   "ถ้าคลาสนี้คือ 'ชิ้นงานทั้งใบ' ให้เพิ่มชื่อลง NON_DEFECT_CLASSES "
+                   "ของโหมด ไม่งั้นจะได้ NG ปลอมทุกใบ") % shown
+            self.class_warnings.append(msg)
+            logger.warning(msg)
+        # เตือนเรื่อง "ไม่มีคลาสทั้งใบ" เฉพาะโหมดที่ใช้คำตัดสิน OK/NG จริง —
+        # โหมดที่ไม่มีแนวคิด "ชิ้นงานทั้งใบ" (เช่น Label) ไม่ได้ผิดอะไร
+        if not bodies and self.verdict_badge:
+            msg = ("โมเดลนี้ไม่มีคลาส 'ชิ้นงานทั้งใบ' (%s) — ระบบจะไม่มีทางสรุปว่า OK "
+                   "และ Frame Capture จะตัดสิน 'ครบใบ' ไม่ได้"
+                   ) % ", ".join(sorted(non_defect))
+            self.class_warnings.append(msg)
+            logger.warning(msg)
+        if not defects:
+            msg = "โมเดลนี้ไม่มีคลาสที่นับเป็นตำหนิเลย — จะไม่มีทางรายงาน NG"
+            self.class_warnings.append(msg)
+            logger.warning(msg)
+
+    def class_role_table(self) -> list:
+        """ตารางบทบาทสำหรับส่งขึ้นหน้าเว็บ: ``[{name, label, role}, ...]``."""
+        labels = self._class_names()
+        return [{"name": cn,
+                 "label": labels.get(cn, cn.replace("_", " ").title()),
+                 "role": role}
+                for cn, role in self.class_roles.items()]
 
     def _class_names(self) -> dict:
-        """Active class-name → display-label mapping."""
-        if self.is_bestx_mode:
-            return _BESTX_CLASS_NAMES
-        if self.mode_config is not None:
-            return getattr(self.mode_config, "CLASS_NAMES", {}) or {}
-        return config.DEFECT_CLASS_NAMES
+        """ชื่อที่แสดงของทุกคลาส **ที่โมเดลมีจริง**.
+
+        ⚠️ นี่คือ *ป้ายชื่อ* ล้วน ๆ ไม่ใช่ตัวกรอง — คลาสที่ไม่มีชื่อกำหนดไว้จะได้
+        ชื่อจากตัวมันเอง (Title Case) **ไม่ถูกทิ้ง** (ดูเหตุผลในหัวไฟล์).
+        """
+        mode_names = self._mode_map("CLASS_NAMES")
+        if not self.model_class_names:
+            # ยังไม่ได้โหลดโมเดล → เส้นทางเดิมทุกประการ
+            if self.mode_config is not None:
+                return mode_names
+            return dict(config.DEFECT_CLASS_NAMES)
+
+        out = {}
+        for cn in self.model_class_names:
+            out[cn] = (mode_names.get(cn)
+                       or _LABEL_FALLBACKS.get(cn)
+                       or cn.replace("_", " ").title())
+        return out
 
     def _colors(self) -> dict:
-        """Active class-name → BGR tuple mapping."""
-        if self.is_bestx_mode:
-            return _BESTX_COLORS
-        if self.mode_config is not None:
-            colors = getattr(self.mode_config, "COLORS", None)
-            if colors:
-                return colors
-        return _COLORS
+        """สีของทุกคลาสที่โมเดลมีจริง: สีตามบทบาท แล้วให้สีของโหมดทับได้."""
+        mode_colors = self._mode_map("COLORS")
+        if not self.model_class_names:
+            if mode_colors:
+                return mode_colors
+            return dict(_COLORS)
+
+        out = {}
+        for cn in self.model_class_names:
+            out[cn] = _ROLE_COLORS[self.role_of(cn)]
+        for cn, col in mode_colors.items():          # โหมดกำหนดเอง = ชนะเสมอ
+            out[str(cn).lower()] = col
+        return out
         
     @staticmethod
     def _openvino_device_status(device: str):
@@ -825,6 +1004,7 @@ class YOLODetector:
             model_path = self.model_path
 
             if not os.path.exists(model_path):
+                self.using_fallback_weights = True
                 logger.warning(f"Custom model not found: {model_path}")
                 logger.warning(
                     "Falling back to yolov8n.pt (COCO pretrained). "
@@ -912,6 +1092,13 @@ class YOLODetector:
             if hasattr(self.model, 'names'):
                 logger.info(f"Model classes ({len(self.model.names)}): {list(self.model.names.values())}")
 
+            # แบ่งบทบาทของคลาสจากรายชื่อของโมเดลเอง (แทนเงื่อนไขชื่อไฟล์เดิม)
+            # ห้ามให้ล้มเหลวที่นี่ทำให้โหลดโมเดลไม่ผ่าน — role_of() มีทางถอย
+            try:
+                self._build_class_roles()
+            except Exception as e:
+                logger.warning("อ่านรายชื่อคลาสของโมเดลไม่ได้: %s", e)
+
             # Log model size + device. A heavy model (yolov8m/l/x) on CPU is the
             # other half of the "bestX.pt stutters" story — if avg inference time
             # stays high after the conf/vectorise fixes, the weights themselves
@@ -939,19 +1126,23 @@ class YOLODetector:
             logger.error(f"Failed to load YOLO model: {e}", exc_info=True)
             return False
 
-    def classify_frame_bestx(self, detections: List[Dict]) -> Optional[str]:
+    def classify_frame(self, detections: List[Dict]) -> Optional[str]:
         """
-        bestX.pt verdict logic:
-          "ng"  — "dent" detected → the whole can is defective
-          "ok"  — "can" detected and no dent → good can
-          None  — nothing detected yet → caller shows no verdict
-        Only call when is_bestx_mode is True.
+        คำตัดสินของ 1 เฟรม — **ตรรกะเดียวกับ bestX.pt เดิม แต่ตัดสินจากบทบาท
+        ของคลาส ไม่ใช่ชื่อคลาส/ชื่อไฟล์**:
+          "ng"  — เจอคลาสที่เป็นตำหนิ → ทั้งใบเสีย
+          "ok"  — เจอคลาสชิ้นงานทั้งใบ และไม่มีตำหนิ → ใบดี
+          None  — ยังไม่เจออะไร → ผู้เรียกต้องไม่แสดงคำตัดสิน (ห้ามเดา)
         """
-        if any(d["class_name"] == "dent" for d in detections):
+        if any(self.role_of(d["class_name"]) == ROLE_DEFECT for d in detections):
             return "ng"
-        if any(d["class_name"] == "can" for d in detections):
+        if any(self.role_of(d["class_name"]) == ROLE_BODY for d in detections):
             return "ok"
         return None
+
+    def classify_frame_bestx(self, detections: List[Dict]) -> Optional[str]:
+        """ชื่อเดิมของ ``classify_frame()`` — คงไว้ให้สคริปต์เก่าเรียกได้."""
+        return self.classify_frame(detections)
 
     def detect(self, frame: np.ndarray, imgsz: int = None) -> List[Dict]:
         """
@@ -974,6 +1165,14 @@ class YOLODetector:
         """
         if self.model is None:
             logger.error("Model not loaded. Call load_model() first.")
+            return []
+
+        # ⚠️ โมเดลสำรอง COCO ไม่ใช่โมเดลของงานนี้ ⇒ ผลของมันไม่มีความหมาย
+        # (คน/ขวด/รถ จะกลายเป็น "ตำหนิ" แล้วถูกนับ + บันทึกลง DB).
+        # เดิมถูกกันโดยบังเอิญด้วยตัวกรองชื่อคลาสที่เพิ่งถอดออก จึงต้องกันตรงนี้
+        # แทน — และกันเฉพาะโหมดที่ให้คำตัดสิน QC เท่านั้น (โหมด Label ที่เคย
+        # ใช้ COCO เป็นตัวสาธิตยังทำงานเหมือนเดิมทุกประการ)
+        if self.using_fallback_weights and self.verdict_badge:
             return []
 
         try:
@@ -1015,7 +1214,6 @@ class YOLODetector:
 
             detections: List[Dict] = []
             names = getattr(self.model, "names", {})
-            known = set(self._class_names().keys())
 
             for result in results:
                 boxes = result.boxes
@@ -1054,13 +1252,12 @@ class YOLODetector:
                     # (Good / GOOD / good all match the same entry).
                     class_name = str(class_name).lower()
 
-                    # กรองเฉพาะ class ที่กำหนดใน mode/config
-                    # known ว่าง = accept ทุก class (เช่น Label mode ก่อนเติม wording)
-                    if known and class_name not in known:
-                        if debug_on:
-                            logger.debug(f"  SKIP unknown class: '{class_name}'")
-                        continue
-
+                    # ⚠️ **ไม่มีการกรองคลาสทิ้งอีกต่อไป**
+                    # เดิมกรองด้วยชุดชื่อของโหมด ⇒ โมเดลที่ตั้งชื่อไฟล์ไม่ตรง
+                    # "bestx.pt" จะโดนทิ้งทุก detection แบบเงียบ ๆ (ไม่มี error
+                    # ไม่มี NG ไม่นับ ไม่ลง DB). คลาสที่ระบบไม่รู้จักตอนนี้ถูก
+                    # **ตรวจตามปกติและนับเป็นตำหนิ** พร้อมขึ้นคำเตือนบนหน้าเว็บ
+                    # จาก ``_build_class_roles()`` ⇒ มองเห็นได้ ไม่เงียบ
                     detections.append({
                         "class_id":   class_id,
                         "class_name": class_name,
@@ -1099,16 +1296,18 @@ class YOLODetector:
         palette = self._colors()
         name_map = self._class_names()
 
-        # bestX.pt: when a dent exists the whole can is defective, so drop the
-        # green "can" box — it must never co-exist with the NG verdict.
-        bestx_verdict = self.classify_frame_bestx(detections) if self.is_bestx_mode else None
+        # เมื่อเจอตำหนิ ทั้งใบถือว่าเสีย ⇒ ทิ้งกรอบเขียว "ชิ้นงานทั้งใบ" เพราะ
+        # มันขัดกับป้าย NG บนภาพเดียวกัน (ตรรกะเดิมของ bestX.pt — ตอนนี้ใช้กับ
+        # ทุกโมเดลในโหมดที่เปิด verdict_badge และตัดสินจาก "บทบาท" ของคลาส)
+        verdict = self.classify_frame(detections) if self.verdict_badge else None
         draw_targets = detections
-        if bestx_verdict == "ng":
-            draw_targets = [d for d in detections if d["class_name"] != "can"]
+        if verdict == "ng":
+            draw_targets = [d for d in detections
+                            if self.role_of(d["class_name"]) != ROLE_BODY]
 
-        # Draw good/dented first, dent_spot on top
+        # วาดกรอบปกติก่อน แล้วค่อยวาด "จุดตำหนิ" (*_spot) ทับด้านบน
         ordered = sorted(draw_targets,
-                         key=lambda d: 1 if d["class_name"] == "dented_spot" else 0)
+                         key=lambda d: 1 if str(d["class_name"]).endswith("_spot") else 0)
 
         for det in ordered:
             x1, y1, x2, y2 = det["bbox"]
@@ -1117,10 +1316,13 @@ class YOLODetector:
             color          = palette.get(class_name, _COLOR_DEFAULT)
 
             # ── Box ──────────────────────────────────────
-            if class_name == "dented_spot":
+            # ความหนาตัดสินจาก **บทบาท** ไม่ใช่ชื่อคลาสตรง ๆ — ไม่งั้นคลาส
+            # ตำหนิที่ชื่อไม่ใช่ "dented" (เช่น "dent" ของ bestX) จะได้กรอบบาง
+            # เท่ากับกระป๋องดี = เน้นผิดตัว
+            if str(class_name).endswith("_spot"):
                 _draw_corner_marks(frame_copy, x1, y1, x2, y2, color,
                                    thickness=2, length=18)
-            elif class_name == "dented":
+            elif self.role_of(class_name) == ROLE_DEFECT:
                 cv2.rectangle(frame_copy, (x1, y1), (x2, y2), color, 3)
             else:
                 cv2.rectangle(frame_copy, (x1, y1), (x2, y2), color, 2)
@@ -1137,8 +1339,8 @@ class YOLODetector:
                 label, cv2.FONT_HERSHEY_SIMPLEX, font_scale, font_thick + 1
             )
 
-            # dent_spot label below box (avoids overlapping with dented label above)
-            if class_name == "dented_spot":
+            # ป้ายของ *_spot อยู่ใต้กรอบ (กันทับป้ายของกรอบตำหนิที่อยู่ด้านบน)
+            if str(class_name).endswith("_spot"):
                 bg_y1   = y2 + 1
                 bg_y2   = y2 + lh + baseline + 6
                 text_y  = y2 + lh + 3
@@ -1152,9 +1354,9 @@ class YOLODetector:
                         cv2.FONT_HERSHEY_SIMPLEX, font_scale, (255, 255, 255),
                         font_thick + 1)
 
-        # bestX.pt: overlay NG / OK verdict on the frame (None → nothing drawn)
-        if self.is_bestx_mode:
-            _draw_bestx_verdict(frame_copy, bestx_verdict)
+        # ป้าย NG / OK มุมขวาบน (None = ยังไม่เจออะไร → ไม่วาดอะไรเลย)
+        if self.verdict_badge:
+            _draw_verdict_badge(frame_copy, verdict)
 
         return frame_copy
     

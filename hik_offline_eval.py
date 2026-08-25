@@ -111,8 +111,18 @@ def main():
         return 2
     import config
     imgsz = args.imgsz or getattr(config, "YOLO_IMGSZ", 480)
-    non_defect = {"good", "can"}
+    # ⚠️ ต้องเป็นชุดเดียวกับที่ระบบใช้จริง — ถามจาก detector ตัวเดียวกับที่
+    # โหลดมา (เดิม hard-code ไว้ ⇒ โมเดลที่ตั้งชื่อคลาส "ทั้งใบ" ต่างออกไปจะถูก
+    # นับเป็นตำหนิ = รายงานคนละเรื่องกับหน้าจอของสถานี)
+    # ตัว detector ปลอมในเทสต์ไม่มีเมธอดนี้ ⇒ ต้องถอยได้โดยไม่พัง
+    getter = getattr(det, "non_defect_classes", None)
+    non_defect = set(getter()) if callable(getter) else {"good", "can"}
+    roles = getattr(det, "class_roles", None) or {}
     print("   ไฟล์โมเดล : %s" % model_path)
+    if roles:
+        print("   คลาส      : %s" % " · ".join(
+            "%s=%s" % (c, "ตำหนิ" if r == "defect" else "ทั้งใบ")
+            for c, r in roles.items()))
     print("   imgsz     : %d" % imgsz)
     print("   ภาพที่ตรวจ : %d ไฟล์" % len(files))
 

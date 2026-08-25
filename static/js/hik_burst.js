@@ -392,12 +392,33 @@
         });
     }
 
+    /** ล้างข้อมูลสรุปทั้งหมด — ใช้ตอนสลับชุด/ลบชุด.
+     *  ⚠️ จำเป็นตั้งแต่มีบรรทัดเตือนสีแดงบนสุด: ถ้าไม่ล้าง คำเตือนของชุดเก่า
+     *  จะค้างอยู่บนหัวของชุดใหม่ = ชี้ปัญหาผิดชุดแบบมั่นใจ */
+    function resetDetails() {
+        ['hikGalKpis', 'hikGalDropBrief'].forEach(function (id) {
+            var el = $(id);
+            if (el) { el.innerHTML = ''; el.style.display = (id === 'hikGalKpis' ? '' : 'none'); }
+        });
+        ['hikGalDrop', 'hikGalDiag'].forEach(function (id) {
+            var el = $(id);
+            if (el) { el.innerHTML = ''; el.style.display = 'none'; }
+        });
+        var note = $('hikGalSummary');
+        if (note) { note.className = 'hik-note info'; note.textContent = 'กำลังโหลด…'; }
+    }
+
     function loadSession(name, keepOffset) {
         var sort = ($('hikGalSort') || {}).value || 'best';
         if (!keepOffset || state.session !== name) {
             state.offset = 0;
             state.rows = [];
             state.sel = {};
+            resetDetails();
+            // พื้นที่เลื่อนเป็นตัวเดียวกันทั้งคอลัมน์แล้ว ⇒ เปิดชุดใหม่ต้องกลับ
+            // ขึ้นบนสุด ไม่งั้นจะไปโผล่กลางรายการภาพของชุดใหม่
+            var sc = document.querySelector('.hik-gal-scroll');
+            if (sc) { sc.scrollTop = 0; }
         }
         state.session = name;
         var title = $('hikGalTitle');
@@ -497,6 +518,23 @@
         box.innerHTML = cards.join('');
 
         // เฟรมที่ทิ้ง = กระป๋องที่หายไปจากชุดทดสอบ ⇒ ต้องเด่น ห้ามซ่อนในบรรทัดยาว ๆ
+        //
+        // ⚠️ ตั้งแต่ย้ายข้อมูลลงไปอยู่ **ใต้กริดภาพ** (เพื่อให้เห็นรูปเป็นหลัก)
+        // กล่องนี้ต้องเลื่อนลงไปดู ⇒ ทิ้งไว้เฉย ๆ = คำเตือนที่ไม่มีใครเห็น.
+        // จึงสรุปเป็น **บรรทัดเดียว** ไว้บนสุดด้วย ส่วนรายละเอียด+วิธีแก้อยู่ล่าง
+        var brief = $('hikGalDropBrief');
+        if (brief) {
+            if (m.dropped) {
+                var bTotal = (m.saved || d.total || 0) + m.dropped;
+                var bPct = bTotal ? Math.round(m.dropped * 100 / bTotal) : 0;
+                brief.textContent = '⚠️ ทิ้งไป ' + m.dropped + ' เฟรม (' + bPct
+                    + '%) เพราะดิสก์เขียนไม่ทัน — เลื่อนลงล่างเพื่อดูวิธีแก้';
+                brief.style.display = '';
+            } else {
+                brief.style.display = 'none';
+                brief.textContent = '';
+            }
+        }
         if (drop) {
             if (m.dropped) {
                 var total = (m.saved || d.total || 0) + m.dropped;
@@ -813,6 +851,9 @@
                 state.session = null;
                 state.rows = [];
                 state.sel = {};
+                resetDetails();
+                var note = $('hikGalSummary');
+                if (note) { note.textContent = 'เลือกชุดภาพทางซ้าย'; }
                 loadSessions();
             })
             .catch(function (e) { showJob(null, '❌ ' + e.message); });

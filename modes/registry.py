@@ -6,10 +6,13 @@ Each mode module must expose:
     DEFAULT_MODEL_FILE, CLASS_NAMES, COLORS
 """
 
+import logging
 import os
 from importlib import import_module
 from types import ModuleType
 from typing import List, Dict, Optional
+
+logger = logging.getLogger(__name__)
 
 AVAILABLE_MODES = ["can_dent", "label"]
 DEFAULT_MODE = "can_dent"
@@ -72,7 +75,20 @@ def resolve_model_path(mode_name: str, filename: Optional[str] = None) -> Option
         if os.path.isfile(path):
             return path
 
+    # ── ไม่มีไฟล์ที่ระบุ/ไฟล์ default ⇒ หยิบตัวแรกในโฟลเดอร์ ─────────────
+    # ⚠️ **ต้อง log ว่าหยิบตัวไหน** — ตั้งแต่ตรรกะไม่ผูกกับชื่อไฟล์แล้ว โมเดล
+    # ทุกตัวทำงานได้เหมือนกันหมด ⇒ การหยิบผิดตัวจะ "ดูเหมือนทำงานปกติ"
+    # แต่เป็นคนละโมเดลกับที่ผู้ใช้ตั้งใจ (ผลตรวจต่างกันโดยไม่มีสัญญาณอะไรเลย)
     found = discover_models(mode_name)
     if found:
+        wanted = [c for c in candidates if c]
+        if wanted:
+            logger.warning(
+                "โหมด '%s': ไม่พบไฟล์ %s ในโฟลเดอร์ %s ⇒ ใช้ '%s' แทน "
+                "(มีให้เลือก: %s)",
+                mode_name, ", ".join(wanted), weights_dir, found[0], ", ".join(found))
+        else:
+            logger.info("โหมด '%s': เลือกโมเดล '%s' อัตโนมัติ (มีให้เลือก: %s)",
+                        mode_name, found[0], ", ".join(found))
         return os.path.join(weights_dir, found[0])
     return None
