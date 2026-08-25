@@ -231,3 +231,115 @@ def test_selftest_passes(capsys):
     assert bt.selftest() == 0
     out = capsys.readouterr().out
     assert "❌" not in out
+
+
+# ── ⑤ ทิศทางที่สอง: NG ปลอมบนกระป๋องดี ────────────────────────────
+# 📊 ที่มา: ภาพหน้าจอระบบ vision เดิมบนไลน์ 6 (ส.ค. 2026) — TOT 40,062 · NG 0
+#    ⇒ มาตรฐานหน้างานคือ "แทบไม่มี NG ปลอมเลย" ⇒ ตัวจำกัดของงานนี้คือ precision
+#    ซึ่ง `sweep()` (วัดแต่ recall) ตอบแทนไม่ได้เลย
+
+def _fp_at(threshold):
+    """โมเดลปลอมที่เริ่มทักผิดเมื่อเบลอเกิน `threshold` — วัดจากความนุ่มของภาพ"""
+    def _fn(img):
+        soft = float(np.mean(np.abs(np.diff(img.astype(np.float32), axis=1))))
+        return [_box(10, 10, 30, 30, 0.4)] if soft < threshold else []
+    return _fn
+
+
+def test_false_positive_sweep_counts_cans_not_boxes():
+    """
+    หน่วยที่เทียบกับ "NG rate %" ของไลน์ได้คือ **ใบที่โดนทัก** ไม่ใช่จำนวนกรอบ
+    (ใบเดียวมี 3 กรอบ = ถูกดีดทิ้ง 1 ใบ ไม่ใช่ 3 ใบ)
+    """
+    imgs = [_striped() for _ in range(4)]
+
+    def three_boxes(img):
+        return [_box(1, 1, 5, 5), _box(6, 6, 9, 9), _box(11, 11, 15, 15)]
+
+    res = bt.sweep_false(three_boxes, imgs, blurs=(0,))
+    row = res[1.0]["rows"][0]
+    assert row["fp_images"] == 4 and row["fp_boxes"] == 12
+    assert row["fp_rate"] == 1.0
+
+
+def test_a_clean_model_reports_zero_false_positives():
+    imgs = [_striped() for _ in range(5)]
+    res = bt.sweep_false(lambda img: [], imgs, blurs=(0, 4, 8))
+    for row in res[1.0]["rows"]:
+        assert row["fp_images"] == 0 and row["fp_rate"] == 0.0
+    assert bt.false_knee(res[1.0]["rows"]) == 8
+
+
+def test_blur_that_creates_false_defects_caps_the_limit():
+    imgs = [_striped() for _ in range(3)]
+    # ลายคาบ 4 px: ความนุ่มวัดได้ 1.51 ที่ L=0-2 และ 0.15 ที่ L≥4 ⇒ เกณฑ์ 0.5
+    # ทำให้ "เริ่มทักผิดตั้งแต่ L=4" ซึ่งเป็นคำตอบที่รู้ล่วงหน้า
+    res = bt.sweep_false(_fp_at(0.5), imgs, blurs=(0, 2, 4, 8, 16))
+    rows = res[1.0]["rows"]
+    assert rows[0]["fp_images"] == 0          # ไม่เบลอ = ไม่ทักผิด
+    assert rows[-1]["fp_images"] == 3         # เบลอมาก = ทักผิดทุกใบ
+    assert bt.false_knee(rows) == 2
+
+
+def test_false_positives_that_exist_without_blur_are_kept_as_the_baseline():
+    """
+    NG ปลอมที่มีอยู่แล้วตั้งแต่ยังไม่เบลอ **ไม่ใช่ความผิดของความเบลอ** —
+    ถ้าไม่แยกฐานออก เครื่องมือจะบอกว่า "เบลอ 0 px ก็ไม่ผ่านแล้ว" แล้วส่งผู้ใช้
+    ไปแก้ exposure/ไฟ ทั้งที่ต้องไปแก้โมเดล/เกณฑ์ conf
+    """
+    imgs = [_striped() for _ in range(4)]
+    res = bt.sweep_false(lambda img: [_box(1, 1, 5, 5)], imgs, blurs=(0, 4, 8))
+    rows = res[1.0]["rows"]
+    assert rows[0]["fp_images"] == 4
+    assert bt.false_knee(rows) == 8, "ทักผิดเท่าเดิมทุกระดับ = ความเบลอไม่ได้ทำให้แย่ลง"
+
+
+def test_false_knee_ignores_a_fluke_pass_after_it_already_broke():
+    """กติกา 'ต่อเนื่อง' เดียวกับ knee() — ผ่านหลังพังแล้วต้องไม่ถูกนับ"""
+    rows = [{"blur": 0, "fp_images": 0}, {"blur": 2, "fp_images": 0},
+            {"blur": 4, "fp_images": 3}, {"blur": 8, "fp_images": 0}]
+    assert bt.false_knee(rows) == 2
+
+
+def test_fp_allowance_can_be_widened_deliberately():
+    rows = [{"blur": 0, "fp_images": 0}, {"blur": 2, "fp_images": 1},
+            {"blur": 4, "fp_images": 5}]
+    assert bt.false_knee(rows, allow=0) == 0
+    assert bt.false_knee(rows, allow=1) == 2
+
+
+# ── ความซื่อสัตย์ทางสถิติ: ตัวอย่างเล็กพิสูจน์อะไรไม่ได้ ────────────
+def test_zero_findings_in_a_small_sample_does_not_mean_zero_rate():
+    """
+    "ทดสอบ 30 ใบไม่เจอ NG ปลอมเลย" ⇒ **ไม่ได้แปลว่าอัตราเป็น 0**
+    ของจริงคือ ≤9.5% ซึ่งห่างจากมาตรฐานหน้างาน (0.0075%) กว่า 1,000 เท่า
+    """
+    ub = bt.upper_bound_95(0, 30)
+    assert 0.09 < ub < 0.10                       # ≈ กฎสามส่วน 3/n
+    assert ub > 0.000075 * 1000
+
+
+def test_the_bound_tightens_with_more_samples():
+    assert bt.upper_bound_95(0, 40062) < 0.0000755
+    assert bt.upper_bound_95(0, 300) < bt.upper_bound_95(0, 30)
+
+
+def test_the_bound_widens_when_something_was_actually_seen():
+    assert bt.upper_bound_95(1, 30) > bt.upper_bound_95(0, 30)
+    assert bt.upper_bound_95(3, 100) > 3 / 100.0   # ต้องไม่ต่ำกว่าค่าที่วัดได้เอง
+
+
+def test_sample_size_needed_matches_what_the_line_actually_ran():
+    """
+    เลขนี้คือคำอธิบายว่าทำไมตัวเลข 0.00% ของไลน์ถึงน่าเชื่อ: มันมาจาก 40,062 ใบ
+    ⇒ การทดสอบบนโต๊ะด้วยภาพหลักสิบใบ **เทียบกับมันไม่ได้เชิงสถิติ**
+    """
+    need = bt.images_needed(0.000075)
+    assert 39_000 < need < 41_000
+    assert bt.images_needed(0.02) == 149
+    assert bt.images_needed(0) is None
+
+
+def test_upper_bound_handles_degenerate_inputs():
+    assert bt.upper_bound_95(0, 0) is None
+    assert bt.upper_bound_95(5, 5) == 1.0
