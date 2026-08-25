@@ -556,10 +556,13 @@ class _CountingDetector:
 
     def __init__(self):
         self.calls = 0
+        self.live_calls = 0        # เฉพาะที่ `inference_loop` เรียก (ไม่ส่ง imgsz)
         self.model = object()
 
     def detect(self, frame, imgsz=None):
         self.calls += 1
+        if imgsz is None:          # เส้นทางเดียวที่ลูปตรวจสดใช้ (app.py: detect(frame))
+            self.live_calls += 1
         return []
 
     def draw_detections(self, frame, dets):            # pragma: no cover
@@ -569,11 +572,17 @@ class _CountingDetector:
         return {}
 
 
-def _wait_growth(det, seconds=0.8):
-    """เพิ่มขึ้นกี่ครั้งในช่วงเวลาที่กำหนด"""
-    before = det.calls
+def _wait_growth(det, seconds=0.8, live_only=False):
+    """
+    เพิ่มขึ้นกี่ครั้งในช่วงเวลาที่กำหนด.
+
+    ⚠️ ``live_only`` จำเป็นกับโหมดไล่ exposure — โหมดนั้น **เรียกโมเดลเองทุกเฟรม**
+    ⇒ ตัวนับรวมจะโตอยู่ดีแม้ลูปตรวจสดหยุดสนิท ⇒ เทสต์จะวัดผิดเรื่อง
+    """
+    field = "live_calls" if live_only else "calls"
+    before = getattr(det, field)
     time.sleep(seconds)
-    return det.calls - before
+    return getattr(det, field) - before
 
 
 def test_pausing_actually_stops_the_model_from_running(bclient, monkeypatch):
@@ -790,7 +799,18 @@ def test_live_smooth_toggle_never_leaks_into_usb(client):
 # จะเสร็จ (imgsz 1280 บนสถานี ~420 ms) ทั้งที่การ "ถ่าย" ใช้เวลาแค่ ~15 ms
 @pytest.fixture
 def shotclient(client, monkeypatch):
-    """client + โมเดลปลอมที่นับการเรียก — เส้นทาง shot ต้องมี detector.model"""
+    """client + โมเดลปลอมที่นับการเรียก — เส้นทาง shot ต้องมี detector.model
+
+    ⚠️ ต้องบังคับ ``AUTH_ENABLED = False`` ตรงนี้ ไม่ใช่พึ่ง env อย่างเดียว —
+    ไฟล์เทสต์อื่น (เช่นชุด auth) เปิดค่านี้ค้างไว้ได้ ⇒ พอรันทั้งชุดพร้อมกัน
+    fixture นี้จะได้ 401 แล้วเทสต์ทุกตัวที่ใช้มันจะ **error ที่ setup**
+    โดยไม่เกี่ยวกับสิ่งที่มันทดสอบเลย (เป็นอยู่ก่อนหน้านี้แล้ว 5 ตัว)
+    """
+    try:
+        from auth import access as _ac
+        monkeypatch.setattr(_ac.ac, "AUTH_ENABLED", False, raising=False)
+    except Exception:                                  # pragma: no cover
+        pass
     fake = _CountingDetector()
     monkeypatch.setattr(appmod, "detector", fake, raising=False)
     appmod.hik_shot_frame = None
@@ -1014,3 +1034,143 @@ def test_the_picture_keeps_updating_while_detection_is_paused(bclient, monkeypat
     finally:
         appmod.hik_live_detect_off = False
         bclient.post("/api/detection/stop")
+
+
+# ── โหมด "ไล่ exposure" (exposure ladder) ─────────────────────────────
+# ⚠️ โหมดนี้ **เปลี่ยนค่าในกล้องจริง** ต่างจากถ่ายรัวที่แค่บันทึกภาพ ⇒ ด่านความ
+# ปลอดภัยคือส่วนที่ต้องล็อกด้วยเทสต์: หยุดตรวจสดตลอดช่วง · คืนค่าเดิมเสมอ ·
+# ไม่ทับกับงานที่กำลังใช้กล้องอยู่
+
+@pytest.fixture
+def expclient(shotclient, monkeypatch, tmp_path):
+    root = tmp_path / "exposure"
+    root.mkdir()
+    import hik_exposure as hxmod
+    monkeypatch.setattr(hxmod.config, "HIK_EXPOSURE_DIR", str(root), raising=False)
+    monkeypatch.setattr(appmod.config, "HIK_EXPOSURE_DIR", str(root), raising=False)
+    shotclient.exp_root = str(root)
+    yield shotclient
+    appmod._hik_ladder_deadline = 0.0
+
+
+def _wait_job(client, kind="exposure", timeout=25.0):
+    end = time.time() + timeout
+    while time.time() < end:
+        job = client.get("/api/camera/hik/exposure").get_json().get("job")
+        if job and job.get("kind") == kind and not job.get("running"):
+            return job
+        time.sleep(0.1)
+    raise AssertionError("งานไม่จบภายในเวลาที่รอ")
+
+
+def test_ladder_runs_and_writes_a_result(expclient):
+    r = expclient.post("/api/camera/hik/exposure",
+                       json={"role": "ng", "frames": 3, "exposures": [2000, 1000]})
+    assert r.status_code == 200, r.get_json()
+    name = r.get_json()["session"]
+    _wait_job(expclient)
+    d = expclient.get("/api/camera/hik/exposures/" + name).get_json()
+    assert d["status"] == "ok"
+    rows = d["session"]["rows"]
+    assert [x["exposure_us"] for x in rows] == [2000.0, 1000.0]
+    assert d["session"]["summary"]["role"] == "ng"
+
+
+def test_live_inspection_is_stopped_for_the_whole_run(expclient):
+    """
+    ระหว่างไล่ค่า ภาพถูกตั้งให้มืด/สว่างผิดปกติโดยตั้งใจ — ถ้าปล่อยให้ตรวจต่อ
+    ระบบจะ **นับกระป๋องและเขียน NG ปลอมลง DB** จากภาพทดสอบ (กฎเหล็กข้อ 2)
+    """
+    det = expclient.fake_detector
+    assert _wait_growth(det, 0.5, live_only=True) > 0     # ปกติตรวจอยู่
+
+    expclient.post("/api/camera/hik/exposure",
+                   json={"role": "ng", "frames": 5,
+                         "exposures": [2000, 1800, 1600, 1400, 1200, 1000]})
+    # ⚠️ ต้องวัด **ภายในช่วงที่งานยังวิ่งอยู่จริง** — บน SDK ปลอมงานจบเร็วมาก
+    # ถ้าใช้ sleep คงที่ จะไปวัดตอนที่ระบบกลับมาตรวจแล้ว แล้วสรุปผิดว่า "ไม่หยุด"
+    # ปล่อยให้เฟรมที่ลูป "ถืออยู่ในมือ" ตอนธงถูกตั้ง ทำงานจบก่อน — เฟรมนั้นถูกจับ
+    # ด้วย **ค่ากล้องเดิม** จึงไม่ใช่ปัญหา. ที่ต้องเป็นศูนย์คือเฟรมหลังจากนั้น
+    time.sleep(0.15)
+    saw_paused = False
+    before = last_while_paused = det.live_calls
+    for _ in range(400):
+        # ⚠️ อ่านตัวนับ **ก่อน** ถามสถานะเสมอ — ถ้าสถานะที่ได้กลับมาบอกว่า
+        # "ยังหยุดอยู่" แปลว่าตอนที่อ่านตัวนับก็ยังหยุดอยู่แน่นอน (การหยุดจบได้
+        # ครั้งเดียว). กลับลำดับเมื่อไร จะนับเฟรมหลังงานจบเข้ามาด้วยแล้วสรุปผิด
+        n = det.live_calls
+        st = expclient.get("/api/camera/hik/exposure").get_json()
+        job = st.get("job") or {}
+        if st.get("paused_inference"):
+            saw_paused = True
+            last_while_paused = n
+        if job.get("kind") == "exposure" and not job.get("running"):
+            break
+        time.sleep(0.02)
+    during = last_while_paused - before
+    assert saw_paused, "สถานะต้องรายงานว่ากำลังหยุดตรวจ"
+    assert during == 0, \
+        "ลูปตรวจสดต้องหยุดสนิทระหว่างไล่ exposure (ไม่งั้นจะนับ/เขียน NG ปลอมลง DB)"
+    _wait_job(expclient)
+    assert _wait_growth(det, 0.6, live_only=True) > 0, "จบแล้วต้องกลับมาตรวจเอง"
+
+
+def test_camera_settings_are_restored_after_the_run(expclient):
+    cam = appmod._live_hik_camera()
+    before = (cam.get_params() or {})
+    exp0 = (before.get("exposure_us") or {}).get("value")
+    gain0 = (before.get("gain_db") or {}).get("value")
+    expclient.post("/api/camera/hik/exposure",
+                   json={"role": "ng", "frames": 3, "exposures": [2000, 800, 400]})
+    _wait_job(expclient)
+    after = (cam.get_params() or {})
+    assert (after.get("exposure_us") or {}).get("value") == pytest.approx(exp0)
+    assert (after.get("gain_db") or {}).get("value") == pytest.approx(gain0)
+
+
+def test_ladder_is_refused_while_a_burst_is_recording(expclient, monkeypatch):
+    monkeypatch.setattr(appmod, "_hik_burst_session", "20260825_120000", raising=False)
+    try:
+        r = expclient.post("/api/camera/hik/exposure", json={"role": "ng"})
+        assert r.status_code == 409
+        assert "ถ่ายรัว" in r.get_json()["message"]
+    finally:
+        appmod._hik_burst_session = None
+
+
+def test_ladder_needs_the_camera_running(client):
+    """ไม่มีกล้องทำงานอยู่ = ต้องปฏิเสธ (รหัสใดก็ได้ที่ไม่ใช่สำเร็จ)"""
+    r = client.post("/api/camera/hik/exposure", json={"role": "ng"})
+    assert r.status_code >= 400
+
+
+def test_an_unknown_role_falls_back_to_ng_instead_of_crashing(expclient):
+    r = expclient.post("/api/camera/hik/exposure",
+                       json={"role": "ระเบิด", "frames": 3, "exposures": [2000]})
+    assert r.get_json()["role"] == "ng"
+    _wait_job(expclient)
+
+
+def test_deleting_a_session_cancels_the_job_first(expclient):
+    """ลบขณะงานยังวิ่ง = งานจะเขียนไฟล์กลับลงโฟลเดอร์ที่ลบไปแล้ว (ซากค้าง)"""
+    name = expclient.post("/api/camera/hik/exposure",
+                          json={"role": "ng", "frames": 3,
+                                "exposures": [2000, 1500, 1000, 700]}).get_json()["session"]
+    time.sleep(0.2)
+    assert expclient.delete("/api/camera/hik/exposures/" + name).status_code == 200
+    time.sleep(0.6)
+    assert not os.path.isdir(os.path.join(expclient.exp_root, name))
+
+
+def test_result_image_path_cannot_escape_the_session_folder(expclient):
+    r = expclient.get("/api/camera/hik/exposures/x/image/..%2F..%2Fconfig.py")
+    assert r.status_code in (400, 404)
+
+
+def test_list_shows_finished_sessions(expclient):
+    name = expclient.post("/api/camera/hik/exposure",
+                          json={"role": "ok", "frames": 3,
+                                "exposures": [2000]}).get_json()["session"]
+    _wait_job(expclient)
+    names = [s["name"] for s in expclient.get("/api/camera/hik/exposures").get_json()["sessions"]]
+    assert name in names

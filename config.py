@@ -9,7 +9,7 @@ import os
 # print it on startup and confirm it is actually executing the new code.
 # NOTE: shown on the navbar badge too — keep it short (<= ~28 chars) or it
 # gets ellipsized there (full value always visible in the footer / hover).
-CONFIG_VERSION = "2026.08.25-irfix"
+CONFIG_VERSION = "2026.08.25-expladder"
 
 # ====================
 # CAMERA CONFIGURATION
@@ -261,6 +261,20 @@ HIK_BURST_MM_PER_PX = None
 # ⚠️ ระหว่างที่หยุด **การนับและการบันทึก DB จะหยุดด้วย** จึงเปิดเองเป็นค่าเริ่มต้นไม่ได้
 # ⚠️ เปิด flag นี้ยังไม่พอ — ต้องติ๊กในแผงถ่ายรัวต่อครั้งด้วย (กันเผลอ)
 HIK_BURST_PAUSE_INFERENCE = True
+
+# ── โหมด "ไล่ exposure" (exposure ladder) — ตอบว่าไม่มีไฟเพิ่มจะกดลงได้แค่ไหน ──
+# ความเบลอบนไลน์ขึ้นกับ exposure อย่างเดียว ⇒ อยากได้ภาพคมต้องกด exposure ลง
+# ⇒ ภาพมืดลง ⇒ ไม่มีไฟก็ต้องดัน gain ขึ้นชดเชย ⇒ **แลกมาด้วยสัญญาณรบกวน**.
+# คำถามที่เดาไม่ได้คือ "กดลงถึงเท่าไรแล้วโมเดลยังเชื่อถือได้" ⇒ ต้องวัด
+HIK_EXPOSURE_DIR = "data/hik_exposure"
+# กี่เฟรมต่อขั้น — ต้อง ≥ 3 ถึงจะวัดสัญญาณรบกวนตามเวลาได้ และยิ่งมากยิ่งเห็น
+# "ผลตรวจกะพริบ" ชัด (เจอ 5/5 กับ เจอ 1/5 คือคนละคำตอบ)
+HIK_EXPOSURE_FRAMES = 5
+# ความสว่างเป้าหมายที่ไล่ gain ไปหา — ต้องตรงกับ hik_burst.TARGET_MEAN
+HIK_EXPOSURE_TARGET_MEAN = 80.0
+# เกณฑ์ตัดสิน "เบลอที่ความเร็วไลน์" — 4 px = ครึ่งหนึ่งของ 8 px ที่วัดได้ว่าโมเดล
+# ทนได้ (blur_tolerance.py 21 ส.ค.) เผื่อไว้เพราะ IoU ของกรอบเริ่มเพี้ยนที่ 8 px
+HIK_EXPOSURE_BLUR_TARGET_PX = 4.0
 
 # ค่าที่ผู้ใช้บันทึกจากหน้าเว็บ (อยู่นอก git — ต่างเครื่องต่างค่าได้)
 HIK_SETTINGS_FILE = "data/hik_camera.json"
