@@ -537,14 +537,20 @@
                 + ' พิกเซลต่อเฟรม</b> (ต่ำกว่าเกณฑ์ที่วัดได้จริง ' + s.min_shift_px + ' px) '
                 + '⇒ ตัวเลขความเร็วและระยะเบลอเป็นสัญญาณรบกวน ไม่ใช่การเคลื่อนที่'
                 + '<br>ชุดนี้ยัง<b>ใช้ดูความคม/โฟกัส/แสงได้</b> — แต่ถ้าจะวัดความเบลอ '
-                + 'ต้องเลื่อนวัตถุให้เร็วขึ้นมาก (ไลน์จริงที่ 450 ใบ/นาที ≈ 7,800 px/วินาที)';
+                + 'ต้องเลื่อนวัตถุให้เร็วขึ้นมาก' + lineCompare(s);
             return;
         }
         var blur = s.blur_px_median;
         var tone = blurTone(blur);
-        var verdict = blur <= 1 ? '✅ คมพอ — กล้องหยุดการเคลื่อนที่ได้ที่ exposure นี้'
+        // ⚠️ ผลนี้เป็นจริง **เฉพาะที่ความเร็วที่ทดสอบ** — ถ้าทดสอบช้ากว่าไลน์มาก
+        // การขึ้นไฟเขียวแบบเหมารวมคือคำตอบที่ผิดแบบมั่นใจ (กฎเหล็กข้อ 2)
+        var slow = (s.line_speed_px_s && s.line_tested === false);
+        var verdict = blur <= 1
+            ? (slow ? '✅ คมพอ <b>ที่ความเร็วที่ทดสอบ</b> — แต่ยังไม่ได้ตอบเรื่องไลน์จริง'
+                : '✅ คมพอ — กล้องหยุดการเคลื่อนที่ได้ที่ exposure นี้')
             : (blur <= 3 ? '⚠️ พอใช้ — ยังเห็นรอยเปื้อนจากการเคลื่อนที่'
                 : '❌ เบลอเกินไป — รายละเอียดรอยบุบหายไปกับการเคลื่อนที่');
+        if (slow && blur <= 1) { tone = 'warn'; }
         var body = '<b>' + verdict + '</b><br>'
             + 'วัตถุเคลื่อนที่ <b>' + Math.round(s.speed_px_s) + ' px/วินาที</b>'
             + (s.speed_mm_s ? ' (' + s.speed_mm_s + ' mm/วิ)' : '')
@@ -566,8 +572,42 @@
                 body += ' ⇒ <b>exposure ปัจจุบันผ่านแล้ว</b>';
             }
         }
+        body += lineCompare(s);
         note.className = 'hik-note ' + (tone === 'good' ? 'good' : (tone === 'warn' ? 'warn' : 'bad'));
         note.innerHTML = body;
+    }
+
+    /**
+     * บรรทัดเทียบกับ "ไลน์จริง" — ต่อท้ายผลสรุปเสมอเมื่อรู้ความเร็วไลน์.
+     *
+     * ตอบคำถามที่ผู้ใช้ต้องการจริง ๆ: *ผลที่เพิ่งวัดมา บอกอะไรเกี่ยวกับไลน์ได้บ้าง*
+     * ไม่ใช่แค่ "ที่ความเร็วที่โบกมือเมื่อกี้ ภาพคมไหม"
+     */
+    function lineCompare(s) {
+        if (!s.line_speed_px_s) { return ''; }
+        var out = '<hr style="border:0;border-top:1px solid rgba(0,0,0,.12);margin:8px 0">'
+            + '🏭 <b>เทียบกับไลน์จริง (' + Math.round(s.line_speed_px_s) + ' px/วินาที)</b><br>';
+        if (s.speed_ratio) {
+            var times = s.speed_ratio > 0 ? (1 / s.speed_ratio) : 0;
+            out += 'ที่ทดสอบมาช้ากว่าไลน์ <b>' + (times >= 10 ? Math.round(times)
+                : times.toFixed(1)) + ' เท่า</b>'
+                + (s.line_tested ? '' : ' ⇒ <b>ผลด้านบนยังใช้สรุปเรื่องไลน์ไม่ได้</b>')
+                + '<br>';
+        }
+        if (s.blur_at_line_px != null) {
+            var b = s.blur_at_line_px;
+            var col = b <= 4 ? '#15803d' : (b <= 8 ? '#ca8a04' : '#dc2626');
+            out += 'exposure <b>' + Math.round(s.exposure_us) + ' µs</b> ที่ความเร็วไลน์'
+                + ' ⇒ เบลอ <b style="color:' + col + '">' + b + ' พิกเซล</b>'
+                + (b > 8 ? ' (โมเดลทนได้ ≤8 px จากที่วัดไว้)' : '')
+                + '<br>';
+            if (b > 4 && s.exposure_us) {
+                var want4 = Math.round(s.exposure_us * 4 / b);
+                out += '📏 ต้องลด exposure เหลือ <b>~' + want4 + ' µs</b> จึงจะเบลอ 4 px'
+                    + ' ⇒ ต้องเพิ่มไฟอีก <b>~' + (b / 4).toFixed(1) + ' เท่า</b>';
+            }
+        }
+        return out;
     }
 
     /**

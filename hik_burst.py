@@ -487,22 +487,32 @@ def _add_completeness(frames, meta):
     return scored
 
 
+# เฟรมที่ประเมินความสมบูรณ์ไม่ได้ ถูกจัดอยู่ระดับนี้ — สูงกว่า "รู้ว่าโดนขอบตัด"
+# (ซึ่งใช้ไม่ได้แน่นอน) แต่ต่ำกว่าเฟรมที่รู้ว่าเห็นเต็มใบ
+UNKNOWN_COMPLETE_TIER = 0.74
+
+
 def rank_key(rec, best_sharp):
     """
     คะแนนรวมสำหรับ "ภาพที่ดีที่สุด" = **สมบูรณ์ก่อน แล้วค่อยคม**.
 
-    ⚠️ เฟรมที่ประเมินความสมบูรณ์ไม่ได้ (``complete is None``) **ไม่ถูกตัดทิ้ง**
-    แต่ถูกจัดให้อยู่หลังเฟรมที่รู้ว่าสมบูรณ์ — ถ้าทั้งชุดประเมินไม่ได้เลย
-    ลำดับจะกลายเป็น "เรียงตามความคม" เหมือนเดิมโดยอัตโนมัติ
+    คืน **tuple** ``(ระดับความสมบูรณ์, ความคมสัมพัทธ์)`` เพื่อให้ความคมเป็น
+    ตัวตัดสินเสมอเมื่อความสมบูรณ์เท่ากัน.
+
+    ⚠️ เดิมคืน float เดียวคือ ``c × rel^0.5`` ⇒ เมื่อ ``c = 0`` (โดนขอบตัด)
+    **ทุกเฟรมได้ 0 เท่ากันหมด** แล้วลำดับกลายเป็น "ตามชื่อไฟล์" ไม่ใช่ตามคุณภาพ.
+    เจอบนสถานี 25 ส.ค.: 4 ใบแรกของแกลเลอรีเป็น 00037-00040 เรียงกันเป๊ะ
+    ทั้งที่คะแนนคมคือ 435/1519/1876/1855 (ไม่ได้เรียงเลย)
+
+    ⚠️ เฟรมที่ประเมินความสมบูรณ์ไม่ได้ (``complete is None``) **ไม่ถูกตัดทิ้ง** —
+    ถ้าทั้งชุดประเมินไม่ได้เลย ลำดับจะกลายเป็น "เรียงตามความคม" โดยอัตโนมัติ
     """
     sharp = float(rec.get("sharp") or 0.0)
     rel = (sharp / best_sharp) if best_sharp and best_sharp > 0 else 0.0
     rel = max(0.0, min(1.0, rel))
     c = rec.get("complete")
-    if c is None:
-        # ไม่รู้ว่าสมบูรณ์ไหม ⇒ ใช้ความคมล้วน แต่หักลงให้ต่ำกว่าเฟรมที่รู้ว่าสมบูรณ์
-        return round(rel * (COMPLETE_MIN_AREA_FRAC ** COMPLETE_SHARP_WEIGHT) * 0.999, 6)
-    return round(float(c) * (rel ** COMPLETE_SHARP_WEIGHT), 6)
+    tier = UNKNOWN_COMPLETE_TIER if c is None else float(c)
+    return (round(tier, 4), round(rel, 6))
 
 
 def compute_metrics(name, job=None):
@@ -671,6 +681,33 @@ def _summarize(frames, exposure_us, mm_per_px):
                 out["target_mean"] = TARGET_MEAN
         if mm_per_px:
             out["speed_mm_s"] = round(speed_med * float(mm_per_px), 1)
+
+    # ── เทียบกับ "ไลน์จริง" ──────────────────────────────────────────────
+    # ⚠️ ข้อสำคัญที่สุดของหน้านี้: ผลที่วัดได้เป็นจริง **เฉพาะที่ความเร็วที่ทดสอบ**.
+    # 25 ส.ค. 2026 ผู้ใช้โบกกระป๋องได้ 74 px/วิ แล้วระบบขึ้นไฟเขียว
+    # "กล้องหยุดการเคลื่อนที่ได้" — จริงที่ 74 px/วิ แต่ไลน์เร็วกว่า **105 เท่า**
+    # ⇒ คำตอบที่ผิดแบบมั่นใจ (กฎเหล็กข้อ 2)
+    #
+    # คำนวณ **นอก** เงื่อนไข moving_enough โดยตั้งใจ: "exposure นี้จะให้เบลอกี่
+    # พิกเซลที่ความเร็วไลน์" ขึ้นกับ exposure อย่างเดียว ⇒ ตอบได้แม้วัตถุจะนิ่งสนิท
+    line = _cfg("HIK_BURST_LINE_SPEED_PX_S")
+    try:
+        line = float(line) if line else 0.0
+    except (TypeError, ValueError):
+        line = 0.0
+    if line > 0:
+        out["line_speed_px_s"] = round(line, 1)
+        out["max_exposure_us_at_line"] = round(1.0 / line * 1e6, 1)
+        if exposure_us:
+            out["blur_at_line_px"] = round(line * (float(exposure_us) / 1e6), 2)
+        if speed_med and moving_enough:
+            ratio = speed_med / line
+            out["speed_ratio"] = round(ratio, 4)
+            out["line_tested"] = bool(
+                ratio >= float(_cfg("HIK_BURST_LINE_SPEED_MIN_RATIO", 0.25) or 0.25))
+        else:
+            out["speed_ratio"] = None
+            out["line_tested"] = False
     return out
 
 
@@ -850,8 +887,12 @@ def diagnose(meta):
             "cause": "disk",
             "text": ("ดิสก์เขียนไม่ทัน — ทิ้ง %d เฟรม (%.0f%% ของที่มาถึง)"
                      % (dropped, dropped * 100.0 / offered)),
-            "fix": ("ตั้ง \"เก็บ 1 ใน N\" ให้สูงขึ้น · ลด ROI · "
-                    "หรือเปิด \"หยุดโมเดลระหว่างถ่ายรัว\"")})
+            "fix": (("เปิด \"เก็บใบที่ดีที่สุดต่อช่วงเวลา\" (ได้ไฟล์น้อยลงโดย"
+                     "**ไม่ทิ้งใบที่ดีที่สุด** ต่างจาก \"1 ใน N\") · "
+                     if not meta.get("window_ms") else "")
+                    + "ลด ROI · ลดคุณภาพ JPEG · "
+                    "เปิด \"หยุดโมเดลระหว่างถ่ายรัว\" · "
+                    "ตั้ง \"เก็บ 1 ใน N\" ให้สูงขึ้น")})
 
     if not issues:
         issues.append({"cause": "ok", "text": "ไม่พบเฟรมหายและไม่มีการทิ้ง", "fix": ""})

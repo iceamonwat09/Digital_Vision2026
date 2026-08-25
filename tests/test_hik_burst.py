@@ -87,7 +87,12 @@ def burst_root(tmp_path, monkeypatch):
     monkeypatch.setattr(hb, "_cfg",
                         lambda n, d=None: {"HIK_BURST_DIR": str(root),
                                            "HIK_BURST_THUMB_WIDTH": 80,
-                                           "HIK_BURST_MM_PER_PX": None}.get(n, d))
+                                           "HIK_BURST_MM_PER_PX": None,
+                                           # 450 ใบ/นาที — ใช้เทียบว่าผลที่วัดได้
+                                           # บอกอะไรเกี่ยวกับไลน์จริงได้บ้าง
+                                           "HIK_BURST_LINE_SPEED_PX_S": 7800.0,
+                                           "HIK_BURST_LINE_SPEED_MIN_RATIO": 0.25,
+                                           }.get(n, d))
     return root
 
 
@@ -854,7 +859,11 @@ def test_unmeasurable_frames_rank_below_known_complete_ones_but_are_not_dropped(
     """วัดไม่ได้ ⇒ ไม่ถูกตัดทิ้ง แต่ต้องอยู่หลังเฟรมที่ 'รู้ว่าสมบูรณ์'"""
     unknown = {"sharp": 10000.0, "complete": None}
     whole = {"sharp": 10000.0, "complete": 1.0}
-    assert hb.rank_key(whole, 10000.0) > hb.rank_key(unknown, 10000.0) > 0.0
+    clipped = {"sharp": 10000.0, "complete": 0.0}
+    # เต็มใบ > วัดไม่ได้ > โดนขอบตัด (วัดไม่ได้ยังมีโอกาสใช้ได้ ต่างจากที่รู้ว่าโดนตัด)
+    assert (hb.rank_key(whole, 10000.0)
+            > hb.rank_key(unknown, 10000.0)
+            > hb.rank_key(clipped, 10000.0))
 
 
 def test_when_nothing_is_measurable_the_order_falls_back_to_sharpness():
@@ -930,3 +939,87 @@ def test_gallery_can_sort_by_completeness_with_unknowns_last(burst_root, tmp_pat
     idx_unknown = [i for i, v in enumerate(vals) if v is None]
     if idx_unknown:
         assert min(idx_unknown) >= len(known), "ที่วัดไม่ได้ต้องอยู่ท้ายสุด"
+
+
+def test_clipped_frames_are_still_ordered_by_sharpness(burst_root):
+    """
+    🐛 เจอบนสถานี 25 ส.ค.: ทุกเฟรมโดนขอบตัด (complete = 0) ⇒ คะแนนเดิมเป็น 0
+    เท่ากันหมด แล้วลำดับกลายเป็น "ตามชื่อไฟล์" — 4 ใบแรกคือ 00037-00040
+    เรียงกันเป๊ะ ทั้งที่คะแนนคมคือ 435/1519/1876/1855 (ไม่ได้เรียงเลย)
+    """
+    recs = {"a": {"sharp": 435.0, "complete": 0.0},
+            "b": {"sharp": 1876.0, "complete": 0.0},
+            "c": {"sharp": 1519.0, "complete": 0.0}}
+    order = sorted(recs, key=lambda k: hb.rank_key(recs[k], 1876.0), reverse=True)
+    assert order == ["b", "c", "a"], "โดนขอบตัดเท่ากัน ⇒ ต้องตัดสินด้วยความคม"
+
+
+def test_completeness_still_outranks_sharpness_after_the_tiebreak_fix(burst_root):
+    """กันการแก้ tie-break ไปทับกฎหลัก: สมบูรณ์ต้องมาก่อนความคมเสมอ"""
+    clipped_sharp = {"sharp": 99999.0, "complete": 0.0}
+    whole_soft = {"sharp": 100.0, "complete": 1.0}
+    assert hb.rank_key(whole_soft, 99999.0) > hb.rank_key(clipped_sharp, 99999.0)
+
+
+# ── ⑮ เทียบผลกับ "ไลน์จริง" ───────────────────────────────────────
+# 🐛 เจอบนสถานี 25 ส.ค.: โบกกระป๋องได้ 74 px/วิ แล้วระบบขึ้นไฟเขียว
+# "กล้องหยุดการเคลื่อนที่ได้" — จริงที่ 74 px/วิ แต่ไลน์เร็วกว่า 105 เท่า
+def _sum_at(speed, exposure, shift=8.0, mean=60.0):
+    frames = {("%05d.jpg" % i): {
+        "sharp": 1500.0, "roi_src": "moving", "complete": 0.5,
+        "speed_px_s": speed, "blur_px": speed * exposure / 1e6,
+        "dt_ms": 100.0, "shift_px": shift, "mean": mean, "ratio": 1.1}
+        for i in range(1, 12)}
+    return hb._summarize(frames, exposure_us=exposure, mm_per_px=None)
+
+
+def test_a_slow_bench_test_is_not_reported_as_a_line_result(burst_root):
+    s = _sum_at(74.0, 2165.0)
+    assert s["blur_px_median"] < 1.0, "ที่ความเร็วที่ทดสอบ ภาพคมจริง"
+    assert s["line_tested"] is False, (
+        "ช้ากว่าไลน์ 105 เท่า ⇒ ห้ามถือว่าตอบคำถามเรื่องไลน์แล้ว")
+    assert s["speed_ratio"] < 0.01
+
+
+def test_blur_at_line_speed_is_reported_even_from_a_slow_test(burst_root):
+    """ตัวเลขที่ผู้ใช้ต้องการจริง ๆ — ขึ้นกับ exposure อย่างเดียว จึงตอบได้เสมอ"""
+    s = _sum_at(74.0, 2165.0)
+    assert s["blur_at_line_px"] == pytest.approx(16.89, abs=0.05)
+    assert s["max_exposure_us_at_line"] == pytest.approx(128.2, abs=0.5)
+
+
+def test_blur_at_line_speed_works_even_when_the_object_never_moved(burst_root):
+    """
+    ⚠️ ต้องคำนวณนอกเงื่อนไข moving_enough — "exposure นี้จะเบลอกี่ px ที่ไลน์"
+    ไม่ต้องรู้ความเร็วของวัตถุที่ทดสอบเลย
+    """
+    s = _sum_at(74.0, 2165.0, shift=0.3)          # ต่ำกว่าเกณฑ์ 2 px
+    assert s["motion"] == "negligible"
+    assert s.get("max_exposure_us_1px") is None, "ห้ามคาดจากสัญญาณรบกวน"
+    assert s["blur_at_line_px"] == pytest.approx(16.89, abs=0.05)
+    assert s["line_tested"] is False
+
+
+def test_a_real_line_speed_test_is_accepted(burst_root):
+    s = _sum_at(7800.0, 500.0, shift=100.0)
+    assert s["line_tested"] is True
+    assert s["speed_ratio"] == pytest.approx(1.0, abs=0.01)
+
+
+def test_line_comparison_is_skipped_when_not_configured(burst_root, monkeypatch):
+    """ไม่ได้ตั้งความเร็วไลน์ ⇒ ไม่เดา ไม่รายงานอะไรเกี่ยวกับไลน์เลย"""
+    monkeypatch.setattr(hb, "_cfg", lambda n, d=None: None if "LINE_SPEED" in n else d)
+    s = _sum_at(74.0, 2165.0)
+    assert "line_speed_px_s" not in s and "blur_at_line_px" not in s
+
+
+def test_disk_advice_offers_the_window_mode_only_when_it_is_off(burst_root):
+    off = hb.diagnose(_meta(saved=96, dropped=98, elapsed=9.6, size="2448x2048"))
+    fix = [i for i in off["issues"] if i["cause"] == "disk"][0]["fix"]
+    assert "ต่อช่วงเวลา" in fix, "ยังไม่ได้เปิดโหมดหน้าต่าง ⇒ ต้องเสนอ"
+
+    meta = _meta(saved=96, dropped=98, elapsed=9.6, size="2448x2048")
+    meta["window_ms"] = 133
+    on = hb.diagnose(meta)
+    fix2 = [i for i in on["issues"] if i["cause"] == "disk"][0]["fix"]
+    assert "ต่อช่วงเวลา" not in fix2, "เปิดอยู่แล้ว ⇒ ต้องไม่เสนอซ้ำ"
