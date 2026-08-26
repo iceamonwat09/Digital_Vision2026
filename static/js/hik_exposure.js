@@ -353,7 +353,13 @@
                 + (r.moved ? '<td class="dim" title="ฉากขยับ — วัดสัญญาณรบกวนไม่ได้">— ขยับ</td>'
                     : cell(r.noise, 2))
                 + cell(r.snr_db, 1)
-                + '<td>' + (hit != null ? hit + '/' + (r.frames || 0) : '—') + '</td>'
+                + '<td>' + (hit != null ? hit + '/' + (r.frames || 0) : '—')
+                    // ⚠️ "เจอกี่เฟรม" ไม่ได้บอกว่า **เจอตรงไหน** — ขั้นที่กรอบ
+                    // ย้ายไปคนละจุดคือขั้นที่โมเดลเจอคนละของ ไม่ใช่รอยบุบเดิม
+                    + (r.boxes_match === false
+                        ? ' <span class="hik-exp-cap" title="กรอบไม่ทับกับขั้นที่สว่างที่สุด'
+                          + ' — น่าจะเจอคนละจุด">คนละจุด</span>' : '')
+                    + '</td>'
                 + cell(r.conf_max, 2)
                 + (blur != null ? '<td class="' + (blur <= BLUR_TARGET_PX ? 'ok' : 'bad')
                     + '">' + blur.toFixed(2) + '</td>' : '<td class="dim">—</td>')
@@ -362,21 +368,41 @@
         return '<table class="hik-exp-table">' + head + body + '</table>';
     }
 
+    /** แปลง **ตัวหนา** ของข้อความฝั่ง Python เป็น <b> — ไม่งั้นดอกจันโผล่บนจอ
+     *  (เห็นจริงในภาพหน้าจอของสถานี: "⇒ **ยังไม่เจอขีดจำกัด** —").
+     *  ข้อความมาจากโค้ดของเราเองทั้งหมด ไม่ใช่ของที่ผู้ใช้พิมพ์ */
+    function mdBold(t) {
+        return String(t == null ? '' : t).replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>');
+    }
+
     function renderVerdict(data) {
         var s = data.summary || {};
         var c = data.combined;
         var role = data.role === 'ng' ? 'กระป๋องมีรอยบุบ' : 'กระป๋องดี';
         var out = '<div class="hik-exp-head">ชุด ' + data.name + ' · ' + role
             + ' · ' + (data.created || '') + '</div>';
-        out += '<div class="hik-exp-line">' + (s.headline || '—') + '</div>';
+        out += '<div class="hik-exp-line">' + mdBold(s.headline || '—') + '</div>';
         if (s.criterion) {
-            out += '<div class="control-hint">เกณฑ์ผ่านของด้านนี้: ' + s.criterion + '</div>';
+            out += '<div class="control-hint">เกณฑ์ผ่านของด้านนี้: ' + mdBold(s.criterion) + '</div>';
         }
         if (s.note_bottom) {
-            out += '<div class="hik-exp-note">⚠️ ' + s.note_bottom + '</div>';
+            out += '<div class="hik-exp-note">⚠️ ' + mdBold(s.note_bottom) + '</div>';
+        }
+        // ⚠️ ฉากไม่นิ่ง = ตัวเลขในตารางเทียบข้ามขั้นไม่ได้ ⇒ ต้องเตือนระดับรอบ
+        // ไม่ใช่แค่เว้นช่อง noise ไว้เฉย ๆ แล้วปล่อยให้อ่านเหมือนปกติ
+        if (s.warn_moved) {
+            out += '<div class="hik-exp-note bad">⛔ ' + mdBold(s.warn_moved) + '</div>';
+        }
+        // เลือกด้านผิด = เคสที่พบบ่อยที่สุดของ "ไม่เจออะไรเลย" ⇒ เสนอปุ่มแก้ให้เลย
+        if (s.warn_role) {
+            out += '<div class="hik-exp-note">⚠️ ' + mdBold(s.warn_role)
+                + ' <button id="hikExpFlipRole" class="btn btn-secondary btn-sm" '
+                + 'type="button">↔️ เปลี่ยนเป็น "'
+                + (data.role === 'ng' ? 'กระป๋องดี' : 'กระป๋องมีรอยบุบ')
+                + '" (ไม่ต้องถ่ายใหม่)</button></div>';
         }
         if (c) {
-            out += '<div class="hik-exp-combined">🎯 ' + c.headline
+            out += '<div class="hik-exp-combined">🎯 ' + mdBold(c.headline)
                 + (c.blur_at_line_px != null
                     ? ' ⇒ เบลอที่ 450 ใบ/นาที <b>' + c.blur_at_line_px.toFixed(2) + ' px</b>' : '')
                 + '</div>';
@@ -433,7 +459,31 @@
                 $('hikExpTableWrap').innerHTML = renderTable(data);
                 $('hikExpShots').innerHTML = renderShots(data);
                 $('hikExpOverlay').style.display = 'flex';
+                var flip = $('hikExpFlipRole');
+                if (flip) {
+                    flip.addEventListener('click', function () {
+                        flipRole(name, data.role === 'ng' ? 'ok' : 'ng');
+                    });
+                }
             });
+    }
+
+    /** เปลี่ยนด้านของชุดที่วัดไว้แล้ว — ข้อมูลในตารางถูกอยู่แล้ว ไม่ต้องถ่ายใหม่ */
+    function flipRole(name, role) {
+        var label = role === 'ng' ? 'กระป๋องมีรอยบุบ' : 'กระป๋องดี';
+        if (!window.confirm('เปลี่ยนด้านของชุดนี้เป็น "' + label + '" ?\n'
+                + 'ภาพและตัวเลขทั้งหมดคงเดิม — เปลี่ยนแค่เกณฑ์ที่ใช้ตัดสิน')) { return; }
+        fetch('/api/camera/hik/exposures/' + encodeURIComponent(name) + '/role', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ role: role })
+        })
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+                if (d.status !== 'ok') { throw new Error(d.message || 'เปลี่ยนด้านไม่สำเร็จ'); }
+                openResults(name);       // โหลดใหม่ให้เห็นคำตอบรวมทันที
+            })
+            .catch(function (e) { msg('❌ ' + e.message, 'bad'); });
     }
 
     window.HikExposure = {

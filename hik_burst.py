@@ -608,7 +608,8 @@ def compute_metrics(name, job=None):
             "computed_at": time.strftime("%Y-%m-%d %H:%M:%S"),
             "mm_per_px": mm_per_px, "exposure_us": exposure_us,
             "frames": frames}
-    data["summary"] = _summarize(frames, exposure_us, mm_per_px)
+    data["summary"] = _summarize(frames, exposure_us, mm_per_px,
+                                 meta.get("gain_db"), meta.get("gain_db_max"))
     _annotate_directions(frames, data["summary"])
     _write_json(os.path.join(path, METRICS_FILE), data)
     return data
@@ -622,7 +623,7 @@ def _median(vals):
     return vals[n // 2] if n % 2 else (vals[n // 2 - 1] + vals[n // 2]) / 2.0
 
 
-def _summarize(frames, exposure_us, mm_per_px):
+def _summarize(frames, exposure_us, mm_per_px, gain_db=None, gain_db_max=None):
     if not frames:
         return {}
     best_file = max(frames, key=lambda k: frames[k].get("sharp") or 0.0)
@@ -644,6 +645,10 @@ def _summarize(frames, exposure_us, mm_per_px):
     # "ขยับน้อยเกินกว่าจะวัดได้" ต่างจาก "ขยับช้า" — อย่างแรกแปลว่าเรา *ไม่รู้*
     moving_enough = bool(shift_med is not None and shift_med >= MIN_MEANINGFUL_SHIFT_PX)
     out = {
+        # gain ปัจจุบัน + เพดาน — ต้องมีเสมอ ไม่ใช่เฉพาะตอนคำนวณคำแนะนำเรื่องไฟ
+        # เพราะทุกข้อความที่พูดว่า "ต้องเพิ่มไฟ" ต้องเช็คสองค่านี้ก่อน
+        "gain_db": round(float(gain_db), 1) if gain_db is not None else None,
+        "gain_db_max": round(float(gain_db_max), 1) if gain_db_max is not None else None,
         "mean_median": round(mean_med, 1) if mean_med is not None else None,
         "shift_px_median": round(shift_med, 2) if shift_med is not None else None,
         "motion": ("ok" if moving_enough
@@ -708,7 +713,78 @@ def _summarize(frames, exposure_us, mm_per_px):
         else:
             out["speed_ratio"] = None
             out["line_tested"] = False
+
+        # ── "ต้องเพิ่มไฟกี่เท่า" ต้องถาม gain ก่อนเสมอ ──────────────────
+        # ใช้ค่าเดียวกับโหมดไล่ exposure — เกณฑ์ "เบลอเป้าหมาย" ต้องมีที่เดียว
+        # ไม่งั้นสองหน้าจอจะบอกเป้าคนละตัวเลขจากข้อมูลชุดเดียวกัน
+        target = float(_cfg("HIK_EXPOSURE_BLUR_TARGET_PX", 4.0) or 4.0)
+        out["blur_target_px"] = target
+        out.update(_light_or_gain(exposure_us, out.get("blur_at_line_px"),
+                                  target, gain_db, gain_db_max))
     return out
+
+
+def _light_or_gain(exposure_us, blur_at_line_px, target_px, gain_db, gain_db_max):
+    """
+    ตอบว่า "จะไปให้ถึงเบลอเป้าหมายต้องทำอะไร" — **เสนอ gain ก่อนเสมอ**.
+
+    ⚠️ นี่คือกับดักที่เกิดซ้ำในโปรเจกต์นี้: การรายงานว่า "ต้องเพิ่มไฟ N เท่า"
+    โดยไม่ดูว่า gain ยังเหลือหัวอยู่เท่าไร ทำให้ผู้ใช้คิดว่าต้อง**ซื้อไฟ**
+    ทั้งที่ของจริงแค่ดัน gain อีกไม่กี่ dB ก็พอ (วัดจริงบนสถานี 26 ส.ค.:
+    ต้องการ 512 µs ⇒ gain 18.4 dB จากเพดาน 24 ⇒ ไม่ต้องซื้ออะไรเลย).
+
+    คืน dict ว่าง เมื่อข้อมูลไม่พอจะตอบ — ไม่เดา (กฎเหล็กข้อ 2).
+    """
+    out = {}
+    try:
+        blur = float(blur_at_line_px)
+        exp = float(exposure_us)
+    except (TypeError, ValueError):
+        return out
+    if blur <= 0 or exp <= 0 or target_px <= 0:
+        return out
+    if blur <= target_px:
+        out["light_ok"] = True          # exposure ปัจจุบันถึงเป้าแล้ว
+        return out
+
+    want_us = exp * target_px / blur
+    factor = exp / want_us              # ภาพจะมืดลงกี่เท่าเมื่อลด exposure
+    out["want_exposure_us"] = round(want_us, 0)
+    out["light_factor_to_target"] = round(factor, 2)
+    out["gain_add_db"] = round(20.0 * math.log10(factor), 1)
+
+    try:
+        cur = float(gain_db)
+        ceiling = float(gain_db_max)
+    except (TypeError, ValueError):
+        return out                       # ไม่รู้ gain/เพดาน ⇒ ไม่ตัดสินว่าต้องซื้อไฟ
+    need = cur + out["gain_add_db"]
+    out["gain_db"] = round(cur, 1)
+    out["gain_db_max"] = round(ceiling, 1)
+    out["gain_needed_db"] = round(need, 1)
+    out["gain_enough"] = bool(need <= ceiling)
+    if out["gain_enough"]:
+        out["gain_headroom_db"] = round(ceiling - need, 1)
+    else:
+        # gain ไม่พอจริง ๆ ⇒ ตรงนี้เท่านั้นที่ควรพูดถึงการเพิ่มไฟ
+        short_db = need - ceiling
+        out["light_factor_needed_after_gain"] = round(10.0 ** (short_db / 20.0), 2)
+    return out
+
+
+def _transport_dominates(out):
+    """เฟรมหายระหว่างทางมากพอที่จะอธิบาย "อัตราที่มาถึงต่ำ" ได้เองหรือยัง.
+
+    เกณฑ์: หายเกิน 10% ของที่กล้องผลิต — ต่ำกว่านั้นถือว่าอธิบายไม่ได้ทั้งหมด
+    จึงยังควรมองหาสาเหตุอื่นด้วย.
+    """
+    lost = out.get("lost_transport") or 0
+    if not lost:
+        return False
+    produced = (out.get("produced_fps") or 0) * (out.get("elapsed_s") or 0)
+    if produced <= 0:
+        return False
+    return (lost / produced) > 0.10
 
 
 def _annotate_directions(frames, summary):
@@ -793,6 +869,12 @@ def diagnose(meta):
     out = {
         "delivered_fps": round(delivered_fps, 1),
         "saved": saved, "dropped_disk": dropped,
+        # **fps ที่กล้องผลิตจริง** = ที่มาถึง + ที่หายระหว่างทาง
+        # ⚠️ ขาดตัวเลขนี้ = อ่านผลผิดทั้งหมด: เคสจริงบนสถานี 26 ส.ค. หน้าจอบอก
+        # "กล้องส่งมาแค่ 43.2 fps" ทั้งที่กล้องผลิต 71 fps (เต็มเพดานเซนเซอร์)
+        # แล้วหายระหว่างทาง 39% ⇒ คนละปัญหากับ "กล้องช้า" คนละวิธีแก้
+        "produced_fps": (round((delivered + lost_transport) / elapsed, 1)
+                         if lost_transport else round(delivered_fps, 1)),
         "lost_transport": lost_transport, "lost_packets": lost_packets,
         "timeouts": timeouts, "elapsed_s": round(elapsed, 1),
         "cam_fps": b.get("cam_fps") or a.get("cam_fps"),
@@ -863,7 +945,14 @@ def diagnose(meta):
             "text": ("กล้องถูกจำกัดอัตราเฟรมไว้เองที่ %.1f fps "
                      "(AcquisitionFrameRate เปิดอยู่)" % float(meta["framerate"])),
             "fix": "ปิด \"จำกัดอัตราเฟรม\" ในแผงตั้งค่ากล้อง แล้วถ่ายใหม่"})
-    elif out.get("gige_ceiling_fps") and delivered_fps < out["gige_ceiling_fps"] * 0.5:
+    elif (out.get("gige_ceiling_fps")
+            and delivered_fps < out["gige_ceiling_fps"] * 0.5
+            # ⚠️ **ห้ามรายงานว่า "กล้องส่งช้า" เมื่อเฟรมหายระหว่างทางเยอะ** —
+            # อัตราที่ "มาถึง" ต่ำเพราะของหายกลางทาง ไม่ใช่เพราะกล้องผลิตช้า.
+            # เดิมข้อความนี้ฝังคำว่า "และไม่มีเฟรมหาย/ไม่มีการทิ้งระหว่างทาง"
+            # ไว้ตายตัว ⇒ ขัดกับบรรทัดข้างบนที่เพิ่งบอกว่าหายไป 286 เฟรม
+            # (เจอจริงบนสถานี 26 ส.ค.) = รายงานผิดแบบมั่นใจ
+            and not _transport_dominates(out)):
         # คำแนะนำต้องเปลี่ยนตามหลักฐาน: ถ้า packet size ใหญ่และ Jumbo เปิดอยู่แล้ว
         # การบอกให้ไป "เช็ค packet size" คือส่งผู้ใช้ไปแก้ของที่ไม่ได้พัง
         if out.get("jumbo"):
@@ -875,11 +964,19 @@ def diagnose(meta):
         else:
             fix = ("เช็ค packet size (ค่าโรงงาน 1500 ทำให้ได้ 15-17 fps) · "
                    "เปิด Jumbo Frame ที่ NIC · exposure ที่ยาวเกิน · AcquisitionFrameRate")
+        # ⚠️ ข้อความต้องตรงกับหลักฐานที่เพิ่งรายงานไปข้างบน — เดิมฝังคำว่า
+        # "ไม่มีเฟรมหาย" ไว้ตายตัว แล้วไปขัดกับหัวข้อ transport ที่บอกว่าหาย
+        # 286 เฟรม (เกิดจริงบนสถานี 26 ส.ค.)
+        if lost_transport:
+            evidence = ("โดยเฟรมที่หายระหว่างทาง (%d) อธิบายส่วนที่ขาดไปได้ไม่หมด"
+                        % lost_transport)
+        else:
+            evidence = "และไม่มีเฟรมหายระหว่างทางเลย"
         issues.append({
             "cause": "camera_rate",
-            "text": ("กล้องส่งมาแค่ %.1f fps ทั้งที่สายรับได้ราว %.0f fps "
-                     "และไม่มีเฟรมหาย/ไม่มีการทิ้งระหว่างทาง"
-                     % (delivered_fps, out["gige_ceiling_fps"])),
+            "text": ("กล้องผลิตได้แค่ %.1f fps ทั้งที่สายรับได้ราว %.0f fps %s"
+                     % (out.get("produced_fps") or delivered_fps,
+                        out["gige_ceiling_fps"], evidence)),
             "fix": fix})
 
     if dropped:

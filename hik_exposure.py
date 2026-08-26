@@ -83,6 +83,12 @@ DARK_LEVEL = 8                     # พิกเซลที่ถือว่�
 
 ROLES = ("ng", "ok")
 
+# จำนวนกรอบสูงสุดที่เก็บไว้ต่อขั้น (พอสำหรับเทียบตำแหน่ง ไม่บวม JSON)
+MAX_BOXES = 10
+# กรอบสองอันถือว่า "ที่เดียวกัน" เมื่อ IoU เกินนี้ — หลวมโดยตั้งใจ เพราะกรอบ
+# ของภาพที่ noise สูงจะขยับ/ขยายเป็นธรรมชาติ (เกณฑ์เดียวกับ blur_tolerance)
+BOX_MATCH_IOU = 0.20
+
 
 # ────────────────────────────────────────────────────────── โฟลเดอร์/ไฟล์
 def root_dir():
@@ -359,6 +365,11 @@ def run_ladder(cam, detect_fn, exposures, role="ng", frames=5,
                         best_shot, best_dets = f, dets
             row["frames_with_defect"] = hits
             row["defect_rate"] = round(hits / float(len(shots)), 3)
+            # ⚠️ เก็บ **ตำแหน่ง** ของกรอบไว้ด้วย — ไม่งั้น "เจอรอยบุบ 5/5" จะ
+            # แยกไม่ออกระหว่าง *เจอรอยบุบเดิม* กับ *เจอของอย่างอื่นคนละที่*
+            # (เกิดจริงบนสถานี 26 ส.ค.: กรอบที่ 512 µs กับ 350 µs อยู่คนละจุด
+            #  = ลายเซ็นของการตรวจที่ขับด้วยสัญญาณรบกวน ไม่ใช่รอยบุบจริง)
+            row["boxes"] = _boxes_of(best_dets)
             row["defects_max"] = max(counts) if counts else 0
             row["conf_max"] = round(max(confs), 3) if confs else None
             row["conf_min"] = round(min(confs), 3) if confs else None
@@ -401,6 +412,68 @@ def run_ladder(cam, detect_fn, exposures, role="ng", frames=5,
     return rows, base
 
 
+def _boxes_of(dets):
+    """ดึง bbox ที่ใช้เทียบตำแหน่งได้ — ตัวที่ไม่มี/รูปแบบไม่ถูกให้ข้ามไปเงียบ ๆ.
+
+    ``detect_fn`` ถูกนิยามไว้แค่ว่า "คืนกล่องตำหนิ" ⇒ ต้องไม่พังเมื่อผู้เรียก
+    ส่ง dict ที่ไม่มี ``bbox`` มา (การเทียบตำแหน่งเป็นของแถม ไม่ใช่ของบังคับ)
+    """
+    out = []
+    for d in (dets or [])[:MAX_BOXES]:
+        box = d.get("bbox") if isinstance(d, dict) else None
+        try:
+            x0, y0, x1, y1 = [int(v) for v in box]
+        except (TypeError, ValueError):
+            continue
+        out.append([x0, y0, x1, y1])
+    return out
+
+
+def _iou(a, b):
+    ax0, ay0, ax1, ay1 = a
+    bx0, by0, bx1, by1 = b
+    iw = max(0, min(ax1, bx1) - max(ax0, bx0))
+    ih = max(0, min(ay1, by1) - max(ay0, by0))
+    inter = iw * ih
+    if inter <= 0:
+        return 0.0
+    union = (ax1 - ax0) * (ay1 - ay0) + (bx1 - bx0) * (by1 - by0) - inter
+    return inter / union if union > 0 else 0.0
+
+
+def mark_box_agreement(rows):
+    """ทำเครื่องหมายว่ากรอบของแต่ละขั้น **อยู่ที่เดียวกับขั้นอ้างอิง** หรือไม่.
+
+    ⚠️ ``defect_rate == 1.0`` บอกแค่ว่า *มีกรอบ* ไม่ได้บอกว่า **กรอบอยู่ตรงไหน**
+    ⇒ ขั้นที่โมเดลไปเจอเงา/ขอบคนละจุดจะถูกนับว่า "ผ่าน" เหมือนกัน ทั้งที่มัน
+    ไม่ได้เห็นรอยบุบเลย (เกิดจริงบนสถานี 26 ส.ค.).
+
+    ขั้นอ้างอิง = **exposure ยาวที่สุดที่มีกรอบและภาพไม่มืด** (สว่างที่สุด =
+    เชื่อถือได้ที่สุด). ตั้งค่า ``boxes_match``:
+        True  — มีกรอบอย่างน้อย 1 อันทับกับกรอบของขั้นอ้างอิง
+        False — มีกรอบ แต่ไม่มีอันไหนทับเลย (น่าสงสัยว่าเจอคนละของ)
+        None  — ไม่มีข้อมูลพอจะตัดสิน (ไม่มีกรอบ / ไม่มีขั้นอ้างอิง)
+    """
+    ref = None
+    for r in sorted(rows, key=lambda x: -(x.get("exposure_us") or 0)):
+        if r.get("error") or r.get("dark"):
+            continue
+        if r.get("boxes"):
+            ref = r
+            break
+    for r in rows:
+        boxes = r.get("boxes") or []
+        if ref is None or not boxes:
+            r["boxes_match"] = None
+            continue
+        if r is ref:
+            r["boxes_match"] = True
+            continue
+        r["boxes_match"] = any(_iou(b, rb) >= BOX_MATCH_IOU
+                               for b in boxes for rb in (ref.get("boxes") or []))
+    return rows
+
+
 def summarize(rows, role, line_speed_px_s=None, mm_per_px=None,
               blur_target_px=None):
     """
@@ -416,14 +489,41 @@ def summarize(rows, role, line_speed_px_s=None, mm_per_px=None,
         out["headline"] = "ไม่มีขั้นไหนวัดได้เลย — ดูข้อความ error ในตาราง"
         return out
 
+    mark_box_agreement(rows)
     ordered = sorted(usable, key=lambda r: -r["exposure_us"])
     if role == "ng":
-        passed = lambda r: r.get("defect_rate") == 1.0 and not r.get("gain_capped")
-        crit = "เจอรอยบุบครบทุกเฟรม (5/5) และ gain ยังไม่ชนเพดาน"
+        # ``boxes_match is False`` = มีหลักฐานบวกว่ากรอบไปอยู่คนละที่ ⇒ ไม่ผ่าน
+        # ``None`` = ไม่มีข้อมูลอ้างอิง ⇒ ไม่ตัดสิน (ไม่ใช่เหตุให้ตก)
+        passed = lambda r: (r.get("defect_rate") == 1.0
+                            and not r.get("gain_capped")
+                            and r.get("boxes_match") is not False)
+        crit = ("เจอรอยบุบครบทุกเฟรม · กรอบอยู่ที่เดิม · gain ยังไม่ชนเพดาน")
     else:
         passed = lambda r: r.get("frames_with_defect") == 0 and not r.get("gain_capped")
         crit = "ไม่มี NG ปลอมเลยสักเฟรม และ gain ยังไม่ชนเพดาน"
     out["criterion"] = crit
+
+    # ── ข้อ ⑤: ฉากไม่นิ่ง = เทียบข้ามขั้นไม่ยุติธรรม ────────────────────
+    # เดิมเว้นแค่ช่อง noise ไว้ แล้วปล่อยให้อ่านตารางเหมือนปกติ ⇒ ผู้ใช้สรุปจาก
+    # ข้อมูลที่ฉากเปลี่ยนไปมาโดยไม่รู้ตัว (เกิดจริง: 3 ใน 6 ขั้นขยับ แล้วผลตรวจ
+    # กระโดด 0/5 → 3/5 → 2/5 → 0/5 ซึ่งอธิบายด้วยการขยับได้ทั้งหมด)
+    moved = [r for r in usable if r.get("moved")]
+    if moved:
+        out["moved_steps"] = len(moved)
+        out["warn_moved"] = (
+            "ฉากไม่นิ่ง %d ใน %d ขั้น ⇒ **การเทียบข้ามขั้นของรอบนี้ไม่ยุติธรรม** "
+            "— มุมที่แสงตกกระทบเปลี่ยนไปด้วย ให้ล็อกชิ้นงานไม่ให้ขยับแล้ววัดใหม่"
+            % (len(moved), len(usable)))
+
+    # ── ข้อ ⑥: ลายเซ็นของ "เลือกด้านผิด" ────────────────────────────────
+    # ด้าน NG ที่ไม่เจออะไรเลยสักขั้น = หน้าตาของกระป๋องดีเป๊ะ ⇒ ต้องเดาให้ถูก
+    # ก่อนส่งผู้ใช้ไปไล่โฟกัส/โมเดล (ซึ่งเป็นการแก้ของที่ไม่ได้พัง)
+    if role == "ng" and all((r.get("frames_with_defect") or 0) == 0 for r in usable):
+        out["maybe_wrong_role"] = True
+        out["warn_role"] = (
+            "ไม่เจอตำหนิเลยสักขั้น — นี่คือลายเซ็นของ **กระป๋องดี** "
+            "ถ้าใบที่วางอยู่ไม่ได้บุบ ให้เปลี่ยนด้านของชุดนี้เป็น \"กระป๋องดี\" "
+            "(ไม่ต้องถ่ายใหม่) แล้วผลจะกลายเป็นคำตอบด้าน NG ปลอมทันที")
 
     # ⚠️ ทุกขั้นมืดสนิท = ไม่มีข้อมูลให้ตัดสิน ⇒ **ห้ามไปโทษโมเดล/การวางกระป๋อง**
     # (ข้อความนั้นจะส่งผู้ใช้ไปแก้ของที่ไม่ได้พัง — กฎเหล็กข้อ 2)
@@ -437,9 +537,18 @@ def summarize(rows, role, line_speed_px_s=None, mm_per_px=None,
 
     if not passed(ordered[0]):
         out["limit_us"] = None
-        out["headline"] = ("แม้แต่ exposure ยาวที่สุด (%.0f µs) ก็ยังไม่ผ่านเกณฑ์ "
-                           "⇒ ปัญหาไม่ได้อยู่ที่ความสว่าง — ตรวจการวางกระป๋อง/โฟกัส/"
-                           "โมเดล ก่อนสรุปเรื่อง exposure" % ordered[0]["exposure_us"])
+        if out.get("maybe_wrong_role"):
+            # ⚠️ เดาสาเหตุที่ **น่าจะเป็นที่สุด** ก่อน — การส่งผู้ใช้ไปไล่โฟกัส/
+            # โมเดลทั้งที่แค่เลือกด้านผิด คือการแก้ของที่ไม่ได้พัง
+            out["headline"] = (
+                "ไม่เจอตำหนิเลยสักขั้น แม้ที่ exposure ยาวที่สุด (%.0f µs) ⇒ "
+                "**น่าจะเลือกด้านผิด** — ถ้าใบที่วางอยู่เป็นกระป๋องดี ให้กด "
+                "\"เปลี่ยนเป็นกระป๋องดี\" (ไม่ต้องถ่ายใหม่)"
+                % ordered[0]["exposure_us"])
+        else:
+            out["headline"] = ("แม้แต่ exposure ยาวที่สุด (%.0f µs) ก็ยังไม่ผ่านเกณฑ์ "
+                               "⇒ ปัญหาไม่ได้อยู่ที่ความสว่าง — ตรวจการวางกระป๋อง/โฟกัส/"
+                               "โมเดล ก่อนสรุปเรื่อง exposure" % ordered[0]["exposure_us"])
         return out
 
     limit = ordered[0]
@@ -482,6 +591,25 @@ def summarize(rows, role, line_speed_px_s=None, mm_per_px=None,
         out["note_bottom"] = ("ผ่านทุกขั้นจนถึงค่าต่ำสุดที่ทดสอบ ⇒ **ยังไม่เจอขีดจำกัด** "
                               "— เติมค่าที่ต่ำกว่านี้เข้าไปในลิสต์แล้วรันซ้ำ")
     return out
+
+
+def resummarize(data, role, line_speed_px_s=None, mm_per_px=None,
+                blur_target_px=None):
+    """เปลี่ยน "ด้าน" ของชุดที่วัดไว้แล้ว **โดยไม่ต้องถ่ายใหม่**.
+
+    ทุกอย่างที่ ``summarize()`` ต้องใช้อยู่ใน ``rows`` แล้ว (``defect_rate`` ·
+    ``frames_with_defect`` · ``gain_capped`` · ``boxes``) ⇒ การเลือกด้านผิด
+    ตอนกดปุ่มไม่ควรทำให้ต้องเสียเวลาวัดใหม่ 3 นาทีทั้งที่ข้อมูลถูกต้องอยู่แล้ว.
+
+    คืน ``data`` ที่แก้แล้ว (แก้ในตัว) — ผู้เรียกเป็นคนบันทึกลงดิสก์
+    """
+    if role not in ROLES:
+        raise ValueError("ด้านต้องเป็น ng หรือ ok")
+    rows = data.get("rows") or []
+    data["role"] = role
+    data["summary"] = summarize(rows, role, line_speed_px_s=line_speed_px_s,
+                                mm_per_px=mm_per_px, blur_target_px=blur_target_px)
+    return data
 
 
 def combine(ng_summary, ok_summary):

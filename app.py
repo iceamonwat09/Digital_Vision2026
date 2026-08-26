@@ -1323,6 +1323,12 @@ def _hik_burst_meta(live, seconds):
 
     meta["exposure_us"] = _val("exposure_us")
     meta["gain_db"] = _val("gain_db")
+    # ⚠️ **เพดาน gain ต้องเก็บด้วย** — ไม่งั้นตอนสรุปผลจะบอกได้แค่ "ต้องเพิ่มไฟ
+    # N เท่า" ทั้งที่คำตอบจริงมักเป็น "ดัน gain อีก X dB ก็พอ ยังไม่ต้องซื้อไฟ"
+    # (บทเรียนที่เกิดซ้ำ: บันทึกเดิมเคยสรุปว่าต้องเพิ่มไฟ 4.2 เท่าเพราะลืมนับ gain)
+    _gain_entry = params.get("gain_db")
+    if isinstance(_gain_entry, dict) and _gain_entry.get("supported"):
+        meta["gain_db_max"] = _gain_entry.get("max")
     meta["exposure_auto"] = (params.get("exposure_auto") or {}).get("symbolic")
     # ค่าที่ใช้ตอบว่า "ทำไมได้ fps เท่านี้" — ถ้าไม่เก็บไว้ ต้องมานั่งเดาทีหลัง
     meta["framerate_enable"] = _val("framerate_enable")
@@ -1476,6 +1482,11 @@ def api_hik_bursts():
                     "mm_per_px": getattr(config, "HIK_BURST_MM_PER_PX", None),
                     "autodetect_top": int(getattr(config, "HIK_BURST_AUTODETECT_TOP", 12)),
                     "can_pause_inference": bool(
+                        getattr(config, "HIK_BURST_PAUSE_INFERENCE", False)),
+                    # ⚠️ ค่าเริ่มต้นของ **ช่องติ๊ก** ต้องส่งไปด้วย ไม่ใช่แค่ "แสดงแถวไหม"
+                    # เดิมหน้าเว็บฝังค่าเริ่มต้นไว้เอง ⇒ config บอกว่าเปิดแต่ช่องติ๊กว่าง
+                    # = พฤติกรรมจริงไม่ตรงกับไฟล์ config โดยไม่มีสัญญาณอะไรบอก
+                    "pause_inference_default": bool(
                         getattr(config, "HIK_BURST_PAUSE_INFERENCE", False)),
                     "window_ms_default": int(
                         getattr(config, "HIK_BURST_WINDOW_MS", 0) or 0)})
@@ -1851,6 +1862,42 @@ def api_hik_exposure_detail(name):
     data["combined"] = hik_exposure.combine(ng.get("summary"), ok.get("summary"))
     data["other_session"] = (other or {}).get("name")
     return jsonify({"status": "ok", "session": data})
+
+
+@app.route('/api/camera/hik/exposures/<name>/role', methods=['POST'])
+def api_hik_exposure_set_role(name):
+    """เปลี่ยน "ด้าน" (ng ↔ ok) ของชุดที่วัดไว้แล้ว — **ไม่ต้องถ่ายใหม่**.
+
+    ⚠️ การเลือกด้านผิดตอนกดปุ่มเกิดง่ายมาก (ช่องเดียวใน dropdown) และเดิม
+    แก้ไม่ได้เลย ⇒ ต้องเสียเวลาวัดใหม่ ~3 นาทีทั้งที่ **ข้อมูลในตารางถูกต้อง
+    อยู่แล้ว** — ทุกอย่างที่ใช้สรุปอยู่ใน rows ครบ (เกิดจริงบนสถานี 26 ส.ค.)
+    """
+    bad = _hik_exposure_guard()
+    if bad:
+        return bad
+    body = request.get_json(silent=True) or {}
+    role = body.get("role")
+    if role not in hik_exposure.ROLES:
+        return _burst_error("ด้านต้องเป็น ng หรือ ok")
+    try:
+        path = hik_exposure.session_dir(name)
+        data = hik_exposure.load_session(name)
+    except ValueError as e:
+        return _burst_error(e, 404)
+    if not data:
+        return _burst_error("ยังไม่มีผลของชุดนี้", 404)
+    if (hik_burst.job_status() or {}).get("kind") == "exposure":
+        return _burst_error("กำลังไล่ exposure อยู่ — รอให้จบก่อน", 409)
+
+    data = hik_exposure.resummarize(
+        data, role,
+        line_speed_px_s=getattr(config, "HIK_BURST_LINE_SPEED_PX_S", None),
+        mm_per_px=getattr(config, "HIK_BURST_MM_PER_PX", None),
+        blur_target_px=getattr(config, "HIK_EXPOSURE_BLUR_TARGET_PX", 4.0))
+    hik_exposure._write_json(os.path.join(path, "ladder.json"), data)
+    logger.info("[hik-exp] เปลี่ยนด้านของชุด %s → %s", name, role)
+    return jsonify({"status": "ok", "role": role,
+                    "headline": (data.get("summary") or {}).get("headline")})
 
 
 @app.route('/api/camera/hik/exposures/<name>', methods=['DELETE'])
