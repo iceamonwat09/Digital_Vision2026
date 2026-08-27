@@ -277,10 +277,25 @@ def test_ok_role_looks_for_false_positives_instead():
 
 
 def test_failing_at_the_brightest_step_blames_the_setup_not_the_exposure():
-    rows = [_row(2165, 0.0), _row(1000, 0.0)]
+    """เจอบ้างแต่ไม่ครบ ⇒ ไม่ใช่เรื่องความสว่าง ให้ไปดูการวาง/โฟกัส/โมเดล."""
+    rows = [_row(2165, 0.4), _row(1000, 0.2)]
     s = hx.summarize(rows, "ng")
     assert s["limit_us"] is None
     assert "ไม่ได้อยู่ที่ความสว่าง" in s["headline"]
+    assert not s.get("maybe_wrong_role")
+
+
+def test_an_ng_run_that_never_finds_anything_suspects_the_wrong_side_first():
+    """ไม่เจอเลยสักขั้น = ลายเซ็นของ **กระป๋องดี** ไม่ใช่ของโฟกัส/โมเดลเสีย.
+
+    ⚠️ เดิมเคสนี้ถูกรวมกับเคสข้างบนแล้วบอกให้ไปตรวจโฟกัส/โมเดล ⇒ ส่งผู้ใช้ไป
+    แก้ของที่ไม่ได้พัง (เกิดจริงบนสถานี 26 ส.ค.: วางกระป๋องดีแต่ลืมเปลี่ยนด้าน)
+    """
+    rows = [_row(2165, 0.0), _row(1000, 0.0)]
+    s = hx.summarize(rows, "ng")
+    assert s["limit_us"] is None
+    assert s["maybe_wrong_role"] is True
+    assert "เลือกด้านผิด" in s["headline"]
 
 
 def test_passing_every_step_says_the_limit_was_not_found_yet():

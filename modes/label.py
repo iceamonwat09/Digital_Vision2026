@@ -18,7 +18,16 @@ WEIGHTS_DIR = os.path.join(
 )
 DEFAULT_MODEL_FILE = None  # auto-pick first .pt found
 
-# Empty dict → yolo_detector accepts every class produced by the model
-# (no filtering). Populate after the user finalises class wording.
+# ── คลาสที่ไม่ใช่ตำหนิ — ค่าเดิมของระบบ (app.py เคย hard-code ชุดนี้ไว้) ────
+# คงไว้เท่าเดิมเป๊ะเพื่อไม่ให้โหมดนี้เปลี่ยนพฤติกรรมแม้แต่นิดเดียว
+NON_DEFECT_CLASSES = {"good", "can"}
+
+# ไม่แสดงป้าย NG/OK และไม่ซ่อนกรอบใด ๆ — โหมดนี้ยังไม่ได้นิยาม "ชิ้นงานทั้งใบ"
+# ⇒ พฤติกรรมการแสดงผลเท่าเดิมทุกประการ
+VERDICT_BADGE = False
+
+# Empty dict → ใช้ชื่อคลาสของโมเดลเองเป็นป้าย และ **ไม่เตือน** เรื่องคลาสที่
+# ระบบไม่รู้จัก (โหมดนี้ตั้งใจรับทุกคลาสที่ผู้ใช้เทรนมา).
+# Populate after the user finalises class wording.
 CLASS_NAMES: dict = {}
 COLORS: dict = {}

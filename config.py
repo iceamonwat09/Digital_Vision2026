@@ -9,7 +9,7 @@ import os
 # print it on startup and confirm it is actually executing the new code.
 # NOTE: shown on the navbar badge too — keep it short (<= ~28 chars) or it
 # gets ellipsized there (full value always visible in the footer / hover).
-CONFIG_VERSION = "2026.08.25-expladder"
+CONFIG_VERSION = "2026.08.26-advice"
 
 # ====================
 # CAMERA CONFIGURATION
@@ -354,8 +354,32 @@ WEIGHTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "weights"
 DEFAULT_MODE = "can_dent"
 
 # Legacy single-model path. Kept so existing code that imports
-# ``config.MODEL_PATH`` keeps working. Points at the can_dent default weights.
-MODEL_PATH = os.path.join(WEIGHTS_DIR, "can_dent", "best.pt")
+# ``config.MODEL_PATH`` keeps working.
+#
+# ⚠️ **ห้าม hard-code ชื่อไฟล์ตายตัวอีกต่อไป** — ตรรกะการตรวจไม่ผูกกับชื่อไฟล์
+# แล้ว (ดู ``yolo_detector``) และผู้ใช้กำลังจะลบ ``best.pt`` ทิ้ง ⇒ ถ้าชี้ตายตัว
+# เครื่องมือ verify/diagnose ทุกตัวจะพังพร้อมกันตอนไฟล์นั้นหายไป.
+# เลือกให้อัตโนมัติ: ไฟล์ที่ตั้งใจไว้ก่อน แล้วค่อยเป็น ``.pt`` ตัวแรกที่มีจริง.
+_CAN_DENT_DIR = os.path.join(WEIGHTS_DIR, "can_dent")
+
+
+def _default_model_path():
+    """Path ของโมเดล can_dent ที่ "มีอยู่จริง" — ไม่มีเลยก็คืนชื่อที่ตั้งใจไว้."""
+    preferred = ["bestX.pt", "best.pt"]
+    for name in preferred:
+        p = os.path.join(_CAN_DENT_DIR, name)
+        if os.path.isfile(p):
+            return p
+    try:
+        found = sorted(f for f in os.listdir(_CAN_DENT_DIR) if f.endswith(".pt"))
+    except OSError:
+        found = []
+    if found:
+        return os.path.join(_CAN_DENT_DIR, found[0])
+    return os.path.join(_CAN_DENT_DIR, preferred[0])
+
+
+MODEL_PATH = _default_model_path()
 
 # Confidence threshold for detections
 CONFIDENCE_THRESHOLD = 0.25

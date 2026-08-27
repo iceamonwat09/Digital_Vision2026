@@ -38,6 +38,12 @@
                     </select>
                     <button id="refreshModelsBtn" class="btn btn-icon" title="รีเฟรชรายการโมเดล">&#x1F504;</button>
                 </div>
+                <!-- คลาสของโมเดลที่โหลดอยู่ + บทบาท (ตำหนิ / ทั้งใบ)
+                     ⚠️ ผู้ใช้เลือกไฟล์ .pt เองได้ ⇒ ถ้าโมเดลมีคลาสที่ระบบไม่รู้จัก
+                     คลาสนั้นจะถูกนับเป็น "ตำหนิ" (NG) ซึ่งเปลี่ยนความหมายของผลตรวจ
+                     ⇒ ต้องมองเห็นบนหน้าจอ ไม่ใช่ซ่อนอยู่ใน log -->
+                <div id="modelClasses" class="model-classes" style="display:none"></div>
+                <div id="modelClassWarn" class="model-class-warn" style="display:none"></div>
             </section>
 
             <!-- ขั้นที่ 2: แหล่งภาพ -->
@@ -432,10 +438,16 @@
             <button id="hikExpDelete" class="btn btn-danger-soft" type="button">ลบชุดนี้</button>
             <button id="hikExpClose" class="snap-x" title="ปิด">&times;</button>
         </div>
+        <!-- ลำดับเดียวกับแกลเลอรีถ่ายรัว: **รูปก่อน แล้วค่อยเป็นข้อมูล**
+             (คำตัดสิน 1 บรรทัดยังอยู่บนสุด เพราะเป็นคำตอบของทั้งหน้า
+              ส่วนตารางรายขั้นที่ยาวย้ายลงไปอยู่ใต้ภาพ) -->
         <div class="hik-exp-body">
             <div id="hikExpVerdict" class="hik-exp-verdict">—</div>
-            <div id="hikExpTableWrap" class="hik-exp-table-wrap"></div>
             <div id="hikExpShots" class="hik-exp-shots"></div>
+            <div class="hik-exp-details">
+                <div class="hik-gal-details-head">📊 ผลรายขั้น</div>
+                <div id="hikExpTableWrap" class="hik-exp-table-wrap"></div>
+            </div>
         </div>
     </div>
 </div>
@@ -452,11 +464,16 @@
                 <div id="hikGalSessions" class="hik-gal-list">—</div>
                 <div id="hikGalDisk" class="hik-gal-disk"></div>
             </aside>
+            <!-- ⚠️ ลำดับสำคัญ: **ปุ่ม → รูป → ข้อมูล**
+                 เดิมวาง KPI + สรุป + วินิจฉัยไว้เหนือกริดภาพ ในคอลัมน์ flex ที่
+                 ความสูงถูกกำหนดมาแล้ว (modal = 94vh) และ **กริดเป็นตัวเดียวที่
+                 ยืดหด (flex:1)** ⇒ ทุกบรรทัดของข้อความถูกหักออกจากพื้นที่รูปตรง ๆ.
+                 วัดจริงบนจอ 1366x768: ข้อความกิน 477px เหลือให้กริด 191px ขณะที่
+                 การ์ด 1 ใบสูง 225px ⇒ **มองไม่เห็นการ์ดเต็มแม้แต่ใบเดียว** และยิ่ง
+                 ชุดมีปัญหา (ข้อความวินิจฉัยยาว) ยิ่งเห็นรูปน้อยลง = กลับด้านกับ
+                 สิ่งที่ควรเป็น. ตอนนี้เลื่อนที่เดียว รูปได้พื้นที่เกือบทั้งหมด
+                 แล้วเลื่อนลงไปอ่านข้อมูล -->
             <section class="hik-gal-main">
-                <div id="hikGalKpis" class="hik-kpis"></div>
-                <div id="hikGalSummary" class="hik-note info">เลือกชุดภาพทางซ้าย</div>
-                <div id="hikGalDrop" class="hik-note bad" style="display:none"></div>
-                <div id="hikGalDiag" class="hik-note info" style="display:none"></div>
                 <div class="hik-gal-bar">
                     <select id="hikGalSort" class="camera-select" title="เรียงลำดับภาพ">
                         <option value="best" selected>เรียง: ดีที่สุด (สมบูรณ์ + คม)</option>
@@ -477,9 +494,21 @@
                     </div>
                 </div>
                 <div id="hikGalJob" class="hik-gal-job" style="display:none"></div>
-                <div id="hikGalGrid" class="hik-gal-grid"></div>
-                <div id="hikGalMore" class="hik-gal-more" style="display:none">
-                    <button id="hikGalMoreBtn" class="btn btn-secondary btn-sm" type="button">โหลดเพิ่ม</button>
+                <!-- บรรทัดเดียวสั้น ๆ ที่ต้องเห็นโดยไม่ต้องเลื่อน — เฟรมที่ทิ้ง
+                     คือกระป๋องที่หายไปจากชุดทดสอบ (รายละเอียดเต็มอยู่ด้านล่าง) -->
+                <div id="hikGalDropBrief" class="hik-gal-brief" style="display:none"></div>
+                <div class="hik-gal-scroll">
+                    <div id="hikGalGrid" class="hik-gal-grid"></div>
+                    <div id="hikGalMore" class="hik-gal-more" style="display:none">
+                        <button id="hikGalMoreBtn" class="btn btn-secondary btn-sm" type="button">โหลดเพิ่ม</button>
+                    </div>
+                    <div class="hik-gal-details">
+                        <div class="hik-gal-details-head">📊 ข้อมูลของชุดนี้</div>
+                        <div id="hikGalKpis" class="hik-kpis"></div>
+                        <div id="hikGalSummary" class="hik-note info">เลือกชุดภาพทางซ้าย</div>
+                        <div id="hikGalDrop" class="hik-note bad" style="display:none"></div>
+                        <div id="hikGalDiag" class="hik-note info" style="display:none"></div>
+                    </div>
                 </div>
             </section>
         </div>
@@ -699,8 +728,11 @@
     .hik-note.warn { background: #FFF8E1; border-color: #FFE0A3; color: #8D5B00; }
     .hik-note.bad  { background: #FEF2F2; border-color: #FECACA; color: #A31515; }
 
+    /* แถบปุ่ม = ตัวควบคุม ไม่ใช่ข้อมูล ⇒ อยู่นอกพื้นที่เลื่อน เห็นตลอดเวลา
+       (flex:0 0 auto กันไม่ให้ถูกบีบเมื่อรายการภาพยาว) */
     .hik-gal-bar {
         display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 10px;
+        flex: 0 0 auto;
     }
     .hik-gal-bar .camera-select { width: auto; min-width: 150px; height: 32px; padding: 3px 8px; }
     .hik-gal-group { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
@@ -774,6 +806,24 @@
     }
     .hik-progress i { display: block; height: 100%; background: var(--blue); transition: width .3s; }
 
+    /* ── พื้นที่เลื่อน "เดียว" ของแกลเลอรี: รูปก่อน แล้วค่อยเป็นข้อมูล ──
+       ⚠️ ต้องเป็น flex:1 + min-height:0 — ถ้าไม่ตั้ง min-height:0 กล่องจะไม่ยอม
+       หดต่ำกว่าความสูงเนื้อหา แล้วดันทะลุ modal ที่ overflow:hidden ออกไป
+       (การ์ดท้าย ๆ หายไปเฉย ๆ โดยไม่มี scrollbar ให้เลื่อน) */
+    .hik-gal-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding-right: 4px; }
+    /* บรรทัดเตือนสั้น 1 บรรทัดที่เห็นได้โดยไม่ต้องเลื่อน (รายละเอียดอยู่ล่างสุด) */
+    .hik-gal-brief {
+        margin-bottom: 8px; padding: 6px 11px; border-radius: 9px;
+        background: #FEF2F2; border: 1.5px solid #FECACA; color: #A31515;
+        font-size: 12px; line-height: 1.5;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .hik-gal-details { margin-top: 16px; padding-top: 12px; border-top: 1.5px dashed var(--gray-200, #e2e8f0); }
+    .hik-gal-details-head {
+        font-size: 10px; font-weight: 700; color: var(--gray-400, #94a3b8);
+        text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px;
+    }
+
     /* กริดภาพ — align-content:start กันไม่ให้แถวถูกยืด/บีบตามความสูงของกล่อง */
     .hik-gal-grid {
         display: grid; grid-template-columns: repeat(auto-fill, minmax(196px, 1fr));
@@ -782,8 +832,8 @@
            แถวจะถูกบีบเหลือ ~48px แต่การ์ดยังสูง 277px ⇒ **การ์ดซ้อนทับกัน**
            เห็นเป็นแถบเทายาวมีแต่ปุ่มกากบาท ไม่มีตัวเลขสักตัว (เจอจริงบนสถานี) */
         grid-auto-rows: max-content;
-        align-content: start; gap: 10px; overflow-y: auto; min-height: 0;
-        flex: 1 1 auto; padding: 2px 4px 2px 2px;
+        align-content: start; gap: 10px; min-height: 0;
+        padding: 2px 4px 2px 2px;
     }
     .hik-card {
         align-self: start; border: 1.5px solid var(--gray-200); border-radius: 10px;
@@ -852,6 +902,29 @@
     .hik-shot-row .btn { width: 100%; }
     .hik-imgsz { width: 100%; }
 
+    /* คลาสของโมเดล + บทบาท (ใต้ช่องเลือกไฟล์ .pt) */
+    .model-classes {
+        margin-top: 7px; display: flex; flex-wrap: wrap; gap: 4px; align-items: center;
+    }
+    .model-class {
+        display: inline-flex; align-items: center; gap: 4px;
+        padding: 1px 7px; border-radius: 6px; font-size: 11px; line-height: 1.7;
+        border: 1px solid var(--gray-200, #e2e8f0); background: var(--white, #fff);
+        max-width: 100%; min-width: 0;
+    }
+    .model-class i {
+        font-style: normal; width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto;
+    }
+    .model-class.defect i { background: #dc2626; }
+    .model-class.body i { background: #16a34a; }
+    .model-class b { font-family: var(--font-mono, monospace); font-weight: 600; }
+    .model-class span { color: var(--gray-400, #94a3b8); }
+    .model-class-warn {
+        margin-top: 7px; padding: 7px 9px; border-radius: 8px;
+        background: #fffbeb; border: 1px solid #fde68a; color: #92400e;
+        font-size: 11px; line-height: 1.6;
+    }
+
     .hik-warn {
         margin-top: 12px !important; padding: 8px 10px; border-radius: 8px;
         background: #fffbeb; border: 1px solid #fde68a;
@@ -888,6 +961,9 @@
         margin-top: 6px; padding: 6px 9px; border-radius: var(--radius);
         background: #FFF8E1; color: #8D5B00; font-size: 12.5px;
     }
+    /* ฉากไม่นิ่ง = ตัวเลขทั้งตารางเทียบข้ามขั้นไม่ได้ ⇒ ต้องเด่นกว่าคำเตือนทั่วไป */
+    .hik-exp-note.bad { background: #FDECEA; color: #B3261E; }
+    .hik-exp-note .btn { margin-left: 6px; vertical-align: middle; }
     .hik-exp-combined {
         margin-top: 8px; padding: 8px 10px; border-radius: var(--radius);
         background: var(--navy); color: #fff; font-size: 13.5px;
@@ -907,6 +983,12 @@
     .hik-exp-table td.dim { color: var(--gray-400); }
     .hik-exp-cap { color: #B3261E; font-size: 10.5px; }
     .hik-exp-shots { padding: 10px 14px 16px; }
+    .hik-exp-details {
+        margin: 4px 14px 16px; padding-top: 12px;
+        border-top: 1.5px dashed var(--gray-200, #e2e8f0);
+    }
+    /* ตารางย้ายมาอยู่ในกล่องที่มีระยะขอบของตัวเองแล้ว ⇒ อย่าเว้นซ้อนอีกชั้น */
+    .hik-exp-details .hik-exp-table-wrap { padding: 0; }
     .hik-exp-shot-grid {
         display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
         grid-auto-rows: max-content; gap: 8px;
@@ -1618,8 +1700,44 @@
                 } else {
                     liveStats.style.display = 'none';
                 }
+
+                renderModelClasses(data.classes);
             })
             .catch(err => console.error('Status error:', err));
+    }
+
+    // แสดง "โมเดลนี้มีคลาสอะไร และตัวไหนถูกนับเป็นตำหนิ"
+    // ⚠️ ตรรกะการตรวจไม่ผูกกับชื่อไฟล์อีกต่อไป — ผูกกับ **บทบาทของคลาส**
+    // ⇒ นี่คือที่เดียวที่ผู้ใช้เห็นได้ว่าโมเดลที่เลือกจะให้ผลแบบไหน
+    const modelClassesEl  = document.getElementById('modelClasses');
+    const modelClassWarnEl = document.getElementById('modelClassWarn');
+    function renderModelClasses(info) {
+        if (!modelClassesEl) { return; }
+        const items = (info && info.items) || [];
+        const warns = (info && info.warnings) || [];
+        if (!items.length) {
+            modelClassesEl.style.display = 'none';
+            modelClassesEl.innerHTML = '';
+        } else {
+            modelClassesEl.innerHTML = items.map(it => {
+                const defect = it.role === 'defect';
+                return '<span class="model-class ' + (defect ? 'defect' : 'body') + '" title="'
+                    + escText(it.label) + '"><i></i><b>' + escText(it.name) + '</b>'
+                    + '<span>' + (defect ? 'ตำหนิ' : 'ทั้งใบ') + '</span></span>';
+            }).join('');
+            modelClassesEl.style.display = '';
+        }
+        if (!warns.length) {
+            modelClassWarnEl.style.display = 'none';
+            modelClassWarnEl.innerHTML = '';
+        } else {
+            modelClassWarnEl.innerHTML = '⚠️ ' + warns.map(escText).join('<br>⚠️ ');
+            modelClassWarnEl.style.display = '';
+        }
+    }
+    function escText(t) {
+        return String(t == null ? '' : t)
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     }
 
     // ── Start ─────────────────────────────────────────

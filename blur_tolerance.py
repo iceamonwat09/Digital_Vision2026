@@ -54,7 +54,15 @@ KEEP_FRAC = 0.95          # "ยังใช้ได้" = ตรวจเจ�
 MATCH_IOU = 0.30          # กรอบที่เบลอจะขยับ/ขยาย ⇒ เกณฑ์จับคู่ต้องหลวมกว่าปกติ
 TARGET_MEAN = 80.0        # ความสว่างที่ "พอใช้งาน" — ต้องตรงกับ hik_burst.TARGET_MEAN
 DEFAULT_BLURS = (0, 1, 2, 3, 4, 6, 8, 12, 16, 20)
+# ⚠️ ต้องเป็นชุดเดียวกับที่ระบบใช้จริง — อ่านจาก ``modes/<mode>.py`` ถ้าอ่านได้
+# (เดิม hard-code ไว้ที่นี่ ⇒ เพิ่มคลาส "ทั้งใบ" ใหม่ในโหมดแล้วเครื่องมือนี้จะ
+# นับมันเป็นตำหนิ = รายงานคนละเรื่องกับหน้างานโดยไม่มีใครรู้)
 NON_DEFECT = {"good", "can"}
+try:                                                   # pragma: no cover
+    from modes.can_dent import NON_DEFECT_CLASSES as _ND
+    NON_DEFECT = {str(x).lower() for x in _ND}
+except Exception:
+    pass
 
 
 def head(title):

@@ -319,11 +319,39 @@
      * แกลเลอรี** ⇒ ช่องติ๊ก "หยุดโมเดลระหว่างถ่ายรัว" **ไม่โผล่เลย** จนกว่าจะ
      * เผลอไปเปิดแกลเลอรีก่อน (จับได้ตอนขับด้วยเบราว์เซอร์จริง เทสต์ยูนิตมองไม่เห็น)
      */
+    /** อ่านตัวเลือกที่ผู้ใช้เคยกดเอง — มีค่าเก็บไว้ = ห้ามให้ค่า default ทับ */
+    function seedChoice(el, key) {
+        try {
+            var v = localStorage.getItem(key);
+            if (v !== null) { el.checked = (v === '1'); el.dataset.touched = '1'; }
+        } catch (e) { /* ไม่มี localStorage ก็ปล่อยให้ค่าเซิร์ฟเวอร์ตัดสิน */ }
+    }
+
+    function rememberChoice(el, key) {
+        el.dataset.touched = '1';
+        try { localStorage.setItem(key, el.checked ? '1' : '0'); }
+        catch (e) { /* ไม่จำก็ไม่เป็นไร */ }
+    }
+
     function applyCaps(d) {
         if (!d) { return; }
         if (d.autodetect_top) { state.autoTop = d.autodetect_top; }
+
+        // ⚠️ **ต้องตั้ง .checked ด้วย ไม่ใช่แค่โชว์/ซ่อนแถว** — เดิมทำแค่โชว์แถว
+        // ⇒ `config.HIK_BURST_PAUSE_INFERENCE = True` และ `HIK_BURST_WINDOW_MS = 133`
+        // บอกว่า "เปิด" แต่พฤติกรรมจริงคือ **ปิด** เพราะช่องติ๊กว่างเปล่า
+        // และไม่มีสัญญาณอะไรบอกเลย (เจอจริงบนสถานี 26 ส.ค.: ถ่ายรัวรอบแรก
+        // ทิ้ง 52 เฟรมเพราะโมเดลยังวิ่งอยู่ + ไม่ได้คัดใบต่อช่วงเวลา)
+        //
+        // แตะเฉพาะตอนที่ผู้ใช้ยังไม่เคยกดเอง (`dataset.touched`) ⇒ กดปิดแล้ว
+        // ค่าจะไม่ถูกดีดกลับตอน poll รอบถัดไป
         var pr = $('hikBurstPauseRow');
+        var pause = $('hikBurstPause');
         if (pr) { pr.style.display = d.can_pause_inference ? '' : 'none'; }
+        if (pause && d.can_pause_inference && !pause.dataset.touched) {
+            pause.checked = d.pause_inference_default !== false;
+        }
+
         var wr = $('hikBurstWindowRow');
         var wh = $('hikBurstWindowHint');
         var on = (d.window_ms_default || 0) > 0;
@@ -332,6 +360,8 @@
         if (on) {
             var ms = $('hikBurstWindowMs');
             if (ms && !ms.dataset.touched) { ms.value = d.window_ms_default; }
+            var wck = $('hikBurstWindow');
+            if (wck && !wck.dataset.touched) { wck.checked = true; }
         }
         var btn = $('hikGalDetectTopBtn');
         if (btn) { btn.textContent = '🔍 ตรวจ ' + state.autoTop + ' ใบที่ดีที่สุด'; }
@@ -392,12 +422,33 @@
         });
     }
 
+    /** ล้างข้อมูลสรุปทั้งหมด — ใช้ตอนสลับชุด/ลบชุด.
+     *  ⚠️ จำเป็นตั้งแต่มีบรรทัดเตือนสีแดงบนสุด: ถ้าไม่ล้าง คำเตือนของชุดเก่า
+     *  จะค้างอยู่บนหัวของชุดใหม่ = ชี้ปัญหาผิดชุดแบบมั่นใจ */
+    function resetDetails() {
+        ['hikGalKpis', 'hikGalDropBrief'].forEach(function (id) {
+            var el = $(id);
+            if (el) { el.innerHTML = ''; el.style.display = (id === 'hikGalKpis' ? '' : 'none'); }
+        });
+        ['hikGalDrop', 'hikGalDiag'].forEach(function (id) {
+            var el = $(id);
+            if (el) { el.innerHTML = ''; el.style.display = 'none'; }
+        });
+        var note = $('hikGalSummary');
+        if (note) { note.className = 'hik-note info'; note.textContent = 'กำลังโหลด…'; }
+    }
+
     function loadSession(name, keepOffset) {
         var sort = ($('hikGalSort') || {}).value || 'best';
         if (!keepOffset || state.session !== name) {
             state.offset = 0;
             state.rows = [];
             state.sel = {};
+            resetDetails();
+            // พื้นที่เลื่อนเป็นตัวเดียวกันทั้งคอลัมน์แล้ว ⇒ เปิดชุดใหม่ต้องกลับ
+            // ขึ้นบนสุด ไม่งั้นจะไปโผล่กลางรายการภาพของชุดใหม่
+            var sc = document.querySelector('.hik-gal-scroll');
+            if (sc) { sc.scrollTop = 0; }
         }
         state.session = name;
         var title = $('hikGalTitle');
@@ -497,6 +548,23 @@
         box.innerHTML = cards.join('');
 
         // เฟรมที่ทิ้ง = กระป๋องที่หายไปจากชุดทดสอบ ⇒ ต้องเด่น ห้ามซ่อนในบรรทัดยาว ๆ
+        //
+        // ⚠️ ตั้งแต่ย้ายข้อมูลลงไปอยู่ **ใต้กริดภาพ** (เพื่อให้เห็นรูปเป็นหลัก)
+        // กล่องนี้ต้องเลื่อนลงไปดู ⇒ ทิ้งไว้เฉย ๆ = คำเตือนที่ไม่มีใครเห็น.
+        // จึงสรุปเป็น **บรรทัดเดียว** ไว้บนสุดด้วย ส่วนรายละเอียด+วิธีแก้อยู่ล่าง
+        var brief = $('hikGalDropBrief');
+        if (brief) {
+            if (m.dropped) {
+                var bTotal = (m.saved || d.total || 0) + m.dropped;
+                var bPct = bTotal ? Math.round(m.dropped * 100 / bTotal) : 0;
+                brief.textContent = '⚠️ ทิ้งไป ' + m.dropped + ' เฟรม (' + bPct
+                    + '%) เพราะดิสก์เขียนไม่ทัน — เลื่อนลงล่างเพื่อดูวิธีแก้';
+                brief.style.display = '';
+            } else {
+                brief.style.display = 'none';
+                brief.textContent = '';
+            }
+        }
         if (drop) {
             if (m.dropped) {
                 var total = (m.saved || d.total || 0) + m.dropped;
@@ -560,13 +628,12 @@
             body += '<br>📏 ที่ความเร็วนี้ exposure ต้องไม่เกิน <b>'
                 + Math.round(s.max_exposure_us_1px) + ' µs</b> จึงจะเบลอ ≤1 px';
             if (s.light_factor_needed && s.light_factor_needed > 1.2) {
-                body += ' ⇒ ต้องเพิ่มไฟอีก <b>~' + s.light_factor_needed
-                    + ' เท่า</b> เพื่อให้ภาพ<b>สว่างเท่าเดิม</b>';
+                body += ' ⇒ ' + brightnessAdvice(s.light_factor_needed, s);
                 if (s.light_factor_usable
                     && s.light_factor_usable > s.light_factor_needed * 1.2) {
-                    body += ' · และ <b>~' + s.light_factor_usable
-                        + ' เท่า</b> ถ้าอยากให้สว่างพอใช้งานจริง (~' + s.target_mean
-                        + '/255 — ตอนนี้วัดได้ ' + fmt(s.mean_median) + ')';
+                    body += ' · ถ้าอยากให้สว่างพอใช้งานจริง (~' + s.target_mean
+                        + '/255 — ตอนนี้วัดได้ ' + fmt(s.mean_median) + ') ต้อง '
+                        + brightnessAdvice(s.light_factor_usable, s);
                 }
             } else if (s.light_factor_needed) {
                 body += ' ⇒ <b>exposure ปัจจุบันผ่านแล้ว</b>';
@@ -575,6 +642,28 @@
         body += lineCompare(s);
         note.className = 'hik-note ' + (tone === 'good' ? 'good' : (tone === 'warn' ? 'warn' : 'bad'));
         note.innerHTML = body;
+    }
+
+    /**
+     * "ต้องชดเชยความสว่างกี่เท่า" → แปลเป็น **gain ก่อน แล้วค่อยเป็นไฟ**
+     *
+     * ⚠️ กล้องตัวนี้มี gain ถึง 24 dB แต่มักใช้อยู่แค่ 8-12 dB ⇒ การรายงานเป็น
+     * "ต้องเพิ่มไฟ N เท่า" เฉย ๆ ทำให้ผู้ใช้ไปตั้งงบซื้อไฟทั้งที่ดัน gain ก็พอ
+     */
+    function brightnessAdvice(factor, s) {
+        var db = Math.round(20 * Math.log10(factor) * 10) / 10;
+        if (s.gain_db == null || s.gain_db_max == null) {
+            return 'ชดเชยความสว่าง <b>+' + db + ' dB</b> (~' + factor
+                + ' เท่า) — ไม่ทราบ gain ปัจจุบัน ตรวจในแผงตั้งค่ากล้อง';
+        }
+        var need = Math.round((s.gain_db + db) * 10) / 10;
+        if (need <= s.gain_db_max) {
+            return '<b>gain +' + db + ' dB</b> (' + s.gain_db + ' → <b>' + need
+                + ' dB</b> · เพดาน ' + s.gain_db_max + ') — <b>ยังไม่ต้องเพิ่มไฟ</b>';
+        }
+        var short = Math.round(Math.pow(10, (need - s.gain_db_max) / 20) * 100) / 100;
+        return 'ดัน gain จนสุดเพดาน (' + s.gain_db_max + ' dB) แล้ว<b>ยังขาดอีก ~'
+            + short + ' เท่า</b> ⇒ ต้องเพิ่มไฟจริง';
     }
 
     /**
@@ -601,10 +690,27 @@
                 + ' ⇒ เบลอ <b style="color:' + col + '">' + b + ' พิกเซล</b>'
                 + (b > 8 ? ' (โมเดลทนได้ ≤8 px จากที่วัดไว้)' : '')
                 + '<br>';
-            if (b > 4 && s.exposure_us) {
-                var want4 = Math.round(s.exposure_us * 4 / b);
-                out += '📏 ต้องลด exposure เหลือ <b>~' + want4 + ' µs</b> จึงจะเบลอ 4 px'
-                    + ' ⇒ ต้องเพิ่มไฟอีก <b>~' + (b / 4).toFixed(1) + ' เท่า</b>';
+            // ⚠️ **ห้ามพูดถึง "เพิ่มไฟ" ก่อนดูว่า gain เหลือหัวเท่าไร** — กล้องตัวนี้
+            // มี gain ถึง 24 dB แต่มักใช้อยู่แค่ 8-12 dB ⇒ การบอกว่า "ต้องเพิ่มไฟ
+            // 2.5 เท่า" ทั้งที่ดัน gain อีก 8 dB ก็พอ = ส่งผู้ใช้ไปตั้งงบซื้อไฟฟรี ๆ
+            if (s.want_exposure_us) {
+                out += '📏 ต้องลด exposure เหลือ <b>~' + Math.round(s.want_exposure_us)
+                    + ' µs</b> จึงจะเบลอ ' + (s.blur_target_px || 4) + ' px';
+                if (s.gain_enough) {
+                    out += ' ⇒ ชดเชยด้วย <b>gain +' + s.gain_add_db + ' dB</b> ('
+                        + s.gain_db + ' → <b>' + s.gain_needed_db + ' dB</b> · เพดาน '
+                        + s.gain_db_max + ') — <b>ยังไม่ต้องเพิ่มไฟ</b>'
+                        + (s.gain_headroom_db != null
+                            ? ' · เหลือหัวอีก ' + s.gain_headroom_db + ' dB' : '');
+                } else if (s.light_factor_needed_after_gain) {
+                    out += ' ⇒ ดัน gain จนสุดเพดาน (' + s.gain_db_max + ' dB) แล้ว'
+                        + '<b>ยังขาดอีก ~' + s.light_factor_needed_after_gain
+                        + ' เท่า</b> ⇒ ต้องเพิ่มไฟจริง';
+                } else if (s.gain_add_db != null) {
+                    // ไม่รู้ gain ปัจจุบัน/เพดาน ⇒ บอกได้แค่ว่าต้องชดเชยกี่ dB
+                    out += ' ⇒ ต้องชดเชยความสว่าง <b>' + s.gain_add_db
+                        + ' dB</b> (ไม่ทราบ gain ปัจจุบัน — ตรวจในแผงตั้งค่ากล้อง)';
+                }
             }
         }
         return out;
@@ -614,6 +720,12 @@
      * "เฟรมที่ควรได้ หายไปตรงไหน" — แยก 3 สาเหตุที่วิธีแก้คนละเรื่องกัน
      * เฟรมหายระหว่างทาง (เครือข่าย) · ดิสก์เขียนไม่ทัน · กล้องส่งมาช้าเอง
      */
+    /** แปลง **ตัวหนา** ของข้อความฝั่ง Python เป็น <b> — ไม่งั้นดอกจันโผล่บนจอ
+     *  (เห็นจริงในภาพหน้าจอของสถานี: "อยู่ที่ **ฝั่งรับ**") */
+    function mdBold(t) {
+        return String(t == null ? '' : t).replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>');
+    }
+
     function renderDiag(g) {
         var el = $('hikGalDiag');
         if (!el) { return; }
@@ -622,7 +734,13 @@
             : (g.cause === 'transport' || g.cause === 'framerate_cap' ? 'bad' : 'warn');
         var icon = g.cause === 'ok' ? '✅' : (tone === 'bad' ? '⛔' : '⚠️');
         var kv = [
-            ['กล้องส่งมาจริง', fmt(g.delivered_fps) + ' fps'],
+            // ⚠️ สองบรรทัดนี้ต้องอยู่คู่กันเสมอ — "มาถึงเครื่อง" ต่ำเพราะของหาย
+            // กลางทาง ≠ กล้องผลิตช้า และวิธีแก้คนละเรื่องกันโดยสิ้นเชิง
+            ['กล้องผลิตจริง', fmt(g.produced_fps) + ' fps'
+                + (g.produced_fps > g.delivered_fps + 0.5
+                    ? ' (มาถึงเครื่อง ' + Math.round(
+                        g.delivered_fps * 100 / g.produced_fps) + '%)' : '')],
+            ['มาถึงเครื่อง', fmt(g.delivered_fps) + ' fps'],
             ['เพดานสาย GigE', g.gige_ceiling_fps ? '~' + g.gige_ceiling_fps + ' fps' : '—'],
             ['Jumbo Frame', g.jumbo === undefined ? '—' : (g.jumbo ? 'เปิด' : 'ปิด')],
             ['packet size', g.packet_size || '—'],
@@ -642,9 +760,9 @@
             : [{ cause: g.cause, text: g.text, fix: g.fix }];
         var many = list.length > 1;
         var body = list.map(function (it, i) {
-            return (many ? '<b>' + (i + 1) + '.</b> ' : '') + '<b>' + it.text + '</b>'
+            return (many ? '<b>' + (i + 1) + '.</b> ' : '') + '<b>' + mdBold(it.text) + '</b>'
                 + (it.fix ? '<br><span' + (many ? ' style="padding-left:16px"' : '')
-                    + '>👉 ' + it.fix + '</span>' : '');
+                    + '>👉 ' + mdBold(it.fix) + '</span>' : '');
         }).join('<br>');
         el.style.display = '';
         el.className = 'hik-note ' + tone;
@@ -813,6 +931,9 @@
                 state.session = null;
                 state.rows = [];
                 state.sel = {};
+                resetDetails();
+                var note = $('hikGalSummary');
+                if (note) { note.textContent = 'เลือกชุดภาพทางซ้าย'; }
                 loadSessions();
             })
             .catch(function (e) { showJob(null, '❌ ' + e.message); });
@@ -865,8 +986,21 @@
 
             loadCaps();          // แถวของฟีเจอร์ต้องโผล่ตั้งแต่เปิดหน้า ไม่ใช่หลังเปิดแกลเลอรี
 
+            // ── ช่องติ๊ก 2 อัน: ค่าเริ่มต้นมาจาก **เซิร์ฟเวอร์** ไม่ใช่ค่าฝังใน JS ──
+            // เดิม `hikBurstWindow` ไม่เคยถูกตั้งค่าเริ่มต้นเลย ⇒ `HIK_BURST_WINDOW_MS
+            // = 133` ใน config บอกว่า "เปิด" แต่ช่องติ๊กว่าง = **ปิด** โดยไม่มีสัญญาณ
+            // อะไรบอก (เจอจริงบนสถานี 26 ส.ค.: ถ่ายรัวทิ้ง 52 เฟรมเพราะไม่ได้คัดใบ)
+            //
+            // ลำดับที่ยึด: ค่าที่ผู้ใช้เคยเลือกเอง (localStorage) ชนะเสมอ ·
+            // ไม่เคยเลือก → ใช้ค่าจากเซิร์ฟเวอร์ใน `applyCaps()` (มาทีหลังเพราะ fetch)
             var wck = $('hikBurstWindow');
-            if (wck) { wck.addEventListener('change', refreshEstimate); }
+            if (wck) {
+                seedChoice(wck, 'hik.windowOn');
+                wck.addEventListener('change', function () {
+                    rememberChoice(wck, 'hik.windowOn');
+                    refreshEstimate();
+                });
+            }
             var wms = $('hikBurstWindowMs');
             if (wms) {
                 wms.addEventListener('input', function () {
@@ -877,16 +1011,11 @@
 
             var pause = $('hikBurstPause');
             if (pause) {
-                // ⚠️ ค่าตั้งต้น = **ติ๊ก** — ระหว่างเก็บข้อมูลเราไม่ต้องการผลตรวจสด
-                // และการตรวจสดแย่ง iGPU จนดิสก์เขียนไม่ทัน (เฟรมหาย = กระป๋องหาย).
-                // ผู้ใช้ยังปลดติ๊กได้ และตัวเลือกถูกจำไว้ต่อเบราว์เซอร์
-                try {
-                    var saved = localStorage.getItem('hik.pauseInf');
-                    pause.checked = (saved === null) ? true : (saved === '1');
-                } catch (e) { pause.checked = true; }
+                // ระหว่างเก็บข้อมูลเราไม่ต้องการผลตรวจสด และการตรวจสดแย่ง iGPU
+                // จนดิสก์เขียนไม่ทัน (เฟรมที่ทิ้ง = กระป๋องที่หายไปจากชุดทดสอบ)
+                seedChoice(pause, 'hik.pauseInf');
                 pause.addEventListener('change', function () {
-                    try { localStorage.setItem('hik.pauseInf', pause.checked ? '1' : '0'); }
-                    catch (e) { /* ไม่จำก็ไม่เป็นไร */ }
+                    rememberChoice(pause, 'hik.pauseInf');
                 });
             }
 

@@ -118,7 +118,12 @@ def _compare(pt_dets_all, ov_dets_all):
 def main():
     ap = argparse.ArgumentParser(
         description="Verify OpenVINO (CPU/iGPU) vs PyTorch detection parity + speed.")
-    default_weights = getattr(config, "MODEL_PATH", "weights/can_dent/best.pt") if config else "weights/can_dent/best.pt"
+    default_weights = getattr(config, "MODEL_PATH", "") if config else ""
+    if not default_weights or not os.path.isfile(default_weights):
+        # best.pt อาจถูกลบไปแล้ว — หยิบ .pt ตัวแรกที่มีจริงแทนการชี้ไฟล์ที่ไม่มี
+        _d = os.path.join("weights", "can_dent")
+        _f = sorted(f for f in os.listdir(_d) if f.endswith(".pt")) if os.path.isdir(_d) else []
+        default_weights = os.path.join(_d, _f[0]) if _f else os.path.join(_d, "bestX.pt")
     ap.add_argument("--weights", default=default_weights, help="path to .pt weights")
     ap.add_argument("--images", default="", help="folder or single image of real samples")
     ap.add_argument("--imgsz", type=int, nargs="+", default=[480, 1280],
