@@ -80,7 +80,7 @@
     return !!(($("awForceOcr") || {}).checked);
   }
 
-  function coverageHtml(cov) {
+  function coverageHtml(cov, fontTrust) {
     if (!cov) return "";              // รายงานเก่าที่ยังไม่มีข้อมูลนี้
     const rows = [
       ["เทียบข้ามแผง/ข้ามไฟล์", cov.cross_panel],
@@ -126,6 +126,25 @@
       h += '<div class="aw-cov-fix">↳ ความต่างที่พบในกลุ่มนี้อาจมาจาก' +
         "วิธีอ่าน ไม่ใช่งานพิมพ์ · ติ๊ก “อ่านทุกโซนด้วย OCR” แล้วส่งตรวจใหม่" +
         "เพื่อให้ทุกโซนมาจาก engine เดียวกัน</div>";
+    }
+    // ฟอนต์ที่ text layer เชื่อไม่ได้ — ต้นเหตุอยู่ที่ขั้นตอน export ของ
+    // คนทำ artwork ⇒ บอกชื่อฟอนต์ไปเลยเพื่อให้ขอไฟล์ใหม่ได้ตรงจุด
+    const badFonts = [];
+    Object.keys(fontTrust || {}).forEach((docKey) => {
+      ((fontTrust[docKey] || {}).suspect || []).forEach((f) => {
+        const tag = docKey === "b" ? f + " (ไฟล์อ้างอิง)" : f;
+        if (badFonts.indexOf(tag) < 0) badFonts.push(tag);
+      });
+    });
+    if (badFonts.length) {
+      h += '<div class="aw-cov-row off">' +
+        '<span class="aw-cov-dot">⚠️</span>' +
+        '<span class="aw-cov-name">ฟอนต์ในไฟล์ที่แมปอักขระผิด</span>' +
+        '<span class="aw-cov-why">' + esc(badFonts.join(", ")) +
+        " — ข้อความของฟอนต์นี้ถูกอ่านจากภาพแทน (ไม่ใช้ค่าจาก PDF)</span></div>";
+      h += '<div class="aw-cov-fix">↳ ต้นเหตุอยู่ที่ไฟล์ ไม่ใช่ที่ระบบตรวจ · ' +
+        "ขอให้ผู้ออกแบบ export ไฟล์ใหม่โดยฝังฟอนต์ให้ครบ (หรือ outline ตัวอักษร) " +
+        "แล้วผลตรวจจะกลับมาแม่นระดับตัวอักษร</div>";
     }
     h += "</div></div>";
     return h;
@@ -226,7 +245,7 @@
                    "</span>" : "") + "</div>";
 
     // ต้องอยู่ "ติดใต้ผลสรุป" — คนอ่าน PASS แล้วมักเลิกอ่านต่อ
-    html += coverageHtml(rep.coverage);
+    html += coverageHtml(rep.coverage, rep.font_trust);
     // ผลเทียบพิกเซลครั้งล่าสุด (ถ้าเคยกด) — advisory ล้วน อยู่ใต้ coverage
     // เพื่อไม่ให้ปนกับผล PASS/FAIL ด้านบน. รายงานเก่าไม่มีคีย์นี้ = ไม่แสดง
     html += pixdiffHtml(rep.pixdiff, rep.id);

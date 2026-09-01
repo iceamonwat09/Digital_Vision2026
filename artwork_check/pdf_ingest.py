@@ -116,6 +116,56 @@ class ArtworkDocument:
                              rect.y0 + (y + h) * rect.height)
             return page.get_text("text", clip=clip).strip()
 
+    def text_spans(self, bbox_norm: Optional[List[float]] = None,
+                   all_pages: bool = False,
+                   max_pages: int = 12) -> List[dict]:
+        """ข้อความพร้อม **ชื่อฟอนต์** ต่อ span — ``[{"font","text"}]``.
+
+        ใช้ตัดสินความน่าเชื่อถือระดับฟอนต์ (``fonttrust``) ซึ่งเป็นระดับที่
+        ความเสียหายของ ToUnicode CMap เกิดขึ้นจริง (วัดแล้ว: ฟอนต์เดียวพัง
+        อีก 12 ฟอนต์ในไฟล์เดียวกันปกติ 100%).
+
+        ``all_pages`` เก็บหลักฐานจากทุกหน้า (ปกติโหมดนี้ตรวจเฉพาะหน้าแรก
+        แต่หลักฐานว่า "ฟอนต์นี้พัง" จากหน้าอื่นก็ใช้ได้และหาได้ฟรี) —
+        จำกัดด้วย ``max_pages`` กันไฟล์หนามาก. ``bbox_norm`` = เอาเฉพาะ
+        span ที่อยู่ในโซนนั้นของหน้าที่กำลังตรวจ.
+
+        คืน ``[]`` สำหรับไฟล์ภาพและ PDF ที่ไม่มี text layer. ไม่ raise:
+        อ่านไม่ได้ = คืนเท่าที่ได้ (ชั้นนี้เป็นตัวช่วย ไม่ใช่ทางหลัก)
+        """
+        if not self.is_pdf:
+            return []
+        out: List[dict] = []
+        try:
+            with fitz.open(self.path) as doc:
+                if all_pages:
+                    pages = range(min(doc.page_count, max(1, max_pages)))
+                else:
+                    pages = [self.page_index]
+                for pno in pages:
+                    page = doc[pno]
+                    clip = None
+                    if bbox_norm is not None:
+                        x, y, w, h = bbox_norm
+                        r = page.rect
+                        clip = fitz.Rect(r.x0 + x * r.width,
+                                         r.y0 + y * r.height,
+                                         r.x0 + (x + w) * r.width,
+                                         r.y0 + (y + h) * r.height)
+                    d = page.get_text("dict", clip=clip) if clip is not None \
+                        else page.get_text("dict")
+                    for block in d.get("blocks", []):
+                        for line in block.get("lines", []):
+                            for sp in line.get("spans", []):
+                                txt = sp.get("text") or ""
+                                if not txt:
+                                    continue
+                                out.append({"font": sp.get("font") or "?",
+                                            "text": txt})
+        except Exception:
+            return out
+        return out
+
     def zone_words(self, bbox_norm: List[float]) -> List[tuple]:
         """PDF text-layer words inside ``bbox_norm``, each as
         ``(text, (fx0, fy0, fx1, fy1))`` with the box as FRACTIONS relative

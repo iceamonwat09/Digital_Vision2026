@@ -18,12 +18,15 @@ from __future__ import annotations
 
 import logging
 import re
-import unicodedata
 from typing import List
 
 from inspectors import vertex_client   # read-only reuse of the dispatcher
 
-from . import config
+from . import config, fonttrust
+# อักขระที่ "เป็นไปไม่ได้ในข้อความจริง" นิยามไว้ที่ ``fonttrust`` ที่เดียว —
+# ทั้งด่านรายโซน (ไฟล์นี้) และด่านระดับฟอนต์ต้องใช้กติกาเดียวกันเป๊ะ ไม่งั้น
+# จะเกิดสภาพ "โซนนี้ผ่านแต่ฟอนต์เดียวกันไม่ผ่าน" ที่อธิบายให้ผู้ใช้ไม่ได้
+from .fonttrust import bad_glyph_count, bad_glyph_sample
 from .pdf_ingest import (ArtworkDocument, apply_rotation, encode_jpg,
                          resolve_rotation)
 
@@ -73,42 +76,6 @@ def _malformed(tok: str) -> bool:
 #
 # ⚠️ **ห้ามใส่ "Cf" (format) เข้าไปเด็ดขาด** — ZWJ/ZWNJ/RLM/LRM เป็นของ
 #    ปกติในข้อความอาหรับ/ฮีบรู ถ้าใส่จะฟ้องผิดทุกฉลากที่มีภาษาเหล่านั้น
-_BAD_CATEGORIES = frozenset(("Cc", "Co", "Cs", "Cn"))
-_REPLACEMENT_CHAR = "�"
-# อักขระควบคุมที่เป็น "ช่องว่าง" ตามปกติของข้อความ — ไม่ใช่ร่องรอยความเสียหาย
-_ALLOWED_CONTROL = "\t\n\r\f\v"
-
-
-def bad_glyph_count(text: str) -> int:
-    """จำนวนอักขระที่ "ไม่มีทางเป็นข้อความจริง" ใน ``text`` (นับทุกครั้งที่พบ)."""
-    if not text:
-        return 0
-    n = 0
-    for ch in text:
-        if ch in _ALLOWED_CONTROL:
-            continue
-        if ch == _REPLACEMENT_CHAR or \
-                unicodedata.category(ch) in _BAD_CATEGORIES:
-            n += 1
-    return n
-
-
-def _bad_glyph_sample(text: str, limit: int = 4) -> str:
-    """ตัวอย่างอักขระต้องห้ามที่พบ เป็นรหัส U+XXXX (ไม่ซ้ำ, เรียงตามที่พบ) —
-    ใส่ไว้ในข้อความอธิบายเพื่อให้ผู้ใช้/คนดูแลระบบไล่ต่อได้ว่าเจออะไร."""
-    seen, out = set(), []
-    for ch in text or "":
-        if ch in _ALLOWED_CONTROL or ch in seen:
-            continue
-        if ch == _REPLACEMENT_CHAR or \
-                unicodedata.category(ch) in _BAD_CATEGORIES:
-            seen.add(ch)
-            out.append("U+%04X" % ord(ch))
-            if len(out) >= limit:
-                break
-    return ", ".join(out)
-
-
 def text_has_bad_glyphs(text: str, min_count: int = None) -> bool:
     """True เมื่อพบอักขระต้องห้ามอย่างน้อย ``min_count`` ตัว."""
     mc = (config.PDFTEXT_BAD_GLYPH_MIN_COUNT if min_count is None
@@ -129,7 +96,7 @@ def garbled_reason(text: str,
     if config.PDFTEXT_BAD_GLYPH_CHECK and text_has_bad_glyphs(text):
         return ("text layer ของโซนนี้มีอักขระที่เป็นไปไม่ได้ในข้อความจริง "
                 "(%s) — ฟอนต์ในไฟล์แมปอักขระกลับเป็น Unicode ไม่ได้ "
-                "จึงไม่ใช้ค่าจาก PDF" % _bad_glyph_sample(text))
+                "จึงไม่ใช้ค่าจาก PDF" % bad_glyph_sample(text))
     mt = config.PDFTEXT_GARBLED_MIN_TOKENS if min_tokens is None else min_tokens
     rt = config.PDFTEXT_GARBLED_RATIO if ratio is None else ratio
     toks = _long_tokens(text)
@@ -158,7 +125,8 @@ def text_looks_garbled(text: str,
 
 
 def read_zone(doc: ArtworkDocument, zone: dict,
-              page_auto: bool = False, force_ocr: bool = False) -> dict:
+              page_auto: bool = False, force_ocr: bool = False,
+              font_trust: dict = None) -> dict:
     """
     Returns:
         {
@@ -180,6 +148,11 @@ def read_zone(doc: ArtworkDocument, zone: dict,
     จาก engine เดียวกัน. **ถ้าไม่มี OCR backend ให้ใช้ จะไม่บังคับ** — ถอย
     ไปใช้ text layer ตามเดิมพร้อมโน้ตบอกเหตุผล ดีกว่าทิ้งข้อความที่อ่านได้
     อยู่แล้วไปแลกกับ UNREADABLE.
+
+    ``font_trust`` = ผลวิเคราะห์ระดับฟอนต์ของทั้งเอกสาร (``fonttrust.analyze``)
+    ที่ ``pipeline`` คำนวณครั้งเดียวแล้วส่งต่อ — ใช้ปฏิเสธข้อความของฟอนต์ที่
+    **พิสูจน์แล้วว่าพังที่อื่นในไฟล์เดียวกัน** แม้ข้อความในโซนนี้จะดูสะอาด
+    (เคสจริง: ``MAČKY`` ออกมาเป็น ``MAÏ/=`` ซึ่งไม่มีอักขระต้องห้ามเลย)
     """
     bbox = zone["bbox"]
     forced = bool(force_ocr) and vertex_client.is_enabled()
@@ -193,6 +166,10 @@ def read_zone(doc: ArtworkDocument, zone: dict,
     if len(embedded) >= config.EMBEDDED_TEXT_MIN_CHARS:
         reason = (garbled_reason(embedded) if config.PDFTEXT_GARBLED_CHECK
                   else "")
+        if not reason:
+            # ข้อความก้อนนี้ "ดูสะอาด" แต่ฟอนต์ที่พิมพ์มันอาจถูกพิสูจน์แล้วว่า
+            # พังจากที่อื่นในไฟล์เดียวกัน — ถามหลักฐานระดับฟอนต์อีกชั้น
+            reason = _font_evidence_reason(doc, bbox, font_trust)
         if reason:
             # text layer มีข้อความ "พอ" แต่ใช้ไม่ได้ (ฟอนต์แมปอักขระผิด).
             # ห้ามส่งต่อด้วย conf 1.0 — ตกไปอ่านจากภาพจริงแทน.
@@ -289,6 +266,25 @@ def read_zone(doc: ArtworkDocument, zone: dict,
     return out
 
 
+def _font_evidence_reason(doc: ArtworkDocument, bbox,
+                          font_trust: dict) -> str:
+    """เหตุผลจาก "หลักฐานระดับฟอนต์" — ``""`` = ไม่มีข้อสงสัย.
+
+    ราคาเป็นศูนย์กับไฟล์ปกติ: ถ้าไม่มีฟอนต์ไหนถูกพิสูจน์ว่าพัง จะไม่แตะ
+    เอกสารเลย (ไม่มีการอ่าน span เพิ่ม)
+    """
+    if not font_trust or not font_trust.get("suspect"):
+        return ""
+    if font_trust.get("mode", "off") == "off":
+        return ""
+    try:
+        spans = doc.text_spans(bbox)
+    except Exception:            # pragma: no cover - ตัวช่วย ไม่ใช่ทางหลัก
+        logger.debug("[artwork] font-evidence: อ่าน span ไม่ได้", exc_info=True)
+        return ""
+    return fonttrust.zone_reason(spans, font_trust)
+
+
 def _render_for_ocr(doc: ArtworkDocument, bbox):
     """เรนเดอร์โซนสำหรับส่ง OCR — เหมือนเดิมทุกอย่าง ยกเว้นเพิ่ม DPI ให้โซน
     ที่เรนเดอร์ออกมาเล็กเกินกว่า OCR จะอ่านได้ (ตรรกะเดียวกับที่
@@ -320,12 +316,14 @@ def _render_for_ocr(doc: ArtworkDocument, bbox):
 
 def read_all_zones(doc: ArtworkDocument, zones: List[dict],
                    page_auto: bool = False,
-                   force_ocr: bool = False) -> List[dict]:
+                   force_ocr: bool = False,
+                   font_trust: dict = None) -> List[dict]:
     out = []
     for z in zones:
         if z.get("type") == "ignore":
             continue
-        r = read_zone(doc, z, page_auto=page_auto, force_ocr=force_ocr)
+        r = read_zone(doc, z, page_auto=page_auto, force_ocr=force_ocr,
+                      font_trust=font_trust)
         logger.info("[artwork] zone %s engine=%s rot=%d chars=%d%s",
                     z["id"], r["engine"], r.get("rotate", 0), len(r["text"]),
                     f" ERROR={r['error']}" if r.get("error") else "")
