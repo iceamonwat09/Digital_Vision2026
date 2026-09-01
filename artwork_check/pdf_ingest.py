@@ -166,6 +166,52 @@ class ArtworkDocument:
             return out
         return out
 
+    def unmappable_fonts(self, max_pages: int = 12) -> List[str]:
+        """ฟอนต์ที่ **ตามสเปก PDF แล้วถอดกลับเป็น Unicode ไม่ได้**.
+
+        เกณฑ์: ฟอนต์ composite (``Type0``) ที่ encoding เป็น ``Identity-H/V``
+        และ **ไม่มี ``/ToUnicode``** — Identity หมายความว่า "เลขที่เขียนใน
+        content stream คือหมายเลข glyph ในซับเซ็ตนี้" ⇒ ถ้าไม่มีตาราง
+        ToUnicode ก็ **ไม่มีข้อมูลใดในไฟล์ที่บอกได้ว่า glyph นั้นคือตัวอักษร
+        อะไร** ตัวอ่านทุกตัวได้แต่เดา (MuPDF เดาเงียบ ๆ · pdfminer ยอมแพ้แล้ว
+        คาย ``(cid:N)``).
+        นี่คือการชี้ที่ **ต้นเหตุ** ไม่ใช่การจับอาการ จึงรู้ได้ตั้งแต่ก่อนเห็น
+        ขยะสักตัว (ต่างจากด่านอักขระต้องห้ามที่ต้องรอให้ฟอนต์คายของเสียออกมา).
+
+        ⚠️ **จงใจตั้งเกณฑ์แคบ** — ไม่เหมารวม encoding มาตรฐาน
+        (WinAnsi/MacRoman/Standard) หรือ CMap ที่มีชื่อในสเปก (เช่น
+        ``UniJIS-UCS2-H``) ซึ่งถอดกลับได้เองโดยไม่ต้องมี ToUnicode.
+        วัดบนไฟล์จริง: ไฟล์ที่ฟอนต์ดี = 0 ตัว · ไฟล์ที่พัง = ตรงตัวที่พังพอดี.
+
+        ⚠️ คืน **ชื่อที่ตัด subset prefix ออกแล้ว** (``DBRRPG+DINPro-Bold`` →
+        ``DINPro-Bold``) เพื่อให้เทียบกับชื่อฟอนต์ใน span ได้ — ผลข้างเคียงคือ
+        ถ้าไฟล์มีฟอนต์ชื่อเดียวกันสองตัว (ตัวหนึ่งดี ตัวหนึ่งพัง) จะถูกสงสัย
+        ทั้งคู่ ซึ่งเป็นทิศทางที่ปลอดภัยกว่าสำหรับงาน QC.
+        """
+        if not self.is_pdf:
+            return []
+        out = set()
+        try:
+            with fitz.open(self.path) as doc:
+                for pno in range(min(doc.page_count, max(1, max_pages))):
+                    for f in doc[pno].get_fonts(full=True):
+                        # (xref, ext, type, basefont, refname, encoding, ...)
+                        xref = f[0]
+                        ftype = f[2] if len(f) > 2 else ""
+                        base = f[3] if len(f) > 3 else ""
+                        enc = (f[5] if len(f) > 5 else "") or ""
+                        if ftype != "Type0" or not enc.startswith("Identity"):
+                            continue
+                        try:
+                            obj = doc.xref_object(xref)
+                        except Exception:
+                            continue
+                        if "/ToUnicode" not in obj:
+                            out.add(base.split("+")[-1].strip())
+        except Exception:
+            return sorted(out)
+        return sorted(f for f in out if f)
+
     def zone_words(self, bbox_norm: List[float]) -> List[tuple]:
         """PDF text-layer words inside ``bbox_norm``, each as
         ``(text, (fx0, fy0, fx1, fy1))`` with the box as FRACTIONS relative

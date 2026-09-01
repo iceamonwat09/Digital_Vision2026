@@ -54,6 +54,7 @@ def test_auto_rotate_changes_signature():
     ("PDFTEXT_BAD_GLYPH_MIN_COUNT", 5),
     ("OCR_GROUP_ENGINE_CONSISTENCY", True),
     ("PDFTEXT_FONT_EVIDENCE", "off"),
+    ("PDFTEXT_FONT_STRUCTURE_CHECK", False),
 ])
 def test_ocr_setting_change_invalidates_cache(monkeypatch, attr, new_value):
     before = sig()
@@ -69,7 +70,7 @@ def test_fingerprint_covers_every_ocr_setting():
     expected = {"dpi", "max_side", "min_side", "dpi_max_factor",
                 "embed_min", "garbled", "garbled_tokens", "garbled_ratio",
                 "bad_glyph", "bad_glyph_min", "group_engine",
-                "font_evidence"}
+                "font_evidence", "font_structure"}
     assert set(fp) == expected
 
 

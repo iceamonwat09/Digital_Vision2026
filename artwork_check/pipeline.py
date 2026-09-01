@@ -193,12 +193,23 @@ def font_trust(doc: ArtworkDocument) -> dict:
     except Exception:            # pragma: no cover - ตัวช่วย ไม่ใช่ทางหลัก
         logger.debug("[artwork] font-trust: อ่าน span ไม่ได้", exc_info=True)
         return {"mode": "off", "suspect": [], "poisoned": "", "fonts": {}}
-    trust = fonttrust.analyze(spans, mode=mode)
+    # หลักฐานทางที่ 2: ฟอนต์ที่ตามสเปกแล้วถอดกลับเป็น Unicode ไม่ได้ —
+    # รู้ได้โดยไม่ต้องรอให้เห็นขยะสักตัว (ราคา ~6 ms)
+    unmappable = []
+    if config.PDFTEXT_FONT_STRUCTURE_CHECK:
+        try:
+            unmappable = doc.unmappable_fonts(
+                max_pages=config.PDFTEXT_FONT_EVIDENCE_MAX_PAGES)
+        except Exception:        # pragma: no cover - ตัวช่วย ไม่ใช่ทางหลัก
+            logger.debug("[artwork] font-trust: อ่านตารางฟอนต์ไม่ได้",
+                         exc_info=True)
+    trust = fonttrust.analyze(spans, mode=mode, unmappable_fonts=unmappable)
     if trust.get("suspect"):
         logger.warning(
-            "[artwork] ฟอนต์ที่แมปอักขระผิดในไฟล์นี้: %s (โหมด %s) — "
-            "ข้อความของฟอนต์เหล่านี้จะไม่ถูกใช้จาก text layer",
-            ", ".join(trust["suspect"]), trust.get("mode"))
+            "[artwork] ฟอนต์ที่เชื่อข้อความไม่ได้ในไฟล์นี้: %s (โหมด %s · "
+            "หลักฐาน %s) — ข้อความของฟอนต์เหล่านี้จะไม่ถูกใช้จาก text layer",
+            ", ".join(trust["suspect"]), trust.get("mode"),
+            trust.get("why"))
     return trust
 
 
@@ -409,6 +420,7 @@ def _ocr_fingerprint() -> dict:
         # หลักฐานระดับฟอนต์ — เปลี่ยนโหมดแล้วโซนที่เคยใช้ text layer อาจ
         # ตกไปใช้ OCR (หรือกลับกัน) ⇒ ข้อความที่ได้เปลี่ยน
         "font_evidence": config.PDFTEXT_FONT_EVIDENCE,
+        "font_structure": bool(config.PDFTEXT_FONT_STRUCTURE_CHECK),
     }
 
 

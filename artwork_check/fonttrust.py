@@ -76,7 +76,8 @@ def bad_glyph_sample(text: str, limit: int = 4) -> str:
     return ", ".join(out)
 
 
-def analyze(spans: Iterable[dict], mode: str = "chars") -> dict:
+def analyze(spans: Iterable[dict], mode: str = "chars",
+            unmappable_fonts: Iterable[str] = ()) -> dict:
     """สรุปความน่าเชื่อถือของแต่ละฟอนต์จาก span ทั้งเอกสาร.
 
     ``spans`` = ``[{"font": str, "text": str}, ...]`` (ลำดับไม่สำคัญ)
@@ -84,14 +85,23 @@ def analyze(spans: Iterable[dict], mode: str = "chars") -> dict:
     คืน::
 
         {"mode": "chars",
-         "suspect": ["DINPro-Bold"],       # ฟอนต์ที่มีหลักฐานว่าพัง
+         "suspect": ["DINPro-Bold"],       # ฟอนต์ที่เชื่อไม่ได้
+         "why": {"DINPro-Bold": ["chars", "structure"]},
          "poisoned": "ÄÏÜĊċ…",             # อักขระที่ฟอนต์ที่เชื่อได้ไม่เคยใช้
          "fonts": {ชื่อฟอนต์: {spans, bad_spans, chars, bad_chars}}}
 
-    **หลักฐานที่ใช้ตัดสินว่า "ฟอนต์นี้พัง" คืออักขระต้องห้ามเท่านั้น** —
-    เป็นหลักฐานที่ผิดพลาดแทบไม่ได้ (อักขระควบคุม/PUA ไม่มีเหตุผลจะอยู่ในข้อความ
-    ที่พิมพ์บนฉลาก) จึงเอามาใช้ "ตัดสินทั้งฟอนต์" ได้อย่างมีเหตุผล.
-    ส่วนชุด ``poisoned`` เป็นเพียงตัวช่วยจำกัดขอบเขต **ไม่ใช่หลักฐาน**
+    **ฟอนต์ถูกจัดว่า "เชื่อไม่ได้" ด้วยหลักฐาน 2 ทางที่เป็นอิสระจากกัน:**
+
+    ① **จากอาการ** (``chars``) — คายอักขระต้องห้ามออกมาที่ใดที่หนึ่งในเอกสาร.
+       แทบผิดพลาดไม่ได้ (อักขระควบคุม/PUA ไม่มีเหตุผลจะอยู่บนฉลาก) แต่ต้อง
+       "รอให้เห็นอาการ" ⇒ ฟอนต์ที่พังแบบคายเฉพาะตัวอักษรที่ดูปกติจะรอด
+
+    ② **จากโครงสร้างไฟล์** (``structure``, ``unmappable_fonts``) — ฟอนต์ที่
+       ตามสเปก PDF แล้ว **ถอดกลับเป็น Unicode ไม่ได้** (CID/Identity-H ที่ไม่มี
+       ToUnicode). ไม่ต้องรออาการเลย และเป็นการชี้ที่ *ต้นเหตุ* ไม่ใช่ *ผลลัพธ์*
+
+    วัดบนไฟล์จริง (833 บรรทัด): ①  จับ 58/70 · ①+② จับ **70/70** โดย
+    ฟ้องผิดเท่ากัน (10) — ② จึงเพิ่ม recall ฟรีโดยไม่เสีย precision
     """
     if mode not in MODES:
         mode = "off"
@@ -108,8 +118,21 @@ def analyze(spans: Iterable[dict], mode: str = "chars") -> dict:
             d["bad_spans"] += 1
             d["bad_chars"] += nb
 
-    suspect = sorted(f for f, d in stats.items() if d["bad_spans"])
-    out = {"mode": mode, "suspect": suspect, "poisoned": "", "fonts": stats}
+    by_symptom = {f for f, d in stats.items() if d["bad_spans"]}
+    # ⚠️ ชื่อฟอนต์ใน span ไม่มี subset prefix (`DINPro-Bold`) ส่วนชื่อจาก
+    #    ตารางฟอนต์มี (`DBRRPG+DINPro-Bold`) — ฝั่งเรียกเป็นคนตัดให้แล้ว
+    by_structure = {(f or "").strip() for f in unmappable_fonts if (f or "").strip()}
+    suspect = sorted(by_symptom | by_structure)
+    why = {}
+    for f in suspect:
+        tags = []
+        if f in by_symptom:
+            tags.append("chars")
+        if f in by_structure:
+            tags.append("structure")
+        why[f] = tags
+    out = {"mode": mode, "suspect": suspect, "why": why,
+           "poisoned": "", "fonts": stats}
     if mode == "off" or not suspect:
         # ไม่มีฟอนต์ไหนมีหลักฐานว่าพัง ⇒ ไฟล์นี้ไม่ถูกแตะเลย (ราคา 0)
         return out
@@ -154,8 +177,15 @@ def span_reason(font: str, text: str, trust: dict) -> str:
         hit = any(c in poisoned for c in text or "")
     if not hit:
         return ""
-    return ("ฟอนต์ “%s” ในไฟล์นี้แมปอักขระกลับเป็น Unicode ผิด (พบหลักฐานที่อื่น"
-            "ในไฟล์เดียวกัน) จึงไม่เชื่อข้อความส่วนนี้" % font)
+    tags = (trust.get("why") or {}).get(font) or ["chars"]
+    if "structure" in tags and "chars" in tags:
+        how = "ฟอนต์ฝังมาแบบถอดกลับเป็น Unicode ไม่ได้ และคายอักขระเสียจริง"
+    elif "structure" in tags:
+        how = ("ฟอนต์ฝังมาแบบ CID/Identity-H ที่ไม่มีตาราง ToUnicode ⇒ ตามสเปก "
+               "PDF แล้วถอดกลับเป็นตัวอักษรไม่ได้")
+    else:
+        how = "พบอักขระที่แมปผิดของฟอนต์นี้ที่อื่นในไฟล์เดียวกัน"
+    return "ฟอนต์ “%s” เชื่อข้อความไม่ได้ — %s" % (font, how)
 
 
 def zone_reason(spans: Iterable[dict], trust: dict) -> str:
@@ -181,11 +211,13 @@ def summary(trust: dict) -> dict:
     ฟอนต์ตัวไหนของไฟล์มีปัญหา** — ต้นเหตุจริงอยู่ที่ขั้นตอน export ไม่ใช่ที่นี่
     """
     if not trust:
-        return {"mode": "off", "suspect": [], "checked": 0}
+        return {"mode": "off", "suspect": [], "why": {}, "checked": 0}
     fonts = trust.get("fonts") or {}
+    why = trust.get("why") or {}
     return {
         "mode": trust.get("mode", "off"),
         "suspect": list(trust.get("suspect") or []),
+        "why": {f: list(why.get(f) or []) for f in (trust.get("suspect") or [])},
         "checked": len(fonts),
         "evidence": {f: {"bad_spans": fonts[f]["bad_spans"],
                          "spans": fonts[f]["spans"],
