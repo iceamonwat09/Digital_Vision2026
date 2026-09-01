@@ -790,6 +790,43 @@ def check_readability(zones: List[dict], ocr_results: List[dict],
     return defects
 
 
+# ── engine ที่ใช้อ่านข้อความ: กลุ่มไหน "เทียบข้าม engine" ────────────────
+
+def engine_mix_groups(zones: List[dict],
+                      ocr_results: List[dict]) -> List[str]:
+    """กลุ่มที่เอาข้อความจาก **สอง engine** มาเทียบกัน (text layer ปนกับ OCR).
+
+    ทำไมต้องรู้: ชั้นเทียบข้ามแผงเทียบ *ข้อความ* ตรง ๆ. text layer ให้
+    ตัวอักษรเป๊ะระดับ vector แต่ตัดบรรทัดตามลำดับใน content stream ของ PDF
+    ส่วน OCR ตัดบรรทัดตามที่ตาเห็นในภาพ ⇒ ความต่างเชิงโครงสร้างของสอง engine
+    (การตัดบรรทัด/ระยะห่าง/ลำดับคอลัมน์) จะปนมากับความต่างจริงของงานพิมพ์
+    แล้วอ่านแยกกันไม่ออก. เป็น **ข้อมูลประกอบล้วน** — ไม่แตะ defects/verdict
+    (ตัวเลือกที่ทำอะไรกับมันจริงคือ ``OCR_GROUP_ENGINE_CONSISTENCY``).
+
+    นับเฉพาะฝั่ง OCR ที่ **อ่านข้อความออกจริง** เพราะโซนที่ OCR ล้มเหลว/ว่าง
+    ไม่ได้เข้าไปในการเทียบอยู่แล้ว (``_vote_panels`` ใช้เฉพาะโซนที่มีข้อความ)
+    ⇒ ถ้ารายงานว่า "ปน" ทั้งที่ไม่มีการเทียบเกิดขึ้น = คำเตือนที่ไม่มีมูล
+    """
+    eng = {r["zone_id"]: (r.get("engine") or "") for r in ocr_results}
+    txt = {r["zone_id"]: (r.get("text") or "").strip() for r in ocr_results}
+    by_group: Dict[str, List[str]] = {}
+    for z in zones:
+        if z.get("type") == "ignore":
+            continue
+        g = (z.get("group") or "").strip()
+        if not g or z["id"] not in eng:
+            continue
+        by_group.setdefault(g, []).append(z["id"])
+    out = []
+    for g, zids in by_group.items():
+        pdf_side = any(eng[i] == "pdf-text" and txt[i] for i in zids)
+        ocr_side = any(eng[i] not in ("pdf-text", "none") and txt[i]
+                       for i in zids)
+        if pdf_side and ocr_side:
+            out.append(g)
+    return sorted(out)
+
+
 # ── Coverage: ชั้นไหน "ได้ทำงานจริง" กับงานใบนี้ ──────────────────────
 
 def check_coverage(zones: List[dict], ocr_results: List[dict]) -> dict:
@@ -863,9 +900,13 @@ def check_coverage(zones: List[dict], ocr_results: List[dict]) -> dict:
 
     n_read = len([z for z in active if readable(z)])
     spell_ok = bool(spell_layer_available())
+    # กลุ่มที่เทียบข้าม engine (text layer ปนกับ OCR) — ความต่างที่เห็นอาจ
+    # มาจาก "วิธีอ่าน" ไม่ใช่ "งานพิมพ์". advisory ล้วน ไม่แตะ defects
+    mixed = engine_mix_groups(zones, ocr_results)
     return {
         "cross_panel": cross,
         "zoom": zoom,
+        "engine_mix": {"groups": mixed, "mixed": bool(mixed)},
         # ชั้นที่ทำงานทุกโซนอยู่แล้ว — รายงานไว้ให้เห็นภาพรวมว่ามีกี่โซนที่
         # มีข้อความให้ตรวจจริง (โซนที่อ่านไม่ออกจะขึ้น UNREADABLE อยู่แล้ว)
         "numbers": {"ran": n_read > 0, "zones": n_read,

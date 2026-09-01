@@ -48,6 +48,11 @@ def test_auto_rotate_changes_signature():
     ("PDFTEXT_GARBLED_CHECK", False),
     ("PDFTEXT_GARBLED_MIN_TOKENS", 20),
     ("PDFTEXT_GARBLED_RATIO", 0.6),
+    # ด่านอักขระต้องห้าม + การอ่านซ้ำให้ engine ตรงกันทั้งกลุ่ม — ทั้งคู่
+    # เปลี่ยนแล้ว "ข้อความที่โซนหนึ่งได้" เปลี่ยนได้จริง (ใช้ text layer vs OCR)
+    ("PDFTEXT_BAD_GLYPH_CHECK", False),
+    ("PDFTEXT_BAD_GLYPH_MIN_COUNT", 5),
+    ("OCR_GROUP_ENGINE_CONSISTENCY", True),
 ])
 def test_ocr_setting_change_invalidates_cache(monkeypatch, attr, new_value):
     before = sig()
@@ -61,7 +66,8 @@ def test_fingerprint_covers_every_ocr_setting():
     เทสต์ชุดบนจะไม่จับ — ตรวจรายชื่อคีย์ตรง ๆ อีกชั้น."""
     fp = pipeline._ocr_fingerprint()
     expected = {"dpi", "max_side", "min_side", "dpi_max_factor",
-                "embed_min", "garbled", "garbled_tokens", "garbled_ratio"}
+                "embed_min", "garbled", "garbled_tokens", "garbled_ratio",
+                "bad_glyph", "bad_glyph_min", "group_engine"}
     assert set(fp) == expected
 
 

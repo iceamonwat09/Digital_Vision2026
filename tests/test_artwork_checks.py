@@ -633,7 +633,7 @@ def test_run_ocr_only_caches_and_stays_isolated(tmp_path, monkeypatch):
     monkeypatch.setattr(pipeline, "ArtworkDocument", lambda *a, **k: object())
     calls = {"n": 0}
 
-    def fake_read(doc, zones, page_auto=False):
+    def fake_read(doc, zones, page_auto=False, force_ocr=False):
         calls["n"] += 1
         return [{"zone_id": z["id"], "text": "Hello", "engine": "stub",
                  "conf": None} for z in zones]
@@ -727,8 +727,9 @@ def test_read_all_docs_routes_each_zone_to_its_own_file(tmp_path, monkeypatch):
                             os.path.basename(path)) or object())
     monkeypatch.setattr(
         pipeline.ocr, "read_all_zones",
-        lambda doc, zones, page_auto=False: [{"zone_id": z["id"], "text": "T",
-                             "engine": "stub", "conf": None} for z in zones])
+        lambda doc, zones, page_auto=False, force_ocr=False: [
+            {"zone_id": z["id"], "text": "T", "engine": "stub", "conf": None}
+            for z in zones])
 
     za = [{"id": "z1", "type": "panel", "group": "G",
            "bbox": [0.1, 0.1, 0.2, 0.2], "doc": "a"}]
@@ -755,7 +756,7 @@ def test_read_all_docs_missing_ref_file_raises(tmp_path, monkeypatch):
         f.write(b"x")
     monkeypatch.setattr(pipeline, "ArtworkDocument", lambda *a, **k: object())
     monkeypatch.setattr(pipeline.ocr, "read_all_zones",
-                        lambda doc, zones, page_auto=False: [])
+                        lambda doc, zones, page_auto=False, force_ocr=False: [])
 
     zb = [{"id": "b1", "type": "panel", "group": "G",
            "bbox": [0.1, 0.1, 0.2, 0.2], "doc": "b"}]
@@ -1490,7 +1491,7 @@ def test_run_inspection_writes_applied_rotation(tmp_path, monkeypatch):
     monkeypatch.setattr(pipeline, "ArtworkDocument", lambda *a, **k: object())
     monkeypatch.setattr(
         pipeline.ocr, "read_all_zones",
-        lambda doc, zones, page_auto=False: [
+        lambda doc, zones, page_auto=False, force_ocr=False: [
             {"zone_id": z["id"], "text": "T", "engine": "stub",
              "conf": None, "rotate": 270 if z["id"] == "z1" else 0}
             for z in zones])

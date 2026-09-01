@@ -73,6 +73,13 @@
       .filter((c) => c && !c.ran && !benign[c.reason]);
   }
 
+  // "อ่านทุกโซนด้วย OCR" — ช่องติ๊กข้างปุ่มส่งตรวจ. ใช้ได้ทั้งตอนส่งตรวจและ
+  // ตอนกดแปล เพื่อให้สองแท็บเห็นข้อความชุดเดียวกัน (ไม่งั้นแท็บแปลจะโชว์
+  // ข้อความจาก text layer ที่เพิ่งสั่งให้ข้ามไป = ขัดกันเองบนหน้าจอเดียว)
+  function forceOcrOn() {
+    return !!(($("awForceOcr") || {}).checked);
+  }
+
   function coverageHtml(cov) {
     if (!cov) return "";              // รายงานเก่าที่ยังไม่มีข้อมูลนี้
     const rows = [
@@ -105,6 +112,21 @@
         h += '<div class="aw-cov-fix">↳ ' + esc(COV_FIX[c.reason]) + "</div>";
       }
     });
+    // กลุ่มที่เทียบข้าม engine (text layer ปนกับ OCR) — ความต่างที่เห็นอาจ
+    // มาจากวิธีอ่าน ไม่ใช่งานพิมพ์. ใช้คลาสเดิมทั้งหมด ไม่เพิ่มคลาสใหม่
+    // (CSS ของ renderReport ต้องมีครบทั้ง 2 template เสมอ)
+    const mix = cov.engine_mix;
+    if (mix && mix.mixed) {
+      h += '<div class="aw-cov-row off">' +
+        '<span class="aw-cov-dot">⚠️</span>' +
+        '<span class="aw-cov-name">engine ที่ใช้อ่านข้อความ</span>' +
+        '<span class="aw-cov-why">ปนกันในกลุ่ม ' +
+        esc((mix.groups || []).join(", ")) +
+        " — บางโซนอ่านจาก text layer ของ PDF บางโซนอ่านด้วย OCR</span></div>";
+      h += '<div class="aw-cov-fix">↳ ความต่างที่พบในกลุ่มนี้อาจมาจาก' +
+        "วิธีอ่าน ไม่ใช่งานพิมพ์ · ติ๊ก “อ่านทุกโซนด้วย OCR” แล้วส่งตรวจใหม่" +
+        "เพื่อให้ทุกโซนมาจาก engine เดียวกัน</div>";
+    }
     h += "</div></div>";
     return h;
   }
@@ -697,6 +719,7 @@
         docMeta: { a: docMeta.a, b: docMeta.b },
         refAttached: refAttached,
         autoRotate: !!($("awAutoRotate") || {}).checked,
+        forceOcr: forceOcrOn(),
         brand: ($("awBrand") || {}).value || "",
         savedAt: Date.now(),
       }));
@@ -747,6 +770,7 @@
       : null;
     refAttached = !!s.refAttached && !!docMeta.b;
     if ($("awAutoRotate")) $("awAutoRotate").checked = !!s.autoRotate;
+    if ($("awForceOcr")) $("awForceOcr").checked = !!s.forceOcr;
     if ($("awBrand") && s.brand) $("awBrand").value = s.brand;
     showTabs(true);
     switchTab("result");
@@ -1684,7 +1708,8 @@
       const rep = await api("/api/artwork/" + inspectionId + "/inspect", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ zones: zones, brand: brandInput.value.trim(), auto_rotate: autoRotate }),
+        body: JSON.stringify({ zones: zones, brand: brandInput.value.trim(),
+                               auto_rotate: autoRotate, force_ocr: forceOcrOn() }),
       });
       renderReport(rep, resultBox);
       showTabs(true);
@@ -1751,7 +1776,8 @@
       textResult = await api("/api/artwork/" + inspectionId + "/translate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ zones: zones, brand: brandInput.value.trim(), auto_rotate: autoRotate }),
+        body: JSON.stringify({ zones: zones, brand: brandInput.value.trim(),
+                               auto_rotate: autoRotate, force_ocr: forceOcrOn() }),
       });
       renderTextTable(textResult, textTableWrap, onlyIssuesCb.checked);
       setResultsWide(true);   // table now has data → widen the results panel

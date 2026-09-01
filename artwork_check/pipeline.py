@@ -178,13 +178,16 @@ def _split_docs(zone_list: List[dict]) -> Tuple[List[dict], List[dict]]:
 
 
 def _read_all_docs(insp_dir: str, zones_a: List[dict], zones_b: List[dict],
-                   auto_rotate: bool = False) -> List[dict]:
+                   auto_rotate: bool = False,
+                   force_ocr: bool = False) -> List[dict]:
     """OCR each zone against ITS OWN document (a → source, b → source_b).
     With no doc-"b" zones this is exactly the original single-doc path.
     ``auto_rotate`` is the page-level toggle passed through to the OCR
-    layer (only affects zones with rotate == "default")."""
-    doc = ArtworkDocument(_find_source(insp_dir))
-    results = ocr.read_all_zones(doc, zones_a, page_auto=auto_rotate)
+    layer (only affects zones with rotate == "default"). ``force_ocr``
+    ข้ามชั้น text layer ทั้งใบ (ผู้ใช้สั่งเอง)."""
+    docs = {"a": ArtworkDocument(_find_source(insp_dir))}
+    results = ocr.read_all_zones(docs["a"], zones_a, page_auto=auto_rotate,
+                                 force_ocr=force_ocr)
     if zones_b:
         try:
             src_b = _find_source(insp_dir, "source_b")
@@ -192,20 +195,77 @@ def _read_all_docs(insp_dir: str, zones_a: List[dict], zones_b: List[dict],
             raise ValueError(
                 "มีโซนของไฟล์อ้างอิง (ชิ้นงาน) แต่ยังไม่ได้แนบไฟล์อ้างอิง — "
                 "แนบไฟล์อ้างอิง หรือลบโซนเหล่านั้นก่อนส่งตรวจ")
-        results += ocr.read_all_zones(ArtworkDocument(src_b), zones_b,
-                                      page_auto=auto_rotate)
+        docs["b"] = ArtworkDocument(src_b)
+        results += ocr.read_all_zones(docs["b"], zones_b,
+                                      page_auto=auto_rotate,
+                                      force_ocr=force_ocr)
+    if not force_ocr and config.OCR_GROUP_ENGINE_CONSISTENCY:
+        results = _unify_group_engines(docs, zones_a + zones_b, results,
+                                       auto_rotate)
     return results
 
 
+def _unify_group_engines(docs: dict, zone_list: List[dict],
+                         results: List[dict],
+                         auto_rotate: bool) -> List[dict]:
+    """อ่านโซนที่ใช้ text layer ซ้ำด้วย OCR เมื่อกลุ่มของมัน engine ปนกัน.
+
+    เปิดด้วย ``OCR_GROUP_ENGINE_CONSISTENCY`` เท่านั้น (default ปิด).
+
+    ⚠️ กติกาสำคัญ: **ถ้าอ่านซ้ำแล้วได้ผลที่แย่กว่าเดิม (error หรือข้อความ
+    ว่าง) ให้เก็บผลจาก text layer ไว้เหมือนเดิม** — การทิ้งข้อความที่เป๊ะ
+    100% ไปแลกกับ "อ่านไม่ได้" คือการทำให้แย่ลง ไม่ใช่ทำให้สม่ำเสมอ
+    """
+    if not ocr.is_ocr_available():
+        return results
+    mixed = set(checks.engine_mix_groups(zone_list, results))
+    if not mixed:
+        return results
+    by_id = {z["id"]: z for z in zone_list}
+    out = []
+    for r in results:
+        z = by_id.get(r["zone_id"])
+        g = (z.get("group") or "").strip() if z else ""
+        if not z or g not in mixed or r.get("engine") != "pdf-text":
+            out.append(r)
+            continue
+        doc = docs.get("b" if z.get("doc") == "b" else "a")
+        if doc is None:
+            out.append(r)
+            continue
+        again = ocr.read_zone(doc, z, page_auto=auto_rotate, force_ocr=True)
+        if again.get("error") or not (again.get("text") or "").strip():
+            # อ่านซ้ำไม่สำเร็จ — คงข้อความเดิมของ text layer ไว้ แล้วบอกไว้
+            r = dict(r)
+            r["note"] = " · ".join(x for x in (
+                r.get("note"),
+                "พยายามอ่านซ้ำด้วย OCR เพื่อให้ engine ตรงกันทั้งกลุ่ม %s "
+                "แต่ไม่สำเร็จ — ใช้ค่าจาก text layer ตามเดิม" % g) if x)
+            logger.warning("[artwork] zone %s: group-engine re-read failed, "
+                           "keeping pdf-text", r["zone_id"])
+            out.append(r)
+            continue
+        again["note"] = " · ".join(x for x in (
+            again.get("note"),
+            "อ่านซ้ำด้วย OCR เพื่อให้เทียบกับโซนอื่นในกลุ่ม %s ด้วย engine "
+            "เดียวกัน" % g) if x)
+        logger.info("[artwork] zone %s: re-read with OCR for group %s "
+                    "engine consistency", again["zone_id"], g)
+        out.append(again)
+    return out
+
+
 def run_inspection(rec_id: str, zone_list: List[dict],
-                   brand: str = "", auto_rotate: bool = False) -> dict:
+                   brand: str = "", auto_rotate: bool = False,
+                   force_ocr: bool = False) -> dict:
     d = report.inspection_dir(rec_id)
     src = _find_source(d)
     zone_list = zones_mod.sanitize_zones(zone_list)
     zones_a, zones_b = _split_docs(zone_list)
 
     t0 = time.time()
-    ocr_results = _read_all_docs(d, zones_a, zones_b, auto_rotate=auto_rotate)
+    ocr_results = _read_all_docs(d, zones_a, zones_b, auto_rotate=auto_rotate,
+                                 force_ocr=force_ocr)
     # Record the concrete angle actually applied back onto each OCR'd zone
     # so the saved report, overlay crops and OCR-review show what OCR read.
     # (ignore-type zones are not OCR'd → left as the user set them.)
@@ -258,6 +318,9 @@ def run_inspection(rec_id: str, zone_list: List[dict],
         # ได้ defects แล้ว จึงไม่มีทางกระทบ verdict/การนับ. ต้องมีเพราะ
         # PASS ไม่ได้แปลว่าตรวจครบ (ดู checks.check_coverage)
         "coverage": checks.check_coverage(zone_list, ocr_results),
+        # อ่านทั้งใบด้วย OCR ตามที่ผู้ใช้สั่งหรือไม่ — บันทึกไว้เพื่อให้อ่าน
+        # รายงานย้อนหลังแล้วรู้ว่าข้อความมาจากเส้นทางไหน
+        "force_ocr": bool(force_ocr),
     }
     if zones_b:
         # Cross-file compare was used — the report page shows both docs.
@@ -298,26 +361,36 @@ def _ocr_fingerprint() -> dict:
         "garbled": bool(config.PDFTEXT_GARBLED_CHECK),
         "garbled_tokens": config.PDFTEXT_GARBLED_MIN_TOKENS,
         "garbled_ratio": config.PDFTEXT_GARBLED_RATIO,
+        # ด่านอักขระต้องห้าม — เปลี่ยนค่าแล้วโซนที่เคยใช้ text layer อาจ
+        # ตกไปใช้ OCR (หรือกลับกัน) ⇒ ข้อความที่ได้เปลี่ยน ⇒ cache ต้องหลุด
+        "bad_glyph": bool(config.PDFTEXT_BAD_GLYPH_CHECK),
+        "bad_glyph_min": config.PDFTEXT_BAD_GLYPH_MIN_COUNT,
+        # engine consistency ต่อกลุ่ม — เปลี่ยนแล้วบางโซนถูกอ่านซ้ำด้วย OCR
+        "group_engine": bool(config.OCR_GROUP_ENGINE_CONSISTENCY),
     }
 
 
-def _zones_signature(zone_list: List[dict], auto_rotate: bool = False) -> str:
+def _zones_signature(zone_list: List[dict], auto_rotate: bool = False,
+                     force_ocr: bool = False) -> str:
     """Stable hash of the zone layout (id/type/group/bbox/doc/rotate), the
-    page auto-rotate flag, AND the OCR settings that decide what the text
-    acquisition step will produce — so a repeated translate request reuses
-    the cached OCR only when nothing that changes the OCR input has changed."""
+    page auto-rotate flag, the force-OCR flag, AND the OCR settings that
+    decide what the text acquisition step will produce — so a repeated
+    translate request reuses the cached OCR only when nothing that changes
+    the OCR input has changed."""
     sig = [{k: z.get(k) for k in ("id", "type", "group", "bbox", "doc",
                                   "rotate")}
            for z in zone_list]
     return hashlib.sha1(
         json.dumps({"z": sig, "auto": bool(auto_rotate),
+                    "force_ocr": bool(force_ocr),
                     "ocr": _ocr_fingerprint()},
                    sort_keys=True, ensure_ascii=False).encode("utf-8")
     ).hexdigest()
 
 
 def _load_ocr_cache(insp_dir: str, zone_list: List[dict],
-                    auto_rotate: bool = False) -> Optional[List[dict]]:
+                    auto_rotate: bool = False,
+                    force_ocr: bool = False) -> Optional[List[dict]]:
     p = os.path.join(insp_dir, _OCR_ONLY_CACHE)
     if not os.path.exists(p):
         return None
@@ -326,17 +399,19 @@ def _load_ocr_cache(insp_dir: str, zone_list: List[dict],
             data = json.load(f)
     except (ValueError, OSError):
         return None
-    if data.get("sig") != _zones_signature(zone_list, auto_rotate):
+    if data.get("sig") != _zones_signature(zone_list, auto_rotate, force_ocr):
         return None          # zones/flag changed → cache stale
     return data.get("ocr")
 
 
 def _save_ocr_cache(insp_dir: str, zone_list: List[dict],
-                    ocr_results: List[dict], auto_rotate: bool = False) -> None:
+                    ocr_results: List[dict], auto_rotate: bool = False,
+                    force_ocr: bool = False) -> None:
     try:
         with open(os.path.join(insp_dir, _OCR_ONLY_CACHE), "w",
                   encoding="utf-8") as f:
-            json.dump({"sig": _zones_signature(zone_list, auto_rotate),
+            json.dump({"sig": _zones_signature(zone_list, auto_rotate,
+                                               force_ocr),
                        "ocr": ocr_results},
                       f, ensure_ascii=False, indent=2)
     except OSError as e:
@@ -456,7 +531,8 @@ def pixdiff_zone_png(rec_id: str, zone_id: str) -> Optional[bytes]:
 
 
 def run_ocr_only(rec_id: str, zone_list: List[dict],
-                 auto_rotate: bool = False) -> Tuple[List[dict], List[dict]]:
+                 auto_rotate: bool = False,
+                 force_ocr: bool = False) -> Tuple[List[dict], List[dict]]:
     """
     Acquire per-zone text only (PDF text layer or N8N OCR) for the advisory
     translate tab, WITHOUT running any check layer or touching report.json /
@@ -469,13 +545,14 @@ def run_ocr_only(rec_id: str, zone_list: List[dict],
         raise FileNotFoundError("ไม่พบรายการอัปโหลดนี้")
     zone_list = zones_mod.sanitize_zones(zone_list)
 
-    cached = _load_ocr_cache(d, zone_list, auto_rotate)
+    cached = _load_ocr_cache(d, zone_list, auto_rotate, force_ocr)
     if cached is not None:
         return zone_list, cached
 
     zones_a, zones_b = _split_docs(zone_list)
-    ocr_results = _read_all_docs(d, zones_a, zones_b, auto_rotate=auto_rotate)
-    _save_ocr_cache(d, zone_list, ocr_results, auto_rotate)
+    ocr_results = _read_all_docs(d, zones_a, zones_b, auto_rotate=auto_rotate,
+                                 force_ocr=force_ocr)
+    _save_ocr_cache(d, zone_list, ocr_results, auto_rotate, force_ocr)
     logger.info("[artwork] ocr-only %s zones=%d", rec_id, len(zone_list))
     return zone_list, ocr_results
 

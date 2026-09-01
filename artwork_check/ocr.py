@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import logging
 import re
+import unicodedata
 from typing import List
 
 from inspectors import vertex_client   # read-only reuse of the dispatcher
@@ -57,27 +58,107 @@ def _malformed(tok: str) -> bool:
     return bool(head) and any(c.isdigit() for c in head)
 
 
+# ── ด่านที่ 2: อักขระที่ "เป็นไปไม่ได้ในข้อความจริง" ────────────────────
+# ลายเซ็นของ ToUnicode CMap พัง ไม่ได้มีแบบเดียว: ฟอนต์ subset คนละตัวจะ
+# คายขยะออกมาคนละหน้าตา บางตัวได้ตัวเลขแทรกกลางคำ (ด่าน ratio ข้างบนจับ
+# ได้) บางตัวได้อักขระควบคุม/Private-Use ปนมา ซึ่งด่าน ratio จับไม่ได้เลย
+# เพราะ token นั้นอาจไม่มีตัวเลขสักตัว (เคสจริง: ไฟล์ A4 ของ Cosma).
+#
+# อักขระในกลุ่มนี้ไม่มีเหตุผลใดที่จะปรากฏในข้อความที่พิมพ์บนฉลาก ⇒ เจอ
+# แม้แต่ตัวเดียวก็ตัดสินได้ ไม่ต้องอาศัยสัดส่วน/จำนวนคำขั้นต่ำ.
+#
+#   Cc = อักขระควบคุม (\x04, \x8c)   Co = Private Use Area
+#   Cs = surrogate                   Cn = ยังไม่ถูกกำหนดใน Unicode
+#   U+FFFD = REPLACEMENT CHARACTER (ร่องรอยการถอดรหัสล้มเหลว)
+#
+# ⚠️ **ห้ามใส่ "Cf" (format) เข้าไปเด็ดขาด** — ZWJ/ZWNJ/RLM/LRM เป็นของ
+#    ปกติในข้อความอาหรับ/ฮีบรู ถ้าใส่จะฟ้องผิดทุกฉลากที่มีภาษาเหล่านั้น
+_BAD_CATEGORIES = frozenset(("Cc", "Co", "Cs", "Cn"))
+_REPLACEMENT_CHAR = "�"
+# อักขระควบคุมที่เป็น "ช่องว่าง" ตามปกติของข้อความ — ไม่ใช่ร่องรอยความเสียหาย
+_ALLOWED_CONTROL = "\t\n\r\f\v"
+
+
+def bad_glyph_count(text: str) -> int:
+    """จำนวนอักขระที่ "ไม่มีทางเป็นข้อความจริง" ใน ``text`` (นับทุกครั้งที่พบ)."""
+    if not text:
+        return 0
+    n = 0
+    for ch in text:
+        if ch in _ALLOWED_CONTROL:
+            continue
+        if ch == _REPLACEMENT_CHAR or \
+                unicodedata.category(ch) in _BAD_CATEGORIES:
+            n += 1
+    return n
+
+
+def _bad_glyph_sample(text: str, limit: int = 4) -> str:
+    """ตัวอย่างอักขระต้องห้ามที่พบ เป็นรหัส U+XXXX (ไม่ซ้ำ, เรียงตามที่พบ) —
+    ใส่ไว้ในข้อความอธิบายเพื่อให้ผู้ใช้/คนดูแลระบบไล่ต่อได้ว่าเจออะไร."""
+    seen, out = set(), []
+    for ch in text or "":
+        if ch in _ALLOWED_CONTROL or ch in seen:
+            continue
+        if ch == _REPLACEMENT_CHAR or \
+                unicodedata.category(ch) in _BAD_CATEGORIES:
+            seen.add(ch)
+            out.append("U+%04X" % ord(ch))
+            if len(out) >= limit:
+                break
+    return ", ".join(out)
+
+
+def text_has_bad_glyphs(text: str, min_count: int = None) -> bool:
+    """True เมื่อพบอักขระต้องห้ามอย่างน้อย ``min_count`` ตัว."""
+    mc = (config.PDFTEXT_BAD_GLYPH_MIN_COUNT if min_count is None
+          else min_count)
+    return bad_glyph_count(text) >= max(1, mc)
+
+
+def garbled_reason(text: str,
+                   min_tokens: int = None,
+                   ratio: float = None) -> str:
+    """เหตุผลว่าทำไม text layer นี้ใช้ไม่ได้ — ``""`` = ใช้ได้.
+
+    คืน "เหตุผล" ไม่ใช่แค่ True/False เพราะสองด่านนี้เกิดจากคนละอาการและ
+    ผู้ใช้ต้องไล่ต่อคนละทาง (ฟอนต์คายอักขระต้องห้าม vs คำผิดรูปทั้งบล็อก).
+    """
+    if not text:                      # None / "" — กันพังแทนที่จะเชื่อว่าเป็น str
+        return ""
+    if config.PDFTEXT_BAD_GLYPH_CHECK and text_has_bad_glyphs(text):
+        return ("text layer ของโซนนี้มีอักขระที่เป็นไปไม่ได้ในข้อความจริง "
+                "(%s) — ฟอนต์ในไฟล์แมปอักขระกลับเป็น Unicode ไม่ได้ "
+                "จึงไม่ใช้ค่าจาก PDF" % _bad_glyph_sample(text))
+    mt = config.PDFTEXT_GARBLED_MIN_TOKENS if min_tokens is None else min_tokens
+    rt = config.PDFTEXT_GARBLED_RATIO if ratio is None else ratio
+    toks = _long_tokens(text)
+    if len(toks) < max(1, mt):
+        return ""
+    bad = sum(1 for t in toks if _malformed(t))
+    if (bad / float(len(toks))) >= rt:
+        return ("text layer ของโซนนี้อ่านออกมาเป็นคำผิดรูป "
+                "(ฟอนต์ในไฟล์แมปอักขระผิด) จึงไม่ใช้ค่าจาก PDF")
+    return ""
+
+
 def text_looks_garbled(text: str,
                        min_tokens: int = None,
                        ratio: float = None) -> bool:
     """True เมื่อข้อความจาก text layer หน้าตาเหมือน "ฟอนต์แมปอักขระผิด".
 
-    ตัดสินเฉพาะบล็อกที่มีคำยาวมากพอ (``min_tokens``) — แถบรหัสงานพิมพ์มีคำ
-    แบบนั้นไม่กี่คำจึงไม่ถูกตัดสิน. วัดกับไฟล์จริง 35 บล็อก: ฟ้องผิด 0.
+    สองด่านที่เป็นอิสระจากกัน (ผ่านทั้งคู่ = ใช้ได้):
+      ① **อักขระต้องห้าม** (control / PUA / surrogate / unassigned / U+FFFD)
+         — เจอตัวเดียวก็พอ ไม่ต้องมีคำยาวขั้นต่ำ
+      ② **สัดส่วนคำผิดรูป** (ตัวเลขแทรกกลางคำ) — ตัดสินเฉพาะบล็อกที่มีคำยาว
+         มากพอ (``min_tokens``) เพราะแถบรหัสงานพิมพ์มีคำแบบนั้นไม่กี่คำ.
+         วัดกับไฟล์จริง 35 บล็อก: ฟ้องผิด 0.
     """
-    mt = config.PDFTEXT_GARBLED_MIN_TOKENS if min_tokens is None else min_tokens
-    rt = config.PDFTEXT_GARBLED_RATIO if ratio is None else ratio
-    if not text:                      # None / "" — กันพังแทนที่จะเชื่อว่าเป็น str
-        return False
-    toks = _long_tokens(text)
-    if len(toks) < max(1, mt):
-        return False
-    bad = sum(1 for t in toks if _malformed(t))
-    return (bad / float(len(toks))) >= rt
+    return bool(garbled_reason(text, min_tokens=min_tokens, ratio=ratio))
 
 
 def read_zone(doc: ArtworkDocument, zone: dict,
-              page_auto: bool = False) -> dict:
+              page_auto: bool = False, force_ocr: bool = False) -> dict:
     """
     Returns:
         {
@@ -93,22 +174,37 @@ def read_zone(doc: ArtworkDocument, zone: dict,
     zones whose ``rotate`` is "default". Rotation applies to the IMAGE
     OCR path only — a zone read from the PDF text layer keeps rotate 0
     (embedded text already carries reading order).
+
+    ``force_ocr`` ข้ามชั้น text layer ทั้งหมดแล้วอ่านจากภาพเสมอ — ใช้เมื่อ
+    ผู้ใช้รู้ว่าไฟล์นี้ฟอนต์พัง หรือเมื่อต้องการให้ทุกโซนในกลุ่มเดียวกันมา
+    จาก engine เดียวกัน. **ถ้าไม่มี OCR backend ให้ใช้ จะไม่บังคับ** — ถอย
+    ไปใช้ text layer ตามเดิมพร้อมโน้ตบอกเหตุผล ดีกว่าทิ้งข้อความที่อ่านได้
+    อยู่แล้วไปแลกกับ UNREADABLE.
     """
     bbox = zone["bbox"]
+    forced = bool(force_ocr) and vertex_client.is_enabled()
+    force_note = ""
+    if force_ocr and not forced:
+        force_note = ("สั่งให้ใช้ OCR แทน text layer แต่ไม่มี OCR backend "
+                      "ให้ใช้ — ใช้ค่าจาก text layer ตามเดิม")
 
-    embedded = doc.embedded_text(bbox)
+    embedded = "" if forced else doc.embedded_text(bbox)
     garbled = ""
     if len(embedded) >= config.EMBEDDED_TEXT_MIN_CHARS:
-        if config.PDFTEXT_GARBLED_CHECK and text_looks_garbled(embedded):
+        reason = (garbled_reason(embedded) if config.PDFTEXT_GARBLED_CHECK
+                  else "")
+        if reason:
             # text layer มีข้อความ "พอ" แต่ใช้ไม่ได้ (ฟอนต์แมปอักขระผิด).
             # ห้ามส่งต่อด้วย conf 1.0 — ตกไปอ่านจากภาพจริงแทน.
-            garbled = ("text layer ของโซนนี้อ่านออกมาเป็นคำผิดรูป "
-                       "(ฟอนต์ในไฟล์แมปอักขระผิด) จึงไม่ใช้ค่าจาก PDF")
+            garbled = reason
             logger.warning("[artwork] zone %s: text layer garbled (%d chars) "
                            "-> fall back to OCR", zone["id"], len(embedded))
         else:
-            return {"zone_id": zone["id"], "text": embedded,
-                    "engine": "pdf-text", "conf": 1.0, "rotate": 0}
+            out = {"zone_id": zone["id"], "text": embedded,
+                   "engine": "pdf-text", "conf": 1.0, "rotate": 0}
+            if force_note:
+                out["note"] = force_note
+            return out
 
     if not vertex_client.is_enabled():
         if garbled:
@@ -183,6 +279,13 @@ def read_zone(doc: ArtworkDocument, zone: dict,
         # ไม่ใช่ error (OCR อ่านสำเร็จ) แต่ผู้ตรวจควรรู้.
         # ต่อท้าย ไม่ทับ — โซนหนึ่งเจอได้ทั้งสองอย่างพร้อมกัน
         out["note"] = " · ".join(x for x in (garbled, out.get("note")) if x)
+    if forced:
+        # โซนนี้อาจมี text layer ที่ใช้ได้อยู่ แต่ถูกสั่งให้อ่านจากภาพแทน —
+        # ต้องบอกไว้ ไม่งั้นผู้ตรวจจะไม่รู้ว่าข้อความที่เห็นมาจาก OCR
+        out["forced_ocr"] = True
+        out["note"] = " · ".join(
+            x for x in ("อ่านด้วย OCR ตามที่สั่ง (ข้ามชั้น text layer)",
+                        out.get("note")) if x)
     return out
 
 
@@ -216,12 +319,13 @@ def _render_for_ocr(doc: ArtworkDocument, bbox):
 
 
 def read_all_zones(doc: ArtworkDocument, zones: List[dict],
-                   page_auto: bool = False) -> List[dict]:
+                   page_auto: bool = False,
+                   force_ocr: bool = False) -> List[dict]:
     out = []
     for z in zones:
         if z.get("type") == "ignore":
             continue
-        r = read_zone(doc, z, page_auto=page_auto)
+        r = read_zone(doc, z, page_auto=page_auto, force_ocr=force_ocr)
         logger.info("[artwork] zone %s engine=%s rot=%d chars=%d%s",
                     z["id"], r["engine"], r.get("rotate", 0), len(r["text"]),
                     f" ERROR={r['error']}" if r.get("error") else "")

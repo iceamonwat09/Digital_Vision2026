@@ -186,9 +186,13 @@ def api_inspect(rec_id):
         return jsonify({"error": f"โซนไม่ถูกต้อง: {e}"}), 400
     brand = str(body.get("brand", "")).strip()[:60]
     auto_rotate = bool(body.get("auto_rotate"))
+    # ผู้ใช้สั่งข้ามชั้น text layer แล้วอ่านทุกโซนด้วย OCR (ช่องติ๊กบนหน้าเว็บ)
+    # — ใช้กับไฟล์ที่ฟอนต์ subset แมปอักขระผิดจนข้อความใน PDF เชื่อไม่ได้
+    force_ocr = bool(body.get("force_ocr"))
     try:
         rep = pipeline.run_inspection(rec_id, zone_list, brand=brand,
-                                      auto_rotate=auto_rotate)
+                                      auto_rotate=auto_rotate,
+                                      force_ocr=force_ocr)
     except (ValueError, FileNotFoundError) as e:
         return jsonify({"error": str(e)}), 404
     except Exception as e:
@@ -422,9 +426,11 @@ def api_translate(rec_id):
             }), 400
         brand = str(body.get("brand", "")).strip()[:60]
         auto_rotate = bool(body.get("auto_rotate"))
+        force_ocr = bool(body.get("force_ocr"))
         try:
             zone_list, ocr_results = pipeline.run_ocr_only(
-                rec_id, zone_list, auto_rotate=auto_rotate)
+                rec_id, zone_list, auto_rotate=auto_rotate,
+                force_ocr=force_ocr)
         except (ValueError, FileNotFoundError) as e:
             return jsonify({"error": str(e)}), 404
         except Exception as e:

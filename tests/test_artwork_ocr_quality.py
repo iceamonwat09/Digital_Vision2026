@@ -172,6 +172,142 @@ def test_short_text_is_never_judged():
     assert ocr.text_looks_garbled("PR3374Y0KOI ROL12SSAL") is False
 
 
+# ── B2. ด่านอักขระต้องห้าม (control / PUA / U+FFFD) ──────────────────
+#
+# ที่มา: ไฟล์จริง 2 ฉบับของงานเดียวกัน (Cosma Schlemmerbox) — เนื้อหาเดียวกัน
+# เป๊ะ ฟอนต์ชื่อเดียวกัน (DINPro-Bold) แต่ subset คนละชุด:
+#   Original : "DOPLŇKOVÉ KRMIVO PRO DOSPĚLÉ KOČKY"   ← text layer ถูกต้อง
+#   ฉบับ A4  : "(340ĊKOVÉ KRMIVO PR3\x04(374Ý0\x8c…"  ← ToUnicode CMap พัง
+# ด่าน ratio เดิม **ไม่ฟ้อง** เคสนี้ (คำผิดรูป 2/14 = 14.3% < 30%) และหนึ่งใน
+# คำที่พังไม่มีตัวเลขเลยจึงไม่มีทางถูกจับด้วยกฎ "ตัวเลขกลางคำ" ไม่ว่าจะตั้ง
+# ratio ต่ำแค่ไหน ⇒ ต้องมีด่านที่ดูชนิดของอักขระแทน
+
+# ข้อความจริงที่ดึงจากไฟล์ A4 ด้วย PyMuPDF (ตัดมา 450 ตัวอักษรแรกของโซน)
+REAL_BROKEN_ZONE = (
+    "odzin. Zapewnić dostęp do świeżej wody.\n"
+    "(340ĊKOVÉ KRMIVO PR3\x04(374Ý0\x8c\x04KOÏ/=\n"
+    "PEGMJMGOÀ\x04XYċ¤O\x04Z\x04ŁIlé. SLOŽENÍ: pacifický tuňák (47,8 %), "
+    "rýže (1,0 %), chlorid \n"
+    "draselný, vývar (50,2 %). ANALYTICKÉ SLOŽKY: hrubý protein 13,0 %, "
+    "hrubý \ntuk 0,5 %, hrubý popel 1,5 %, hrubá vláknina 0,1 %, "
+    "vlhkost 84,0 %.\n"
+)
+# ข้อความจริงจากไฟล์ Original (เนื้อหาเดียวกัน แต่ฟอนต์แมปถูก)
+REAL_CLEAN_ZONE = (
+    "odzin. Zapewnić dostęp do świeżej wody.\n"
+    "DOPLŇKOVÉ KRMIVO PRO DOSPĚLÉ KOČKY\n"
+    "Pacifický tuňák v želé. SLOŽENÍ: pacifický tuňák (47,8 %), "
+    "rýže (1,0 %), chlorid \n"
+    "draselný, vývar (50,2 %). ANALYTICKÉ SLOŽKY: hrubý protein 13,0 %, "
+    "hrubý \ntuk 0,5 %, hrubý popel 1,5 %, hrubá vláknina 0,1 %, "
+    "vlhkost 84,0 %.\n"
+)
+
+
+def test_real_broken_file_zone_is_flagged():
+    """เคสที่จุดชนวนงานนี้ — ต้องจับได้."""
+    assert ocr.text_looks_garbled(REAL_BROKEN_ZONE) is True
+
+
+def test_real_clean_file_zone_is_not_flagged():
+    """ไฟล์ที่ฟอนต์ดี (เนื้อหาเดียวกันเป๊ะ) ต้องไม่ถูกฟ้อง."""
+    assert ocr.text_looks_garbled(REAL_CLEAN_ZONE) is False
+
+
+def test_the_gap_this_layer_closes(monkeypatch):
+    """พิสูจน์ว่าด่านเดิมจับเคสนี้ไม่ได้จริง ๆ — ไม่ใช่แค่เพิ่มโค้ดซ้ำซ้อน.
+
+    ถ้าวันหนึ่งมีคนลบด่านอักขระทิ้งแล้วบอกว่า "ด่าน ratio ก็พอ" เทสต์นี้จะแดง
+    """
+    monkeypatch.setattr(config, "PDFTEXT_BAD_GLYPH_CHECK", False)
+    assert ocr.text_looks_garbled(REAL_BROKEN_ZONE) is False, (
+        "ด่าน ratio เดิมไม่เคยจับเคสนี้ได้ — ถ้าเทสต์นี้แดงแปลว่าสมมติฐาน"
+        "ของงานนี้เปลี่ยนไป ต้องอ่านใหม่ก่อนแก้")
+    monkeypatch.setattr(config, "PDFTEXT_BAD_GLYPH_CHECK", True)
+    assert ocr.text_looks_garbled(REAL_BROKEN_ZONE) is True
+
+
+@pytest.mark.parametrize("text,why", [
+    ("PEGMJMGOÀ\x04XYċ¤O\x04Z\x04ŁIlé. SLOŽENÍ", "อักขระควบคุม C0"),
+    ("KRMIVO PR3\x8c(374Ý0 KO", "อักขระควบคุม C1"),
+    ("KOVÉ KRMIVO PR DOSPLÉ", "Private Use Area"),
+    ("DOPL�KOVÉ KRMIVO PR� DOSP�LÉ", "U+FFFD"),
+])
+def test_impossible_characters_are_flagged(text, why):
+    assert ocr.text_looks_garbled(text) is True, why
+
+
+@pytest.mark.parametrize("text,why", [
+    # ⚠️ เคสที่อันตรายที่สุดสำหรับด่านนี้: อักขระจัดทิศทางข้อความ (category
+    # "Cf") เป็นของ *ปกติ* บนฉลากอาหรับ/ฮีบรู ถ้าเผลอรวมเข้าไปจะฟ้องผิดทุกใบ
+    ("‏مكونات: تونة المحيط الهادئ ٤٧٫٨٪ ‎ أرز ‍ ١٫٠٪ مرق",
+     "อาหรับ + RLM/LRM/ZWJ"),
+    ("‎מרכיבים: טונה אוקיינוס שקט 47.8% אורז 1.0% מרק 50.2%",
+     "ฮีบรู + LRM"),
+    ("COMPOSITION : thon du Pacifique (47,8 %), riz (1,0 %), "
+     "chlo­rure de potassium", "NBSP + soft hyphen"),
+    ("成分：太平洋鲣鱼（４７．８％）、米（１．０％）、氯化钾", "จีน + full-width"),
+    ("ส่วนประกอบ: ปลาทูน่า ๔๗.๘% ข้าว ๑.๐% น้ำซุป ๕๐.๒%", "ไทย"),
+    ("♻ PAP 20 · ⌛ 24 ⇒ ✓ NET WT 170 g ± 2 % ™ ® © °C", "สัญลักษณ์บนฉลาก"),
+])
+def test_legitimate_scripts_are_never_flagged(text, why):
+    assert ocr.bad_glyph_count(text) == 0, why
+    assert ocr.text_looks_garbled(text) is False, why
+
+
+def test_tabs_and_newlines_are_not_evidence():
+    """ช่องว่างทุกชนิดเป็นของปกติในข้อความที่สกัดมา ไม่ใช่ร่องรอยความเสียหาย."""
+    assert ocr.bad_glyph_count("A\tB\nC\r\nD\x0cE\x0bF") == 0
+
+
+def test_hard_signal_needs_no_minimum_word_count():
+    """ต่างจากด่าน ratio: ข้อความสั้นที่มีอักขระต้องห้ามก็ตัดสินได้ทันที
+    (ratio ต้องมีคำยาว >= 8 คำถึงจะยอมตัดสิน)."""
+    assert ocr.text_looks_garbled("KO\x04KY") is True
+
+
+def test_bad_glyph_check_can_be_switched_off(monkeypatch):
+    monkeypatch.setattr(config, "PDFTEXT_BAD_GLYPH_CHECK", False)
+    assert ocr.text_looks_garbled("PEGMJMGOÀ\x04XYċ¤O") is False
+
+
+def test_bad_glyph_min_count_is_configurable(monkeypatch):
+    monkeypatch.setattr(config, "PDFTEXT_BAD_GLYPH_MIN_COUNT", 3)
+    assert ocr.text_looks_garbled("KRMIVO PR3\x04 KO") is False   # เจอ 1 ตัว
+    assert ocr.text_looks_garbled("KR\x04MIVO PR3\x04 K\x04O") is True
+
+
+def test_reason_names_the_gate_that_fired():
+    """สองด่านนี้เกิดจากคนละอาการ ผู้ใช้ต้องไล่ต่อคนละทาง ⇒ ข้อความต้องต่างกัน."""
+    glyph = ocr.garbled_reason(REAL_BROKEN_ZONE)
+    ratio = ocr.garbled_reason(GARBLED_TEXTS[0])
+    assert "อักขระที่เป็นไปไม่ได้" in glyph and "U+0004" in glyph
+    assert "คำผิดรูป" in ratio
+    assert ocr.garbled_reason(REAL_CLEAN_ZONE) == ""
+    assert ocr.garbled_reason(None) == "" and ocr.garbled_reason("") == ""
+
+
+def test_control_char_text_layer_falls_back_to_ocr(ocr_on, monkeypatch):
+    """เส้นทางจริง: โซนที่ text layer มีอักขระต้องห้ามต้องไม่ถูกส่งต่อด้วย
+    conf 1.0 แต่ต้องไปอ่านจากภาพแทน."""
+    monkeypatch.setattr(config, "PDFTEXT_GARBLED_CHECK", True)
+    doc = FakeDoc(embedded=REAL_BROKEN_ZONE, first=(1400, 900))
+    r = ocr.read_zone(doc, ZONE)
+    assert r["engine"] == "mock" and r["text"] == "FROM OCR"
+    assert r.get("conf") != 1.0
+    assert "U+0004" in r.get("note", ""), "ต้องบอกหลักฐานไว้ในผล"
+
+
+def test_clean_zone_of_the_same_artwork_still_uses_text_layer(ocr_on,
+                                                              monkeypatch):
+    """ไฟล์พี่น้องกันที่ฟอนต์ดี ต้องไม่เสียความแม่นของ text layer ไปด้วย."""
+    monkeypatch.setattr(config, "PDFTEXT_GARBLED_CHECK", True)
+    doc = FakeDoc(embedded=REAL_CLEAN_ZONE, first=(1400, 900))
+    r = ocr.read_zone(doc, ZONE)
+    assert r["engine"] == "pdf-text" and r["conf"] == 1.0
+    assert doc.calls == []
+
+
 # ── กันพัง: โซนเดียวพังต้องไม่ล้มการตรวจทั้งใบ ───────────────────────
 
 def test_garbled_check_accepts_none():
