@@ -108,6 +108,7 @@ if _HERE not in sys.path:
 
 try:
     from artwork_check import config as aw_config
+    from artwork_check import ocr as aw_ocr
     from artwork_check.pdf_ingest import ArtworkDocument, encode_jpg
 except Exception as e:                 # pragma: no cover
     print("import artwork_check ไม่สำเร็จ (รันสคริปต์นี้ในโฟลเดอร์โปรเจกต์): %s" % e)
@@ -465,6 +466,20 @@ def layer_groundtruth(ad, zones, engines, dpi, verbose):
         truth_w = _words(z["truth"])
         if not truth_w:
             continue
+        # ── เฉลยเองเชื่อไม่ได้ ⇒ ไม่เอามาให้คะแนน ────────────────────────
+        # ใช้ **ตัวตรวจตัวเดียวกับ production** (ocr.garbled_reason): ถ้า
+        # เส้นทางจริงจะไม่ยอมใช้ text layer ของโซนนี้ การเอามันมาเป็น "เฉลย"
+        # ก็ไม่มีความหมาย — และแย่กว่านั้นคือ engine ที่อ่าน *ถูก* จะถูกหัก
+        # คะแนนเพราะไม่ตรงกับขยะ (เคสจริง: ไฟล์ A4 ของ Cosma ที่ฟอนต์
+        # DINPro-Bold แมปอักขระเช็กผิด). นับแยกไว้ แล้วรายงานตอนสรุป
+        bad_truth = aw_ocr.garbled_reason(z["truth"])
+        if bad_truth:
+            z["truth_rejected"] = bad_truth
+            res.setdefault("_rejected_truth", 0)
+            res["_rejected_truth"] += 1
+            print("   โซน %-2d ข้าม — เฉลยจาก text layer ใช้ไม่ได้: %s"
+                  % (i, bad_truth))
+            continue
         nlines = len([l for l in str(z["truth"]).splitlines() if l.strip()])
         line_px = img.shape[0] / float(max(1, nlines))
         too_small = line_px < MIN_LINE_PX
@@ -808,6 +823,16 @@ def main():
                 r = g[e.name]
                 for k in ("gt", "hit", "got", "extra"):
                     totals[e.name][k] += r[k]
+            # เฉลยที่ถูกปฏิเสธ = โซนที่ "วัดไม่ได้" ไม่ใช่ "ผ่าน" — ต้องเห็น
+            # ตรงนี้ ไม่งั้นจะอ่านผลว่า engine ถูกวัดครบทุกโซนทั้งที่ข้ามไป
+            nrej = g.get("_rejected_truth", 0)
+            if nrej:
+                print("    ⚠ ข้าม %d/%d โซน — text layer ของโซนนั้นเสียเอง "
+                      "(ฟอนต์แมปอักขระผิด) จึงใช้เป็นเฉลยไม่ได้"
+                      % (nrej, len(gt_zones)))
+                if nrej >= len(gt_zones):
+                    print("      ⇒ ไฟล์นี้ **ไม่มีเฉลยที่เชื่อได้เลย** — "
+                          "ตัวเลข recall/precision ของไฟล์นี้จึงไม่มีความหมาย")
         else:
             print("[2] GROUND TRUTH  ข้าม — ไฟล์นี้ไม่มี text block "
                   "ที่ยาวพอ (outline ทั้งใบ)")

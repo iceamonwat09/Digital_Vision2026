@@ -33,7 +33,8 @@ def _read(p):
 #: ⚠️ เดิมสแกนแค่ body ของ ``renderReport`` ⇒ คลาสของ ``coverageHtml``
 #: (``.aw-cov*``) หลุดการตรวจทั้งที่เป็นเคสที่ทำให้เขียนเทสต์นี้ตั้งแต่แรก
 _HELPERS = [
-    ("  function coverageHtml(cov) {", "  window.awCoverageHtml = coverageHtml;"),
+    ("  function coverageHtml(cov, fontTrust) {",
+     "  window.awCoverageHtml = coverageHtml;"),
     ("  function pixdiffHtml(pd, recId) {", "  window.awPixdiffHtml = pixdiffHtml;"),
 ]
 

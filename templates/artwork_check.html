@@ -458,6 +458,19 @@
           ปิด = ทุกโซนเหมือนเดิม (ไม่หมุน) · คลิก <b>↻</b> มุมบนขวาของโซนเพื่อตั้งเอง</span>
       </div>
 
+      <!-- ข้ามชั้น text layer ของ PDF แล้วอ่านทุกโซนด้วย OCR — สำหรับไฟล์ที่
+           ฟอนต์ subset แมปอักขระกลับเป็น Unicode ผิด (ข้อความใน PDF เชื่อไม่ได้
+           ทั้งที่ภาพพิมพ์ถูก). ระบบจับเคสแบบนี้ได้เองอยู่แล้วรายโซน — ช่องนี้
+           คือทางลัดเมื่อผู้ใช้รู้ว่าทั้งไฟล์เชื่อไม่ได้ -->
+      <div class="aw-row" style="margin-top:6px;">
+        <label class="aw-rotate-mode" title="ปิด (แนะนำ) = ใช้ข้อความจาก PDF เมื่อมีและตรวจสอบคุณภาพให้อัตโนมัติ · เปิด = อ่านทุกโซนจากภาพด้วย OCR (ช้ากว่า ใช้โควตา Gemini และแม่นน้อยกว่า text layer)">
+          <input type="checkbox" id="awForceOcr"> 🔍 อ่านทุกโซนด้วย OCR (ข้ามข้อความใน PDF)
+        </label>
+        <span class="aw-rotate-hint" style="font-size:12px;color:#78909c;">
+          ปิด = เหมือนเดิม (ใช้ข้อความใน PDF เมื่อเชื่อถือได้ = แม่นกว่าและเร็วกว่า) ·
+          เปิดเมื่อไฟล์นั้น <b>ฟอนต์พัง</b> จนข้อความใน PDF ใช้ไม่ได้ทั้งใบ</span>
+      </div>
+
       <div id="awProps" class="aw-props" style="display:none;">
         <b>โซนที่เลือก: <span id="awPropId"></span></b>
         <span id="awPropDoc" class="aw-doc-badge doc-a" style="display:none;"></span>
