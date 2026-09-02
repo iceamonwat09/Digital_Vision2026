@@ -900,6 +900,17 @@ def check_coverage(zones: List[dict], ocr_results: List[dict]) -> dict:
 
     n_read = len([z for z in active if readable(z)])
     spell_ok = bool(spell_layer_available())
+    # ⚠️ ต้องสะท้อนเงื่อนไขใน ``run_all_checks`` เป๊ะ — ถ้าชั้นนี้ถูกปิดแล้ว
+    # ยังรายงานว่า "ทำงาน" คือคำตอบที่ผิดแบบมั่นใจ (กฎเหล็กข้อ 2) และเป็น
+    # กับดักเดียวกับที่ docstring ของฟังก์ชันนี้เตือนไว้เอง
+    if not config.INSPECT_SPELL_LAYER:
+        spelling = {"ran": False, "zones": n_read,
+                    "reason": "moved_to_translate"}
+    else:
+        spelling = {"ran": spell_ok and n_read > 0, "zones": n_read,
+                    "reason": ("ok" if spell_ok and n_read
+                               else ("spellchecker_missing" if not spell_ok
+                                     else "no_readable_zone"))}
     # กลุ่มที่เทียบข้าม engine (text layer ปนกับ OCR) — ความต่างที่เห็นอาจ
     # มาจาก "วิธีอ่าน" ไม่ใช่ "งานพิมพ์". advisory ล้วน ไม่แตะ defects
     mixed = engine_mix_groups(zones, ocr_results)
@@ -911,10 +922,7 @@ def check_coverage(zones: List[dict], ocr_results: List[dict]) -> dict:
         # มีข้อความให้ตรวจจริง (โซนที่อ่านไม่ออกจะขึ้น UNREADABLE อยู่แล้ว)
         "numbers": {"ran": n_read > 0, "zones": n_read,
                     "reason": "ok" if n_read else "no_readable_zone"},
-        "spelling": {"ran": spell_ok and n_read > 0, "zones": n_read,
-                     "reason": ("ok" if spell_ok and n_read
-                                else ("spellchecker_missing" if not spell_ok
-                                      else "no_readable_zone"))},
+        "spelling": spelling,
         "zones_total": len(active),
         "zones_readable": n_read,
     }
@@ -929,7 +937,13 @@ def run_all_checks(zones: List[dict], ocr_results: List[dict],
     defects: List[dict] = []
     defects += check_group_consistency(zones, texts)
     defects += check_numbers(zones, texts)
-    defects += check_spelling(zones, texts, vocab_words=vocab_words)
+    # ชั้น dictionary ย้ายไปอยู่ที่แท็บ "ข้อความ + คำแปล" เท่านั้น (default) —
+    # ปุ่มส่งตรวจตอบเรื่อง "สองไฟล์/สองแผงเหมือนกันไหม" ไม่ใช่เรื่องการสะกด.
+    # ⚠️ ``check_spelling`` **ยังต้องอยู่** เพราะแท็บแปลและเทสต์เรียกใช้ตรง ๆ
+    # (แท็บแปลมี spell pass ของตัวเองผ่าน ``_get_spellcheckers`` ⇒ การปิดตรงนี้
+    #  ไม่กระทบตารางแปลแม้แต่แถวเดียว)
+    if config.INSPECT_SPELL_LAYER:
+        defects += check_spelling(zones, texts, vocab_words=vocab_words)
     defects += check_phrases(zones, texts, vocab_phrases or [])
     defects += check_readability(zones, ocr_results)
     return defects

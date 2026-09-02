@@ -107,7 +107,10 @@ def _ownership_guard():
 
 @artwork_bp.route("/artwork_check")
 def artwork_page():
-    return render_template("artwork_check.html")
+    # ``pixdiff_ui`` = แสดงปุ่ม "🔍 เทียบภาพเก่า/ใหม่" หรือไม่ (default: ซ่อน).
+    # ปุ่มยังอยู่ใน DOM เสมอ แค่ถูกซ่อนด้วย CSS — ดูเหตุผลที่ config.PIXDIFF_UI
+    return render_template("artwork_check.html",
+                           pixdiff_ui=config.PIXDIFF_UI)
 
 
 @artwork_bp.route("/artwork_check/history")

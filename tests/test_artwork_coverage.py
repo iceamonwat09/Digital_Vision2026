@@ -14,7 +14,7 @@ import itertools
 
 import pytest
 
-from artwork_check import checks
+from artwork_check import checks, config
 
 
 PANEL = "ALPHA BRAVO CHARLIE\nNET WEIGHT 170 G\nMADE IN THAILAND"
@@ -121,10 +121,23 @@ def test_numbers_layer_needs_readable_text():
 
 
 def test_spelling_reports_missing_library(monkeypatch):
+    """ต้องเปิด ``INSPECT_SPELL_LAYER`` ก่อน — ตั้งแต่ 2 ก.ย. 2026 ปุ่มส่งตรวจ
+    ไม่ตรวจคำสะกดเป็นค่าเริ่มต้น (ย้ายไปแท็บแปล) ⇒ เหตุผลเริ่มต้นคือ
+    ``moved_to_translate``. สาขา ``spellchecker_missing`` ยังต้องทำงานถูกต้อง
+    เมื่อผู้ใช้เปิด flag กลับมา — คนละเหตุผล คนละวิธีแก้ ห้ามยุบรวมกัน."""
+    monkeypatch.setattr(config, "INSPECT_SPELL_LAYER", True)
     monkeypatch.setattr(checks, "spell_layer_available", lambda: False)
     c = cov([("A", PANEL)])
     assert c["spelling"]["ran"] is False
     assert c["spelling"]["reason"] == "spellchecker_missing"
+
+
+def test_spelling_layer_moved_to_translate_by_default():
+    """ค่าเริ่มต้น: รายงานต้องบอกตรง ๆ ว่าชั้นนี้ไม่ได้ทำงานที่ปุ่มนี้แล้ว —
+    ไม่งั้น ✅ PASS จะถูกอ่านว่า 'ไม่มีคำผิด' ซึ่งไม่จริง (กฎเหล็กข้อ 2)."""
+    c = cov([("A", PANEL)])
+    assert c["spelling"]["ran"] is False
+    assert c["spelling"]["reason"] == "moved_to_translate"
 
 
 def test_zone_counts():
