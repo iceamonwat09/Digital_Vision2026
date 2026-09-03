@@ -846,7 +846,7 @@
       cancelDraw();
       // ไฟล์หลักใหม่ = inspection record ใหม่ → สถานะไฟล์อ้างอิงเดิมหลุด
       // (ถ้าผู้ใช้ยังเลือกไฟล์ 🅱 ค้างไว้ จะผูกกับ record ใหม่ให้อัตโนมัติด้านล่าง)
-      docMeta.a = { w: res.preview_size[0], h: res.preview_size[1],
+      docMeta.a = { w: res.preview_size[0], h: res.preview_size[1], pdf: !!res.is_pdf,
                     url: "/api/artwork/" + inspectionId + "/preview.png?t=" + Date.now() };
       docMeta.b = null;
       refAttached = false;
@@ -897,7 +897,7 @@
       fd.append("file", f);
       const res = await api("/api/artwork/" + inspectionId + "/upload_ref",
                             { method: "POST", body: fd });
-      docMeta.b = { w: res.preview_size[0], h: res.preview_size[1],
+      docMeta.b = { w: res.preview_size[0], h: res.preview_size[1], pdf: !!res.is_pdf,
                     url: "/api/artwork/" + inspectionId + "/preview_b.png?t=" + Date.now() };
       refAttached = true;
       // โซนฝั่ง b ของไฟล์ก่อนหน้า (ถ้ามี) ทิ้ง — ไฟล์เปลี่ยนแล้ว. เริ่มจาก
@@ -1150,9 +1150,13 @@
     // แสดงเฉพาะโซนของไฟล์ที่ stage กำลังแสดง (โหมดไฟล์เดียว = doc a ทั้งหมด)
     zones.filter((z) => docOfZone(z) === activeDoc).forEach((z) => {
       const el = document.createElement("div");
+      // คุณภาพขนาดโซน = วงแหวนรอบนอก (box-shadow) ไม่ใช่สีขอบ — สีขอบถูก
+      // ใช้บอกชนิดโซน/ไฟล์/ถูกเลือกอยู่ไปหมดแล้ว ทับแล้วอ่านไม่ออกทั้งคู่
+      const qz = z.type === "ignore" ? null : zoneQuality(z.bbox);
       el.className = "aw-zone t-" + z.type +
         (docOfZone(z) === "b" ? " doc-b" : "") +
-        (z.id === selectedId ? " selected" : "");
+        (z.id === selectedId ? " selected" : "") +
+        (qz && qz.level !== "ok" ? " q-" + qz.level : "");
       el.dataset.zid = z.id;
       el.style.left = (z.bbox[0] * W) + "px";
       el.style.top = (z.bbox[1] * H) + "px";
@@ -1167,6 +1171,14 @@
       const handle = document.createElement("div");
       handle.className = "aw-handle";
       el.appendChild(handle);
+      if (qz) {
+        const sz = document.createElement("div");
+        sz.className = "aw-zone-size q-" + qz.level;
+        sz.textContent = zoneQualityTag(qz);
+        sz.title = "ความละเอียดที่ OCR จะเห็น ~" + qz.effDpi + " dpi (" +
+                   qz.w + "×" + qz.h + " px · " + qz.tiles + " ไทล์)";
+        el.appendChild(sz);
+      }
       // ชิปหมุน ↻ (มุมบนขวา) — คลิกวนสถานะการหมุนของโซนนี้
       const chip = document.createElement("div");
       const ci = rotChipInfo(z);
@@ -1347,35 +1359,116 @@
       pp.textContent = "";
     }
     renderHlHint(z);
+    renderSizeHint(z);
     updateRotPreview();
   }
 
   // เตือนตั้งแต่ตอนจัดโซน (ก่อนส่งตรวจ) ว่าโซนนี้จะชี้ตำแหน่งคำไม่ได้
   // คำนวณจากเรขาคณิตอย่างเดียว — ต้องให้ผลตรงกับ zones.highlight_risk ฝั่ง
   // เซิร์ฟเวอร์ (ดูค่าคงที่ในไฟล์นั้น)
-  const HL_DPI = 450, HL_MAX_SIDE = 1600, HL_MIN_SIDE = 1200;
+  const HL_MAX_SIDE = 1600, HL_MIN_SIDE = 1200;
   const HL_MIN_SHORT = 700, HL_MAX_ASPECT = 4.0;
-  function predictCrop(bbox, pageW, pageH) {
-    let pw = Math.max(1, bbox[2] * pageW) / 72 * HL_DPI;
-    let ph = Math.max(1, bbox[3] * pageH) / 72 * HL_DPI;
-    let lo = Math.max(pw, ph);
-    if (lo > HL_MAX_SIDE) { const s = HL_MAX_SIDE / lo; pw *= s; ph *= s; }
-    lo = Math.max(pw, ph);
-    if (lo < HL_MIN_SIDE) {
-      const s = Math.min(4, HL_MIN_SIDE / lo); pw *= s; ph *= s;
-      lo = Math.max(pw, ph);
-      if (lo > HL_MAX_SIDE) { const s2 = HL_MAX_SIDE / lo; pw *= s2; ph *= s2; }
-    }
-    return [Math.round(pw), Math.round(ph)];
+
+  // ── ค่าคงที่ที่ต้องตรงกับฝั่ง Python ──────────────────────────────
+  // PREVIEW_DPI/OCR_* มาจาก artwork_check/config.py · GEM_*/ZONE_MAG_OK
+  // มาจาก artwork_check/zones.py — ห้ามแก้ข้างเดียว
+  // (tests/test_artwork_zone_quality.py อ่านไฟล์นี้มาเทียบ)
+  const PREVIEW_DPI = 150, OCR_DPI = 450;
+  const OCR_CROP_MAX_SIDE = 3000, OCR_CROP_MIN_SIDE = 1200;
+  const OCR_DPI_MAX_FACTOR = 4.0;
+  const GEM_SMALL_SIDE = 384, GEM_TILE_DIV = 1.5;
+  const GEM_TILE_MIN = 256, GEM_TILE_MAX = 768;
+  const ZONE_MAG_OK = 1.15;
+
+  // พิกเซลของ crop "ก่อนผ่านเพดาน/การเพิ่ม DPI"
+  // ⚠️ เดิมโค้ดนี้ hard-code ขนาดหน้าเป็น 842 pt (A4 แนวนอน) แล้วเดา
+  //    ความสูงจากสัดส่วนภาพ ⇒ บนงานแผ่นใหญ่ (เช่น 757 mm) คลาด 2.5 เท่า
+  //    ตอนนี้คิดจากขนาด preview จริง ซึ่งเรนเดอร์ที่ PREVIEW_DPI = เป๊ะ
+  // ⚠️ ไฟล์ raster ไม่มี dpi — พิกเซลของ preview คือพิกเซลของไฟล์ต้นทาง
+  //    ตรง ๆ (pdf_ingest.render ไม่สนใจ dpi เมื่อไม่ใช่ PDF)
+  function cropBasePx(bbox, dpi) {
+    const m = docMeta[activeDoc];
+    const w = natW || (previewImg && previewImg.naturalWidth);
+    const h = natH || (previewImg && previewImg.naturalHeight);
+    if (!m || !w || !h || m.pdf === undefined) return null;  // ไม่รู้ = ไม่เดา
+    const k = m.pdf ? (dpi / PREVIEW_DPI) : 1;
+    return [Math.max(1, bbox[2] * w) * k, Math.max(1, bbox[3] * h) * k];
   }
+
+  // เพดานด้านยาว + การเพิ่ม DPI ให้โซนเล็ก — ลำดับเดียวกับฝั่ง Python
+  // คืน [w, h, ตัวคูณ] · ตัวคูณ < 1 = โดนเพดานย่อลง (เสีย dpi จริง)
+  function capBoost(pw, ph, maxSide, minSide) {
+    let scale = 1, lo = Math.max(pw, ph);
+    if (maxSide && lo > maxSide) { scale = maxSide / lo; pw *= scale; ph *= scale; }
+    lo = Math.max(pw, ph);
+    if (minSide && lo < minSide) {
+      const f = Math.min(OCR_DPI_MAX_FACTOR, minSide / lo);
+      pw *= f; ph *= f;
+      lo = Math.max(pw, ph);
+      if (maxSide && lo > maxSide) {
+        const s2 = maxSide / lo; pw *= s2; ph *= s2; scale *= s2;
+      }
+    }
+    return [pw, ph, scale];
+  }
+
+  // กฎการหั่นไทล์ของ Gemini: ภาพที่ด้านใดด้านหนึ่งเกิน 384 px ถูกหั่นเป็น
+  // ไทล์ clamp(min(W,H)/1.5, 256, 768) แล้วทุกไทล์ถูกขยายเป็น 768x768
+  // ⇒ ด้านสั้นยิ่งใหญ่ ยิ่งได้ขยายน้อย และตันที่ 1152 px (= ไม่ขยายเลย)
+  function gemTiling(w, h) {
+    if (w <= GEM_SMALL_SIDE && h <= GEM_SMALL_SIDE) return [1, 1];
+    let t = Math.min(w, h) / GEM_TILE_DIV;
+    t = Math.max(GEM_TILE_MIN, Math.min(GEM_TILE_MAX, t));
+    return [Math.ceil(w / t) * Math.ceil(h / t), GEM_TILE_MAX / t];
+  }
+
+  // โซนนี้จะถูกส่งให้ OCR ด้วยความละเอียดที่โมเดล "เห็น" เท่าไร
+  // advisory 100% — ไม่ห้ามวาด ไม่แตะผลตรวจ/verdict/การนับ
+  function zoneQuality(bbox) {
+    if (!bbox || !(bbox[2] > 0) || !(bbox[3] > 0)) return null;
+    const base = cropBasePx(bbox, OCR_DPI);
+    if (!base) return null;
+    const m = docMeta[activeDoc];
+    const r = capBoost(base[0], base[1], OCR_CROP_MAX_SIDE,
+                       m.pdf ? OCR_CROP_MIN_SIDE : 0);
+    const pw = r[0], ph = r[1], scale = r[2];
+    const t = gemTiling(pw, ph), tiles = t[0], mag = t[1];
+    const down = scale < 0.999;
+    const level = (down || mag <= 1.001) ? "bad"
+                : (mag < ZONE_MAG_OK ? "warn" : "ok");
+    let mm = null;
+    if (m.pdf) {
+      const w = natW || previewImg.naturalWidth;
+      const h = natH || previewImg.naturalHeight;
+      mm = [bbox[2] * w / PREVIEW_DPI * 25.4, bbox[3] * h / PREVIEW_DPI * 25.4];
+    }
+    return { level: level, w: Math.round(pw), h: Math.round(ph),
+             tiles: tiles, mag: mag, effDpi: Math.round(OCR_DPI * scale * mag),
+             mm: mm, shortPx: Math.round(Math.min(pw, ph)), downscaled: down };
+  }
+
+  // ป้ายสั้น ๆ ที่ติดบนกรอบตอนลาก/บนโซน
+  // ⚠️ ห้ามอ้างเลข mm ตายตัวเป็นเหตุผล — เกณฑ์จริงคือ "ด้านสั้นของภาพที่
+  //    ส่งจริง" ซึ่งชั้นเพิ่ม DPI ให้โซนเล็กทำให้โซนเกือบจัตุรัสทะลุเกณฑ์
+  //    ได้ทั้งที่ยังเล็กกว่า 65 mm (วัดเจอตอนขับเบราว์เซอร์จริง)
+  function zoneQualityTag(q) {
+    if (!q) return "";
+    const size = q.mm
+      ? q.mm[0].toFixed(0) + "×" + q.mm[1].toFixed(0) + " mm"
+      : q.w + "×" + q.h + " px";
+    if (q.downscaled) return size + " · ใหญ่เกิน ระบบต้องย่อ ✗";
+    if (q.level === "bad") return size + " · ไม่ได้ขยาย ✗";
+    if (q.level === "warn") return size + " · ×" + q.mag.toFixed(2) + " ⚠";
+    return size + " · ×" + q.mag.toFixed(2) + " ✓";
+  }
+
   function renderHlHint(z) {
     const el = $("awHlHint");
     if (!el) return;
-    // ขนาดหน้าเป็นจุด (pt) — ประมาณจากสัดส่วนภาพ preview ที่โหลดมา
-    const img = $("awPreviewImg");
-    if (!z || !img || !img.naturalWidth) { el.style.display = "none"; return; }
-    const pageW = 842, pageH = pageW * (img.naturalHeight / img.naturalWidth);
-    const [pw, ph] = predictCrop(z.bbox, pageW, pageH);
+    const base = z ? cropBasePx(z.bbox, OCR_DPI) : null;
+    if (!base) { el.style.display = "none"; return; }
+    const r = capBoost(base[0], base[1], HL_MAX_SIDE, HL_MIN_SIDE);
+    const pw = r[0], ph = r[1];
     const short = Math.min(pw, ph), aspect = Math.max(pw, ph) / (short || 1);
     if (short >= HL_MIN_SHORT) { el.style.display = "none"; return; }
     el.style.display = "";
@@ -1383,6 +1476,31 @@
       ? "⚠ โซนนี้กว้างมาก — กรอบแดงชี้คำอาจไม่ขึ้น"
       : "⚠ โซนนี้เล็กไป — กรอบแดงชี้คำอาจไม่ขึ้น") +
       " (ผลตรวจไม่กระทบ) ดับเบิลคลิกที่โซนให้ระบบจัดให้พอดี หรือลากใหม่ให้กระชับเฉพาะบล็อกข้อความ";
+  }
+
+  // บรรทัดตัวเลขเต็มในแผง properties (ทำไมโซนนี้ถึงเขียว/เหลือง/แดง)
+  function renderSizeHint(z) {
+    const el = $("awSizeHint");
+    if (!el) return;
+    const q = z ? zoneQuality(z.bbox) : null;
+    if (!q) { el.style.display = "none"; return; }
+    el.style.display = "";
+    el.className = "aw-size-hint q-" + q.level;
+    const head = q.level === "ok" ? "🟢 ขนาดโซนเหมาะกับ OCR"
+               : q.level === "warn" ? "🟡 ขนาดโซนก้ำกึ่ง"
+               : "🔴 ขนาดโซนทำให้ OCR เห็นตัวหนังสือเล็กลง";
+    const limitPx = Math.round(GEM_TILE_MAX * GEM_TILE_DIV);
+    let tip = "";
+    if (q.downscaled)
+      tip = " — โซนใหญ่เกิน " + OCR_CROP_MAX_SIDE +
+            " px ระบบต้องย่อภาพลงก่อนส่ง จึงเสียความละเอียดจริง";
+    else if (q.level !== "ok")
+      tip = " — ด้านสั้นของภาพที่ส่งคือ " + q.shortPx + " px (ตั้งแต่ " +
+            limitPx + " px ขึ้นไป OCR จะไม่ขยายให้เลย) · ลากโซนให้แบนลง" +
+            " คือเตี้ยลงหรือกว้างขึ้น หรือแบ่งเป็นสองโซน";
+    el.textContent = head + tip + " · ภาพที่ส่ง " + q.w + "×" + q.h +
+      " px · " + q.tiles + " ไทล์ · ขยาย ×" + q.mag.toFixed(2) +
+      " · ความละเอียดที่โมเดลเห็น ~" + q.effDpi + " dpi";
   }
   $("awPropType").addEventListener("change", () => {
     const z = selectedZone(); if (z) { z.type = $("awPropType").value; renderZones(); }
@@ -1454,6 +1572,10 @@
     const p = drawPoint(ev);
     draw = { x0: p.x, y0: p.y, el: document.createElement("div") };
     draw.el.className = "aw-drawbox";
+    draw.tag = document.createElement("div");
+    draw.tag.className = "aw-drawbox-tag";
+    draw.tag.style.display = "none";
+    draw.el.appendChild(draw.tag);
     stage.appendChild(draw.el);
   });
 
@@ -1464,6 +1586,18 @@
     draw.el.style.top = q.y + "px";
     draw.el.style.width = q.w + "px";
     draw.el.style.height = q.h + "px";
+    // ทาสีสดตามความละเอียดที่ OCR จะได้จากโซนขนาดนี้ (เขียว/เหลือง/แดง)
+    // กรอบยางลบเป็นสีเดียวที่ "ว่าง" อยู่ — สีขอบโซนจริงถูกใช้บอกชนิด
+    // โซน/ไฟล์/สถานะถูกเลือกไปหมดแล้ว จึงห้ามเอามาทับ
+    const W = dispW(), H = dispH();
+    const qual = (W && H)
+      ? zoneQuality([q.x / W, q.y / H, q.w / W, q.h / H]) : null;
+    draw.el.className = "aw-drawbox" + (qual ? " q-" + qual.level : "");
+    if (draw.tag) {
+      const txt = (q.w >= 8 && q.h >= 8) ? zoneQualityTag(qual) : "";
+      draw.tag.textContent = txt;
+      draw.tag.style.display = txt ? "" : "none";
+    }
   });
 
   document.addEventListener("mouseup", (ev) => {

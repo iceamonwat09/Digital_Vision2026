@@ -73,10 +73,23 @@
   .aw-zone.doc-b.selected .aw-zone-tag { background:rgba(229,57,53,.92); }
   .aw-img-label.ref-label { background:#e0f2f1; color:#00695c; border-bottom-color:#b2dfdb; }
 
-  /* rubber-band rectangle while drawing a new zone */
+  /* rubber-band rectangle while drawing a new zone.
+     สีของกรอบนี้เป็น "ช่องว่าง" ช่องเดียวที่ยังไม่มีความหมายอื่น จึงเอามา
+     บอกคุณภาพขนาดโซนสด ๆ ได้ (สีขอบของ .aw-zone ถูกใช้บอกชนิดโซน/ไฟล์/
+     ถูกเลือกอยู่ไปหมดแล้ว — ทับแล้วผู้ใช้แยกไม่ออก) */
   .aw-drawbox { position:absolute; border:2px dashed #1565c0;
                 background:rgba(21,101,192,.12); pointer-events:none;
                 box-sizing:border-box; z-index:5; }
+  .aw-drawbox.q-ok   { border-color:#2e7d32; background:rgba(46,125,50,.12); }
+  .aw-drawbox.q-warn { border-color:#f9a825; background:rgba(249,168,37,.14); }
+  .aw-drawbox.q-bad  { border-color:#c62828; background:rgba(198,40,40,.14); }
+  .aw-drawbox-tag { position:absolute; left:0; bottom:100%; margin-bottom:2px;
+                    background:rgba(38,50,56,.92); color:#fff; font-size:11px;
+                    line-height:1.5; padding:1px 6px; border-radius:4px;
+                    white-space:nowrap; font-weight:600; }
+  .aw-drawbox.q-ok   .aw-drawbox-tag { background:rgba(46,125,50,.95); }
+  .aw-drawbox.q-warn .aw-drawbox-tag { background:rgba(249,168,37,.97); color:#3e2723; }
+  .aw-drawbox.q-bad  .aw-drawbox-tag { background:rgba(198,40,40,.95); }
 
   /* zone editor */
   /* ช่องมองของตัวแก้โซน. ความกว้างของกล่องนี้ไม่เข้าไปในสูตรพิกัดโซนเลย
@@ -128,6 +141,24 @@
   .aw-zone.t-zoom   { border-style:dashed; border-color:rgba(255,143,0,.9); }
   .aw-zone.t-header { border-color:rgba(106,27,154,.85); }
   .aw-zone.t-ignore { border-color:rgba(120,144,156,.6); background:rgba(120,144,156,.12); }
+  /* คุณภาพขนาดโซน = วงแหวนรอบนอก — ไม่แตะสีขอบ จึงอยู่ร่วมกับ
+     t-zoom/t-header/doc-b/selected ได้ทุกคู่ */
+  .aw-zone.q-warn { box-shadow:0 0 0 3px rgba(249,168,37,.45); }
+  .aw-zone.q-bad  { box-shadow:0 0 0 3px rgba(198,40,40,.40); }
+  .aw-zone-size { position:absolute; left:-1px; bottom:-1px; font-size:9px;
+                  line-height:14px; height:14px; padding:0 4px;
+                  border-radius:0 4px 0 0; white-space:nowrap;
+                  pointer-events:none; opacity:0; transition:opacity .12s;
+                  background:rgba(46,125,50,.92); color:#fff; font-weight:700; }
+  .aw-zone-size.q-warn { background:rgba(249,168,37,.95); color:#3e2723; }
+  .aw-zone-size.q-bad  { background:rgba(198,40,40,.92); }
+  .aw-zone:hover .aw-zone-size, .aw-zone.selected .aw-zone-size { opacity:1; }
+  /* บรรทัดตัวเลขในแผง properties */
+  .aw-size-hint { margin-top:6px; padding:6px 8px; border-radius:6px;
+                  font-size:12px; line-height:1.5; }
+  .aw-size-hint.q-ok   { background:#e8f5e9; color:#1b5e20; }
+  .aw-size-hint.q-warn { background:#fff8e1; color:#7a5900; }
+  .aw-size-hint.q-bad  { background:#ffebee; color:#b71c1c; }
   .aw-zone-tag { position:absolute; top:-1px; left:-1px; background:rgba(25,118,210,.9); color:#fff;
                  font-size:10px; line-height:1; padding:2px 5px; border-radius:0 0 4px 0; pointer-events:none; white-space:nowrap; }
   .aw-zone.selected .aw-zone-tag { background:rgba(229,57,53,.92); }
@@ -489,6 +520,7 @@
           <button id="awPropDelete" class="aw-btn aw-btn-danger">ลบโซนนี้</button>
         </div>
         <div id="awHlHint" class="aw-hl-hint" style="display:none;"></div>
+        <div id="awSizeHint" class="aw-size-hint" style="display:none;"></div>
         <div id="awRotPreview" class="aw-rot-preview" style="display:none;">
           <div class="aw-rot-cap">🔎 ภาพที่ OCR จะเห็น (<span id="awRotState"></span>) — คลิก ↻ ที่มุมโซนเพื่อหมุน</div>
           <img id="awRotThumb" class="aw-rot-thumb" alt="ตัวอย่างที่หมุนแล้ว">
