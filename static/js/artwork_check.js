@@ -57,6 +57,10 @@
     no_panel_in_group: "โซน zoom ไม่มี panel ในกลุ่มเดียวกันให้เทียบ",
     spellchecker_missing: "ยังไม่ได้ติดตั้ง pyspellchecker บนเครื่องเซิร์ฟเวอร์",
     no_readable_zone: "ไม่มีโซนที่อ่านข้อความออก",
+    // ปุ่มส่งตรวจไม่ตรวจคำสะกดแล้ว (2 ก.ย. 2026) — ต้องบอกให้ชัดว่าไป
+    // ตรวจที่ไหนแทน ไม่งั้น ✅ PASS จะถูกอ่านว่า "ไม่มีคำผิด" ซึ่งไม่จริง
+    moved_to_translate: 'ย้ายไปตรวจที่แท็บ "ข้อความ + คำแปล" แล้ว ' +
+      "(ปุ่มนี้เทียบความเหมือนของไฟล์/แผง ไม่ตรวจการสะกด)",
   };
   const COV_FIX = {
     no_shared_group: 'โซนที่ควรมีข้อความเหมือนกัน (เช่นแผงเดียวกันที่พิมพ์ซ้ำ ' +
@@ -68,7 +72,10 @@
   // ต้องคิดจากที่เดียวกัน ไม่งั้นแถบเตือนแต่หัวเรื่องบอกว่าไม่พบประเด็น
   function coverageGaps(cov) {
     if (!cov) return [];
-    const benign = { no_zoom_zone: 1, single_zone: 1 };
+    // benign = "ไม่ได้ทำงานเพราะไม่มีของให้ตรวจ / ย้ายไปที่อื่นแล้ว" — ไม่ใช่
+    // ช่องโหว่ที่ผู้ใช้ต้องไปแก้ ⇒ ต้องไม่ทำให้แถบเป็นสีเตือนและไม่เปลี่ยน
+    // หัวเรื่องเป็น "PASS — ไม่พบประเด็นในชั้นที่ตรวจ" ทุกใบตลอดกาล
+    const benign = { no_zoom_zone: 1, single_zone: 1, moved_to_translate: 1 };
     return [cov.cross_panel, cov.zoom, cov.numbers, cov.spelling]
       .filter((c) => c && !c.ran && !benign[c.reason]);
   }
@@ -250,8 +257,14 @@
     // เพื่อไม่ให้ปนกับผล PASS/FAIL ด้านบน. รายงานเก่าไม่มีคีย์นี้ = ไม่แสดง
     html += pixdiffHtml(rep.pixdiff, rep.id);
 
+    // การ์ดของชั้นที่ "ไม่ได้ทำงานในปุ่มนี้แล้ว" ต้องไม่โชว์เลข 0 ค้างไว้ —
+    // ช่องที่ไม่มีทางเป็นค่าอื่นได้ทำให้ผู้ใช้สับสนกว่าไม่มีช่อง. อ่านจาก
+    // coverage ที่ server ส่งมา ⇒ **รายงานเก่ายังโชว์การ์ดพร้อมจำนวนจริง**
+    const spellOff = !!(rep.coverage && rep.coverage.spelling &&
+                        rep.coverage.spelling.reason === "moved_to_translate");
     html += '<div class="aw-summary">';
     Object.keys(CLASS_LABELS).forEach((cls) => {
+      if (cls === "SPELL_FAIL" && spellOff) return;
       const n = (rep.summary && rep.summary[cls]) || 0;
       html += '<div class="aw-sumcard' + (n ? " hit" : "") + '">' +
         esc(CLASS_LABELS[cls]) + "<b>" + n + "</b></div>";
@@ -715,7 +728,10 @@
     ["awInspect", "awTranslateMain", "awAddZone", "awClearZones", "awRedetect",
      "awPairAuto", "awTemplateLoad", "awTemplateSave", "awRefToggle",
      "awPixdiff"].forEach((id) => {
-      $(id).disabled = b || !inspectionId;
+      // ⚠️ ต้องเช็ค null — ปุ่มที่ถูกปิดด้วย flag อาจไม่มีใน DOM แล้ว
+      // ($("id") ที่ไม่มีจริงจะทำให้ลูปนี้ตายทั้งก้อน = ปุ่มที่เหลือค้างหมด)
+      const el = $(id);
+      if (el) el.disabled = b || !inspectionId;
     });
     fileInputB.disabled = b;
   }
@@ -872,8 +888,9 @@
         warns.push("✅ ไฟล์นี้มี text layer — โซนที่อ่านได้จากตัว PDF จะแม่น 100% โดยไม่ใช้ OCR");
       if (!res.ocr_available)
         warns.push("⚠️ ยังไม่ได้ตั้งค่า N8N_OCR_WEBHOOK_URL — โซนที่ไม่มี text layer จะถูกรายงานเป็น 'อ่านไม่ได้'");
+      // การสะกดถูกตรวจที่แท็บแปล (ไม่ใช่ปุ่มส่งตรวจ) แล้ว — ชี้ให้ตรงที่
       if (!res.spell_layer_available)
-        warns.push("⚠️ ยังไม่ได้ติดตั้ง pyspellchecker — ชั้นตรวจ dictionary จะถูกข้าม (pip install pyspellchecker)");
+        warns.push('⚠️ ยังไม่ได้ติดตั้ง pyspellchecker — การตรวจคำสะกดในแท็บ "ข้อความ + คำแปล" จะถูกข้าม (pip install pyspellchecker)');
       const w = $("awEnvWarn");
       w.style.display = warns.length ? "" : "none";
       w.innerHTML = warns.map(esc).join("<br>");
@@ -1803,7 +1820,9 @@
 
   // ── inspect ────────────────────────────────────────────────────────
   // ── เทียบภาพเก่า/ใหม่ (advisory) — ต้องกดเอง ไม่วิ่งตอนส่งตรวจสอบ ──
-  $("awPixdiff").addEventListener("click", async () => {
+  // ปุ่มอาจถูกซ่อน/ถอดออกด้วย config.PIXDIFF_UI — ผูก listener เมื่อมีจริง
+  // เท่านั้น (เส้นทาง API และการแสดงผลรายงานเก่ายังทำงานเหมือนเดิมทุกอย่าง)
+  if ($("awPixdiff")) $("awPixdiff").addEventListener("click", async () => {
     if (!inspectionId || busy) return;
     if (!refAttached) {
       alert("ต้องแนบ 🅱 ไฟล์อ้างอิง (ฉบับเก่า/ที่อนุมัติแล้ว) ก่อน — " +

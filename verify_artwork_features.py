@@ -191,11 +191,14 @@ def section_a(s: Suite):
     # ── แพ็กเกจ optional: ตัวหนึ่งเป็นจุดบอด QC อีกตัวแค่ความสวยงาม ──
     try:
         from spellchecker import SpellChecker  # noqa: F401
-        s.ok("pyspellchecker ติดตั้งแล้ว (ชั้น dictionary ทำงาน)")
+        s.ok('pyspellchecker ติดตั้งแล้ว (ชั้น dictionary ในแท็บ "ข้อความ + '
+             'คำแปล" ทำงาน)')
     except Exception as e:
         s.bad("pyspellchecker ติดตั้งแล้ว", got=str(e),
-              fix="py -3.9 -m pip install pyspellchecker — ถ้าไม่มี ชั้นตรวจคำสะกด"
-                  "จะถูกข้าม **เงียบ ๆ** คำผิดจะขึ้น ✓ เหมือนไม่มีปัญหา (จุดบอด QC)")
+              fix="py -3.9 -m pip install pyspellchecker — ถ้าไม่มี การตรวจคำสะกด"
+                  'ในแท็บ "ข้อความ + คำแปล" จะถูกข้าม **เงียบ ๆ** คำผิดจะขึ้น ✓ '
+                  "เหมือนไม่มีปัญหา (จุดบอด QC). ตั้งแต่ 2 ก.ย. 2026 ปุ่มส่งตรวจ"
+                  "ไม่ตรวจคำสะกดแล้ว ⇒ แท็บแปลเป็นที่เดียวที่ตรวจเรื่องนี้")
     try:
         import pytesseract
         s.ok("pytesseract + tesseract binary",
