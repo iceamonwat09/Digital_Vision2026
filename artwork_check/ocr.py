@@ -22,6 +22,7 @@ from typing import List
 
 from inspectors import vertex_client   # read-only reuse of the dispatcher
 
+from . import bands as bands_mod
 from . import config, fonttrust
 # อักขระที่ "เป็นไปไม่ได้ในข้อความจริง" นิยามไว้ที่ ``fonttrust`` ที่เดียว —
 # ทั้งด่านรายโซน (ไฟล์นี้) และด่านระดับฟอนต์ต้องใช้กติกาเดียวกันเป๊ะ ไม่งั้น
@@ -124,9 +125,68 @@ def text_looks_garbled(text: str,
     return bool(garbled_reason(text, min_tokens=min_tokens, ratio=ratio))
 
 
+def _ocr_in_bands(crop, zone_id: str):
+    """อ่านภาพโซนแบบ "หั่นเป็นแถบตามช่องว่างระหว่างบรรทัด" (โหมดทดลอง).
+
+    คืน ``(result | None, note)``. ``None`` = ให้ผู้เรียกใช้ทางเดิม
+    (ยิงภาพเดียว) — เกิดเมื่อหาจุดตัดที่ปลอดภัยไม่ได้ หรือมีแถบใดอ่านพลาด.
+
+    ⚠️ **ห้ามคืนข้อความที่ขาดไปบางแถบเด็ดขาด** — วัดแล้วว่าข้อความที่ขาด
+    ครึ่งเดียวทำให้ชั้นเทียบฟ้อง defect ปลอม 30 รายการโดยไม่มีสัญญาณอะไร
+    (แย่กว่า "อ่านไม่ได้" มาก) ⇒ แถบใดพลาด = ทิ้งผลทั้งชุด ถอยไปทางเดิม
+
+    ⚠️ **``blocks`` ถูกทิ้งในโหมดนี้โดยตั้งใจ** — bbox ที่ backend คืนมา
+    อ้างพิกัด "ของแถบนั้น" และแต่ละแถบขนาดต่างกัน เอามารวมเป็นชุดเดียวทำให้
+    ``highlight._infer_scale`` เดา convention ผิด ⇒ กรอบแดงไปโผล่ผิดที่
+    (กฎเหล็กข้อ 2: ไม่มีกรอบ ดีกว่ากรอบผิดตำแหน่ง). ชั้นกรอบแดงที่เหลือ
+    (PDF word box / Tesseract) ยังทำงานตามปกติ
+    """
+    try:
+        spans = bands_mod.find_bands(crop)
+    except Exception:                            # pragma: no cover - กันพังล้วน
+        logger.exception("[artwork] zone %s: หาจุดหั่นแถบไม่สำเร็จ", zone_id)
+        return None, ""
+    if len(spans) < 2:
+        return None, ""
+
+    texts, confs, engines = [], [], []
+    for i, (y0, y1) in enumerate(spans, 1):
+        piece = crop[y0:y1]
+        if piece is None or piece.size == 0:
+            return None, "หั่นแถบแล้วได้ภาพว่าง — ใช้การอ่านทั้งโซนแทน"
+        try:
+            r = vertex_client.ocr_image(encode_jpg(piece))
+        except Exception as e:                   # pragma: no cover
+            logger.exception("[artwork] zone %s แถบ %d: OCR ล้มเหลว",
+                             zone_id, i)
+            return None, ("อ่านแบบหั่นแถบไม่สำเร็จที่แถบ %d (%s) "
+                          "— ใช้การอ่านทั้งโซนแทน" % (i, e))
+        if not isinstance(r, dict) or r.get("error") or r.get("stub"):
+            why = ((r.get("error") if isinstance(r, dict) else None)
+                   or "คืนค่าผิดรูป/stub")
+            return None, ("อ่านแบบหั่นแถบไม่สำเร็จที่แถบ %d (%s) "
+                          "— ใช้การอ่านทั้งโซนแทน" % (i, why))
+        texts.append((r.get("text") or "").strip())
+        c = _mean_conf(r.get("blocks") or [])
+        if c is not None:
+            confs.append(c)
+        if r.get("engine"):
+            engines.append(str(r["engine"]))
+
+    out = {
+        "text": "\n".join(t for t in texts if t),
+        "blocks": [],
+        "engine": engines[0] if engines else "n8n",
+        "conf": (sum(confs) / len(confs)) if confs else None,
+    }
+    note = ("อ่านแบบหั่นเป็น %d แถบ (โหมดทดลอง) — กรอบแดงชี้คำจาก OCR "
+            "ถูกปิดในโหมดนี้" % len(spans))
+    return out, note
+
+
 def read_zone(doc: ArtworkDocument, zone: dict,
               page_auto: bool = False, force_ocr: bool = False,
-              font_trust: dict = None) -> dict:
+              font_trust: dict = None, split_bands: bool = False) -> dict:
     """
     Returns:
         {
@@ -148,6 +208,12 @@ def read_zone(doc: ArtworkDocument, zone: dict,
     จาก engine เดียวกัน. **ถ้าไม่มี OCR backend ให้ใช้ จะไม่บังคับ** — ถอย
     ไปใช้ text layer ตามเดิมพร้อมโน้ตบอกเหตุผล ดีกว่าทิ้งข้อความที่อ่านได้
     อยู่แล้วไปแลกกับ UNREADABLE.
+
+    ``split_bands`` (โหมดทดลอง) หั่นภาพโซนเป็นแถบตามช่องว่างระหว่างบรรทัด
+    แล้วยิง OCR ทีละแถบ — ทำให้ตัวหนังสือใหญ่ขึ้นในสายตาโมเดลจริง (วัดได้
+    71 -> 213 px บนโซนจริง) และลดอาการโมเดลรวบแถวที่ซ้ำกัน. ราคาคือยิง
+    backend หลายครั้งต่อโซน. ไม่ติ๊ก = ทางเดิมเป๊ะ. ดู ``_ocr_in_bands``
+    สำหรับกติกาความปลอดภัย (แถบใดพลาด = ถอยไปอ่านทั้งโซน)
 
     ``font_trust`` = ผลวิเคราะห์ระดับฟอนต์ของทั้งเอกสาร (``fonttrust.analyze``)
     ที่ ``pipeline`` คำนวณครั้งเดียวแล้วส่งต่อ — ใช้ปฏิเสธข้อความของฟอนต์ที่
@@ -210,8 +276,13 @@ def read_zone(doc: ArtworkDocument, zone: dict,
     # ขึ้นไปจะได้ HTTP 500 แทนรายงาน ⇒ ผู้ตรวจไม่ได้อะไรเลยแม้แต่โซนที่
     # อ่านสำเร็จ. แปลงเป็น UNREADABLE เฉพาะโซนนั้นแทน (กฎเหล็กข้อ 2:
     # บอกว่าอ่านไม่ได้ ดีกว่าไม่บอกอะไรเลย)
+    band_note = ""
+    result = None
+    if split_bands:
+        result, band_note = _ocr_in_bands(crop, zone["id"])
     try:
-        result = vertex_client.ocr_image(encode_jpg(crop))
+        if result is None:
+            result = vertex_client.ocr_image(encode_jpg(crop))
     except Exception as e:                       # pragma: no cover - กันพังล้วน
         logger.exception("[artwork] zone %s: OCR backend ล้มเหลว", zone["id"])
         return {"zone_id": zone["id"], "text": "", "engine": "none",
@@ -226,7 +297,8 @@ def read_zone(doc: ArtworkDocument, zone: dict,
         "zone_id": zone["id"],
         "text": (result.get("text") or "").strip(),
         "engine": result.get("engine", "n8n"),
-        "conf": _mean_conf(blocks),
+        "conf": (result["conf"] if "conf" in result
+                 else _mean_conf(blocks)),
         "rotate": angle,
         # Per-element boxes (text/bbox/conf) when the backend returned
         # them — kept ONLY so the defect-card red-box highlighter
@@ -251,6 +323,10 @@ def read_zone(doc: ArtworkDocument, zone: dict,
         # ผู้ตรวจเห็น ไม่ใช่ทิ้งไปเงียบ ๆ อย่างที่เคยเป็น
         out["note"] = " · ".join(
             x for x in (out.get("note"), str(result["warning"])) if x)
+    if band_note:
+        # โหมดหั่นแถบ: บอกทั้งตอนสำเร็จ (กรอบแดงถูกปิด) และตอนถอยกลับ
+        # ไปอ่านทั้งโซน (จะได้ไม่เข้าใจผิดว่าผลนี้มาจากการหั่น)
+        out["note"] = " · ".join(x for x in (out.get("note"), band_note) if x)
     if garbled:
         # บอกไว้ในผลว่าทำไมโซนนี้ไม่ได้ใช้ text layer ทั้งที่ไฟล์มี —
         # ไม่ใช่ error (OCR อ่านสำเร็จ) แต่ผู้ตรวจควรรู้.
@@ -316,13 +392,14 @@ def _render_for_ocr(doc: ArtworkDocument, bbox):
 
 def read_all_zones(doc: ArtworkDocument, zones: List[dict],
                    page_auto: bool = False,
-                   force_ocr: bool = False,
+                   force_ocr: bool = False, split_bands: bool = False,
                    font_trust: dict = None) -> List[dict]:
     out = []
     for z in zones:
         if z.get("type") == "ignore":
             continue
         r = read_zone(doc, z, page_auto=page_auto, force_ocr=force_ocr,
+                      split_bands=split_bands,
                       font_trust=font_trust)
         logger.info("[artwork] zone %s engine=%s rot=%d chars=%d%s",
                     z["id"], r["engine"], r.get("rotate", 0), len(r["text"]),

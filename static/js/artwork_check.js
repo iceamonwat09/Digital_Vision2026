@@ -87,6 +87,11 @@
     return !!(($("awForceOcr") || {}).checked);
   }
 
+  // โหมดทดลอง: หั่นโซนเป็นแถบก่อนส่ง OCR (ไม่ติ๊ก = ทางเดิมเป๊ะ)
+  function splitBandsOn() {
+    return !!(($("awSplitBands") || {}).checked);
+  }
+
   function coverageHtml(cov, fontTrust) {
     if (!cov) return "";              // รายงานเก่าที่ยังไม่มีข้อมูลนี้
     const rows = [
@@ -755,6 +760,7 @@
         refAttached: refAttached,
         autoRotate: !!($("awAutoRotate") || {}).checked,
         forceOcr: forceOcrOn(),
+        splitBands: splitBandsOn(),
         brand: ($("awBrand") || {}).value || "",
         savedAt: Date.now(),
       }));
@@ -806,6 +812,7 @@
     refAttached = !!s.refAttached && !!docMeta.b;
     if ($("awAutoRotate")) $("awAutoRotate").checked = !!s.autoRotate;
     if ($("awForceOcr")) $("awForceOcr").checked = !!s.forceOcr;
+    if ($("awSplitBands")) $("awSplitBands").checked = !!s.splitBands;
     if ($("awBrand") && s.brand) $("awBrand").value = s.brand;
     showTabs(true);
     switchTab("result");
@@ -983,6 +990,14 @@
     autoRotate = !!ev.target.checked;
     renderZones();
     updateRotPreview();
+  });
+
+  // ช่องติ๊กที่เปลี่ยน "วิธีอ่านข้อความ" ต้องถูกจำไว้ในงานที่ค้าง —
+  // เดิมค่าถูกบันทึกก็ต่อเมื่อมีการแก้โซน (saveSession ถูกเรียกจาก
+  // renderZones) ⇒ ติ๊กแล้วรีเฟรชทันทีจะได้ค่าเก่ากลับมาแบบเงียบ
+  ["awForceOcr", "awSplitBands"].forEach((id) => {
+    const el = $(id);
+    if (el) el.addEventListener("change", saveSessionSoon);
   });
 
   $("awDocTabA").addEventListener("click", () => { if (activeDoc !== "a") showDoc("a"); });
@@ -1881,7 +1896,8 @@
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ zones: zones, brand: brandInput.value.trim(),
-                               auto_rotate: autoRotate, force_ocr: forceOcrOn() }),
+                               auto_rotate: autoRotate, force_ocr: forceOcrOn(),
+                               split_bands: splitBandsOn() }),
       });
       renderReport(rep, resultBox);
       showTabs(true);
@@ -1949,7 +1965,8 @@
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ zones: zones, brand: brandInput.value.trim(),
-                               auto_rotate: autoRotate, force_ocr: forceOcrOn() }),
+                               auto_rotate: autoRotate, force_ocr: forceOcrOn(),
+                               split_bands: splitBandsOn() }),
       });
       renderTextTable(textResult, textTableWrap, onlyIssuesCb.checked);
       setResultsWide(true);   // table now has data → widen the results panel

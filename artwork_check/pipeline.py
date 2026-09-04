@@ -29,6 +29,7 @@ from typing import List, Optional, Tuple
 
 import cv2
 
+from . import bands as bands_mod
 from . import (checks, config, fonttrust, ocr, pixdiff, report, vocab,
                zones as zones_mod)
 from .pdf_ingest import (ArtworkDocument, apply_rotation, encode_jpg,
@@ -217,7 +218,8 @@ def font_trust(doc: ArtworkDocument) -> dict:
 
 def _read_all_docs(insp_dir: str, zones_a: List[dict], zones_b: List[dict],
                    auto_rotate: bool = False,
-                   force_ocr: bool = False) -> Tuple[List[dict], dict]:
+                   force_ocr: bool = False,
+                   split_bands: bool = False) -> Tuple[List[dict], dict]:
     """OCR each zone against ITS OWN document (a → source, b → source_b).
     With no doc-"b" zones this is exactly the original single-doc path.
     ``auto_rotate`` is the page-level toggle passed through to the OCR
@@ -231,6 +233,7 @@ def _read_all_docs(insp_dir: str, zones_a: List[dict], zones_b: List[dict],
     trust = {"a": font_trust(docs["a"])}
     results = ocr.read_all_zones(docs["a"], zones_a, page_auto=auto_rotate,
                                  force_ocr=force_ocr,
+                                 split_bands=split_bands,
                                  font_trust=trust["a"])
     if zones_b:
         try:
@@ -246,6 +249,7 @@ def _read_all_docs(insp_dir: str, zones_a: List[dict], zones_b: List[dict],
         results += ocr.read_all_zones(docs["b"], zones_b,
                                       page_auto=auto_rotate,
                                       force_ocr=force_ocr,
+                                      split_bands=split_bands,
                                       font_trust=trust["b"])
     if not force_ocr and config.OCR_GROUP_ENGINE_CONSISTENCY:
         results = _unify_group_engines(docs, zones_a + zones_b, results,
@@ -305,7 +309,8 @@ def _unify_group_engines(docs: dict, zone_list: List[dict],
 
 def run_inspection(rec_id: str, zone_list: List[dict],
                    brand: str = "", auto_rotate: bool = False,
-                   force_ocr: bool = False) -> dict:
+                   force_ocr: bool = False,
+                   split_bands: bool = False) -> dict:
     d = report.inspection_dir(rec_id)
     src = _find_source(d)
     zone_list = zones_mod.sanitize_zones(zone_list)
@@ -314,7 +319,8 @@ def run_inspection(rec_id: str, zone_list: List[dict],
     t0 = time.time()
     ocr_results, trust = _read_all_docs(d, zones_a, zones_b,
                                         auto_rotate=auto_rotate,
-                                        force_ocr=force_ocr)
+                                        force_ocr=force_ocr,
+                                        split_bands=split_bands)
     # Record the concrete angle actually applied back onto each OCR'd zone
     # so the saved report, overlay crops and OCR-review show what OCR read.
     # (ignore-type zones are not OCR'd → left as the user set them.)
@@ -370,6 +376,7 @@ def run_inspection(rec_id: str, zone_list: List[dict],
         # อ่านทั้งใบด้วย OCR ตามที่ผู้ใช้สั่งหรือไม่ — บันทึกไว้เพื่อให้อ่าน
         # รายงานย้อนหลังแล้วรู้ว่าข้อความมาจากเส้นทางไหน
         "force_ocr": bool(force_ocr),
+        "split_bands": bool(split_bands),
         # ฟอนต์ที่ text layer เชื่อไม่ได้ — ผู้ตรวจเอาไปบอกคนทำ artwork ได้ว่า
         # ต้อง export ไฟล์ใหม่ (ต้นเหตุจริงอยู่ที่ขั้นตอนนั้น ไม่ใช่ที่ระบบนี้)
         "font_trust": {k: fonttrust.summary(v) for k, v in trust.items()},
@@ -423,11 +430,19 @@ def _ocr_fingerprint() -> dict:
         # ตกไปใช้ OCR (หรือกลับกัน) ⇒ ข้อความที่ได้เปลี่ยน
         "font_evidence": config.PDFTEXT_FONT_EVIDENCE,
         "font_structure": bool(config.PDFTEXT_FONT_STRUCTURE_CHECK),
+        # โหมดหั่นแถบ (ตัวสวิตช์เป็น per-request อยู่ใน _zones_signature
+        # แล้ว — ที่นี่คือ "ค่าจูนการหั่น" ซึ่งเปลี่ยนแล้วได้แถบคนละชุด
+        # ⇒ ข้อความที่อ่านได้เปลี่ยน ⇒ cache ต้องหลุด)
+        "band_target": bands_mod.BAND_TARGET_PX,
+        "band_min": bands_mod.BAND_MIN_PX,
+        "band_max": bands_mod.MAX_BANDS,
+        "band_quiet": bands_mod.QUIET_RATIO,
     }
 
 
 def _zones_signature(zone_list: List[dict], auto_rotate: bool = False,
-                     force_ocr: bool = False) -> str:
+                     force_ocr: bool = False,
+                     split_bands: bool = False) -> str:
     """Stable hash of the zone layout (id/type/group/bbox/doc/rotate), the
     page auto-rotate flag, the force-OCR flag, AND the OCR settings that
     decide what the text acquisition step will produce — so a repeated
@@ -439,6 +454,7 @@ def _zones_signature(zone_list: List[dict], auto_rotate: bool = False,
     return hashlib.sha1(
         json.dumps({"z": sig, "auto": bool(auto_rotate),
                     "force_ocr": bool(force_ocr),
+                    "split_bands": bool(split_bands),
                     "ocr": _ocr_fingerprint()},
                    sort_keys=True, ensure_ascii=False).encode("utf-8")
     ).hexdigest()
@@ -446,7 +462,8 @@ def _zones_signature(zone_list: List[dict], auto_rotate: bool = False,
 
 def _load_ocr_cache(insp_dir: str, zone_list: List[dict],
                     auto_rotate: bool = False,
-                    force_ocr: bool = False) -> Optional[List[dict]]:
+                    force_ocr: bool = False,
+                    split_bands: bool = False) -> Optional[List[dict]]:
     p = os.path.join(insp_dir, _OCR_ONLY_CACHE)
     if not os.path.exists(p):
         return None
@@ -455,19 +472,21 @@ def _load_ocr_cache(insp_dir: str, zone_list: List[dict],
             data = json.load(f)
     except (ValueError, OSError):
         return None
-    if data.get("sig") != _zones_signature(zone_list, auto_rotate, force_ocr):
+    if data.get("sig") != _zones_signature(zone_list, auto_rotate, force_ocr,
+                                          split_bands):
         return None          # zones/flag changed → cache stale
     return data.get("ocr")
 
 
 def _save_ocr_cache(insp_dir: str, zone_list: List[dict],
                     ocr_results: List[dict], auto_rotate: bool = False,
-                    force_ocr: bool = False) -> None:
+                    force_ocr: bool = False,
+                    split_bands: bool = False) -> None:
     try:
         with open(os.path.join(insp_dir, _OCR_ONLY_CACHE), "w",
                   encoding="utf-8") as f:
             json.dump({"sig": _zones_signature(zone_list, auto_rotate,
-                                               force_ocr),
+                                               force_ocr, split_bands),
                        "ocr": ocr_results},
                       f, ensure_ascii=False, indent=2)
     except OSError as e:
@@ -588,7 +607,8 @@ def pixdiff_zone_png(rec_id: str, zone_id: str) -> Optional[bytes]:
 
 def run_ocr_only(rec_id: str, zone_list: List[dict],
                  auto_rotate: bool = False,
-                 force_ocr: bool = False) -> Tuple[List[dict], List[dict]]:
+                 force_ocr: bool = False,
+                 split_bands: bool = False) -> Tuple[List[dict], List[dict]]:
     """
     Acquire per-zone text only (PDF text layer or N8N OCR) for the advisory
     translate tab, WITHOUT running any check layer or touching report.json /
@@ -601,15 +621,18 @@ def run_ocr_only(rec_id: str, zone_list: List[dict],
         raise FileNotFoundError("ไม่พบรายการอัปโหลดนี้")
     zone_list = zones_mod.sanitize_zones(zone_list)
 
-    cached = _load_ocr_cache(d, zone_list, auto_rotate, force_ocr)
+    cached = _load_ocr_cache(d, zone_list, auto_rotate, force_ocr,
+                             split_bands)
     if cached is not None:
         return zone_list, cached
 
     zones_a, zones_b = _split_docs(zone_list)
     ocr_results, _trust = _read_all_docs(d, zones_a, zones_b,
                                          auto_rotate=auto_rotate,
-                                         force_ocr=force_ocr)
-    _save_ocr_cache(d, zone_list, ocr_results, auto_rotate, force_ocr)
+                                         force_ocr=force_ocr,
+                                         split_bands=split_bands)
+    _save_ocr_cache(d, zone_list, ocr_results, auto_rotate, force_ocr,
+                    split_bands)
     logger.info("[artwork] ocr-only %s zones=%d", rec_id, len(zone_list))
     return zone_list, ocr_results
 
