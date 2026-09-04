@@ -550,10 +550,19 @@
               sug[w].map((s) => "<code>" + esc(s) + "</code>").join(" ") + "</span>";
         });
       } else if (r.status === "unsupported") {
-        // dict ตัดสินภาษานี้ไม่ได้ — ไม่ใช่ "สะกดผิด" แค่ dict ไม่ครอบคลุม
+        // ⚠️ เดิมเขียนว่า "dict ไม่รองรับคำนี้" ซึ่งผู้ตรวจอ่านได้ว่า
+        //    "ระบบไม่ได้ตรวจ" แล้วเลื่อนผ่าน — วัดบนฉลากจริงแล้วไม่จริง:
+        //    dict อาหรับมี 143,678 คำ และ **ตรวจแล้วจริง ๆ** · คำผิดจริง
+        //    كربوهيدات ไม่อยู่ใน dict ส่วนรูปที่ถูก كربوهيدرات อยู่ ⇒ เป็น
+        //    หลักฐาน "อ่อนแต่มีจริง" ไม่ใช่ "ไม่มีข้อมูล"
+        //    วัดได้ 1 คำผิดจริง : 4 คำจริงที่ dict ขาด (คำนำหน้า/ทับศัพท์)
+        //    ⇒ พูดว่า "สะกดผิด" ไม่ได้ (จะเป็นผลที่ผิดแบบมั่นใจ) แต่ต้อง
+        //    ไม่พูดว่า "ไม่ได้ตรวจ" เช่นกัน · คำแนะนำยังปิดอยู่เพราะพิสูจน์
+        //    แล้วว่าเดาผิด (مهدرجة → مدرجة คนละคำ)
         const langs = (r.unsupported_langs || []).join("/") || "ภาษานี้";
-        st = '<span class="aw-status-info">ℹ️ dict ไม่รองรับคำนี้ (' +
-          esc(langs) + ") — พิจารณาผล AI</span>";
+        st = '<span class="aw-status-info">ℹ️ ไม่อยู่ใน dict ' + esc(langs) +
+          " — อาจเป็นคำเฉพาะ/มีคำนำหน้า หรือสะกดผิด · ไม่มีคำแนะนำ" +
+          " (ดูผล AI ประกอบ)</span>";
       }
       html += "<td>" + st + "</td>";
       // Advisory AI spell-check (Gemini, via the translate webhook).
@@ -1411,6 +1420,13 @@
   const GEM_SMALL_SIDE = 384, GEM_TILE_DIV = 1.5;
   const GEM_TILE_MIN = 256, GEM_TILE_MAX = 768;
   const ZONE_MAG_OK = 1.15;
+  const GEM_TOKENS_PER_TILE = 258;
+
+  // คั่นหลักพันแบบคงที่ — ห้ามใช้ toLocaleString() เพราะผลขึ้นกับ locale
+  // ของเบราว์เซอร์ (บาง locale ให้เลขไทย) แล้วเทสต์/หน้าจอจะไม่ตรงกัน
+  function thousands(n) {
+    return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  }
 
   // พิกเซลของ crop "ก่อนผ่านเพดาน/การเพิ่ม DPI"
   // ⚠️ เดิมโค้ดนี้ hard-code ขนาดหน้าเป็น 842 pt (A4 แนวนอน) แล้วเดา
@@ -1475,7 +1491,9 @@
       mm = [bbox[2] * w / PREVIEW_DPI * 25.4, bbox[3] * h / PREVIEW_DPI * 25.4];
     }
     return { level: level, w: Math.round(pw), h: Math.round(ph),
-             tiles: tiles, mag: mag, effDpi: Math.round(OCR_DPI * scale * mag),
+             tiles: tiles, mag: mag, tokens: tiles * GEM_TOKENS_PER_TILE,
+             tilePx: Math.round(GEM_TILE_MAX / mag),
+             effDpi: Math.round(OCR_DPI * scale * mag),
              mm: mm, shortPx: Math.round(Math.min(pw, ph)), downscaled: down };
   }
 
@@ -1483,15 +1501,22 @@
   // ⚠️ ห้ามอ้างเลข mm ตายตัวเป็นเหตุผล — เกณฑ์จริงคือ "ด้านสั้นของภาพที่
   //    ส่งจริง" ซึ่งชั้นเพิ่ม DPI ให้โซนเล็กทำให้โซนเกือบจัตุรัสทะลุเกณฑ์
   //    ได้ทั้งที่ยังเล็กกว่า 65 mm (วัดเจอตอนขับเบราว์เซอร์จริง)
+  // ⚠️ และห้ามพูดว่า "ไม่ได้ขยาย = ตัวหนังสือเล็ก" — วัดสองโซนที่ผลอ่าน
+  //    ต่างกันจริงแล้ว ตัวหนังสือในสายตาโมเดลเท่ากัน (71.1 vs 68.9 px)
+  //    สิ่งที่ต่างคือ **จำนวนไทล์ = โควตา token** ดู zones.GEM_TOKENS_PER_TILE
   function zoneQualityTag(q) {
     if (!q) return "";
     const size = q.mm
       ? q.mm[0].toFixed(0) + "×" + q.mm[1].toFixed(0) + " mm"
       : q.w + "×" + q.h + " px";
     if (q.downscaled) return size + " · ใหญ่เกิน ระบบต้องย่อ ✗";
-    if (q.level === "bad") return size + " · ไม่ได้ขยาย ✗";
-    if (q.level === "warn") return size + " · ×" + q.mag.toFixed(2) + " ⚠";
-    return size + " · ×" + q.mag.toFixed(2) + " ✓";
+    // ⚠️ ใช้ "ด้านของไทล์" ไม่ใช่ "จำนวนไทล์" — จำนวนไทล์โตตามพื้นที่โซน
+    //    ⇒ โซนใหญ่ได้เลขเยอะทั้งที่หยาบที่สุด ผู้ใช้จะอ่านว่า "เยอะ = ดี"
+    //    แล้วไปขยายโซน. ด้านของไทล์เทียบข้ามขนาดโซนได้ตรง ๆ (เล็ก = ดี)
+    const t = " · ไทล์ " + q.tilePx + " px";
+    if (q.level === "bad") return size + t + " (หยาบสุด) ✗";
+    if (q.level === "warn") return size + t + " ⚠";
+    return size + t + " ✓";
   }
 
   function renderHlHint(z) {
@@ -1520,7 +1545,7 @@
     el.className = "aw-size-hint q-" + q.level;
     const head = q.level === "ok" ? "🟢 ขนาดโซนเหมาะกับ OCR"
                : q.level === "warn" ? "🟡 ขนาดโซนก้ำกึ่ง"
-               : "🔴 ขนาดโซนทำให้ OCR เห็นตัวหนังสือเล็กลง";
+               : "🔴 โมเดลจะสุ่มอ่านโซนนี้หยาบที่สุด";
     const limitPx = Math.round(GEM_TILE_MAX * GEM_TILE_DIV);
     let tip = "";
     if (q.downscaled)
@@ -1528,11 +1553,13 @@
             " px ระบบต้องย่อภาพลงก่อนส่ง จึงเสียความละเอียดจริง";
     else if (q.level !== "ok")
       tip = " — ด้านสั้นของภาพที่ส่งคือ " + q.shortPx + " px (ตั้งแต่ " +
-            limitPx + " px ขึ้นไป OCR จะไม่ขยายให้เลย) · ลากโซนให้แบนลง" +
-            " คือเตี้ยลงหรือกว้างขึ้น หรือแบ่งเป็นสองโซน";
+            limitPx + " px ขึ้นไป ไทล์จะตันที่ " + GEM_TILE_MAX +
+            " px = หยาบที่สุด) · ลากโซนให้แบนลง คือเตี้ยลงหรือ" +
+            "กว้างขึ้น · แบ่งเป็นสองโซน · หรือติ๊ก \u201cหั่นโซนเป็นแถบ\u201d";
     el.textContent = head + tip + " · ภาพที่ส่ง " + q.w + "×" + q.h +
-      " px · " + q.tiles + " ไทล์ · ขยาย ×" + q.mag.toFixed(2) +
-      " · ความละเอียดที่โมเดลเห็น ~" + q.effDpi + " dpi";
+      " px · หั่นเป็นไทล์ละ " + q.tilePx + " px (ยิ่งเล็กยิ่งละเอียด · " +
+      "ตันที่ " + GEM_TILE_MAX + ") · รวม " + q.tiles + " ไทล์ = " +
+      thousands(q.tokens) + " token ที่โมเดลมีให้ภาพนี้";
   }
   $("awPropType").addEventListener("change", () => {
     const z = selectedZone(); if (z) { z.type = $("awPropType").value; renderZones(); }

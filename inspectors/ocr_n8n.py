@@ -277,10 +277,43 @@ def ocr_image(image_bytes: bytes,
         if isinstance(payload, dict) and payload.get("engine")
         else "n8n"
     )
+    # workflow บอกเองว่าคำตอบใช้ไม่ได้ (finishReason != STOP = ถูกตัดกลางคัน ·
+    # promptFeedback.blockReason = โมเดลปฏิเสธภาพ · โควตาเต็ม). docstring ของ
+    # ฟังก์ชันนี้สัญญาคีย์ "error" ไว้ตั้งแต่แรก และ ocr.read_zone ก็รออ่านอยู่
+    # แต่ return เดิม "ไม่ส่งต่อ" ⇒ ข้อความชี้เหตุตกหายที่ข้อต่อสุดท้าย แล้ว
+    # ผู้ตรวจเห็นแค่ "OCR ไม่พบข้อความ" ซึ่งอ่านได้ว่า "โซนนี้ไม่มีตัวหนังสือ"
+    err = str(payload.get("error") or "").strip() if isinstance(payload, dict) else ""
+    warn = str(payload.get("warning") or "").strip() if isinstance(payload, dict) else ""
 
-    return {
+    if err:
+        # ⚠️ ทิ้งข้อความ/บล็อกที่ได้มาด้วย ไม่ใช่แนบไปพร้อม error —
+        # วัดบนข้อมูลจริงแล้วว่าคำตอบที่ถูกตัดกลางคันทำให้ฟ้อง defect ปลอม
+        # 30 รายการโดยไม่มีสัญญาณอะไรเลย (ชั้นเทียบใช้ texts[zone_id] ซึ่ง
+        # ไม่ได้ดู error) ขณะที่การไม่มีข้อความให้ UNREADABLE 1 รายการ =
+        # ขอให้คนดู. กฎเหล็กข้อ 2: ผลที่ผิดแบบมั่นใจ แย่กว่าไม่แสดงผล
+        print(f"[N8N→OCR] ✗ workflow รายงานว่าอ่านไม่สำเร็จ: {err}")
+        out = {
+            "text": "",
+            "blocks": [],
+            # stub=True เพื่อให้เดินทางเดียวกับความล้มเหลวอื่นของฟังก์ชันนี้
+            # ทุกตัว — สำคัญกับโหมด Label Paper (master_ocr) ซึ่งเช็ค stub
+            # เพื่อ "ไม่แคชและไม่ใช้ผลนี้" อยู่แล้ว
+            "stub": True,
+            "engine": engine,
+            "error": err,
+        }
+        if warn:
+            out["warning"] = warn
+        return out
+
+    out = {
         "text": text,
         "blocks": blocks,
         "stub": False,
         "engine": engine,
     }
+    if warn:
+        # อ่านสำเร็จแต่ workflow ติดธงไว้ (เช่นภาพเบลอ/บางแถบอ่านยาก) —
+        # advisory ล้วน ไม่ทำให้โซนตกเป็น error (read_zone แปลงเป็น note)
+        out["warning"] = warn
+    return out

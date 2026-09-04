@@ -48,6 +48,7 @@ def _js_const(name):
     ("GEM_TILE_MIN", lambda: Z.GEM_TILE_MIN),
     ("GEM_TILE_MAX", lambda: Z.GEM_TILE_MAX),
     ("ZONE_MAG_OK", lambda: Z.ZONE_MAG_OK),
+    ("GEM_TOKENS_PER_TILE", lambda: Z.GEM_TOKENS_PER_TILE),
 ])
 def test_js_constants_match_python(name, expected):
     assert _js_const(name) == pytest.approx(float(expected()))
@@ -217,3 +218,78 @@ def test_quality_is_advisory_only_and_never_touches_zone_data():
     before = dict(z)
     Z.zone_ocr_quality(z["bbox"], PAGE_W_PT, PAGE_H_PT)
     assert z == before
+
+
+# ── คำเตือนต้องพูดถึง "ไทล์" ไม่ใช่ "กำลังขยาย" ──────────────────────────
+#
+# วัดสองโซนที่ผลอ่านต่างกันจริงแล้วพบว่า **ตัวหนังสือในสายตาโมเดลเท่ากัน**
+# (z1 = 71.1 px · b2 = 68.9 px ต่างกัน 3%) เพราะแผงของ z1 ใหญ่กว่าบนแผ่น
+# จริง กำลังขยายที่น้อยกว่าจึงหักล้างกันพอดี ⇒ ป้ายเดิม "ไม่ได้ขยาย ✗"
+# **บอกสาเหตุผิด** และส่งผู้ใช้ไปลองวิธีที่ "น่าจะขยายได้" (เช่นย่อภาพก่อน
+# ส่ง) ซึ่งวัดแล้วเป็น no-op. สิ่งที่ต่างจริงคือโควตา token ต่อบรรทัด.
+
+def test_quality_reports_the_token_budget():
+    """จำนวนไทล์คือโควตาความสนใจ — ต้องเป็นตัวเลขที่เอาไปเทียบสองโซนได้."""
+    q = Z.zone_ocr_quality(bbox_mm(72.8, 50.4), PAGE_W_PT, PAGE_H_PT)
+    assert q["tokens"] == q["tiles"] * Z.GEM_TOKENS_PER_TILE
+
+
+def test_the_zone_that_reads_correctly_gets_more_tokens():
+    """เหตุผลที่แท้จริงของสองโซนในไฟล์จริง — ไม่ใช่ขนาดตัวหนังสือ."""
+    bad = Z.zone_ocr_quality(bbox_mm(69.8, 66.2), PAGE_W_PT, PAGE_H_PT)   # z1
+    good = Z.zone_ocr_quality(bbox_mm(72.8, 50.4), PAGE_W_PT, PAGE_H_PT)  # b2
+    assert bad["tiles"] < good["tiles"]
+    assert bad["tokens"] < good["tokens"]
+
+
+def test_ui_no_longer_claims_the_text_is_not_magnified():
+    """ป้ายเดิม "ไม่ได้ขยาย ✗" พูดเกินจริง — ห้ามกลับไปใช้."""
+    src = _hint_source()
+    assert "ไม่ได้ขยาย" not in src
+    assert "ไม่ขยายให้เลย" not in src
+
+
+def test_ui_states_the_tile_size_not_only_the_count():
+    """ป้ายต้องใช้ "ด้านของไทล์" ไม่ใช่ "จำนวนไทล์".
+
+    จำนวนไทล์โตตามพื้นที่โซน ⇒ โซนใหญ่ได้เลขเยอะทั้งที่หยาบที่สุด แล้ว
+    ผู้ใช้อ่านว่า "เยอะ = ดี" แล้วไปขยายโซนซึ่งไม่ช่วยเลย. ด้านของไทล์
+    ไม่ขึ้นกับพื้นที่ ⇒ เทียบสองโซนกันได้ตรง ๆ (เล็ก = ละเอียด).
+    """
+    src = _hint_source()
+    assert "ไทล์" in src
+    assert "tilePx" in src
+    assert "tokens" in src          # โควตารวมยังบอกในแผง properties
+
+
+def test_tile_size_shrinks_as_the_zone_gets_flatter():
+    """ตัวเลขที่ผู้ใช้เห็นต้องขยับไปทางเดียวกับคำแนะนำ "ลากให้แบนลง"."""
+    tall = Z.zone_ocr_quality(bbox_mm(69.8, 66.2), PAGE_W_PT, PAGE_H_PT)
+    flat = Z.zone_ocr_quality(bbox_mm(72.8, 50.4), PAGE_W_PT, PAGE_H_PT)
+    assert tall["tile_px"] == Z.GEM_TILE_MAX      # ตันแล้ว = level bad
+    assert flat["tile_px"] < tall["tile_px"]
+    assert tall["level"] == "bad" and flat["level"] == "ok"
+
+
+def test_a_bigger_zone_gets_more_tiles_but_is_still_judged_bad():
+    """หลักฐานว่าทำไม "จำนวนไทล์" เป็นป้ายตัดสินไม่ได้."""
+    small = Z.zone_ocr_quality(bbox_mm(69.8, 66.2), PAGE_W_PT, PAGE_H_PT)
+    big = Z.zone_ocr_quality(bbox_mm(140, 132), PAGE_W_PT, PAGE_H_PT)
+    assert big["tiles"] > small["tiles"]          # ไทล์เยอะกว่า
+    assert big["tile_px"] == small["tile_px"]     # แต่หยาบเท่ากันเป๊ะ
+    assert big["level"] == small["level"] == "bad"
+
+
+def test_ui_offers_the_band_split_checkbox_as_a_way_out():
+    """โหมดหั่นแถบมีแล้ว — คำแนะนำต้องชี้ไปหามัน ไม่ใช่แค่ "ลากใหม่"."""
+    assert "หั่นโซนเป็นแถบ" in _hint_source()
+
+
+def test_number_in_the_hint_is_not_locale_dependent():
+    """toLocaleString() ให้ผลต่างกันตาม locale (บาง locale ให้เลขไทย)
+    ⇒ ตัวเลขบนคำเตือนต้องคั่นหลักพันเอง.
+
+    (บรรทัดวันที่ของแถบกู้คืนงานใช้ toLocaleString("th-TH") ได้ต่อไป —
+    ที่นั่นระบุ locale ไว้ชัด และเป็นวันที่ ไม่ใช่ตัวเลขที่ต้องเทียบกัน)"""
+    assert "toLocaleString" not in _hint_source()
+    assert "function thousands" in _js()

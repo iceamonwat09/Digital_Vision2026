@@ -601,14 +601,29 @@ _RE_WORD = re.compile(
 # ไม่ใช่คำสะกด ไม่ควรฟ้อง SPELL_FAIL (เช่น "https" จาก https://…)
 _SPELL_STOPLIST = {"http", "https", "www", "mailto"}
 
-# Scripts whose pyspellchecker dictionary is unreliable enough that a
-# "not in dictionary" result is NOT trustworthy evidence of a typo, so a
-# failed word must NOT raise SPELL_FAIL (would falsely push the verdict
-# to REVIEW) and must NOT get an edit-distance suggestion (Arabic
-# morphology makes single-edit guesses wrong — "المهدرجة"→"المدرجة" is a
-# different word). These words are surfaced advisory-only in the
-# translate tab as "dict ไม่รองรับคำนี้ (<script>)" and defer to the AI
-# column + cross-panel comparison. Maps a script key → Thai name.
+# Scripts whose pyspellchecker dictionary is too weak to *decide* a typo,
+# so a failed word must NOT raise SPELL_FAIL (would falsely push the
+# verdict to REVIEW) and must NOT get an edit-distance suggestion.
+#
+# ⚠️ วัดจริงบนฉลาก John West ทั้งสองฉบับ (OCR ด้วย tesseract-ara แล้วกรอง
+#    conf >= 85 เหลือคำอาหรับ 69 คำ) — ผลไม่ได้แปลว่า "dict ใช้ไม่ได้":
+#      dict รู้จัก 57/69 = 82.6%
+#      ไม่รู้จัก 12 คำ  แยกได้เป็น
+#        1  คำผิดจริงที่เรากำลังตามหา  (كربوهيدات — รูปที่ถูก كربوهيدرات
+#           **อยู่ใน dict**) ⇒ ชั้นนี้คือชั้นเดียวที่มีโอกาสจับมันได้ เพราะ
+#           ไฟล์ทั้งสองฉบับพิมพ์คำผิดเหมือนกัน ชั้นเทียบข้ามไฟล์จึงไม่มีทางเห็น
+#        4  คำจริงที่ dict ขาด (مهدرجة · للتصنيع = มีคำนำหน้า ل ·
+#           المصفى · كوليسترول = ทับศัพท์)
+#        7  Tesseract อ่านผิดเอง (المئوية→المثوية ฯลฯ) — ไม่ใช่ความผิด dict
+#
+#    ⇒ 1 จริง : 4 ปลอม ⇒ **ตัดสินไม่ได้** (ยังคง advisory ต่อไป) แต่
+#      **ไม่ใช่ "ไม่มีข้อมูล"** ⇒ ข้อความบน UI ต้องบอกว่า "ไม่อยู่ใน dict"
+#      ไม่ใช่ "dict ไม่รองรับ" ซึ่งผู้ตรวจอ่านว่า "ระบบไม่ได้ตรวจ"
+#    ⇒ คำแนะนำยังต้องปิดสนิท: พิสูจน์แล้วว่าเดาผิด — "مهدرجة"→"مدرجة"
+#      เป็นคนละคำ (Arabic morphology ทำให้ edit-distance 1 ไร้ความหมาย)
+#
+# These words are surfaced advisory-only in the translate tab and defer to
+# the AI column + cross-panel comparison. Maps a script key → Thai name.
 UNSUPPORTED_SCRIPT_NAMES = {"arabic": "อาหรับ"}
 
 # Arabic Unicode blocks (base + supplement + extended-A + presentation
