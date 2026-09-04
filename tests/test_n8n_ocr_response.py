@@ -282,6 +282,28 @@ def test_workflow_error_reaches_the_caller(monkeypatch):
     assert r["error"] == TRUNCATED
 
 
+def test_text_that_was_read_is_kept_by_default(monkeypatch):
+    """🔴 บทเรียน 4 ก.ย.: คีย์ ``error`` มาจาก **workflow ของผู้ใช้**
+    ซึ่งเราคุมเงื่อนไขไม่ได้ ⇒ ห้ามให้มันทิ้งข้อความที่อ่านได้แล้วเป็นค่า
+    เริ่มต้น. ถ้า node ใน N8N ติดธงกว้างไป ทุกโซนจะกลายเป็น "อ่านไม่ได้"
+    พร้อมกันทั้งใบ = แย่กว่าก่อนแก้มาก (กฎเหล็กข้อ 1).
+    """
+    body = json.dumps({"error": TRUNCATED, "text": "دهون كلية ١ جم"})
+    r = call(monkeypatch, body)
+    assert r["text"] == "دهون كلية ١ جم"       # ใช้ต่อเหมือนก่อนแก้
+    assert not r.get("error")                   # ไม่ทำให้โซนตกเป็น UNREADABLE
+    assert r["stub"] is False
+    assert TRUNCATED in r["warning"]            # แต่ต้องเห็นว่าไม่สมบูรณ์
+
+
+def test_empty_text_still_reports_the_real_reason(monkeypatch):
+    """หัวใจของการแก้รอบนี้ — ยังทำงานเต็มที่โดยไม่ต้องเปิด flag ใด ๆ."""
+    r = call(monkeypatch, json.dumps({"error": TRUNCATED, "text": "   "}))
+    assert r["error"] == TRUNCATED
+    assert r["text"] == ""
+    assert r["stub"] is True
+
+
 def test_partial_text_is_dropped_when_the_workflow_reports_an_error(monkeypatch):
     """หัวใจของด่านนี้ — ข้อความที่ขาดครึ่งอันตรายกว่าไม่มีข้อความ.
 
@@ -290,6 +312,7 @@ def test_partial_text_is_dropped_when_the_workflow_reports_an_error(monkeypatch)
     ผ่านไปพร้อม error โซนนั้นจะทั้งขึ้น UNREADABLE **และ** ถูกเอาไปเทียบ
     ⇒ ฟ้อง defect ปลอมทุกแถวที่หายไป (วัดได้ 30 รายการบนข้อมูลจริง).
     """
+    monkeypatch.setattr(config, "N8N_OCR_ERROR_DISCARDS_TEXT", True)
     body = json.dumps({"error": TRUNCATED,
                        "text": "دهون كلية ١ جم",
                        "blocks": [{"text": "دهون", "bbox": [0, 0, 9, 9]}]})
@@ -331,6 +354,7 @@ def test_warning_key_reaches_the_caller_without_failing_the_zone(monkeypatch):
 
 
 def test_error_and_warning_can_arrive_together(monkeypatch):
+    monkeypatch.setattr(config, "N8N_OCR_ERROR_DISCARDS_TEXT", True)
     r = call(monkeypatch, json.dumps({"error": TRUNCATED, "warning": "ภาพเบลอ",
                                       "text": "ครึ่งเดียว"}))
     assert r["error"] == TRUNCATED and r["warning"] == "ภาพเบลอ"
