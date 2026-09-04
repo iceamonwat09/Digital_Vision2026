@@ -47,7 +47,8 @@ def _js_const(name):
     ("GEM_TILE_DIV", lambda: Z.GEM_TILE_DIV),
     ("GEM_TILE_MIN", lambda: Z.GEM_TILE_MIN),
     ("GEM_TILE_MAX", lambda: Z.GEM_TILE_MAX),
-    ("ZONE_MAG_OK", lambda: Z.ZONE_MAG_OK),
+    ("ZONE_DPI_OK", lambda: Z.ZONE_DPI_OK),
+    ("ZONE_DPI_BAD", lambda: Z.ZONE_DPI_BAD),
     ("GEM_TOKENS_PER_TILE", lambda: Z.GEM_TOKENS_PER_TILE),
 ])
 def test_js_constants_match_python(name, expected):
@@ -122,7 +123,9 @@ def test_the_zone_that_lost_arabic_digits_is_flagged_bad():
     assert q["level"] == "bad"
     assert q["tiles"] == 4
     assert q["mag"] == pytest.approx(1.0, abs=0.01)
-    assert q["downscaled"] is False        # ไม่ได้เสีย dpi จริง แค่ไม่ได้ขยาย
+    assert q["downscaled"] is False        # ไม่ได้เสีย dpi จริง
+    # โซนนี้ตกลงมาที่ "พื้น" ของ OCR_DPI พอดี = ไม่ได้ประโยชน์จากชั้นใดเลย
+    assert q["eff_dpi"] == pytest.approx(config.OCR_DPI, abs=2)
 
 
 def test_the_zone_that_read_correctly_is_flagged_ok():
@@ -131,25 +134,41 @@ def test_the_zone_that_read_correctly_is_flagged_ok():
     assert q["tiles"] == 6
     assert q["mag"] == pytest.approx(1.29, abs=0.02)
     assert q["eff_dpi"] > config.OCR_DPI
+    assert q["eff_dpi"] >= Z.ZONE_DPI_OK
 
 
-def test_a_2_mm_difference_across_the_limit_flips_the_verdict():
+def test_a_few_mm_across_the_limit_flips_the_verdict():
     """เหตุผลที่ผู้ใช้เห็นว่า "วาดกรอบใหม่แล้วบางครั้งถูก" — โซนยืนคร่อม
     เส้นแบ่งพอดี ต่างกันไม่กี่มิลลิเมตรก็พลิก."""
-    over = Z.zone_ocr_quality(bbox_mm(70, 66), PAGE_W_PT, PAGE_H_PT)
-    under = Z.zone_ocr_quality(bbox_mm(70, 63), PAGE_W_PT, PAGE_H_PT)
+    over = Z.zone_ocr_quality(bbox_mm(70, 60), PAGE_W_PT, PAGE_H_PT)
+    under = Z.zone_ocr_quality(bbox_mm(70, 50), PAGE_W_PT, PAGE_H_PT)
     assert over["level"] == "bad"
-    assert under["level"] != "bad"
-    assert under["mag"] > over["mag"]
+    assert under["level"] == "ok"
+    assert under["eff_dpi"] > over["eff_dpi"]
 
 
 @pytest.mark.parametrize("h_mm,level", [
-    (20, "ok"), (40, "ok"), (50, "ok"), (55, "ok"),
-    (60, "warn"), (64, "warn"), (65, "bad"), (100, "bad"),
+    (20, "ok"), (40, "ok"), (50, "ok"),
+    (55, "warn"), (60, "bad"), (65, "bad"), (100, "bad"),
 ])
 def test_measured_ladder_is_locked(h_mm, level):
     assert Z.zone_ocr_quality(bbox_mm(70, h_mm),
                               PAGE_W_PT, PAGE_H_PT)["level"] == level
+
+
+def test_the_ladder_is_monotone():
+    """ยิ่งลากโซนใหญ่ ความละเอียดที่โมเดลเห็นต้องลดลงเรื่อย ๆ ห้ามกระโดดกลับ.
+
+    เกณฑ์เดิม (ตัดสินด้วยกำลังขยาย) ให้ 60 mm = bad แต่ 64/66/70 mm = warn
+    ⇒ ลากใหญ่ขึ้นแล้ว "ดีขึ้น" ซึ่งเป็นไปไม่ได้ทางกายภาพ = ลายเซ็นว่าตัวชี้วัด
+    ผิดตัว. เทสต์นี้กันไม่ให้กลับไปเป็นแบบนั้น.
+    """
+    prev = None
+    for h in range(20, 101, 2):
+        q = Z.zone_ocr_quality(bbox_mm(70, h), PAGE_W_PT, PAGE_H_PT)
+        if prev is not None:
+            assert q["eff_dpi"] <= prev + 1, "โซนสูง %d mm ได้ dpi เพิ่มขึ้น" % h
+        prev = q["eff_dpi"]
 
 
 # ── กับดัก "โซนเกือบจัตุรัส" ที่เกิดจากชั้นเพิ่ม DPI ของเราเอง ─────────
@@ -159,8 +178,8 @@ def test_measured_ladder_is_locked(h_mm, level):
 # เกณฑ์จริงจึงเป็น "ด้านสั้นของภาพที่ส่ง" ไม่ใช่ "ด้านสั้นของโซนเป็น mm"
 
 @pytest.mark.parametrize("h_mm,level", [
-    (50, "ok"), (55, "warn"), (60, "bad"), (62, "bad"),
-    (64, "warn"), (66, "warn"), (70, "warn"),
+    (50, "ok"), (55, "warn"), (60, "warn"), (62, "bad"),
+    (64, "bad"), (66, "bad"), (70, "bad"),
 ])
 def test_near_square_zones_are_judged_by_the_sent_image_not_by_mm(h_mm, level):
     q = Z.zone_ocr_quality(bbox_mm(60, h_mm), PAGE_W_PT, PAGE_H_PT)
@@ -293,3 +312,64 @@ def test_number_in_the_hint_is_not_locale_dependent():
     ที่นั่นระบุ locale ไว้ชัด และเป็นวันที่ ไม่ใช่ตัวเลขที่ต้องเทียบกัน)"""
     assert "toLocaleString" not in _hint_source()
     assert "function thousands" in _js()
+
+
+# ── บั๊กที่ผู้ใช้เจอบนสถานี 4 ก.ย.: ป้ายบอกให้ตัดเนื้อหาทิ้ง ───────────
+#
+# ผู้ใช้ลากโซนรอบแผงโภชนาการพอดี (28×29 mm) ได้ ✗ แต่พอลากเลยขอบแผงลงไป
+# (28×34 mm) ได้ ✓ ⇒ เครื่องมือกำลังบอกให้ "ลากไม่ให้เต็มแผง".
+# วัดแล้วพบว่าโมเดลเห็นสองโซนนี้ **ละเอียดเท่ากันเป๊ะ** (~1050 dpi ทั้งคู่)
+# เพราะชั้นเพิ่ม DPI ตรึงด้านยาวของภาพที่ส่งไว้ที่ OCR_CROP_MIN_SIDE
+# ⇒ กำลังขยายกับความละเอียดต้นทางหักล้างกันพอดี
+
+def test_two_zones_the_model_sees_identically_get_the_same_verdict():
+    tight = Z.zone_ocr_quality(bbox_mm(28, 29), PAGE_W_PT, PAGE_H_PT)  # เต็มแผง
+    loose = Z.zone_ocr_quality(bbox_mm(28, 34), PAGE_W_PT, PAGE_H_PT)  # เลยขอบ
+    assert tight["eff_dpi"] == pytest.approx(loose["eff_dpi"], rel=0.05)
+    assert tight["level"] == loose["level"] == "ok"
+
+
+def test_a_small_zone_is_never_flagged_bad():
+    """โซนเล็กได้ประโยชน์เต็มจากชั้นเพิ่ม DPI ⇒ ไม่มีเหตุให้เตือน.
+
+    ถ้าเทสต์นี้แดง แปลว่าเกณฑ์กลับไปตัดสินด้วยรูปทรง (mag/ไทล์) ซึ่งไร้
+    ความหมายในย่านนี้ แล้วจะไปบอกผู้ใช้ให้ตัดเนื้อหาทิ้งอีก.
+    """
+    for w, h in ((28, 29), (29, 30), (20, 20), (35, 35), (40, 30)):
+        q = Z.zone_ocr_quality(bbox_mm(w, h), PAGE_W_PT, PAGE_H_PT)
+        assert q["level"] != "bad", "%dx%d ได้ %s" % (w, h, q["level"])
+        assert q["eff_dpi"] > config.OCR_DPI
+
+
+def test_eff_dpi_includes_the_small_zone_boost():
+    """บั๊กเดิม: eff_dpi คิดจาก ``scale`` ซึ่งรายงานเฉพาะ "ย่อเพราะชนเพดาน"
+    ไม่รวมชั้นเพิ่ม DPI ⇒ โซน 28×29 ที่เรนเดอร์จริงที่ ~1050 dpi ถูกรายงาน
+    เป็น 450 dpi (ต่ำกว่าความจริง 2.3 เท่า).
+    """
+    q = Z.zone_ocr_quality(bbox_mm(28, 29), PAGE_W_PT, PAGE_H_PT)
+    pw, _, _ = Z.ocr_crop_size(bbox_mm(28, 29), PAGE_W_PT, PAGE_H_PT)
+    assert q["eff_dpi"] == pytest.approx(pw / (28 / 25.4) * q["mag"], rel=0.01)
+    assert q["eff_dpi"] > 900
+
+
+def _tag_source():
+    """เฉพาะตัว ``zoneQualityTag`` — ป้ายที่ติดบนกรอบตอนลาก."""
+    js = _js()
+    i = js.index("function zoneQualityTag")
+    return js[i:js.index("function renderHlHint", i)]
+
+
+def test_the_drag_tag_states_the_number_that_decides():
+    """ป้ายบนกรอบต้องโชว์ dpi ที่โมเดลเห็น — ไม่ใช่ไทล์/กำลังขยาย ซึ่ง
+    ไร้ความหมายกับโซนเล็ก (ดูเทสต์ two_zones_the_model_sees_identically)."""
+    tag = _tag_source()
+    assert "effDpi" in tag
+    assert "dpi" in tag
+    assert "q.tiles" not in tag           # จำนวนไทล์โตตามพื้นที่ ⇒ ป้ายไม่ได้
+    assert "q.mag" not in tag
+    assert "ไม่ได้ขยาย" not in tag
+
+
+def test_ui_tells_the_user_to_tighten_not_to_crop_content():
+    """คำแนะนำต้องไม่ผลักให้ลากเลยขอบเนื้อหา."""
+    assert "กระชับ" in _hint_source()

@@ -1411,7 +1411,7 @@
   const HL_MIN_SHORT = 700, HL_MAX_ASPECT = 4.0;
 
   // ── ค่าคงที่ที่ต้องตรงกับฝั่ง Python ──────────────────────────────
-  // PREVIEW_DPI/OCR_* มาจาก artwork_check/config.py · GEM_*/ZONE_MAG_OK
+  // PREVIEW_DPI/OCR_* มาจาก artwork_check/config.py · GEM_*/ZONE_DPI_*
   // มาจาก artwork_check/zones.py — ห้ามแก้ข้างเดียว
   // (tests/test_artwork_zone_quality.py อ่านไฟล์นี้มาเทียบ)
   const PREVIEW_DPI = 150, OCR_DPI = 450;
@@ -1419,7 +1419,7 @@
   const OCR_DPI_MAX_FACTOR = 4.0;
   const GEM_SMALL_SIDE = 384, GEM_TILE_DIV = 1.5;
   const GEM_TILE_MIN = 256, GEM_TILE_MAX = 768;
-  const ZONE_MAG_OK = 1.15;
+  const ZONE_DPI_OK = 580, ZONE_DPI_BAD = 500;
   const GEM_TOKENS_PER_TILE = 258;
 
   // คั่นหลักพันแบบคงที่ — ห้ามใช้ toLocaleString() เพราะผลขึ้นกับ locale
@@ -1482,18 +1482,23 @@
     const pw = r[0], ph = r[1], scale = r[2];
     const t = gemTiling(pw, ph), tiles = t[0], mag = t[1];
     const down = scale < 0.999;
-    const level = (down || mag <= 1.001) ? "bad"
-                : (mag < ZONE_MAG_OK ? "warn" : "ok");
     let mm = null;
     if (m.pdf) {
       const w = natW || previewImg.naturalWidth;
       const h = natH || previewImg.naturalHeight;
       mm = [bbox[2] * w / PREVIEW_DPI * 25.4, bbox[3] * h / PREVIEW_DPI * 25.4];
     }
+    // ความละเอียดที่โมเดลเห็นจริง — รวมชั้นเพิ่ม DPI + ย่อเพราะชนเพดาน +
+    // กำลังขยายจากการหั่นไทล์. ⚠️ ห้ามคิดจาก scale (ไม่รวมชั้นเพิ่ม DPI)
+    // และห้ามตัดสินด้วย mag ล้วน (ไร้ความหมายกับโซนเล็ก — ดู zones.py)
+    const effDpi = mm ? pw / Math.max(1e-6, mm[0] / 25.4) * mag
+                      : OCR_DPI * scale * mag;
+    const level = effDpi >= ZONE_DPI_OK ? "ok"
+                : (effDpi >= ZONE_DPI_BAD ? "warn" : "bad");
     return { level: level, w: Math.round(pw), h: Math.round(ph),
              tiles: tiles, mag: mag, tokens: tiles * GEM_TOKENS_PER_TILE,
              tilePx: Math.round(GEM_TILE_MAX / mag),
-             effDpi: Math.round(OCR_DPI * scale * mag),
+             effDpi: Math.round(effDpi),
              mm: mm, shortPx: Math.round(Math.min(pw, ph)), downscaled: down };
   }
 
@@ -1510,11 +1515,10 @@
       ? q.mm[0].toFixed(0) + "×" + q.mm[1].toFixed(0) + " mm"
       : q.w + "×" + q.h + " px";
     if (q.downscaled) return size + " · ใหญ่เกิน ระบบต้องย่อ ✗";
-    // ⚠️ ใช้ "ด้านของไทล์" ไม่ใช่ "จำนวนไทล์" — จำนวนไทล์โตตามพื้นที่โซน
-    //    ⇒ โซนใหญ่ได้เลขเยอะทั้งที่หยาบที่สุด ผู้ใช้จะอ่านว่า "เยอะ = ดี"
-    //    แล้วไปขยายโซน. ด้านของไทล์เทียบข้ามขนาดโซนได้ตรง ๆ (เล็ก = ดี)
-    const t = " · ไทล์ " + q.tilePx + " px";
-    if (q.level === "bad") return size + t + " (หยาบสุด) ✗";
+    // ⚠️ ตัวเลขบนป้ายต้องเป็น "ความละเอียดที่โมเดลเห็น" ไม่ใช่ไทล์/กำลังขยาย
+    //    — สองตัวหลังไร้ความหมายกับโซนเล็ก (ดู zones.ZONE_DPI_OK)
+    const t = " · โมเดลเห็น " + q.effDpi + " dpi";
+    if (q.level === "bad") return size + t + " ✗";
     if (q.level === "warn") return size + t + " ⚠";
     return size + t + " ✓";
   }
@@ -1543,23 +1547,21 @@
     if (!q) { el.style.display = "none"; return; }
     el.style.display = "";
     el.className = "aw-size-hint q-" + q.level;
-    const head = q.level === "ok" ? "🟢 ขนาดโซนเหมาะกับ OCR"
-               : q.level === "warn" ? "🟡 ขนาดโซนก้ำกึ่ง"
-               : "🔴 โมเดลจะสุ่มอ่านโซนนี้หยาบที่สุด";
-    const limitPx = Math.round(GEM_TILE_MAX * GEM_TILE_DIV);
+    const head = q.level === "ok" ? "🟢 ความละเอียดที่โมเดลเห็นเพียงพอ"
+               : q.level === "warn" ? "🟡 ความละเอียดที่โมเดลเห็นก้ำกึ่ง"
+               : "🔴 ความละเอียดที่โมเดลเห็นต่ำ";
     let tip = "";
     if (q.downscaled)
       tip = " — โซนใหญ่เกิน " + OCR_CROP_MAX_SIDE +
             " px ระบบต้องย่อภาพลงก่อนส่ง จึงเสียความละเอียดจริง";
     else if (q.level !== "ok")
-      tip = " — ด้านสั้นของภาพที่ส่งคือ " + q.shortPx + " px (ตั้งแต่ " +
-            limitPx + " px ขึ้นไป ไทล์จะตันที่ " + GEM_TILE_MAX +
-            " px = หยาบที่สุด) · ลากโซนให้แบนลง คือเตี้ยลงหรือ" +
-            "กว้างขึ้น · แบ่งเป็นสองโซน · หรือติ๊ก \u201cหั่นโซนเป็นแถบ\u201d";
-    el.textContent = head + tip + " · ภาพที่ส่ง " + q.w + "×" + q.h +
-      " px · หั่นเป็นไทล์ละ " + q.tilePx + " px (ยิ่งเล็กยิ่งละเอียด · " +
-      "ตันที่ " + GEM_TILE_MAX + ") · รวม " + q.tiles + " ไทล์ = " +
-      thousands(q.tokens) + " token ที่โมเดลมีให้ภาพนี้";
+      tip = " — ลากโซนให้กระชับเฉพาะบล็อกข้อความที่ต้องอ่าน (ยิ่งโซนเล็ก" +
+            " ระบบยิ่งเรนเดอร์ละเอียดขึ้นให้) · แบ่งเป็นสองโซน · หรือติ๊ก" +
+            " \u201cหั่นโซนเป็นแถบ\u201d";
+    el.textContent = head + " ~" + q.effDpi + " dpi" + tip +
+      " · วัดจริง: 581 dpi อ่านครบ · 450 dpi เลขอาหรับหาย" +
+      " · ภาพที่ส่ง " + q.w + "×" + q.h + " px · " + q.tiles + " ไทล์ (ละ " +
+      q.tilePx + " px) = " + thousands(q.tokens) + " token";
   }
   $("awPropType").addEventListener("change", () => {
     const z = selectedZone(); if (z) { z.type = $("awPropType").value; renderZones(); }

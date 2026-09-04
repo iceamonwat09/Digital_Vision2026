@@ -24,7 +24,7 @@
 ## 🚦 อ่านตรงนี้ก่อน — สถานะล่าสุด 4 ก.ย. 2026 (สำหรับแชทใหม่)
 
 **Branch: `claude/candent-artwork-performance-outzkr`** · `CONFIG_VERSION` =
-**`2026.09.04-tiles`** · pytest **1223 ผ่าน / 58 fail** (ชุด fail เท่ากับ
+**`2026.09.04-effdpi`** · pytest **1231 ผ่าน / 58 fail** (ชุด fail เท่ากับ
 baseline เป๊ะ — ยืนยันด้วย `git stash` แล้วได้ 1113/58)
 
 ### 🗣️ 4 ก.ย. (รอบ 2) — **3 จุดที่เครื่องมือ "พูดสิ่งที่ไม่จริง"** (ไม่แตะ verdict)
@@ -3319,7 +3319,7 @@ A, B, C, …) ⇒ ทุกกลุ่มมีสมาชิก 1 ตัว �
   `tests/test_artwork_ownership.py` 30 ตัว (สิทธิ์เห็นประวัติ + ชื่อผู้ตรวจ).
   ⚠️ `tests/test_inspection_golden.py` **fail 5 ตัวอยู่แล้ว** (pre-existing, `NameError: FieldResult`
   ในโมดูล Label Paper) — ไม่เกี่ยวกับ artwork. ยืนยันด้วย `git stash` ก่อนโทษการแก้ของตัวเอง.
-- CONFIG_VERSION ปัจจุบัน: **`2026.09.04-tiles`** (เช็คที่ footer ว่ารันโค้ดใหม่จริง).
+- CONFIG_VERSION ปัจจุบัน: **`2026.09.04-effdpi`** (เช็คที่ footer ว่ารันโค้ดใหม่จริง).
 
 ---
 
