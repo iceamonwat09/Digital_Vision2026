@@ -24,6 +24,19 @@ def bbox_mm(w_mm, h_mm, x=0.05, y=0.05):
     return [x, y, w_mm / 297.0, h_mm / 210.0]
 
 
+# ⚠️ การวัดจริงทั้งหมด (John West · 3 รอบ) ทำตอน OCR_CROP_MIN_SIDE = 1200
+#    ต่อมาค่านี้ถูกปรับเป็น 1536 (ได้ความละเอียดเพิ่มโดยไม่กิน token เพิ่ม)
+#    ⇒ เทสต์ที่ **ล็อกผลวัด** ต้องตรึงค่าเดิมไว้ ไม่งั้นมันจะเลิกทดสอบสิ่งที่
+#    วัดมาแล้วเงียบ ๆ. เทสต์ที่ทดสอบ **คุณสมบัติ** (monotone / โซนเล็กไม่โดน
+#    เตือน / สองโซนที่โมเดลเห็นเท่ากันต้องได้คำตอบเดียวกัน) ใช้ค่าปัจจุบัน
+MEASURED_MIN_SIDE = 1200
+
+
+@pytest.fixture
+def as_measured(monkeypatch):
+    monkeypatch.setattr(config, "OCR_CROP_MIN_SIDE", MEASURED_MIN_SIDE)
+
+
 def _js():
     with open(JS_PATH, encoding="utf-8") as f:
         return f.read()
@@ -90,7 +103,7 @@ def test_the_limit_is_65_mm_at_the_configured_dpi():
 
 # ── เส้นทางเรนเดอร์ต้องตรงกับ ocr._render_for_ocr ────────────────────
 
-def test_small_zone_is_boosted_up_to_the_min_side():
+def test_small_zone_is_boosted_up_to_the_min_side(as_measured):
     pw, ph, scale = Z.ocr_crop_size(bbox_mm(20, 15), PAGE_W_PT, PAGE_H_PT)
     assert scale == 1.0
     assert max(pw, ph) == pytest.approx(config.OCR_CROP_MIN_SIDE, abs=1)
@@ -118,7 +131,7 @@ def test_huge_zone_is_downscaled_and_reported_as_such():
 
 # ── ล็อกผลที่วัดได้จากไฟล์จริง ───────────────────────────────────────
 
-def test_the_zone_that_lost_arabic_digits_is_flagged_bad():
+def test_the_zone_that_lost_arabic_digits_is_flagged_bad(as_measured):
     q = Z.zone_ocr_quality(bbox_mm(69.8, 66.2), PAGE_W_PT, PAGE_H_PT)
     assert q["level"] == "bad"
     assert q["tiles"] == 4
@@ -128,7 +141,7 @@ def test_the_zone_that_lost_arabic_digits_is_flagged_bad():
     assert q["eff_dpi"] == pytest.approx(config.OCR_DPI, abs=2)
 
 
-def test_the_zone_that_read_correctly_is_flagged_ok():
+def test_the_zone_that_read_correctly_is_flagged_ok(as_measured):
     q = Z.zone_ocr_quality(bbox_mm(72.8, 50.4), PAGE_W_PT, PAGE_H_PT)
     assert q["level"] == "ok"
     assert q["tiles"] == 6
@@ -137,7 +150,7 @@ def test_the_zone_that_read_correctly_is_flagged_ok():
     assert q["eff_dpi"] >= Z.ZONE_DPI_OK
 
 
-def test_a_few_mm_across_the_limit_flips_the_verdict():
+def test_a_few_mm_across_the_limit_flips_the_verdict(as_measured):
     """เหตุผลที่ผู้ใช้เห็นว่า "วาดกรอบใหม่แล้วบางครั้งถูก" — โซนยืนคร่อม
     เส้นแบ่งพอดี ต่างกันไม่กี่มิลลิเมตรก็พลิก."""
     over = Z.zone_ocr_quality(bbox_mm(70, 60), PAGE_W_PT, PAGE_H_PT)
@@ -151,7 +164,7 @@ def test_a_few_mm_across_the_limit_flips_the_verdict():
     (20, "ok"), (40, "ok"), (50, "ok"),
     (55, "warn"), (60, "bad"), (65, "bad"), (100, "bad"),
 ])
-def test_measured_ladder_is_locked(h_mm, level):
+def test_measured_ladder_is_locked(as_measured, h_mm, level):
     assert Z.zone_ocr_quality(bbox_mm(70, h_mm),
                               PAGE_W_PT, PAGE_H_PT)["level"] == level
 
@@ -181,13 +194,13 @@ def test_the_ladder_is_monotone():
     (50, "ok"), (55, "warn"), (60, "warn"), (62, "bad"),
     (64, "bad"), (66, "bad"), (70, "bad"),
 ])
-def test_near_square_zones_are_judged_by_the_sent_image_not_by_mm(h_mm, level):
+def test_near_square_zones_are_judged_by_the_sent_image_not_by_mm(as_measured, h_mm, level):
     q = Z.zone_ocr_quality(bbox_mm(60, h_mm), PAGE_W_PT, PAGE_H_PT)
     assert q["level"] == level
     assert q["short_mm"] <= Z.zone_short_side_limit_mm()   # โซนยังเล็กกว่า 65 mm
 
 
-def test_bad_near_square_zone_reports_the_real_reason_in_pixels():
+def test_bad_near_square_zone_reports_the_real_reason_in_pixels(as_measured):
     q = Z.zone_ocr_quality(bbox_mm(60, 62), PAGE_W_PT, PAGE_H_PT)
     assert q["level"] == "bad" and q["downscaled"] is False
     assert q["short_px"] >= q["limit_px"]      # เหตุผลจริงอยู่ที่พิกเซล
@@ -281,7 +294,7 @@ def test_ui_states_the_tile_size_not_only_the_count():
     assert "tokens" in src          # โควตารวมยังบอกในแผง properties
 
 
-def test_tile_size_shrinks_as_the_zone_gets_flatter():
+def test_tile_size_shrinks_as_the_zone_gets_flatter(as_measured):
     """ตัวเลขที่ผู้ใช้เห็นต้องขยับไปทางเดียวกับคำแนะนำ "ลากให้แบนลง"."""
     tall = Z.zone_ocr_quality(bbox_mm(69.8, 66.2), PAGE_W_PT, PAGE_H_PT)
     flat = Z.zone_ocr_quality(bbox_mm(72.8, 50.4), PAGE_W_PT, PAGE_H_PT)
@@ -290,7 +303,7 @@ def test_tile_size_shrinks_as_the_zone_gets_flatter():
     assert tall["level"] == "bad" and flat["level"] == "ok"
 
 
-def test_a_bigger_zone_gets_more_tiles_but_is_still_judged_bad():
+def test_a_bigger_zone_gets_more_tiles_but_is_still_judged_bad(as_measured):
     """หลักฐานว่าทำไม "จำนวนไทล์" เป็นป้ายตัดสินไม่ได้."""
     small = Z.zone_ocr_quality(bbox_mm(69.8, 66.2), PAGE_W_PT, PAGE_H_PT)
     big = Z.zone_ocr_quality(bbox_mm(140, 132), PAGE_W_PT, PAGE_H_PT)
@@ -322,11 +335,30 @@ def test_number_in_the_hint_is_not_locale_dependent():
 # เพราะชั้นเพิ่ม DPI ตรึงด้านยาวของภาพที่ส่งไว้ที่ OCR_CROP_MIN_SIDE
 # ⇒ กำลังขยายกับความละเอียดต้นทางหักล้างกันพอดี
 
-def test_two_zones_the_model_sees_identically_get_the_same_verdict():
+def test_two_zones_the_model_sees_identically_get_the_same_verdict(as_measured):
+    """ที่ค่าตอนที่ผู้ใช้เจอบั๊ก (MIN_SIDE 1200) โมเดลเห็นสองโซนนี้เท่ากันเป๊ะ
+    แต่ป้ายให้ ✗ กับ ✓ ⇒ บอกให้ตัดเนื้อหาทิ้ง."""
     tight = Z.zone_ocr_quality(bbox_mm(28, 29), PAGE_W_PT, PAGE_H_PT)  # เต็มแผง
     loose = Z.zone_ocr_quality(bbox_mm(28, 34), PAGE_W_PT, PAGE_H_PT)  # เลยขอบ
     assert tight["eff_dpi"] == pytest.approx(loose["eff_dpi"], rel=0.05)
     assert tight["level"] == loose["level"] == "ok"
+
+
+@pytest.mark.parametrize("w,h,extra", [
+    (28, 29, 5), (28, 29, 12), (40, 30, 8), (60, 40, 15), (70, 50, 20),
+])
+def test_cropping_content_away_is_never_rewarded(w, h, extra):
+    """คุณสมบัติที่ต้องจริงเสมอไม่ว่าจะตั้ง OCR_CROP_MIN_SIDE เท่าไร:
+
+    การลากเลยขอบเนื้อหาออกไป (โซนใหญ่ขึ้นโดยเนื้อหาเท่าเดิม) ต้อง **ไม่เคย**
+    ได้คะแนนดีกว่าการลากกระชับ — ไม่งั้นเครื่องมือจะสอนให้ผู้ตรวจตัดเนื้อหา
+    ที่ต้องอ่านทิ้ง ซึ่งเป็นความเสียหายที่ร้ายแรงกว่าการไม่เตือนอะไรเลย
+    """
+    tight = Z.zone_ocr_quality(bbox_mm(w, h), PAGE_W_PT, PAGE_H_PT)
+    loose = Z.zone_ocr_quality(bbox_mm(w, h + extra), PAGE_W_PT, PAGE_H_PT)
+    assert tight["eff_dpi"] >= loose["eff_dpi"]
+    order = {"bad": 0, "warn": 1, "ok": 2}
+    assert order[tight["level"]] >= order[loose["level"]]
 
 
 def test_a_small_zone_is_never_flagged_bad():
@@ -373,3 +405,36 @@ def test_the_drag_tag_states_the_number_that_decides():
 def test_ui_tells_the_user_to_tighten_not_to_crop_content():
     """คำแนะนำต้องไม่ผลักให้ลากเลยขอบเนื้อหา."""
     assert "กระชับ" in _hint_source()
+
+
+# ── ค่า OCR_CROP_MIN_SIDE = 1536 (4 ก.ย. 2026) ──────────────────────
+#
+# 1536 = 2 x GEM_TILE_MAX พอดี = ค่าสูงสุดที่ยังอยู่ใน "ขั้น 4 ไทล์"
+# ⇒ ได้ความละเอียดเพิ่มโดยไม่กิน token ของ Gemini เพิ่มเลย
+
+def test_min_side_sits_exactly_on_a_tile_boundary():
+    """ถ้าเลยขั้นนี้ไปแม้แต่นิดเดียว จำนวนไทล์กระโดดเป็น 9 ทันที
+    (token x2.25) — ค่านี้จึงไม่ใช่ตัวเลขที่เลือกมาลอย ๆ."""
+    assert config.OCR_CROP_MIN_SIDE % Z.GEM_TILE_MAX == 0
+    assert config.OCR_CROP_MIN_SIDE // Z.GEM_TILE_MAX == 2
+
+
+def test_raising_min_side_to_the_tile_boundary_costs_no_extra_tokens(monkeypatch):
+    """หลักฐานว่า 1200 -> 1536 ฟรีจริง — วัดบนโซนจริงทั้งสามแบบ."""
+    for w, h in ((28, 29), (69.8, 66.2), (72.8, 50.4)):
+        monkeypatch.setattr(config, "OCR_CROP_MIN_SIDE", 1200)
+        before = Z.zone_ocr_quality(bbox_mm(w, h), PAGE_W_PT, PAGE_H_PT)
+        monkeypatch.setattr(config, "OCR_CROP_MIN_SIDE", 1536)
+        after = Z.zone_ocr_quality(bbox_mm(w, h), PAGE_W_PT, PAGE_H_PT)
+        assert after["tokens"] == before["tokens"], "%sx%s กิน token เพิ่ม" % (w, h)
+        assert after["eff_dpi"] >= before["eff_dpi"]
+
+
+def test_the_zone_that_lost_arabic_digits_improves_at_the_new_setting():
+    """โซนที่วัดว่า "เลขอาหรับหายเกือบทุกรอบ" ที่ 450 dpi ต้องดีขึ้นจริง."""
+    q = Z.zone_ocr_quality(bbox_mm(69.8, 66.2), PAGE_W_PT, PAGE_H_PT)
+    assert q["eff_dpi"] > config.OCR_DPI          # ไม่ติดพื้นอีกแล้ว
+    assert q["level"] != "bad"
+    # ⚠️ ยังไม่ถึง ZONE_DPI_OK — ยังไม่เคยยิง Gemini ที่ค่านี้ ⇒ ต้องเป็น
+    #    "warn" ไม่ใช่ "ok" (ไม่มั่นใจ = ไม่บอกว่าผ่าน · กฎเหล็กข้อ 2)
+    assert q["level"] == "warn"

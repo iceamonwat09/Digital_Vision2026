@@ -1415,7 +1415,7 @@
   // มาจาก artwork_check/zones.py — ห้ามแก้ข้างเดียว
   // (tests/test_artwork_zone_quality.py อ่านไฟล์นี้มาเทียบ)
   const PREVIEW_DPI = 150, OCR_DPI = 450;
-  const OCR_CROP_MAX_SIDE = 3000, OCR_CROP_MIN_SIDE = 1200;
+  const OCR_CROP_MAX_SIDE = 3000, OCR_CROP_MIN_SIDE = 1536;
   const OCR_DPI_MAX_FACTOR = 4.0;
   const GEM_SMALL_SIDE = 384, GEM_TILE_DIV = 1.5;
   const GEM_TILE_MIN = 256, GEM_TILE_MAX = 768;
