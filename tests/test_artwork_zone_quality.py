@@ -407,16 +407,31 @@ def test_ui_tells_the_user_to_tighten_not_to_crop_content():
     assert "กระชับ" in _hint_source()
 
 
-# ── ค่า OCR_CROP_MIN_SIDE = 1536 (4 ก.ย. 2026) ──────────────────────
+# ── OCR_CROP_MIN_SIDE: เลขคณิตกับหน้างานไม่ตรงกัน (4 ก.ย. 2026) ─────
 #
-# 1536 = 2 x GEM_TILE_MAX พอดี = ค่าสูงสุดที่ยังอยู่ใน "ขั้น 4 ไทล์"
-# ⇒ ได้ความละเอียดเพิ่มโดยไม่กิน token ของ Gemini เพิ่มเลย
+# 1536 = 2 x GEM_TILE_MAX พอดี ⇒ ได้ความละเอียดเพิ่มโดยไม่กิน token เพิ่ม
+# (เทสต์ข้างล่างยืนยันเลขคณิตนั้นว่าถูก) — **แต่ทดสอบบนสถานีด้วยไฟล์จริง
+# แล้ว defect ปลอมเยอะขึ้น** เพราะระบบนี้เทียบ OCR ↔ OCR: สิ่งที่สำคัญคือ
+# "สองฝั่งอ่านตรงกันไหม" ไม่ใช่ "อ่านละเอียดแค่ไหน" ⇒ default กลับเป็น 1200
 
-def test_min_side_sits_exactly_on_a_tile_boundary():
-    """ถ้าเลยขั้นนี้ไปแม้แต่นิดเดียว จำนวนไทล์กระโดดเป็น 9 ทันที
-    (token x2.25) — ค่านี้จึงไม่ใช่ตัวเลขที่เลือกมาลอย ๆ."""
-    assert config.OCR_CROP_MIN_SIDE % Z.GEM_TILE_MAX == 0
-    assert config.OCR_CROP_MIN_SIDE // Z.GEM_TILE_MAX == 2
+def test_default_min_side_is_the_field_tested_value():
+    """ห้ามเปลี่ยนค่านี้จากการคำนวณอย่างเดียวอีก — ต้อง A/B บนไฟล์จริงก่อน.
+
+    1536 ชนะทุกตัวเลขเชิงเรขาคณิต (dpi สูงกว่า · token เท่าเดิม) แต่แพ้บน
+    หน้างานจริง. ถ้าจะขยับต้องมีผลนับ defect จากไฟล์คู่จริงมาประกอบ.
+    """
+    assert config.OCR_CROP_MIN_SIDE == 1200
+
+
+def test_1536_is_still_the_right_value_to_try_next(monkeypatch):
+    """เก็บเลขคณิตไว้ให้ครบ เผื่อกลับมาทดลองอีกครั้ง — 1536 คือค่าสูงสุด
+    ที่ยังอยู่ในขั้น 4 ไทล์ (เลยไปนิดเดียว token กระโดด x2.25)."""
+    assert 1536 % Z.GEM_TILE_MAX == 0 and 1536 // Z.GEM_TILE_MAX == 2
+    monkeypatch.setattr(config, "OCR_CROP_MIN_SIDE", 1536)
+    a = Z.zone_ocr_quality(bbox_mm(28, 29), PAGE_W_PT, PAGE_H_PT)
+    monkeypatch.setattr(config, "OCR_CROP_MIN_SIDE", 1600)
+    b = Z.zone_ocr_quality(bbox_mm(28, 29), PAGE_W_PT, PAGE_H_PT)
+    assert b["tokens"] > a["tokens"]
 
 
 def test_raising_min_side_to_the_tile_boundary_costs_no_extra_tokens(monkeypatch):
@@ -430,11 +445,10 @@ def test_raising_min_side_to_the_tile_boundary_costs_no_extra_tokens(monkeypatch
         assert after["eff_dpi"] >= before["eff_dpi"]
 
 
-def test_the_zone_that_lost_arabic_digits_improves_at_the_new_setting():
-    """โซนที่วัดว่า "เลขอาหรับหายเกือบทุกรอบ" ที่ 450 dpi ต้องดีขึ้นจริง."""
+def test_the_zone_that_lost_arabic_digits_would_improve_at_1536(monkeypatch):
+    """เลขคณิตยังถูก: ที่ 1536 โซนนี้หลุดจากพื้น 450 dpi จริง —
+    เก็บไว้เป็นหลักฐานว่าทำไมถึงเคยเลือกค่านั้น (แต่หน้างานบอกอีกอย่าง)."""
+    monkeypatch.setattr(config, "OCR_CROP_MIN_SIDE", 1536)
     q = Z.zone_ocr_quality(bbox_mm(69.8, 66.2), PAGE_W_PT, PAGE_H_PT)
-    assert q["eff_dpi"] > config.OCR_DPI          # ไม่ติดพื้นอีกแล้ว
-    assert q["level"] != "bad"
-    # ⚠️ ยังไม่ถึง ZONE_DPI_OK — ยังไม่เคยยิง Gemini ที่ค่านี้ ⇒ ต้องเป็น
-    #    "warn" ไม่ใช่ "ok" (ไม่มั่นใจ = ไม่บอกว่าผ่าน · กฎเหล็กข้อ 2)
-    assert q["level"] == "warn"
+    assert q["eff_dpi"] > config.OCR_DPI
+    assert q["level"] == "warn"      # ไม่มั่นใจ = ไม่บอกว่าผ่าน
