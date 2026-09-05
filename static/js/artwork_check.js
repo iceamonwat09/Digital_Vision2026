@@ -92,6 +92,17 @@
     return !!(($("awSplitBands") || {}).checked);
   }
 
+  // โหมดทดลอง "อ่านซ้ำ 2 รอบ แล้วยืนยันผล" — ใช้กับปุ่มส่งตรวจสอบเท่านั้น
+  // (แท็บแปลไม่เกี่ยว เพราะมันไม่ได้ตัดสิน defect)
+  function confirmReadsOn() {
+    return !!(($("awConfirmReads") || {}).checked);
+  }
+
+  // โหมดทดลอง "เทียบแผงระดับพิกเซล" — ใช้กับปุ่มส่งตรวจสอบเท่านั้น
+  function pixelCheckOn() {
+    return !!(($("awPixelCheck") || {}).checked);
+  }
+
   function coverageHtml(cov, fontTrust) {
     if (!cov) return "";              // รายงานเก่าที่ยังไม่มีข้อมูลนี้
     const rows = [
@@ -161,6 +172,64 @@
     h += "</div></div>";
     return h;
   }
+  // ── โหมดทดลอง "อ่านซ้ำ 2 รอบ" — กล่องบอกว่ากรองอะไรออกไป ────────────
+  // ⚠️ ต้องแสดงรายการที่ "ยังไม่ยืนยัน" เสมอ — การกรองที่มองไม่เห็นคือการ
+  //    ซ่อนข้อมูลจากผู้ตรวจ (กฎเหล็กข้อ 2). รายงานเก่าไม่มีคีย์นี้ = ไม่แสดง
+  function confirmHtml(cf) {
+    if (!cf) return "";
+    if (cf.error) {
+      return '<div class="aw-confirm warn">🔁 โหมดอ่านซ้ำ: ' + esc(cf.error) +
+        "</div>";
+    }
+    const n = cf.unconfirmed || 0;
+    let h = '<div class="aw-confirm' + (n ? " warn" : "") + '">' +
+      "🔁 ยืนยันด้วยการอ่าน " + esc(cf.rounds) + " รอบ · รายงาน " +
+      esc(cf.confirmed) + " รายการที่พบทุกรอบ";
+    if (!n) return h + " · ไม่มีรายการที่ตกไป</div>";
+    h += " · <b>ตกไป " + esc(n) + " รายการที่พบรอบเดียว</b>" +
+      '<div class="aw-confirm-list">รายการที่ยังยืนยันไม่ได้ ' +
+      "(ไม่นับเป็นข้อผิดพลาด แต่ควรดูด้วยตา):";
+    (cf.items || []).slice(0, 20).forEach((it) => {
+      h += '<div class="aw-confirm-item"><code>' + esc(it.zone_id) + "</code> " +
+        esc(it["class"]) + (it.found ? " — “" + esc(it.found) + "”" : "") +
+        "</div>";
+    });
+    if ((cf.items || []).length > 20)
+      h += '<div class="aw-confirm-item">… และอีก ' +
+           esc(cf.items.length - 20) + " รายการ</div>";
+    return h + "</div></div>";
+  }
+  // ── โหมดทดลอง "เทียบแผงระดับพิกเซล" — กล่องบอกว่ากลุ่มไหนใช้ผลจากภาพ ──
+  // ⚠️ ต้องบอกให้ชัดว่ากลุ่มไหน "เทียบไม่ได้แล้วถอยไปใช้ชั้นข้อความ" —
+  //    ไม่งั้นผู้ใช้เข้าใจว่าทุกกลุ่มถูกเทียบด้วยภาพแล้ว (กฎเหล็กข้อ 2)
+  function pixelHtml(px) {
+    if (!px) return "";
+    if (px.error)
+      return '<div class="aw-confirm warn">🎯 เทียบพิกเซล: ' + esc(px.error) +
+        "</div>";
+    const pairs = px.pairs || [];
+    if (!pairs.length)
+      return '<div class="aw-confirm">🎯 เทียบพิกเซล: ' +
+        "ไม่มีกลุ่มที่เข้าเงื่อนไข (ต้องมีโซน panel สองโซนในกลุ่มเดียวกัน " +
+        "และเป็นไฟล์ PDF ทั้งคู่) — ผลทั้งหมดมาจากชั้นข้อความเหมือนเดิม</div>";
+    const fell = pairs.filter((p) => p.status !== "ok");
+    let h = '<div class="aw-confirm' + (fell.length ? " warn" : "") + '">' +
+      "🎯 เทียบแผงระดับพิกเซล · ใช้ผลจากภาพ " + esc(px.used) + " กลุ่ม";
+    h += '<div class="aw-confirm-list">';
+    pairs.forEach((p) => {
+      const ok = p.status === "ok";
+      h += '<div class="aw-confirm-item"><code>' + esc(p.group) + "</code> " +
+        (ok ? "เทียบด้วยภาพ · พบ " + esc(p.regions) + " บริเวณ" +
+              (p.scale ? " · สเกล " + esc(p.scale) : "")
+            : "เทียบไม่ได้ (" + esc(p.reason || p.status) +
+              ") — ใช้ผลชั้นข้อความของกลุ่มนี้แทน") + "</div>";
+    });
+    return h + "</div></div>";
+  }
+  window.awPixelHtml = pixelHtml;
+
+  window.awConfirmHtml = confirmHtml;
+
   window.awCoverageHtml = coverageHtml;
 
   // ── เทียบภาพเก่า/ใหม่ระดับพิกเซล (advisory ล้วน) ──────────────────
@@ -261,6 +330,9 @@
     // ผลเทียบพิกเซลครั้งล่าสุด (ถ้าเคยกด) — advisory ล้วน อยู่ใต้ coverage
     // เพื่อไม่ให้ปนกับผล PASS/FAIL ด้านบน. รายงานเก่าไม่มีคีย์นี้ = ไม่แสดง
     html += pixdiffHtml(rep.pixdiff, rep.id);
+    // โหมดอ่านซ้ำ (ถ้าเปิด) — บอกว่ากรองอะไรออกไป ไม่ให้หายเงียบ
+    html += confirmHtml(rep.confirm);
+    html += pixelHtml(rep.pixel);
 
     // การ์ดของชั้นที่ "ไม่ได้ทำงานในปุ่มนี้แล้ว" ต้องไม่โชว์เลข 0 ค้างไว้ —
     // ช่องที่ไม่มีทางเป็นค่าอื่นได้ทำให้ผู้ใช้สับสนกว่าไม่มีช่อง. อ่านจาก
@@ -770,6 +842,8 @@
         autoRotate: !!($("awAutoRotate") || {}).checked,
         forceOcr: forceOcrOn(),
         splitBands: splitBandsOn(),
+        confirmReads: confirmReadsOn(),
+        pixelCheck: pixelCheckOn(),
         brand: ($("awBrand") || {}).value || "",
         savedAt: Date.now(),
       }));
@@ -822,6 +896,8 @@
     if ($("awAutoRotate")) $("awAutoRotate").checked = !!s.autoRotate;
     if ($("awForceOcr")) $("awForceOcr").checked = !!s.forceOcr;
     if ($("awSplitBands")) $("awSplitBands").checked = !!s.splitBands;
+    if ($("awConfirmReads")) $("awConfirmReads").checked = !!s.confirmReads;
+    if ($("awPixelCheck")) $("awPixelCheck").checked = !!s.pixelCheck;
     if ($("awBrand") && s.brand) $("awBrand").value = s.brand;
     showTabs(true);
     switchTab("result");
@@ -1004,7 +1080,8 @@
   // ช่องติ๊กที่เปลี่ยน "วิธีอ่านข้อความ" ต้องถูกจำไว้ในงานที่ค้าง —
   // เดิมค่าถูกบันทึกก็ต่อเมื่อมีการแก้โซน (saveSession ถูกเรียกจาก
   // renderZones) ⇒ ติ๊กแล้วรีเฟรชทันทีจะได้ค่าเก่ากลับมาแบบเงียบ
-  ["awForceOcr", "awSplitBands"].forEach((id) => {
+  ["awForceOcr", "awSplitBands", "awConfirmReads",
+   "awPixelCheck"].forEach((id) => {
     const el = $(id);
     if (el) el.addEventListener("change", saveSessionSoon);
   });
@@ -1934,7 +2011,9 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ zones: zones, brand: brandInput.value.trim(),
                                auto_rotate: autoRotate, force_ocr: forceOcrOn(),
-                               split_bands: splitBandsOn() }),
+                               split_bands: splitBandsOn(),
+                               confirm_reads: confirmReadsOn(),
+                               pixel_check: pixelCheckOn() }),
       });
       renderReport(rep, resultBox);
       showTabs(true);

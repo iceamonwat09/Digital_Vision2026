@@ -30,6 +30,8 @@ from typing import List, Optional, Tuple
 import cv2
 
 from . import bands as bands_mod
+from . import confirm as confirm_mod
+from . import panelmatch as panelmatch_mod
 from . import (checks, config, fonttrust, ocr, pixdiff, report, vocab,
                zones as zones_mod)
 from .pdf_ingest import (ArtworkDocument, apply_rotation, encode_jpg,
@@ -307,10 +309,88 @@ def _unify_group_engines(docs: dict, zone_list: List[dict],
     return out
 
 
+def _pixel_compare(insp_dir: str, zone_list: List[dict],
+                   defects: List[dict]):
+    """โหมดทดลอง: เทียบ "แผงต่อแผง" ระดับพิกเซลแทนชั้นเทียบข้อความ.
+
+    ทำเฉพาะกลุ่มที่มีโซนชนิด panel **สองโซนพอดี** และทั้งคู่มาจากไฟล์ PDF —
+    กลุ่มอื่นและชั้นตรวจอื่น (ตัวเลข · บาร์โค้ด · อ่านไม่ออก) **ไม่ถูกแตะ**
+
+    ⚠️ เทียบไม่ได้ (คนละเนื้อหา / เรนเดอร์ไม่ได้) ⇒ **คงผลชั้นข้อความของ
+       กลุ่มนั้นไว้ทั้งหมด** ห้ามทิ้ง coverage เพราะเราเทียบไม่ได้เอง
+    """
+    srcs = {"a": _find_source(insp_dir)}
+    try:
+        srcs["b"] = _find_source(insp_dir, "source_b")
+    except FileNotFoundError:
+        pass
+
+    by_group = {}
+    for z in zone_list:
+        if z.get("type") != "panel":
+            continue
+        by_group.setdefault(z.get("group") or "", []).append(z)
+
+    replaced_groups = set()
+    new_defects: List[dict] = []
+    pairs = []
+    for g, zs in sorted(by_group.items()):
+        if not g or len(zs) != 2:
+            continue
+        za, zb = zs
+        pa, pb = srcs.get(za.get("doc", "a")), srcs.get(zb.get("doc", "a"))
+        if not pa or not pb:
+            continue
+        if not (ArtworkDocument(pa).is_pdf and ArtworkDocument(pb).is_pdf):
+            pairs.append({"group": g, "status": "skipped",
+                          "reason": "not_pdf", "regions": 0})
+            continue
+        res, img_a, img_b = panelmatch_mod.compare_ex(
+            pa, za["bbox"], pb, zb["bbox"])
+        entry = {"group": g, "status": res.get("status"),
+                 "reason": res.get("reason", ""),
+                 "regions": len(res.get("regions") or []),
+                 "scale": res.get("scale"), "ncc": res.get("ncc"),
+                 "ecc": res.get("ecc")}
+        pairs.append(entry)
+        if res.get("status") != pixdiff.OK or img_a is None:
+            continue                       # เทียบไม่ได้ ⇒ ใช้ผลชั้นข้อความเดิม
+
+        def _read(which, px, _a=img_a, _b=img_b):
+            """อ่านข้อความเฉพาะบริเวณที่ต่าง — ครอปเล็ก ๆ อ่านได้นิ่งกว่ามาก.
+            อ่านไม่ได้ = คืนค่าว่าง **ห้ามเดา** (กฎเหล็กข้อ 2)"""
+            img = _a if which == "a" else _b
+            pad = 14
+            x, y, w, h = px
+            y0, y1 = max(0, y - pad), min(img.shape[0], y + h + pad)
+            x0, x1 = max(0, x - pad), min(img.shape[1], x + w + pad)
+            crop = img[y0:y1, x0:x1]
+            if crop.size == 0:
+                return ""
+            r = ocr.read_image(crop)
+            return (r or {}).get("text", "")
+
+        new_defects += panelmatch_mod.regions_to_defects(res, za, zb, _read)
+        replaced_groups.add(g)
+
+    if not replaced_groups:
+        return defects, {"pairs": pairs, "used": 0}
+
+    # แทนที่เฉพาะ MISMATCH_* ของกลุ่มที่เทียบพิกเซลสำเร็จ — คลาสอื่นคงเดิม
+    ids = {z["id"] for z in zone_list
+           if (z.get("group") or "") in replaced_groups}
+    kept = [x for x in defects
+            if not (str(x.get("class", "")).startswith("MISMATCH_")
+                    and x.get("zone_id") in ids)]
+    return kept + new_defects, {"pairs": pairs, "used": len(replaced_groups)}
+
+
 def run_inspection(rec_id: str, zone_list: List[dict],
                    brand: str = "", auto_rotate: bool = False,
                    force_ocr: bool = False,
-                   split_bands: bool = False) -> dict:
+                   split_bands: bool = False,
+                   confirm_reads: bool = False,
+                   pixel_check: bool = False) -> dict:
     d = report.inspection_dir(rec_id)
     src = _find_source(d)
     zone_list = zones_mod.sanitize_zones(zone_list)
@@ -336,9 +416,41 @@ def run_inspection(rec_id: str, zone_list: List[dict],
         vocab_words = set(v["words"])
         vocab_phrases = v["phrases"]
 
-    defects = checks.run_all_checks(zone_list, ocr_results,
-                                    vocab_words=vocab_words,
-                                    vocab_phrases=vocab_phrases)
+    def _checks(res):
+        return checks.run_all_checks(zone_list, res,
+                                     vocab_words=vocab_words,
+                                     vocab_phrases=vocab_phrases)
+
+    defects = _checks(ocr_results)
+    confirm_info = None
+    if confirm_reads:
+        # โหมดทดลอง: อ่านซ้ำอีกรอบด้วยเส้นทางเดียวกันเป๊ะ แล้วเชื่อเฉพาะ
+        # defect ที่โผล่ทั้งสองรอบ. เป็นการ **กรอง** ไม่ใช่การสร้างใหม่ ⇒
+        # ผลที่แสดงกับผู้ใช้หน้าตาเหมือนเดิมทุกประการ แค่เหลือน้อยลง
+        # (เหตุผลเชิงตัวเลขทั้งหมดอยู่ใน artwork_check/confirm.py)
+        try:
+            ocr_2, _ = _read_all_docs(d, zones_a, zones_b,
+                                      auto_rotate=auto_rotate,
+                                      force_ocr=force_ocr,
+                                      split_bands=split_bands)
+            defects, unconfirmed = confirm_mod.confirm([defects, _checks(ocr_2)])
+            confirm_info = confirm_mod.summary(defects, unconfirmed, 2)
+        except Exception:
+            # อ่านรอบสองไม่สำเร็จ = ยืนยันไม่ได้ ⇒ **คงผลรอบแรกไว้ทั้งหมด**
+            # (ห้ามทิ้ง defect เพราะเหตุขัดข้องของเราเอง) พร้อมบอกให้เห็น
+            logger.exception("[artwork] อ่านรอบยืนยันไม่สำเร็จ — ใช้ผลรอบเดียว")
+            confirm_info = {"rounds": 1, "confirmed": len(defects),
+                            "unconfirmed": 0, "items": [],
+                            "error": "อ่านรอบที่สองไม่สำเร็จ — ผลนี้มาจากการอ่านรอบเดียว"}
+
+    pixel_info = None
+    if pixel_check:
+        try:
+            defects, pixel_info = _pixel_compare(d, zone_list, defects)
+        except Exception:
+            logger.exception("[artwork] เทียบพิกเซลไม่สำเร็จ — ใช้ผลชั้นข้อความ")
+            pixel_info = {"pairs": [], "used": 0,
+                          "error": "เทียบพิกเซลไม่สำเร็จ — ผลนี้มาจากชั้นข้อความเหมือนเดิม"}
 
     _tag_highlight_risk(d, zone_list)
 
@@ -377,6 +489,13 @@ def run_inspection(rec_id: str, zone_list: List[dict],
         # รายงานย้อนหลังแล้วรู้ว่าข้อความมาจากเส้นทางไหน
         "force_ocr": bool(force_ocr),
         "split_bands": bool(split_bands),
+        # โหมดยืนยันด้วยการอ่านซ้ำ — advisory ล้วน. defect ที่ "ยังไม่ยืนยัน"
+        # ต้องแสดงให้ผู้ตรวจเห็น ไม่ใช่ทิ้งเงียบ ๆ (กฎเหล็กข้อ 2)
+        "confirm_reads": bool(confirm_reads),
+        "confirm": confirm_info,
+        # โหมดเทียบพิกเซล — บอกว่ากลุ่มไหนใช้ผลจากภาพแทนชั้นข้อความ
+        "pixel_check": bool(pixel_check),
+        "pixel": pixel_info,
         # ฟอนต์ที่ text layer เชื่อไม่ได้ — ผู้ตรวจเอาไปบอกคนทำ artwork ได้ว่า
         # ต้อง export ไฟล์ใหม่ (ต้นเหตุจริงอยู่ที่ขั้นตอนนั้น ไม่ใช่ที่ระบบนี้)
         "font_trust": {k: fonttrust.summary(v) for k, v in trust.items()},

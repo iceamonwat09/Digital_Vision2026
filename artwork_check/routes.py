@@ -193,11 +193,17 @@ def api_inspect(rec_id):
     # — ใช้กับไฟล์ที่ฟอนต์ subset แมปอักขระผิดจนข้อความใน PDF เชื่อไม่ได้
     force_ocr = bool(body.get("force_ocr"))
     split_bands = bool(body.get("split_bands"))
+    # โหมดทดลอง: อ่านซ้ำอีกรอบแล้วเชื่อเฉพาะ defect ที่โผล่ทั้งสองรอบ
+    confirm_reads = bool(body.get("confirm_reads"))
+    # โหมดทดลอง: เทียบแผงต่อแผงระดับพิกเซลแทนชั้นเทียบข้อความ
+    pixel_check = bool(body.get("pixel_check"))
     try:
         rep = pipeline.run_inspection(rec_id, zone_list, brand=brand,
                                       auto_rotate=auto_rotate,
                                       force_ocr=force_ocr,
-                                      split_bands=split_bands)
+                                      split_bands=split_bands,
+                                      confirm_reads=confirm_reads,
+                                      pixel_check=pixel_check)
     except (ValueError, FileNotFoundError) as e:
         return jsonify({"error": str(e)}), 404
     except Exception as e:

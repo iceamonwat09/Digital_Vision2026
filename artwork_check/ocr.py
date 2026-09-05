@@ -390,6 +390,31 @@ def _render_for_ocr(doc: ArtworkDocument, bbox):
     return bigger
 
 
+def read_image(crop) -> dict:
+    """อ่านข้อความจากภาพเล็ก ๆ ที่ให้มาตรง ๆ (ไม่ผ่านการเรนเดอร์โซน).
+
+    ใช้กับโหมดเทียบพิกเซล: เมื่อรู้แล้วว่า "ต่างตรงไหน" ค่อยอ่านเฉพาะ
+    บริเวณนั้น — ครอปเล็กอ่านได้นิ่งกว่าการอ่านทั้งแผงมาก และถึงอ่านไม่ได้
+    เราก็ยังรู้ตำแหน่งอยู่ดี
+
+    คืน ``{"text", "engine"}`` — ล้มเหลว/ไม่มี backend = ``text`` ว่าง
+    **ไม่โยน exception และไม่เดา** (กฎเหล็กข้อ 2)
+    """
+    if crop is None or getattr(crop, "size", 0) == 0:
+        return {"text": "", "engine": "none"}
+    if not vertex_client.is_enabled():
+        return {"text": "", "engine": "none"}
+    try:
+        r = vertex_client.ocr_image(encode_jpg(crop))
+    except Exception:
+        logger.exception("[artwork] read_image ล้มเหลว")
+        return {"text": "", "engine": "none"}
+    if not isinstance(r, dict) or r.get("error") or r.get("stub"):
+        return {"text": "", "engine": str((r or {}).get("engine", "n8n"))}
+    return {"text": (r.get("text") or "").strip(),
+            "engine": str(r.get("engine", "n8n"))}
+
+
 def read_all_zones(doc: ArtworkDocument, zones: List[dict],
                    page_auto: bool = False,
                    force_ocr: bool = False, split_bands: bool = False,
