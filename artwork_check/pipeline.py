@@ -347,9 +347,19 @@ def _pixel_compare(insp_dir: str, zone_list: List[dict],
             continue
         res, img_a, img_b = panelmatch_mod.compare_ex(
             pa, za["bbox"], pb, zb["bbox"])
+        # ⬇️ ตัวเลขทุกตัวที่ใช้ "พัฒนาต่อ" ต้องไปถึงหน้าจอ ไม่ใช่ให้เดาจาก
+        #    จำนวน defect (ข้อกำหนดผู้ใช้ 5 ก.ย.) — โดยเฉพาะ ``ecc``
+        #    (คุณภาพการทาบภาพ) และ ``edge_regions`` (ของที่ลากเกินแผงเข้ามา)
+        #    ⚠️ ``ncc`` **ห้ามใช้ตัดสิน** — วัดแล้วได้ 1.0000 ในเคสที่ผลมั่ว
         entry = {"group": g, "status": res.get("status"),
                  "reason": res.get("reason", ""),
                  "regions": len(res.get("regions") or []),
+                 "edge_regions": res.get("edge_regions"),
+                 "areas_mm2": res.get("areas_mm2"),
+                 "diff_ratio": res.get("diff_ratio"),
+                 "min_region_mm2": res.get("min_region_mm2"),
+                 "mm_per_px": res.get("mm_per_px"),
+                 "size": res.get("size"), "dpi": res.get("dpi"),
                  "scale": res.get("scale"), "ncc": res.get("ncc"),
                  "ecc": res.get("ecc")}
         pairs.append(entry)
@@ -433,8 +443,11 @@ def run_inspection(rec_id: str, zone_list: List[dict],
                                       auto_rotate=auto_rotate,
                                       force_ocr=force_ocr,
                                       split_bands=split_bands)
-            defects, unconfirmed = confirm_mod.confirm([defects, _checks(ocr_2)])
-            confirm_info = confirm_mod.summary(defects, unconfirmed, 2)
+            r2 = _checks(ocr_2)
+            n1 = len(defects)
+            defects, unconfirmed = confirm_mod.confirm([defects, r2])
+            confirm_info = confirm_mod.summary(defects, unconfirmed, 2,
+                                               [n1, len(r2)])
         except Exception:
             # อ่านรอบสองไม่สำเร็จ = ยืนยันไม่ได้ ⇒ **คงผลรอบแรกไว้ทั้งหมด**
             # (ห้ามทิ้ง defect เพราะเหตุขัดข้องของเราเอง) พร้อมบอกให้เห็น

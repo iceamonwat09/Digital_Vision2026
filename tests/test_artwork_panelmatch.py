@@ -334,3 +334,153 @@ def test_the_page_says_which_groups_fell_back():
     i = js.index("function pixelHtml(px)")
     block = js[i:js.index("window.awPixelHtml", i)]
     assert "เทียบไม่ได้" in block and "ใช้ผลชั้นข้อความ" in block
+
+
+# ══════════════════════════════════════════════════════════════════════
+# ชุดที่เพิ่มหลังสร้าง ``verify_compare.py`` (5 ก.ย. 2026)
+#
+# เครื่องมือวัดจับได้ 2 เรื่องที่ชุดเทสต์เดิม **มองไม่เห็นเลย** เพราะเทสต์
+# เดิมลากโซนเท่ากันทั้งสองฝั่งเสมอ ซึ่งไม่ใช่สิ่งที่เกิดบนสถานี:
+#
+#   ① ``loc`` ติดลบ (เกิดทุกครั้งที่ลากโซน a หลวมกว่า b) ถูก ``max(0, …)``
+#      ตัดทิ้ง ⇒ ภาพสองฝั่งเลื่อนกันเท่ากับค่าที่ตัด. วัดบนไฟล์เดียวกัน:
+#      หลวม 1 mm ⇒ **ฟ้องผิด 21 บริเวณ** · 3 mm ⇒ 31 · 6 mm ⇒ 47
+#      และ **NCC = 1.0000 ทุกเคส** ⇒ ด่าน NCC จับไม่ได้เลย
+#   ② ความต่างที่ "ติดขอบพื้นที่เทียบ" = เนื้อหารอบแผงที่ลากเกินเข้ามา
+#      วัดบนคู่จริง 10 แบบการลาก: ที่ไม่ติดขอบ = 1 พอดีทุกแบบ (ของจริง)
+#      ที่ติดขอบ = 0/4/10/12 (ขยะล้วน) ⇒ แยกได้ 10/10
+# ══════════════════════════════════════════════════════════════════════
+
+def _grow(zone, f):
+    """ขยายโซนออกทุกด้านเป็นสัดส่วน ``f`` ของหน้า (จำลองการลากหลวม)."""
+    x, y, w, h = zone
+    return [x - f, y - f, w + 2 * f, h + 2 * f]
+
+
+def test_dragging_zone_a_loose_must_not_shift_the_comparison(base):
+    """ลากโซน a หลวมกว่า b บนไฟล์เดียวกัน ⇒ ต้องไม่เจออะไรเลย.
+
+    นี่คือเคสที่ทำให้ ``loc`` ติดลบ. ถ้ากลับไป ``max(0, loc)`` เทสต์นี้แดง
+    ทันที (วัดจริง: ฟ้องผิด 20-40 บริเวณ)
+    """
+    for f in (0.01, 0.03, 0.05):
+        r = PM.compare(base, _grow(ZONE, f), base, ZONE, dpi=TEST_DPI)
+        assert r["status"] == pixdiff.OK
+        assert r["regions"] == [], "ลากหลวม %.0f%% แล้วฟ้องผิด %d บริเวณ" % (
+            f * 100, len(r["regions"]))
+
+
+def test_dragging_zone_b_loose_must_not_shift_the_comparison(base):
+    """ทิศตรงข้าม (``loc`` เป็นบวก) ต้องยังถูกเหมือนเดิม."""
+    for f in (0.01, 0.03, 0.05):
+        r = PM.compare(base, ZONE, base, _grow(ZONE, f), dpi=TEST_DPI)
+        assert r["status"] == pixdiff.OK
+        assert r["regions"] == []
+
+
+def test_the_real_change_survives_every_way_of_dragging(tmp_path, base):
+    """ความต่างจริงต้องไม่ขึ้นกับ "มือที่ลากโซน" — เจอครบทุกแบบ."""
+    other = _panel(tmp_path / "b.pdf", dv=24)
+    for za, zb in [(ZONE, ZONE), (_grow(ZONE, 0.03), ZONE),
+                   (ZONE, _grow(ZONE, 0.03)), (_grow(ZONE, 0.03),
+                                               _grow(ZONE, 0.03))]:
+        r = PM.compare(base, za, other, zb, dpi=TEST_DPI)
+        assert r["status"] == pixdiff.OK
+        assert len(r["regions"]) == 1, "ลาก %s/%s ได้ %d บริเวณ" % (
+            za, zb, len(r["regions"]))
+
+
+def test_a_difference_that_only_touches_the_edge_is_not_a_panel_difference(
+        tmp_path, base):
+    """แต้มความต่างไว้ **นอกแผง** (ในวงแหวนที่ลากเกิน) ⇒ ต้องไม่ตัดสิน.
+
+    ``edge_only`` ทำให้ ``pipeline`` ถอยไปใช้ผลชั้นข้อความของกลุ่มนั้น
+    ซึ่งดีกว่าทั้งการฟ้องขยะและการบอกว่า "ไม่พบความต่าง"
+    """
+    marked = str(tmp_path / "edge.pdf")
+    doc = fitz.open(base)
+    page = doc[0]
+    r = page.rect
+    z = _grow(ZONE, 0.03)
+    # วางจุดชิดมุมซ้ายบนของโซนที่ลากหลวม (= อยู่นอกแผง)
+    x = r.x0 + (z[0] + 0.004) * r.width
+    y = r.y0 + (z[1] + 0.004) * r.height
+    page.draw_rect(fitz.Rect(x, y, x + 10, y + 10), color=(0, 0, 0),
+                   fill=(0, 0, 0), width=0)
+    doc.save(marked)
+    doc.close()
+
+    res = PM.compare(base, z, marked, z, dpi=TEST_DPI)
+    assert res["status"] != pixdiff.OK
+    assert res["reason"] == "edge_only"
+    assert res.get("edge_regions", 0) >= 1
+    # ต้องมีคำอธิบายภาษาคนเสมอ ไม่ใช่รหัสเปล่า ๆ
+    assert "ขอบ" in pixdiff.reason_text("edge_only")
+
+
+def test_edge_regions_are_counted_not_hidden(tmp_path, base):
+    """ของที่ตกไปเพราะติดขอบ ต้อง **นับไว้** ไม่ใช่หายเงียบ."""
+    other = _panel(tmp_path / "b.pdf", dv=24)
+    doc = fitz.open(other)
+    page = doc[0]
+    r = page.rect
+    z = _grow(ZONE, 0.03)
+    x = r.x0 + (z[0] + 0.004) * r.width
+    y = r.y0 + (z[1] + 0.004) * r.height
+    page.draw_rect(fitz.Rect(x, y, x + 10, y + 10), color=(0, 0, 0),
+                   fill=(0, 0, 0), width=0)
+    both = str(tmp_path / "both.pdf")
+    doc.save(both)
+    doc.close()
+
+    res = PM.compare(base, z, both, z, dpi=TEST_DPI)
+    assert res["status"] == pixdiff.OK
+    assert len(res["regions"]) == 1          # ของจริงในแผง
+    assert res["edge_regions"] >= 1          # ของนอกแผง — รายงานแยก
+
+
+def test_the_result_carries_the_numbers_needed_to_improve_it(tmp_path, base):
+    """ผลต้องมี "ตัวเลขที่เอาไปพัฒนาต่อได้" ไม่ใช่แค่คำตอบ.
+
+    ข้อกำหนดจากผู้ใช้ 5 ก.ย.: ทุกโหมดต้องแสดงข้อมูลที่เอาไปพัฒนาต่อได้
+    ไม่ใช่ให้มานั่งเดาจากคำตอบ
+    """
+    other = _panel(tmp_path / "b.pdf", dv=24)
+    r = compare(base, other)
+    for k in ("scale", "ncc", "ecc", "diff_ratio", "size", "zone_size",
+              "mm_per_px", "trim_px", "min_region_px", "min_region_mm2",
+              "areas_mm2", "edge_regions"):
+        assert k in r, "ผลไม่มีคีย์ %r ที่ใช้วินิจฉัย" % k
+    assert r["areas_mm2"] and r["areas_mm2"][0] > 0
+    assert r["min_region_mm2"] > 0
+
+
+def test_sensitivity_floor_is_below_the_real_defect_that_was_measured():
+    """เกณฑ์ขนาดต่ำสุดต้องเล็กกว่าความต่างจริงที่วัดได้อย่างมีระยะเผื่อ.
+
+    ความต่างจริงของคู่ John West วัดได้ **0.246 mm²** ที่ 400 dpi.
+    ถ้าเกณฑ์ไปอยู่ใกล้ค่านั้น ระบบจะพลาดแบบ **false negative** ซึ่งเกิดจริง
+    มาแล้วบนสถานี (รอบหนึ่งได้ 0 defect) ⇒ ต้องเผื่ออย่างน้อย 3 เท่า
+    """
+    mmpp = 25.4 / PM.DPI
+    floor_mm2 = PM.MIN_REGION_PX * mmpp * mmpp
+    assert floor_mm2 <= 0.246 / 3.0, (
+        "เกณฑ์ %.3f mm² ใกล้ความต่างจริง 0.246 mm² เกินไป" % floor_mm2)
+
+
+def test_region_bbox_is_a_fraction_of_the_whole_zone_a(tmp_path, base):
+    """``bbox`` ต้องอ้างอิง "โซน a เต็มใบ" แม้พื้นที่ที่เทียบจะเล็กกว่า.
+
+    เมื่อลากโซน a หลวม พื้นที่ที่เทียบได้จริงคือส่วนที่ทับกันเท่านั้น —
+    ถ้าคำนวณ bbox จากพื้นที่ทับ กรอบที่ชี้ให้คนดูจะเลื่อนไปจากของจริง
+    """
+    other = _panel(tmp_path / "b.pdf", dv=24)
+    tight = PM.compare(base, ZONE, other, ZONE, dpi=TEST_DPI)
+    f = 0.03
+    loose = PM.compare(base, _grow(ZONE, f), other, ZONE, dpi=TEST_DPI)
+    assert len(tight["regions"]) == len(loose["regions"]) == 1
+    # โซนที่กว้างขึ้น (w + 2f) ⇒ สัดส่วนของจุดเดิมต้องขยับไปตามสูตร ไม่ใช่คงเดิม
+    bt = tight["regions"][0]["bbox"][0]
+    bl = loose["regions"][0]["bbox"][0]
+    exp = (bt * ZONE[2] + f) / (ZONE[2] + 2 * f)
+    assert abs(bl - exp) < 0.02, "bbox=%.4f ควรใกล้ %.4f" % (bl, exp)

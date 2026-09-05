@@ -185,7 +185,15 @@
     let h = '<div class="aw-confirm' + (n ? " warn" : "") + '">' +
       "🔁 ยืนยันด้วยการอ่าน " + esc(cf.rounds) + " รอบ · รายงาน " +
       esc(cf.confirmed) + " รายการที่พบทุกรอบ";
-    if (!n) return h + " · ไม่มีรายการที่ตกไป</div>";
+    const stat = [];
+    if (cf.per_round && cf.per_round.length)
+      stat.push("แต่ละรอบฟ้อง " + cf.per_round.map(esc).join(" · ") + " รายการ");
+    if (cf.agreement != null)
+      stat.push("สองรอบเห็นตรงกัน " + Math.round(cf.agreement * 100) + "%" +
+                (cf.agreement < 0.5 ? " (ต่ำ — การอ่านไม่เสถียรในงานใบนี้)" : ""));
+    const num = stat.length
+      ? '<div class="aw-confirm-num">' + esc(stat.join(" · ")) + "</div>" : "";
+    if (!n) return h + " · ไม่มีรายการที่ตกไป" + num + "</div>";
     h += " · <b>ตกไป " + esc(n) + " รายการที่พบรอบเดียว</b>" +
       '<div class="aw-confirm-list">รายการที่ยังยืนยันไม่ได้ ' +
       "(ไม่นับเป็นข้อผิดพลาด แต่ควรดูด้วยตา):";
@@ -197,7 +205,7 @@
     if ((cf.items || []).length > 20)
       h += '<div class="aw-confirm-item">… และอีก ' +
            esc(cf.items.length - 20) + " รายการ</div>";
-    return h + "</div></div>";
+    return h + "</div>" + num + "</div>";
   }
   // ── โหมดทดลอง "เทียบแผงระดับพิกเซล" — กล่องบอกว่ากลุ่มไหนใช้ผลจากภาพ ──
   // ⚠️ ต้องบอกให้ชัดว่ากลุ่มไหน "เทียบไม่ได้แล้วถอยไปใช้ชั้นข้อความ" —
@@ -216,13 +224,30 @@
     let h = '<div class="aw-confirm' + (fell.length ? " warn" : "") + '">' +
       "🎯 เทียบแผงระดับพิกเซล · ใช้ผลจากภาพ " + esc(px.used) + " กลุ่ม";
     h += '<div class="aw-confirm-list">';
+    // ตัวเลขวินิจฉัยครบชุด — ผู้ใช้ต้องเอาไปพัฒนาต่อได้โดยไม่ต้องเดา
     pairs.forEach((p) => {
       const ok = p.status === "ok";
+      const num = [];
+      if (p.scale != null) num.push("สเกล " + esc(p.scale));
+      if (p.ecc != null) num.push("คุณภาพการทาบ " + esc(p.ecc));
+      if (p.diff_ratio != null)
+        num.push("ต่าง " + (p.diff_ratio * 100).toFixed(4) + "%");
+      if (p.size) num.push("ภาพ " + esc(p.size[0]) + "×" + esc(p.size[1]) +
+                           " px @" + esc(p.dpi) + " dpi");
+      if (p.min_region_mm2 != null)
+        num.push("เห็นได้ตั้งแต่ " + esc(p.min_region_mm2) + " mm²");
       h += '<div class="aw-confirm-item"><code>' + esc(p.group) + "</code> " +
         (ok ? "เทียบด้วยภาพ · พบ " + esc(p.regions) + " บริเวณ" +
-              (p.scale ? " · สเกล " + esc(p.scale) : "")
-            : "เทียบไม่ได้ (" + esc(p.reason || p.status) +
-              ") — ใช้ผลชั้นข้อความของกลุ่มนี้แทน") + "</div>";
+              ((p.areas_mm2 && p.areas_mm2.length)
+                 ? " (" + p.areas_mm2.map(esc).join(", ") + " mm²)" : "")
+            : "เทียบไม่ได้ (" + esc(PD_WHY[p.reason] || p.reason || p.status) +
+              ") — ใช้ผลชั้นข้อความของกลุ่มนี้แทน");
+      if (p.edge_regions)
+        h += ' · <b>ตัดทิ้ง ' + esc(p.edge_regions) + " บริเวณที่ติดขอบโซน</b>" +
+             " (เนื้อหารอบแผงที่ลากเกินเข้ามา — ลากให้ครอบเฉพาะแผงจะแม่นกว่า)";
+      if (num.length)
+        h += '<div class="aw-confirm-num">' + esc(num.join(" · ")) + "</div>";
+      h += "</div>";
     });
     return h + "</div></div>";
   }
@@ -243,6 +268,7 @@
     zone_blank: "โซนแทบไม่มีเนื้อหาให้เทียบ",
     zone_too_different: "ต่างกันมากเกินกว่าจะเป็นการแก้ไข",
     too_different: "ต่างกันทั้งใบ",
+    edge_only: "ความต่างอยู่ติดขอบโซนทั้งหมด = เนื้อหารอบแผงที่ลากเกินเข้ามา",
     zone_empty: "โซนอยู่นอกหน้า/เล็กเกินไป",
     not_pdf: "รองรับเฉพาะ PDF",
     file_not_found: "ไม่พบไฟล์",

@@ -95,12 +95,21 @@ def confirm(rounds: List[List[dict]]) -> Tuple[List[dict], List[dict]]:
 
 
 def summary(confirmed: List[dict], unconfirmed: List[dict],
-            n_rounds: int) -> Dict[str, object]:
-    """ข้อมูลสำหรับแสดงบนรายงาน (advisory ล้วน)."""
+            n_rounds: int, per_round: List[int] = None) -> Dict[str, object]:
+    """ข้อมูลสำหรับแสดงบนรายงาน (advisory ล้วน).
+
+    ``agreement`` = สัดส่วนที่สองรอบเห็นตรงกัน — **ตัวเลขที่เอาไปพัฒนาต่อได้**
+    ไม่ใช่แค่คำตอบ: ค่าต่ำ = การอ่านของ OCR ไม่เสถียรในงานใบนี้ (ควรแก้
+    prompt / ลากโซนใหม่ / เพิ่มรอบ) ค่าสูง = ผลเชื่อได้แม้รอบเดียว
+    """
+    total = len(confirmed) + len(unconfirmed)
     return {
         "rounds": int(n_rounds),
         "confirmed": len(confirmed),
         "unconfirmed": len(unconfirmed),
+        "per_round": [int(x) for x in (per_round or [])],
+        "agreement": (round(len(confirmed) / float(total), 3)
+                      if total else None),
         "items": [
             {"class": d.get("class", ""), "zone_id": d.get("zone_id", ""),
              "found": d.get("found", ""), "message": d.get("message", "")}

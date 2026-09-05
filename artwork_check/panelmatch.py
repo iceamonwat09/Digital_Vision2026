@@ -42,7 +42,21 @@ TEMPLATE_MARGIN_FRAC = 0.22   # ต้อง >= (1 - SCALE_LO)/2 (มีเท�
 TRIM_PX = 12               # ตัดขอบทิ้งก่อนหาบริเวณ (ขอบ = ที่เดียวที่ข้อมูลไม่ทับกัน)
 BLUR_SIGMA = 1.0
 TOLERANCE_PX = 1
-MIN_REGION_PX = 40
+# ⬇️ 15 ไม่ใช่ 40 — วัดด้วย ``verify_compare.py`` บนไฟล์จริง:
+#    ความต่างจริงของคู่ John West (เซลล์ 20%/24%) มีขนาดแค่ **61 px²**
+#    ที่ 400 dpi ⇒ เกณฑ์ 40 เหลือระยะเผื่อแค่ 1.5 เท่า และเป็นกลไกของ
+#    **false negative ที่เกิดจริงบนสถานี** (รอบหนึ่งได้ 0 defect)
+#    ไล่ระดับ 40→6 แล้ววัดสามด้านพร้อมกัน: ฟ้องผิดบน self-compare = **0
+#    ทุกค่า** (4 ไฟล์ × 14 โซนหนาแน่น ink สูงสุด 1.00 · σ สูงสุด 77) ·
+#    ความไวดีขึ้นจาก 0.4 mm เป็น **0.2 mm** เมื่อ <= 15 · คู่จริงให้
+#    "บริเวณในแผง = 1" ทุกค่า ⇒ เลือก 15 (0.06 mm²) เพื่อได้ระยะเผื่อ 4 เท่า
+#    โดยยังไม่ไปสุดขอบที่วัดมา
+MIN_REGION_PX = 15
+# ความต่างที่ "ติดขอบพื้นที่เทียบ" ไม่ใช่ความต่างของแผง แต่คือเนื้อหารอบ ๆ
+# ที่ผู้ใช้ลากเกินเข้ามา (สองไฟล์วางแผงคนละที่ ของรอบ ๆ จึงคนละอย่าง).
+# วัดบนคู่จริง 10 แบบการลาก: บริเวณที่ **ไม่ติดขอบ** = 1 พอดีทุกแบบ
+# (= ความต่างจริง) ส่วนที่ติดขอบ = 0/4/10/12 = ขยะทั้งหมด ⇒ แยกได้ 10/10
+EDGE_TOL_PX = 2
 
 
 def _to_gray(img):
@@ -177,14 +191,25 @@ def compare_ex(path_a: str, bbox_a, path_b: str, bbox_b,
 
     interp = cv2.INTER_AREA if scale < 1.0 else cv2.INTER_CUBIC
     rb = cv2.resize(b, None, fx=scale, fy=scale, interpolation=interp)
-    x0, y0 = max(0, loc[0]), max(0, loc[1])
-    crop = rb[y0:y0 + a.shape[0], x0:x0 + a.shape[1]]
-    h = min(crop.shape[0], a.shape[0])
-    w = min(crop.shape[1], a.shape[1])
+    # ``loc`` = ตำแหน่งของ "มุมซ้ายบนของ a" ในระบบพิกัดของ b ที่ย่อแล้ว
+    #
+    # ⚠️ **ค่านี้ติดลบได้จริง** — เกิดทุกครั้งที่ผู้ใช้ลากโซน a หลวมกว่า b
+    #    (โซน a ครอบพื้นที่มากกว่า ⇒ มุมซ้ายบนของ a อยู่ "ก่อน" มุมของ b).
+    #    เดิม clamp เป็น 0 ⇒ **ภาพสองฝั่งเลื่อนกันเท่ากับค่าที่ clamp ทิ้ง**
+    #    วัดได้: ลากหลวม 1 mm ⇒ loc=(-15,-16) px ⇒ ฟ้องผิด 21 บริเวณ ·
+    #    3 mm ⇒ loc=(-47,-47) ⇒ 31 บริเวณ — ทั้งที่เป็น **ไฟล์เดียวกัน**
+    #    และ NCC ยังเท่ากับ **1.0000** ทุกเคส (ด่าน NCC จับไม่ได้เลย)
+    #    ⇒ ต้องครอป "ส่วนที่ทับกัน" ของทั้งสองฝั่ง ไม่ใช่ตัดค่าติดลบทิ้ง
+    ox, oy = int(loc[0]), int(loc[1])
+    ax0, ay0 = max(0, -ox), max(0, -oy)
+    bx0, by0 = max(0, ox), max(0, oy)
+    h = min(a.shape[0] - ay0, rb.shape[0] - by0)
+    w = min(a.shape[1] - ax0, rb.shape[1] - bx0)
     if h < 8 or w < 8:
         return (dict(pixdiff._skip("align_failed"), scale=scale, ncc=ncc,
                      ecc=0.0), None, None)
-    aa, bb = a[:h, :w], crop[:h, :w]
+    aa = a[ay0:ay0 + h, ax0:ax0 + w]
+    bb = rb[by0:by0 + h, bx0:bx0 + w]
 
     bb = match_colors(aa, bb)
     bb, ecc = refine_align(aa, bb)
@@ -195,17 +220,54 @@ def compare_ex(path_a: str, bbox_a, path_b: str, bbox_b,
     res = pixdiff.compare_images(ai, bi, blur_sigma=BLUR_SIGMA,
                                  tolerance_px=TOLERANCE_PX,
                                  min_region_px=MIN_REGION_PX)
-    # แปลงพิกัดกลับเป็นสัดส่วนของ "โซน a" เต็มใบ (บวกขอบที่ตัดไปคืน)
+    # ── แยก "ความต่างของแผง" ออกจาก "ของที่ลากเกินแผงเข้ามา" ──────────
+    # บริเวณที่แตะขอบพื้นที่เทียบ = อยู่ในวงแหวนที่ผู้ใช้ลากเลยแผงออกไป
+    # ซึ่งสองไฟล์มีเนื้อหารอบแผงคนละอย่าง ⇒ ต่างจริงแต่ **ไม่ใช่คำตอบ**
+    # ⚠️ ไม่ทิ้งเงียบ — นับไว้แล้วรายงานเป็นคำเตือนให้ลากโซนใหม่
+    kept, edge = [], []
+    if res.get("status") == pixdiff.OK:
+        ih, iw = (ai.shape[0], ai.shape[1])
+        t = EDGE_TOL_PX
+        for g in res.get("regions") or []:
+            x, y, gw, gh = g["px"]
+            if x <= t or y <= t or x + gw >= iw - t or y + gh >= ih - t:
+                edge.append(g)
+            else:
+                kept.append(g)
+        res["regions"] = kept
+        res["edge_regions"] = len(edge)
+        res["edge_area_px"] = int(sum(int(g["area_px"]) for g in edge))
+        # ติดขอบล้วน = เราแยกไม่ออกว่าของจริงอยู่ในนั้นไหม ⇒ **ไม่ตัดสิน**
+        # ถอยไปใช้ผลชั้นข้อความของกลุ่มนั้นแทน (กฎเหล็กข้อ 2)
+        if edge and not kept:
+            out = dict(pixdiff._skip("edge_only"),
+                       scale=round(scale, 4), ncc=round(ncc, 4),
+                       ecc=round(ecc, 4), edge_regions=len(edge),
+                       diff_ratio=res.get("diff_ratio"),
+                       size=[w, h], dpi=dpi, trim_px=m,
+                       mm_per_px=round(25.4 / float(dpi), 4))
+            return out, aa, bb
+    # ``px``  = พิกัดในภาพที่ align แล้ว (aa/bb) — ผู้เรียกใช้ครอปอ่านข้อความ
+    # ``px_a`` = พิกัดเดียวกันบน "โซน a เต็มใบ" — ใช้บอกตำแหน่งให้คนดู
+    ah, aw = a.shape[:2]
     for g in res.get("regions") or []:
         px = list(g["px"])
         px[0] += m
         px[1] += m
         g["px"] = px
-        g["bbox"] = [round(px[0] / float(w), 5), round(px[1] / float(h), 5),
-                     round(px[2] / float(w), 5), round(px[3] / float(h), 5)]
+        pa_ = [px[0] + ax0, px[1] + ay0, px[2], px[3]]
+        g["px_a"] = pa_
+        g["bbox"] = [round(pa_[0] / float(aw), 5), round(pa_[1] / float(ah), 5),
+                     round(pa_[2] / float(aw), 5), round(pa_[3] / float(ah), 5)]
+    mmpp = 25.4 / float(dpi)
     res.update(scale=round(scale, 4), ncc=round(ncc, 4), ecc=round(ecc, 4),
-               size=[w, h], dpi=dpi, trim_px=m,
-               mm_per_px=round(25.4 / float(dpi), 4))
+               size=[w, h], zone_size=[aw, ah], offset=[ax0, ay0],
+               dpi=dpi, trim_px=m, mm_per_px=round(mmpp, 4),
+               # ข้อมูลที่เอาไปพัฒนาต่อได้: ความไวที่ทำได้จริงของรอบนี้
+               min_region_px=MIN_REGION_PX,
+               min_region_mm2=round(MIN_REGION_PX * mmpp * mmpp, 4),
+               areas_mm2=[round(g["area_px"] * mmpp * mmpp, 3)
+                          for g in (res.get("regions") or [])])
     # คืนภาพที่ align แล้วทั้งสองฝั่ง (พิกัดตรงกันแล้ว) เพื่อให้ผู้เรียกครอป
     # บริเวณเดียวกันจากทั้งสองไฟล์ไปอ่านข้อความได้
     return res, aa, bb
@@ -213,7 +275,7 @@ def compare_ex(path_a: str, bbox_a, path_b: str, bbox_b,
 
 def region_center_mm(region: dict, size_px, mm_per_px: float):
     """จุดกึ่งกลางของบริเวณเป็นมิลลิเมตรจากมุมซ้ายบนของโซน."""
-    px = region.get("px") or [0, 0, 0, 0]
+    px = region.get("px_a") or region.get("px") or [0, 0, 0, 0]
     return (round((px[0] + px[2] / 2.0) * mm_per_px, 1),
             round((px[1] + px[3] / 2.0) * mm_per_px, 1))
 

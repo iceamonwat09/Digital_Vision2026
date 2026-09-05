@@ -187,3 +187,34 @@ def test_the_dropped_items_are_shown_on_the_report():
     assert "cf.items" in block                      # ลงรายการที่ตกไป
     assert "ยังยืนยันไม่ได้" in block
     assert "html += confirmHtml(rep.confirm);" in js
+
+
+# ── ตัวเลขที่เอาไปพัฒนาต่อได้ (ข้อกำหนดผู้ใช้ 5 ก.ย. 2026) ───────────
+# "ทุกโหมดต้องแสดงข้อมูลที่มีประโยชน์ในการเอามาพัฒนาต่อ ไม่ใช่ดูคำตอบแล้วเดา"
+
+def test_summary_reports_how_much_the_two_reads_agreed():
+    """``agreement`` บอกว่าการอ่านของงานใบนี้เสถียรแค่ไหน.
+
+    ค่าต่ำ = OCR ไม่นิ่ง (ควรแก้ prompt / ลากโซนใหม่ / เพิ่มรอบ)
+    ค่าสูง = เชื่อผลรอบเดียวได้ — เป็นคนละคำถามกับ "มี defect กี่รายการ"
+    """
+    a, b = defects_of(1), defects_of(3)
+    c, u = confirm.confirm([a, b])
+    s = confirm.summary(c, u, 2, [len(a), len(b)])
+    assert s["per_round"] == [len(a), len(b)]
+    assert s["agreement"] == round(len(c) / float(len(c) + len(u)), 3)
+    # รอบ 1 ฟ้อง 7 · รอบ 3 ฟ้อง 1 · ตรงกัน 1 ⇒ สอดคล้องกันต่ำมาก
+    assert s["agreement"] < 0.2
+
+
+def test_agreement_is_none_when_there_is_nothing_to_agree_about():
+    """ไม่มี defect เลย = ไม่มีอะไรให้วัดความสอดคล้อง ⇒ **ห้ามตอบ 0%**
+    (0% แปลว่า "ไม่ตรงกันเลย" ซึ่งเป็นคำตอบที่ผิดแบบมั่นใจ)"""
+    s = confirm.summary([], [], 2, [0, 0])
+    assert s["agreement"] is None
+
+
+def test_summary_still_works_without_the_per_round_numbers():
+    """ผู้เรียกเดิมที่ส่ง 3 อาร์กิวเมนต์ต้องไม่พัง."""
+    s = confirm.summary(defects_of(2), [], 2)
+    assert s["per_round"] == [] and s["rounds"] == 2
