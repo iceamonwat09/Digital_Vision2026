@@ -236,12 +236,19 @@
                            " px @" + esc(p.dpi) + " dpi");
       if (p.min_region_mm2 != null)
         num.push("เห็นได้ตั้งแต่ " + esc(p.min_region_mm2) + " mm²");
-      h += '<div class="aw-confirm-item"><code>' + esc(p.group) + "</code> " +
-        (ok ? "เทียบด้วยภาพ · พบ " + esc(p.regions) + " บริเวณ" +
+      // ⚠️ "ภาพไม่เห็นความต่าง" ไม่เท่ากับ "ไม่มีความต่าง" — ต้องบอกให้ชัด
+      //    ว่ากลุ่มนี้ยังใช้ผลชั้นข้อความอยู่ ไม่ใช่ปล่อยให้เข้าใจว่ายืนยันแล้ว
+      const body = !ok
+        ? "เทียบไม่ได้ (" + esc(PD_WHY[p.reason] || p.reason || p.status) +
+          ") — ใช้ผลชั้นข้อความของกลุ่มนี้แทน"
+        : (p.kept_text_layer
+            ? "เทียบด้วยภาพแล้ว <b>ไม่พบความต่าง</b> — " +
+              "ผลของกลุ่มนี้ยังมาจากชั้นข้อความ (ภาพไม่เห็น ≠ ไม่มี)"
+            : "เทียบด้วยภาพ · พบ " + esc(p.regions) + " บริเวณ" +
               ((p.areas_mm2 && p.areas_mm2.length)
-                 ? " (" + p.areas_mm2.map(esc).join(", ") + " mm²)" : "")
-            : "เทียบไม่ได้ (" + esc(PD_WHY[p.reason] || p.reason || p.status) +
-              ") — ใช้ผลชั้นข้อความของกลุ่มนี้แทน");
+                 ? " (" + p.areas_mm2.map(esc).join(", ") + " mm²)" : ""));
+      h += '<div class="aw-confirm-item"><code>' + esc(p.group) + "</code> " +
+        body;
       if (p.edge_regions)
         h += ' · <b>ตัดทิ้ง ' + esc(p.edge_regions) + " บริเวณที่ติดขอบโซน</b>" +
              " (เนื้อหารอบแผงที่ลากเกินเข้ามา — ลากให้ครอบเฉพาะแผงจะแม่นกว่า)";

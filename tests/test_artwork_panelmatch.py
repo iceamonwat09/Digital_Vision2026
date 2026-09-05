@@ -484,3 +484,122 @@ def test_region_bbox_is_a_fraction_of_the_whole_zone_a(tmp_path, base):
     bl = loose["regions"][0]["bbox"][0]
     exp = (bt * ZONE[2] + f) / (ZONE[2] + 2 * f)
     assert abs(bl - exp) < 0.02, "bbox=%.4f ควรใกล้ %.4f" % (bl, exp)
+
+
+# ══════════════════════════════════════════════════════════════════════
+# ชุดที่เพิ่มหลังผลรันจริงบนสถานี 5 ก.ย. 2026 (รอบ 2)
+#
+# รายงานขึ้น **0 ทุกช่อง** ทั้งที่ OCR สองฝั่งอ่าน `20%` กับ `24%` ต่างกันชัด ๆ
+# ไล่แล้วพบ 2 จุดที่ต้องแก้พร้อมกัน:
+#
+#   ① แผงที่พิมพ์เล็ก (28x29 mm) เรนเดอร์ที่ 400 dpi ได้แค่ 447x457 px ⇒
+#      ความต่างจริงเหลือ **5 พิกเซล** ⇒ พบ 0 บริเวณ
+#      (ไล่ระดับบนไฟล์จริง: 411px -> 5px ต่าง -> 0 บริเวณ · 562px -> 27px -> 1)
+#   ② พบ 0 บริเวณแล้ว **ยังลบ MISMATCH ของชั้นข้อความทิ้งทั้งกลุ่ม**
+#      ⇒ ความต่างจริงที่ชั้นข้อความจับได้ หายไปด้วย
+# ══════════════════════════════════════════════════════════════════════
+
+_IMG = np.zeros((400, 400, 3), dtype=np.uint8)
+
+
+def _tiny(path, dv=20):
+    """แผงเดียวกันแต่ **พิมพ์เล็ก** — จำลองงานจริงที่แผงมีขนาดไม่กี่ mm."""
+    return _panel(path, dv=dv, k=0.34, x0=40, y0=40)
+
+
+TINY_ZONE = [30 / 600.0, 30 / 420.0, 110 / 600.0, 70 / 420.0]
+
+
+def test_a_small_panel_is_rendered_big_enough_to_see_the_difference(tmp_path):
+    """แผงเล็กต้องถูกเรนเดอร์ใหม่ที่ DPI สูงขึ้นก่อนเทียบ.
+
+    ปิดชั้นนี้ (``MIN_SIDE_PX = 0``) แล้วความต่างจะเล็กจนถูกตัดทิ้ง =
+    อาการ false negative ที่เกิดจริงบนสถานี
+    """
+    a = _tiny(tmp_path / "a.pdf", dv=20)
+    b = _tiny(tmp_path / "b.pdf", dv=24)
+    r = PM.compare(a, TINY_ZONE, b, TINY_ZONE, dpi=TEST_DPI)
+    assert r["status"] == pixdiff.OK
+    assert len(r["regions"]) >= 1, "แผงเล็กแล้วมองไม่เห็นความต่างจริง"
+    assert r["dpi"] > TEST_DPI, "ควรเรนเดอร์ใหม่ที่ DPI สูงขึ้น"
+    assert max(r["size"]) >= PM.MIN_SIDE_PX * 0.9
+
+
+def test_the_boost_is_reported_so_it_can_be_diagnosed(tmp_path):
+    """``dpi``/``mm_per_px`` ที่รายงานต้องเป็นค่า **ที่ใช้จริง** ไม่ใช่ค่าที่ขอ."""
+    a = _tiny(tmp_path / "a.pdf", dv=20)
+    b = _tiny(tmp_path / "b.pdf", dv=24)
+    r = PM.compare(a, TINY_ZONE, b, TINY_ZONE, dpi=TEST_DPI)
+    assert abs(r["mm_per_px"] - 25.4 / r["dpi"]) < 1e-3
+    # พื้นที่ที่รายงานต้องคิดจาก mm/px ที่ใช้จริง ไม่งั้นเลข mm² ผิด
+    assert r["areas_mm2"] and r["areas_mm2"][0] > 0
+
+
+def test_a_wide_reference_zone_must_not_hide_the_need_for_more_pixels(tmp_path):
+    """โซนอ้างอิงที่ลากกว้างต้องไม่กลบความจำเป็นในการเพิ่มความละเอียด.
+
+    ทั้งสองฝั่งเรนเดอร์ที่ mm/px เท่ากัน ⇒ ขนาดภาพสะท้อน "ขนาดโซนที่ลาก"
+    ล้วน ๆ. ถ้าใช้ ``max`` ของสองฝั่งตัดสิน โซนอ้างอิงที่กว้างจะทำให้ไม่ boost
+    """
+    a = _tiny(tmp_path / "a.pdf", dv=20)
+    b = _tiny(tmp_path / "b.pdf", dv=24)
+    wide = [0.0, 0.0, 1.0, 1.0]                 # ลากทั้งหน้าเป็นฝั่งอ้างอิง
+    r = PM.compare(a, TINY_ZONE, b, wide, dpi=TEST_DPI)
+    assert r["dpi"] > TEST_DPI, "โซน b ที่กว้างกลบการเพิ่มความละเอียดไป"
+
+
+def test_pixel_layer_finding_nothing_never_deletes_the_text_layer_result(
+        tmp_path, monkeypatch):
+    """**เกิดจริงบนสถานี:** ชั้นภาพพบ 0 บริเวณ แล้วลบ MISMATCH ของชั้นข้อความ
+    ทิ้งทั้งกลุ่ม ⇒ รายงานขึ้น 0 ทุกช่องทั้งที่มีความต่างจริง.
+
+    "ภาพไม่เห็น" ไม่เท่ากับ "ไม่มี" (กฎเหล็กข้อ 2)
+    """
+    from artwork_check import pipeline
+
+    src = _panel(tmp_path / "a.pdf", dv=20)
+    monkeypatch.setattr(pipeline, "_find_source", lambda d, *a, **k: src)
+
+    zones = [{"id": "z1", "type": "panel", "group": "A", "bbox": ZONE, "doc": "a"},
+             {"id": "z2", "type": "panel", "group": "A", "bbox": ZONE, "doc": "b"}]
+    text_defect = {"class": "MISMATCH_PANELS", "zone_id": "z1",
+                   "found": "24%", "message": "ต่างกันจริง"}
+
+    def _nothing(*a, **k):
+        return ({"status": pixdiff.OK, "regions": [], "edge_regions": 0,
+                 "scale": 1.0, "ncc": 1.0, "ecc": 1.0, "diff_ratio": 0.0,
+                 "size": [400, 400], "dpi": 400, "mm_per_px": 0.0635,
+                 "areas_mm2": [], "min_region_mm2": 0.06}, _IMG, _IMG)
+
+    monkeypatch.setattr(pipeline.panelmatch_mod, "compare_ex", _nothing)
+    out, info = pipeline._pixel_compare(str(tmp_path), zones, [text_defect])
+    assert out == [text_defect], "ชั้นภาพพบ 0 บริเวณ แต่ไปลบผลชั้นข้อความทิ้ง"
+    assert info["used"] == 0
+    assert info["pairs"][0].get("kept_text_layer") is True
+
+
+def test_pixel_layer_still_replaces_when_it_has_something_to_say(
+        tmp_path, monkeypatch):
+    """ชั้นภาพที่ **เจอบริเวณ** ยังแทนที่ผลชั้นข้อความได้เหมือนเดิม."""
+    from artwork_check import pipeline
+
+    src = _panel(tmp_path / "a.pdf", dv=20)
+    monkeypatch.setattr(pipeline, "_find_source", lambda d, *a, **k: src)
+    zones = [{"id": "z1", "type": "panel", "group": "A", "bbox": ZONE, "doc": "a"},
+             {"id": "z2", "type": "panel", "group": "A", "bbox": ZONE, "doc": "b"}]
+    stale = {"class": "MISMATCH_PANELS", "zone_id": "z1", "found": "ขยะ"}
+
+    def _found(*a, **k):
+        return ({"status": pixdiff.OK, "edge_regions": 0, "scale": 1.0,
+                 "ncc": 1.0, "ecc": 1.0, "diff_ratio": 0.0001,
+                 "size": [400, 400], "dpi": 400, "mm_per_px": 0.0635,
+                 "min_region_mm2": 0.06, "areas_mm2": [0.25],
+                 "regions": [{"px": [10, 10, 20, 20], "px_a": [10, 10, 20, 20],
+                              "bbox": [0.02, 0.02, 0.05, 0.05], "area_px": 61}]},
+                _IMG, _IMG)
+
+    monkeypatch.setattr(pipeline.panelmatch_mod, "compare_ex", _found)
+    out, info = pipeline._pixel_compare(str(tmp_path), zones, [stale])
+    assert stale not in out
+    assert len(out) == 1 and out[0]["class"] == "MISMATCH_PANELS"
+    assert info["used"] == 1

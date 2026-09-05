@@ -380,7 +380,16 @@ def _pixel_compare(insp_dir: str, zone_list: List[dict],
             r = ocr.read_image(crop)
             return (r or {}).get("text", "")
 
-        new_defects += panelmatch_mod.regions_to_defects(res, za, zb, _read)
+        found = panelmatch_mod.regions_to_defects(res, za, zb, _read)
+        # ⚠️ **พบ 0 บริเวณ ห้ามลบผลชั้นข้อความ** — "ภาพไม่เห็น" ไม่ใช่ "ไม่มี"
+        #    เกิดจริงบนสถานี 5 ก.ย.: แผงเล็กทำให้ความต่างเหลือ 5 พิกเซล ⇒
+        #    พบ 0 บริเวณ ⇒ ลบ MISMATCH ของชั้นข้อความทิ้ง ⇒ **รายงานขึ้น 0 ทุกช่อง
+        #    ทั้งที่ OCR สองฝั่งอ่าน 20% กับ 24% ต่างกันชัด ๆ** (กฎเหล็กข้อ 2)
+        #    ⇒ แทนที่ได้ก็ต่อเมื่อชั้นภาพ "มีอะไรจะพูด" เท่านั้น
+        if not found:
+            entry["kept_text_layer"] = True
+            continue
+        new_defects += found
         replaced_groups.add(g)
 
     if not replaced_groups:

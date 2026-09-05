@@ -39,6 +39,23 @@ SCALE_LO, SCALE_HI = 0.60, 1.70    # ช่วงสเกลที่ยอม�
 SCALE_STEP = 0.004
 MIN_SCALE_NCC = 0.55
 TEMPLATE_MARGIN_FRAC = 0.22   # ต้อง >= (1 - SCALE_LO)/2 (มีเทสต์ล็อก)       # ต่ำกว่านี้ = คนละเนื้อหา ⇒ ไม่เทียบ (เกณฑ์เดียวกับ pixdiff)
+# ⬇️ ความละเอียดขั้นต่ำของภาพที่เอาไปเทียบ — แพทเทิร์นเดียวกับ
+#    ``ocr._render_for_ocr`` (``OCR_CROP_MIN_SIDE``) และจำเป็นด้วยเหตุผลเดียวกัน
+#
+#    **เจอบนสถานี 5 ก.ย.: แผงที่พิมพ์เล็ก (28x29 mm) เรนเดอร์ที่ 400 dpi ได้
+#    แค่ 447x457 px ⇒ ความต่างจริง (20% -> 24%) เหลือ "5 พิกเซล" ⇒ พบ 0 บริเวณ
+#    = false negative** ทั้งที่ OCR ทั้งสองฝั่งอ่านตัวเลขต่างกันชัด ๆ
+#
+#    ไล่ระดับความละเอียดบนคู่ไฟล์จริง (ลด dpi = จำลองแผงที่เล็กลง):
+#      ด้านยาว 411 px -> ต่าง   5 px -> **0 บริเวณ**  (อาการของสถานี)
+#      ด้านยาว 485 px -> ต่าง  14 px -> 0 บริเวณ
+#      ด้านยาว 562 px -> ต่าง  27 px -> 1 บริเวณ 0.179 mm²
+#      ด้านยาว 747 px -> ต่าง  65 px -> 1 บริเวณ 0.246 mm²
+#      ด้านยาว 1868 px -> ต่าง 640 px -> 1 บริเวณ 0.403 mm²
+#    **ฟ้องผิดบน self-compare = 0 ทุกความละเอียด** ⇒ เพิ่มความละเอียดไม่มีราคา
+#    ด้านความแม่น ⇒ ตั้ง 1000 เพื่อได้ระยะเผื่อ ~1.8 เท่าจากจุดที่เริ่มเห็น
+MIN_SIDE_PX = 1000
+DPI_MAX_FACTOR = 4.0       # เพดานเดียวกับ config.OCR_DPI_MAX_FACTOR
 TRIM_PX = 12               # ตัดขอบทิ้งก่อนหาบริเวณ (ขอบ = ที่เดียวที่ข้อมูลไม่ทับกัน)
 BLUR_SIGMA = 1.0
 TOLERANCE_PX = 1
@@ -181,6 +198,23 @@ def compare_ex(path_a: str, bbox_a, path_b: str, bbox_b,
     if a is None or b is None or a.size == 0 or b.size == 0:
         return (dict(pixdiff._skip("render_failed"), scale=0.0, ncc=0.0,
                      ecc=0.0), None, None)
+
+    # แผงที่พิมพ์เล็กได้ภาพเล็กตามไปด้วย ⇒ ความต่างจริงเหลือไม่กี่พิกเซลแล้ว
+    # ถูกตัดทิ้ง. เรนเดอร์ใหม่ที่ DPI สูงขึ้นให้ถึงขั้นต่ำ (ดู MIN_SIDE_PX)
+    # ⚠️ ต้องใช้ภาพที่ **เล็กกว่า** เป็นตัวกำหนด ไม่ใช่ใหญ่กว่า —
+    #    ``render_zone_mm`` เรนเดอร์ทั้งสองฝั่งที่ mm/px เท่ากันอยู่แล้ว
+    #    ขนาดภาพจึงสะท้อน "ขนาดโซนที่ลาก" ล้วน ๆ. พื้นที่ที่เทียบได้จริงคือ
+    #    ส่วนที่ทับกัน = ถูกจำกัดด้วยโซนที่เล็กกว่า ⇒ ถ้าใช้ max โซนอ้างอิงที่
+    #    ลากกว้างจะกลบความจำเป็นในการเพิ่มความละเอียดไปเงียบ ๆ
+    longest = min(max(a.shape[0], a.shape[1]), max(b.shape[0], b.shape[1]))
+    if MIN_SIDE_PX and 0 < longest < MIN_SIDE_PX:
+        f = min(DPI_MAX_FACTOR, MIN_SIDE_PX / float(longest))
+        dpi2 = max(dpi + 1, int(round(dpi * f)))
+        a2, _ = pixdiff.render_zone_mm(path_a, bbox_a, dpi2, page_index)
+        b2, _ = pixdiff.render_zone_mm(path_b, bbox_b, dpi2, page_index)
+        if (a2 is not None and b2 is not None
+                and a2.size and b2.size):
+            a, b, dpi = a2, b2, dpi2
 
     ga, gb = _to_gray(a), _to_gray(b)
     scale, loc, ncc = find_scale(ga, gb)
