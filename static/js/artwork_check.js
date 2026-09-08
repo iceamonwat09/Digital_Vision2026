@@ -266,6 +266,36 @@
       if (p.edge_regions)
         h += ' · <b>ตัดทิ้ง ' + esc(p.edge_regions) + " บริเวณที่ติดขอบโซน</b>" +
              " (เนื้อหารอบแผงที่ลากเกินเข้ามา — ลากให้ครอบเฉพาะแผงจะแม่นกว่า)";
+      // ── แผงสองฝั่งขนาดจริงต่างกันกี่เท่า (ปรู๊ฟย่อ ฯลฯ) ───────────
+      // บอกเสมอเมื่ออยู่นอกช่วงที่จับคู่ได้เอง ไม่ว่าจะปรับให้แล้วหรือไม่ —
+      // เดิมเคสนี้ตอบรวม ๆ ว่า "อาจลากโซนคนละส่วน" ซึ่งส่งผู้ใช้ไปแก้ของที่
+      // ไม่ได้พัง (เขาลากถูกแล้ว แค่ไฟล์หนึ่งเป็นฉบับย่อ)
+      if (p.zone_ratio != null && (p.zone_ratio < 0.6 || p.zone_ratio > 1.7))
+        h += ' · <b>แผงในสองไฟล์ขนาดต่างกัน ' + esc(p.zone_ratio) + " เท่า</b>" +
+             (p.prescaled
+                ? " — ระบบเรนเดอร์ฝั่งที่เล็กกว่าที่ความละเอียดสูงขึ้น" +
+                  " (a " + esc(p.dpi_a) + " dpi · b " + esc(p.dpi_b) +
+                  " dpi) ให้เท่ากันก่อนเทียบแล้ว"
+                : " — เกินกว่าจะปรับให้เท่ากันได้");
+      // ── มุมที่ชั้นภาพใช้จริง (มาจากค่าของโซน = ที่ OCR ใช้) ───────
+      if (p.rotate_a || p.rotate_b)
+        h += " · หมุนก่อนเทียบ a " + esc(p.rotate_a || 0) + "° · b " +
+             esc(p.rotate_b || 0) + "°";
+      // ── ความหนาหมึกของทั้งแผง ─────────────────────────────────────
+      // ต่างกันเล็กน้อยแต่สม่ำเสมอ ⇒ ขอบตัวอักษรทุกตัวต่าง ⇒ ฟ้องนับร้อย
+      // บริเวณทั้งที่ไม่มีคำไหนผิด ⇒ บอกครั้งเดียวว่านี่คือที่มา
+      // ⚠️ ยกเปอร์เซ็นต์มาพูดได้เฉพาะตอนเส้นหนาพอจะวัด (reliable)
+      const pi = p.panel_ink;
+      if (pi && Math.abs(pi.stroke_pct) >= 3) {
+        h += pi.reliable
+          ? ' · <b>ทั้งแผงหนากว่ากัน ' + Math.abs(pi.stroke_pct).toFixed(1) +
+            "%</b> (เส้น " + esc(pi.stroke_a) + " vs " + esc(pi.stroke_b) +
+            " px) ⇒ ขอบตัวอักษรทุกตัวจะต่าง — บริเวณที่ฟ้องส่วนใหญ่มาจาก" +
+            "เรื่องนี้ ไม่ใช่คำผิด"
+          : ' · <b>ทั้งแผงหนาไม่เท่ากัน</b> (เส้น ' + esc(pi.stroke_a) +
+            " vs " + esc(pi.stroke_b) + " px) — บางเกินกว่าจะบอกเป็น" +
+            "เปอร์เซ็นต์ได้อย่างมีความหมาย จึงบอกค่าที่วัดได้ตรง ๆ";
+      }
       if (num.length)
         h += '<div class="aw-confirm-num">' + esc(num.join(" · ")) + "</div>";
       h += "</div>";
@@ -867,6 +897,7 @@
   const fileInput = $("awFile"), brandInput = $("awBrand");
   const fileInputB = $("awFileB");
   const stage = $("awStage"), stageEmpty = $("awStageEmpty");
+  const stageRot = $("awStageRot");
   const previewImg = $("awPreviewImg");
   const propsBox = $("awProps");
   const resultBox = $("awResult");
@@ -1039,6 +1070,7 @@
     resetTextTab();
     showDoc("a");
     stage.style.display = "inline-block";
+    if (stageRot) stageRot.style.display = "inline-block";
     stageEmpty.style.display = "none";
     $("awZoomBar").style.display = "";
     $("awStageBox").classList.remove("is-empty");
@@ -1100,6 +1132,7 @@
       resetTextTab();
       showDoc("a");
       stage.style.display = "inline-block";
+      if (stageRot) stageRot.style.display = "inline-block";
       stageEmpty.style.display = "none";
       // แถบเครื่องมือโผล่เหนือกล่อง → กล่องเลิกเป็น "กล่องเปล่ารอรับไฟล์"
       // (มุมบนตรง ต่อกับแถบ, เส้นทึบแทนเส้นประ)
@@ -1382,9 +1415,67 @@
     }
   }
 
+  // ── หมุนเฉพาะการแสดงผล (ผู้ใช้ 8 ก.ย.) ────────────────────────────
+  //
+  // ทำไมต้องมี: ฉลากซองจำนวนมากวางตัวหนังสือ "ตั้ง" ทั้งใบ ⇒ ลากโซนโดยอ่าน
+  // ไม่ออก และมุมที่ระบบเดาเองยังผิดทางได้ (วัดจริง: auto เลือก 270° ได้
+  // 6-9 คำ ส่วนที่ถูกคือ 90° ได้ 93 คำ — แย่กว่าไม่หมุนเลย)
+  //
+  // ⚠️ **หมุนแค่ภาพที่แสดง — พิกัดที่เก็บยังเป็นของหน้าที่ไม่หมุนเสมอ**
+  //    ⇒ preview.png / crop / propose_zones / snap_bbox / autopair /
+  //      overlay / pixdiff / highlight ไม่ต้องแก้เลยสักตัว
+  const PAGE_ROT = [0, 90, 180, 270];
+  let pageRot = 0;
+
+  // มุมนี้ทำให้ภาพบนจอเป็นแนวนอน ⇒ โซนใหม่ควรตั้ง rotate เท่านี้เพื่อให้
+  // OCR เห็นภาพแบบเดียวกับที่คนเห็น (ชั้น pixel ก็ใช้ค่าเดียวกันนี้)
+  function rotForNewZone() { return pageRot; }
+
+  // จุดบนจอ (เทียบกับมุมซ้ายบนของกล่องที่หมุนแล้ว) → พิกัดในภาพที่ยังไม่หมุน
+  // ที่มาของสูตร: ภาพถูก transform เป็น translate(...) rotate(deg) รอบจุด 0,0
+  function unrotPoint(sx, sy, W, H) {
+    if (pageRot === 90) return { x: sy, y: H - sx };
+    if (pageRot === 180) return { x: W - sx, y: H - sy };
+    if (pageRot === 270) return { x: W - sy, y: sx };
+    return { x: sx, y: sy };
+  }
+
+  function applyPageRot() {
+    if (!stageRot) return;
+    const W = dispW(), H = dispH();
+    const st = stage.style;
+    if (!W || !H) return;
+    if (pageRot === 90) {
+      st.transform = "translate(" + H + "px, 0) rotate(90deg)";
+      stageRot.style.width = H + "px"; stageRot.style.height = W + "px";
+    } else if (pageRot === 180) {
+      st.transform = "translate(" + W + "px, " + H + "px) rotate(180deg)";
+      stageRot.style.width = W + "px"; stageRot.style.height = H + "px";
+    } else if (pageRot === 270) {
+      st.transform = "translate(0, " + W + "px) rotate(270deg)";
+      stageRot.style.width = H + "px"; stageRot.style.height = W + "px";
+    } else {
+      st.transform = "";
+      stageRot.style.width = W + "px"; stageRot.style.height = H + "px";
+    }
+    const btn = $("awPageRot");
+    if (btn) btn.textContent = pageRot + "\u00b0";
+    updatePannable();
+  }
+
+  const pageRotBtn = $("awPageRot");
+  if (pageRotBtn) {
+    pageRotBtn.addEventListener("click", () => {
+      if (busy) return;
+      pageRot = PAGE_ROT[(PAGE_ROT.indexOf(pageRot) + 1) % PAGE_ROT.length];
+      applyPageRot();
+    });
+  }
+
   function applyZoom() {
     if (!natW) return;
     previewImg.style.width = Math.round(natW * zoomPct / 100) + "px";
+    applyPageRot();          // ขนาดภาพเปลี่ยน ⇒ กล่องที่หมุนต้องตามด้วย
     updatePannable();
   }
   function dispW() { return previewImg.clientWidth || natW; }
@@ -1832,11 +1923,18 @@
   });
 
   function drawPoint(ev) {
-    const r = previewImg.getBoundingClientRect();
-    return {
-      x: Math.min(Math.max(ev.clientX - r.left, 0), r.width),
-      y: Math.min(Math.max(ev.clientY - r.top, 0), r.height),
-    };
+    // ⚠️ ตอนหมุนจอ ``previewImg.getBoundingClientRect()`` คืนกรอบ
+    //    **แนวแกน** ของภาพที่หมุนแล้ว ซึ่งไม่ใช่ระบบพิกัดของภาพเอง
+    //    ⇒ ต้องวัดจากกล่องที่หมุน (stageRot) แล้วแปลงกลับด้วย unrotPoint
+    //    ไม่งั้นโซนจะไปวางผิดที่แบบเงียบ ๆ (บั๊กที่แย่ที่สุดของ repo นี้)
+    const host = (pageRot && stageRot) ? stageRot : previewImg;
+    const r = host.getBoundingClientRect();
+    const W = dispW(), H = dispH();
+    const sx = Math.min(Math.max(ev.clientX - r.left, 0), r.width);
+    const sy = Math.min(Math.max(ev.clientY - r.top, 0), r.height);
+    const q = pageRot ? unrotPoint(sx, sy, W, H) : { x: sx, y: sy };
+    return { x: Math.min(Math.max(q.x, 0), W),
+             y: Math.min(Math.max(q.y, 0), H) };
   }
   function drawRect(ev) {
     const p = drawPoint(ev);
@@ -1900,7 +1998,11 @@
     while (zones.some((z) => z.id === prefix + n)) n++;
     const z = {
       id: prefix + n, type: "panel", group: nextGroupLetter(activeDoc),
-      doc: activeDoc, rotate: "default",
+      doc: activeDoc,
+      // จอหมุนอยู่เท่าไร โซนใหม่ตั้งเท่านั้น ⇒ OCR (และชั้น pixel) เห็นแผง
+      // ในแนวเดียวกับที่คนเห็นและยืนยันด้วยตาแล้ว. ไม่ได้หมุน = "default"
+      // = พฤติกรรมเดิมเป๊ะ
+      rotate: rotForNewZone() || "default",
       bbox: [q.x / W, q.y / H, q.w / W, q.h / H]
         .map((v) => Math.round(v * 1e5) / 1e5),
       label: (activeDoc === "b" ? "อ้างอิง " : "โซน ") + n,

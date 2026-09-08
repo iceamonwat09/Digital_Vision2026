@@ -82,3 +82,4 @@ data/hik_burst/               # ภาพจากโหมด "ถ่ายร�
 data/hik_exposure/            # ผล+ภาพจากโหมด "ไล่ exposure" (ความละเอียดเต็ม)
 hik_shots/                    # ภาพตัวอย่างจาก diagnose_hikrobot.py --save-dir
 hik*.json                     # ผลจาก diagnose_hikrobot.py --json
+stubs/

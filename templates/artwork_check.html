@@ -186,6 +186,11 @@
      ทับ และตอนกด "เพิ่มโซน" ถูก crosshair (inline บน .aw-stage) ทับ */
   .aw-stage-box.aw-pannable { cursor:grab; }
   .aw-stage-box.aw-panning, .aw-stage-box.aw-panning * { cursor:grabbing !important; }
+  /* ตัวห่อสำหรับ "หมุนเฉพาะการแสดงผล" — กล่องนี้กินพื้นที่เท่ากับภาพหลัง
+     หมุน ส่วน .aw-stage ข้างในถูก transform ⇒ โซนที่วางทับอยู่หมุนตามไป
+     ด้วยเองโดยไม่ต้องแก้สูตรตำแหน่งของโซนเลย */
+  .aw-stage-rot { position:relative; display:inline-block; line-height:0; }
+  .aw-stage-rot > .aw-stage { transform-origin:0 0; }
   .aw-stage  { position:relative; display:inline-block; line-height:0; }
   /* ห้ามให้เบราว์เซอร์ "ลากรูป" (native image drag) แย่ง event ตอน pan
      ด้วยปุ่มซ้าย — preventDefault ใน JS กันได้แล้ว นี่คือชั้นกันซ้ำ */
@@ -496,6 +501,11 @@
           <button id="awZoomFitPage" class="aw-btn aw-btn-sm"
                   title="ย่อให้เห็นทั้งแผ่นในครั้งเดียว — พอดีทั้งกว้างและสูง (ไม่เปลี่ยนพิกัดโซน)">⛶ พอดีทั้งหน้า</button>
         </span>
+        <span class="aw-tb-group">
+          <span class="aw-tb-label">↻ หมุนจอ</span>
+          <button id="awPageRot" class="aw-btn aw-btn-sm"
+                  title="หมุนเฉพาะภาพที่แสดง เพื่อให้อ่านตัวหนังสือที่ตั้งได้ — พิกัดโซนที่เก็บไม่เปลี่ยน และโซนใหม่จะตั้งมุมให้ OCR อ่านแนวนอนให้อัตโนมัติ">0°</button>
+        </span>
         <span class="aw-pan-hint">✋ ลากบนพื้นที่ว่างเพื่อเลื่อนภาพ (หรือกดล้อเมาส์ลาก)</span>
       </div>
 
@@ -506,8 +516,10 @@
           หรือกด "+ เพิ่มโซน" เพื่อกำหนดเอง<br>
           สามารถปรับขนาด ย้าย หรือลบโซน (ปุ่ม Delete) ได้ก่อนส่งตรวจสอบ
         </div>
-        <div id="awStage" class="aw-stage" style="display:none;">
-          <img id="awPreviewImg" alt="artwork preview">
+        <div id="awStageRot" class="aw-stage-rot" style="display:none;">
+          <div id="awStage" class="aw-stage">
+            <img id="awPreviewImg" alt="artwork preview">
+          </div>
         </div>
       </div>
 

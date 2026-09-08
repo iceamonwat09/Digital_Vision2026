@@ -373,8 +373,13 @@ def _pixel_compare(insp_dir: str, zone_list: List[dict],
             pairs.append({"group": g, "status": "skipped",
                           "reason": "not_pdf", "regions": 0})
             continue
+        # ── ชั้นภาพใช้ "มุมหมุนของโซน" ตัวเดียวกับที่ชั้น OCR ใช้ ────
+        # ค่านี้ถูกเขียนกลับเป็นองศาจริง (int) ก่อนถึงตรงนี้แล้ว ส่วนโซนที่
+        # ยังเป็น "default"/"auto" (ไม่เคยผ่าน OCR) ให้ถือเป็น 0 = ทางเดิม
+        ra = za.get("rotate") if isinstance(za.get("rotate"), int) else 0
+        rb = zb.get("rotate") if isinstance(zb.get("rotate"), int) else 0
         res, img_a, img_b = panelmatch_mod.compare_ex(
-            pa, za["bbox"], pb, zb["bbox"])
+            pa, za["bbox"], pb, zb["bbox"], rotate_a=ra, rotate_b=rb)
         # ⬇️ ตัวเลขทุกตัวที่ใช้ "พัฒนาต่อ" ต้องไปถึงหน้าจอ ไม่ใช่ให้เดาจาก
         #    จำนวน defect (ข้อกำหนดผู้ใช้ 5 ก.ย.) — โดยเฉพาะ ``ecc``
         #    (คุณภาพการทาบภาพ) และ ``edge_regions`` (ของที่ลากเกินแผงเข้ามา)
@@ -389,7 +394,16 @@ def _pixel_compare(insp_dir: str, zone_list: List[dict],
                  "mm_per_px": res.get("mm_per_px"),
                  "size": res.get("size"), "dpi": res.get("dpi"),
                  "scale": res.get("scale"), "ncc": res.get("ncc"),
-                 "ecc": res.get("ecc")}
+                 "ecc": res.get("ecc"),
+                 # แผงสองฝั่งขนาดต่างกันกี่เท่า + ปรับให้แล้วหรือยัง
+                 "zone_ratio": res.get("zone_ratio"),
+                 "prescaled": res.get("prescaled"),
+                 "dpi_a": res.get("dpi_a"), "dpi_b": res.get("dpi_b"),
+                 # มุมที่ชั้นภาพใช้จริง (มาจากค่าของโซน = ที่ OCR ใช้)
+                 "rotate_a": res.get("rotate_a"),
+                 "rotate_b": res.get("rotate_b"),
+                 # ความหนาหมึกของทั้งแผง — อธิบายว่าทำไมบริเวณถึงเยอะ
+                 "panel_ink": res.get("panel_ink")}
         pairs.append(entry)
         if res.get("status") != pixdiff.OK or img_a is None:
             continue                       # เทียบไม่ได้ ⇒ ใช้ผลชั้นข้อความเดิม
