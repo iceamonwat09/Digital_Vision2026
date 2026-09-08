@@ -418,19 +418,45 @@ def read_image(crop) -> dict:
 def read_all_zones(doc: ArtworkDocument, zones: List[dict],
                    page_auto: bool = False,
                    force_ocr: bool = False, split_bands: bool = False,
-                   font_trust: dict = None) -> List[dict]:
-    out = []
-    for z in zones:
-        if z.get("type") == "ignore":
-            continue
+                   font_trust: dict = None,
+                   parallel: int = None) -> List[dict]:
+    """อ่านทุกโซนของเอกสารหนึ่งฉบับ — คืนผลตาม **ลำดับของ ``zones`` เสมอ**.
+
+    ``parallel`` = ยิงพร้อมกันกี่โซน (ค่าเริ่มต้นจาก
+    ``config.OCR_PARALLEL``). ตั้ง 1 = ทางเดิมเป๊ะ ไม่สร้าง thread pool เลย
+
+    ⚠️ **ทำไมขนานได้อย่างปลอดภัย:** งานหนักคือการรอ backend ตอบ (วัดบนสถานี
+       ~5 วินาที/โซน = 87% ของเวลาทั้งใบ) และแต่ละโซน **ไม่เกี่ยวกันเลย** —
+       ไม่มี state ร่วม ไม่มีลำดับที่ต้องรักษา. ส่วน PyMuPDF ก็ปลอดภัยเพราะ
+       ``ArtworkDocument`` เปิด ``fitz.open()`` **ใหม่ทุกครั้งที่เรียก**
+       (ไม่ได้แชร์ handle ระหว่างเธรด)
+    ⚠️ ผลลัพธ์ต้องเรียงตามลำดับโซนเดิม ไม่ใช่ลำดับที่ตอบกลับมาก่อน —
+       ไม่งั้น ``report.json`` และแท็บแปลจะสลับแถวไปมาในแต่ละรอบ
+    """
+    todo = [z for z in zones if z.get("type") != "ignore"]
+    if not todo:
+        return []
+    n = config.OCR_PARALLEL if parallel is None else parallel
+    try:
+        n = max(1, int(n))
+    except (TypeError, ValueError):
+        n = 1
+
+    def _one(z):
         r = read_zone(doc, z, page_auto=page_auto, force_ocr=force_ocr,
-                      split_bands=split_bands,
-                      font_trust=font_trust)
+                      split_bands=split_bands, font_trust=font_trust)
         logger.info("[artwork] zone %s engine=%s rot=%d chars=%d%s",
                     z["id"], r["engine"], r.get("rotate", 0), len(r["text"]),
                     f" ERROR={r['error']}" if r.get("error") else "")
-        out.append(r)
-    return out
+        return r
+
+    if n <= 1 or len(todo) <= 1:
+        return [_one(z) for z in todo]
+
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=min(n, len(todo))) as ex:
+        # ``map`` คงลำดับของ input ให้เอง
+        return list(ex.map(_one, todo))
 
 
 def _mean_conf(blocks: list):

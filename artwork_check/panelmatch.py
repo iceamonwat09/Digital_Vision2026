@@ -175,6 +175,42 @@ def refine_align(img_a, img_b):
     return out, float(cc)
 
 
+def _zone_px(path: str, bbox, dpi: int, page_index: int = 0):
+    """ทำนายขนาดภาพ (px) ของโซนที่ ``dpi`` โดย **ไม่ต้องเรนเดอร์**.
+
+    ``render_zone_mm`` เรนเดอร์ที่สเกล mm จริง ⇒ ขนาด px คำนวณตรง ๆ ได้จาก
+    ขนาดหน้าเป็นมิลลิเมตร. คืน ``None`` เมื่ออ่านขนาดหน้าไม่ได้ (ไม่ใช่ PDF)
+    """
+    size = pixdiff.page_size_mm(path, page_index)
+    if not size:
+        return None
+    try:
+        w_mm = float(bbox[2]) * size[0]
+        h_mm = float(bbox[3]) * size[1]
+    except (TypeError, IndexError, ValueError):
+        return None
+    if w_mm <= 0 or h_mm <= 0:
+        return None
+    k = dpi / 25.4
+    return (max(1, int(round(w_mm * k))), max(1, int(round(h_mm * k))))
+
+
+def _dpi_for(path_a, bbox_a, path_b, bbox_b, dpi: int,
+             page_index: int = 0) -> int:
+    """DPI ที่ควรใช้จริง — เพิ่มให้ถึง :data:`MIN_SIDE_PX` ตั้งแต่รอบแรก."""
+    if not MIN_SIDE_PX:
+        return dpi
+    pa = _zone_px(path_a, bbox_a, dpi, page_index)
+    pb = _zone_px(path_b, bbox_b, dpi, page_index)
+    if not pa or not pb:
+        return dpi                      # อ่านขนาดหน้าไม่ได้ ⇒ ทางเดิม
+    longest = min(max(pa), max(pb))
+    if longest <= 0 or longest >= MIN_SIDE_PX:
+        return dpi
+    f = min(DPI_MAX_FACTOR, MIN_SIDE_PX / float(longest))
+    return max(dpi + 1, int(round(dpi * f)))
+
+
 def compare(path_a: str, bbox_a, path_b: str, bbox_b,
             dpi: int = DPI, page_index: int = 0,
             trim_px: int = TRIM_PX) -> dict:
@@ -193,19 +229,27 @@ def compare_ex(path_a: str, bbox_a, path_b: str, bbox_b,
     คืน dict แบบเดียวกับ ``pixdiff.compare_zone`` (``status`` · ``reason`` ·
     ``regions`` เป็นสัดส่วนของ **โซน a**) บวก ``scale`` · ``ncc`` · ``ecc``
     """
+    # ── ความละเอียดที่ต้องใช้ คำนวณจาก **ขนาดโซนเป็นมิลลิเมตร** ก่อนเรนเดอร์
+    #
+    # แผงที่พิมพ์เล็กได้ภาพเล็กตามไปด้วย ⇒ ความต่างจริงเหลือไม่กี่พิกเซลแล้ว
+    # ถูกตัดทิ้ง (ดู MIN_SIDE_PX). เดิมเรนเดอร์ที่ ``dpi`` ก่อนแล้วค่อยดูว่า
+    # เล็กไปไหม ⇒ **เรนเดอร์ทิ้ง 1 รอบเสมอ** (วัดได้ 0.85 วินาที/กลุ่ม)
+    # ตอนนี้ทำนายขนาดจาก mm ⇒ เรนเดอร์รอบเดียวในเคสปกติ
+    #
+    # ⚠️ ต้องใช้โซนที่ **เล็กกว่า** เป็นตัวกำหนด ไม่ใช่ใหญ่กว่า —
+    #    ``render_zone_mm`` เรนเดอร์ทั้งสองฝั่งที่ mm/px เท่ากันอยู่แล้ว
+    #    ขนาดภาพจึงสะท้อน "ขนาดโซนที่ลาก" ล้วน ๆ. พื้นที่ที่เทียบได้จริงคือ
+    #    ส่วนที่ทับกัน = ถูกจำกัดด้วยโซนที่เล็กกว่า ⇒ ถ้าใช้ max โซนอ้างอิงที่
+    #    ลากกว้างจะกลบความจำเป็นในการเพิ่มความละเอียดไปเงียบ ๆ
+    dpi = _dpi_for(path_a, bbox_a, path_b, bbox_b, dpi, page_index)
     a, _ = pixdiff.render_zone_mm(path_a, bbox_a, dpi, page_index)
     b, _ = pixdiff.render_zone_mm(path_b, bbox_b, dpi, page_index)
     if a is None or b is None or a.size == 0 or b.size == 0:
         return (dict(pixdiff._skip("render_failed"), scale=0.0, ncc=0.0,
                      ecc=0.0), None, None)
 
-    # แผงที่พิมพ์เล็กได้ภาพเล็กตามไปด้วย ⇒ ความต่างจริงเหลือไม่กี่พิกเซลแล้ว
-    # ถูกตัดทิ้ง. เรนเดอร์ใหม่ที่ DPI สูงขึ้นให้ถึงขั้นต่ำ (ดู MIN_SIDE_PX)
-    # ⚠️ ต้องใช้ภาพที่ **เล็กกว่า** เป็นตัวกำหนด ไม่ใช่ใหญ่กว่า —
-    #    ``render_zone_mm`` เรนเดอร์ทั้งสองฝั่งที่ mm/px เท่ากันอยู่แล้ว
-    #    ขนาดภาพจึงสะท้อน "ขนาดโซนที่ลาก" ล้วน ๆ. พื้นที่ที่เทียบได้จริงคือ
-    #    ส่วนที่ทับกัน = ถูกจำกัดด้วยโซนที่เล็กกว่า ⇒ ถ้าใช้ max โซนอ้างอิงที่
-    #    ลากกว้างจะกลบความจำเป็นในการเพิ่มความละเอียดไปเงียบ ๆ
+    # ทางถอย: โซนที่ถูกขอบหน้ากระดาษตัด (หรืออ่านขนาดหน้าไม่ได้) จะได้ภาพ
+    # เล็กกว่าที่ทำนาย ⇒ เรนเดอร์ซ้ำอีกรอบเหมือนเดิม (เกิดไม่บ่อย)
     longest = min(max(a.shape[0], a.shape[1]), max(b.shape[0], b.shape[1]))
     if MIN_SIDE_PX and 0 < longest < MIN_SIDE_PX:
         f = min(DPI_MAX_FACTOR, MIN_SIDE_PX / float(longest))
@@ -333,7 +377,8 @@ def region_center_mm(region: dict, size_px, mm_per_px: float):
 #    (กฎเหล็กข้อ 2: กรอบที่ชี้ผิด แย่กว่าไม่มีกรอบ)
 
 def regions_to_defects(res: dict, zone_a: dict, zone_b: dict,
-                       read_region=None, inspect_region=None) -> List[dict]:
+                       read_region=None, inspect_region=None,
+                       max_inspect: int = 0) -> List[dict]:
     """``(ผลจาก compare, โซน a, โซน b)`` → รายการ defect.
 
     ``read_region(which, px)`` = อ่านข้อความของบริเวณหนึ่ง (ทางเดิม)
@@ -352,14 +397,25 @@ def regions_to_defects(res: dict, zone_a: dict, zone_b: dict,
     la = zone_a.get("label") or zone_a.get("id")
     lb = zone_b.get("label") or zone_b.get("id")
     grp = zone_a.get("group") or ""
-    for g in res.get("regions") or []:
+    regs = res.get("regions") or []
+    # ⚠️ **เพดานจำนวนครั้งที่อ่านข้อความ** — ``pixdiff`` คืนได้ถึง 200 บริเวณ
+    #    และแต่ละบริเวณอ่านสองฝั่ง ⇒ 400 ครั้ง/ใบ ที่ ~5 วินาที = 33 นาที
+    #    และเผาโควตา. เกิดจริงได้เมื่อแนบไฟล์ผิดคู่/ลากครอบคนละแผง
+    #    ``pixdiff`` เรียงบริเวณตามพื้นที่จากมากไปน้อยให้แล้ว ⇒ ที่ใหญ่สุด
+    #    (สำคัญสุด) ได้อ่านก่อน · ที่เหลือ **ยังรายงานครบ** แต่บอกตำแหน่ง
+    #    อย่างเดียว ไม่เดาข้อความ (กฎเหล็กข้อ 2)
+    cap = int(max_inspect or 0)
+    for i, g in enumerate(regs):
         x_mm, y_mm = region_center_mm(g, size, mmpp)
         where = "ตำแหน่ง %.1f, %.1f mm จากมุมซ้ายบนของโซน" % (x_mm, y_mm)
         found = ref = ""
         rel = "unknown"
         note = ""
         info = None
-        if inspect_region is not None:
+        over_cap = bool(cap) and i >= cap
+        if over_cap:
+            rel = "unread"
+        elif inspect_region is not None:
             try:
                 info = inspect_region(g["px"]) or None
             except Exception:                # pragma: no cover - กันพังล้วน
@@ -391,6 +447,13 @@ def regions_to_defects(res: dict, zone_a: dict, zone_b: dict,
             # ครอปตัดกลางคำ — ข้อความที่ได้ไม่ใช่ความต่างของงาน
             msg = ("กลุ่ม %s: %s กับ %s ต่างกันที่ %s "
                    "(อ่านข้อความตรงนั้นได้ไม่ครบ โปรดดูด้วยตา)"
+                   % (grp, la, lb, where))
+            found = ref = ""
+        elif rel == "unread":
+            # ไม่ได้อ่านเพราะ **เราตั้งเพดานไว้เอง** ไม่ใช่เพราะอ่านไม่ออก —
+            # ต้องบอกตามจริง ไม่งั้นผู้ตรวจเข้าใจว่าภาพตรงนั้นอ่านไม่ได้
+            msg = ("กลุ่ม %s: %s กับ %s ต่างกันที่ %s "
+                   "(บริเวณที่ต่างมีจำนวนมาก — ไม่ได้อ่านข้อความตรงนี้ โปรดดูด้วยตา)"
                    % (grp, la, lb, where))
             found = ref = ""
         else:

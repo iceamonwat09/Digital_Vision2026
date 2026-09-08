@@ -311,8 +311,25 @@ def _unify_group_engines(docs: dict, zone_list: List[dict],
     return out
 
 
+def _read_pair(crop_a, crop_b):
+    """อ่านข้อความของครอปสองฝั่ง **พร้อมกัน** → ``(text_a, text_b)``.
+
+    เป็นการรอ backend ตอบล้วน ๆ ไม่มี state ร่วม ⇒ ยิงพร้อมกันได้ผลเท่าเดิม
+    ทุกประการ แค่เร็วขึ้นเท่าตัว. ``OCR_PARALLEL <= 1`` = ทางเดิม (เรียงกัน)
+    """
+    def _rd(c):
+        return (ocr.read_image(c) or {}).get("text", "")
+    if int(getattr(config, "OCR_PARALLEL", 1) or 1) <= 1:
+        return _rd(crop_a), _rd(crop_b)
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=2) as ex:
+        fa = ex.submit(_rd, crop_a)
+        fb = ex.submit(_rd, crop_b)
+        return fa.result(), fb.result()
+
+
 def _pixel_compare(insp_dir: str, zone_list: List[dict],
-                   defects: List[dict], progress=None):
+                   defects: List[dict], progress=None, deadline=None):
     """โหมดทดลอง: เทียบ "แผงต่อแผง" ระดับพิกเซลแทนชั้นเทียบข้อความ.
 
     ทำเฉพาะกลุ่มที่มีโซนชนิด panel **สองโซนพอดี** และทั้งคู่มาจากไฟล์ PDF —
@@ -337,7 +354,14 @@ def _pixel_compare(insp_dir: str, zone_list: List[dict],
     replaced_groups = set()
     new_defects: List[dict] = []
     pairs = []
+    stopped = ""
     for g, zs in sorted(by_group.items()):
+        if deadline and time.time() > deadline:
+            # หมดเวลารวม ⇒ หยุดเฉพาะชั้นนี้ **ไม่ทิ้งผลที่ได้แล้ว**
+            stopped = "หมดเวลารวมของการตรวจ — หยุดที่กลุ่ม %s" % g
+            pairs.append({"group": g, "status": "skipped",
+                          "reason": "timeout", "regions": 0})
+            continue
         pg.start("pixel", "กำลังเทียบกลุ่ม %s" % g)
         if not g or len(zs) != 2:
             continue
@@ -380,12 +404,14 @@ def _pixel_compare(insp_dir: str, zone_list: List[dict],
                ``expand_box`` ขยายเฉพาะที่ว่างทั้งสองฝั่ง ⇒ ใช้ได้ทุกภาษา
                และไม่มีทางกินคำข้าง ๆ
             """
+            if deadline and time.time() > deadline:
+                return None                 # หมดเวลา ⇒ ไม่อ่าน แต่ยังรายงาน
             box = appearance.expand_box(_a, _b, px)
             ca, cb = appearance.crop(_a, box), appearance.crop(_b, box)
             if getattr(ca, "size", 0) == 0 or getattr(cb, "size", 0) == 0:
                 return None
-            ta = (ocr.read_image(ca) or {}).get("text", "")
-            tb = (ocr.read_image(cb) or {}).get("text", "")
+            # อ่านสองฝั่งพร้อมกัน — เป็นการรอ backend ล้วน ไม่มี state ร่วม
+            ta, tb = _read_pair(ca, cb)
             rel = appearance.relation(ta, tb)
             # วัดรูปลักษณ์เฉพาะตอนที่ตัวอักษรเหมือนกัน — ถ้าตัวอักษรต่างกัน
             # อยู่แล้ว ตัวเลขความหนา/ขนาดไม่ได้บอกอะไรเพิ่ม
@@ -394,7 +420,12 @@ def _pixel_compare(insp_dir: str, zone_list: List[dict],
                     "box": box}
 
         found = panelmatch_mod.regions_to_defects(
-            res, za, zb, inspect_region=_inspect)
+            res, za, zb, inspect_region=_inspect,
+            max_inspect=config.PIXEL_MAX_OCR_REGIONS)
+        n_reg = len(res.get("regions") or [])
+        cap = int(config.PIXEL_MAX_OCR_REGIONS or 0)
+        if cap and n_reg > cap:
+            entry["ocr_capped"] = [cap, n_reg]
         # ⚠️ **พบ 0 บริเวณ ห้ามลบผลชั้นข้อความ** — "ภาพไม่เห็น" ไม่ใช่ "ไม่มี"
         #    เกิดจริงบนสถานี 5 ก.ย.: แผงเล็กทำให้ความต่างเหลือ 5 พิกเซล ⇒
         #    พบ 0 บริเวณ ⇒ ลบ MISMATCH ของชั้นข้อความทิ้ง ⇒ **รายงานขึ้น 0 ทุกช่อง
@@ -406,8 +437,11 @@ def _pixel_compare(insp_dir: str, zone_list: List[dict],
         new_defects += found
         replaced_groups.add(g)
 
+    if stopped:
+        pg.note("pixel", stopped)
     if not replaced_groups:
-        return defects, {"pairs": pairs, "used": 0}
+        return defects, {"pairs": pairs, "used": 0,
+                         "stopped": stopped or None}
 
     # แทนที่เฉพาะ MISMATCH_* ของกลุ่มที่เทียบพิกเซลสำเร็จ — คลาสอื่นคงเดิม
     ids = {z["id"] for z in zone_list
@@ -415,7 +449,8 @@ def _pixel_compare(insp_dir: str, zone_list: List[dict],
     kept = [x for x in defects
             if not (str(x.get("class", "")).startswith("MISMATCH_")
                     and x.get("zone_id") in ids)]
-    return kept + new_defects, {"pairs": pairs, "used": len(replaced_groups)}
+    return kept + new_defects, {"pairs": pairs, "used": len(replaced_groups),
+                                "stopped": stopped or None}
 
 
 def run_inspection(rec_id: str, zone_list: List[dict],
@@ -439,7 +474,14 @@ def run_inspection(rec_id: str, zone_list: List[dict],
             % (n_zone, len(zones_a), len(zones_b)))
 
     t0 = time.time()
-    pg.start("ocr", "กำลังอ่าน %d โซน" % n_zone)
+    # เวลารวมสูงสุด — เกินแล้ว **ข้ามเฉพาะชั้นเสริม** (อ่านซ้ำ / เทียบพิกเซล /
+    # อ่านบริเวณที่ต่าง) แล้วออกรายงานเท่าที่มี. ห้ามทิ้ง defect ที่ได้แล้ว
+    # เพราะเราหมดเวลาเอง (กฎเหล็กข้อ 2) · 0 = ไม่จำกัด
+    deadline = (t0 + config.INSPECT_TIMEOUT_S
+                if config.INSPECT_TIMEOUT_S else None)
+    timed_out = False
+    pg.start("ocr", "กำลังอ่าน %d โซน (พร้อมกันสูงสุด %d สาย)"
+             % (n_zone, max(1, int(config.OCR_PARALLEL or 1))))
     ocr_results, trust = _read_all_docs(d, zones_a, zones_b,
                                         auto_rotate=auto_rotate,
                                         force_ocr=force_ocr,
@@ -471,9 +513,19 @@ def run_inspection(rec_id: str, zone_list: List[dict],
             "พบ %d รายการจากชั้นข้อความ" % len(defects))
 
     confirm_info = None
+    over = bool(deadline) and time.time() > deadline
+    if over:
+        timed_out = True
     if not confirm_reads:
         pg.skip("confirm", "ไม่ได้ติ๊กช่อง “อ่านซ้ำ 2 รอบ”")
-    if confirm_reads:
+    elif over:
+        pg.skip("confirm", "ข้ามเพราะใช้เวลาเกิน %.0f วินาทีแล้ว"
+                % config.INSPECT_TIMEOUT_S)
+        confirm_info = {"rounds": 1, "confirmed": len(defects),
+                        "unconfirmed": 0, "items": [],
+                        "error": "ข้ามการอ่านรอบที่สองเพราะใช้เวลาเกินกำหนด — "
+                                 "ผลนี้มาจากการอ่านรอบเดียว"}
+    if confirm_reads and not over:
         pg.start("confirm", "อ่านรอบที่สองด้วยเส้นทางเดียวกัน")
         # โหมดทดลอง: อ่านซ้ำอีกรอบด้วยเส้นทางเดียวกันเป๊ะ แล้วเชื่อเฉพาะ
         # defect ที่โผล่ทั้งสองรอบ. เป็นการ **กรอง** ไม่ใช่การสร้างใหม่ ⇒
@@ -509,13 +561,25 @@ def run_inspection(rec_id: str, zone_list: List[dict],
                     "อ่านรอบที่สองไม่สำเร็จ — ใช้ผลรอบเดียว")
 
     pixel_info = None
+    over = bool(deadline) and time.time() > deadline
+    if over:
+        timed_out = True
     if not pixel_check:
         pg.skip("pixel", "ไม่ได้ติ๊กช่อง “เทียบแผงระดับพิกเซล”")
-    if pixel_check:
+    elif over:
+        pg.skip("pixel", "ข้ามเพราะใช้เวลาเกิน %.0f วินาทีแล้ว"
+                % config.INSPECT_TIMEOUT_S)
+        pixel_info = {"pairs": [], "used": 0,
+                      "error": "ข้ามการเทียบพิกเซลเพราะใช้เวลาเกินกำหนด — "
+                               "ผลนี้มาจากชั้นข้อความเหมือนเดิม"}
+    if pixel_check and not over:
         pg.start("pixel", "จับคู่กลุ่มที่มีโซน panel สองโซน")
         try:
             defects, pixel_info = _pixel_compare(d, zone_list, defects,
-                                                 progress=pg)
+                                                 progress=pg,
+                                                 deadline=deadline)
+            if (pixel_info or {}).get("stopped"):
+                timed_out = True
             _report_pixel_progress(pg, pixel_info)
         except Exception:
             logger.exception("[artwork] เทียบพิกเซลไม่สำเร็จ — ใช้ผลชั้นข้อความ")
@@ -566,6 +630,8 @@ def run_inspection(rec_id: str, zone_list: List[dict],
         # รายงานย้อนหลังแล้วรู้ว่าข้อความมาจากเส้นทางไหน
         "force_ocr": bool(force_ocr),
         "split_bands": bool(split_bands),
+        # ใช้เวลาเกินกำหนดจนต้องข้ามชั้นเสริม — ต้องบอก ไม่ใช่เงียบ
+        "timed_out": bool(timed_out),
         # โหมดยืนยันด้วยการอ่านซ้ำ — advisory ล้วน. defect ที่ "ยังไม่ยืนยัน"
         # ต้องแสดงให้ผู้ตรวจเห็น ไม่ใช่ทิ้งเงียบ ๆ (กฎเหล็กข้อ 2)
         "confirm_reads": bool(confirm_reads),
@@ -628,6 +694,8 @@ def _report_ocr_progress(pg, ocr_results, trust) -> None:
 def _report_pixel_progress(pg, info) -> None:
     """บอกว่ากลุ่มไหนเทียบด้วยภาพได้จริง กลุ่มไหนตกเงื่อนไข — และเพราะอะไร."""
     pairs = (info or {}).get("pairs") or []
+    if (info or {}).get("stopped"):
+        pg.note("pixel", str(info["stopped"]))
     if not pairs:
         pg.done("pixel", progress_mod.SKIP,
                 "ไม่มีกลุ่มที่เข้าเงื่อนไข (ต้องมีโซน panel สองโซนในกลุ่มเดียวกัน "
@@ -642,11 +710,14 @@ def _report_pixel_progress(pg, info) -> None:
             pg.note("pixel", "กลุ่ม %s · เทียบแล้วไม่พบความต่าง → คงผลชั้นข้อความ"
                     % p.get("group"))
         else:
-            pg.note("pixel", "กลุ่ม %s · พบ %s บริเวณ%s · ต่าง %s%%"
+            cap = p.get("ocr_capped")
+            pg.note("pixel", "กลุ่ม %s · พบ %s บริเวณ%s · ต่าง %s%%%s"
                     % (p.get("group"), p.get("regions"),
                        " · ตัดทิ้งติดขอบ %s" % p["edge_regions"]
                        if p.get("edge_regions") else "",
-                       round((p.get("diff_ratio") or 0) * 100, 4)))
+                       round((p.get("diff_ratio") or 0) * 100, 4),
+                       " · อ่านข้อความ %d จาก %d บริเวณ (เพดาน)"
+                       % (cap[0], cap[1]) if cap else ""))
     pg.done("pixel",
             progress_mod.OK if used else progress_mod.WARN,
             "ใช้ผลจากภาพ %d จาก %d กลุ่ม" % (used, len(pairs)))
