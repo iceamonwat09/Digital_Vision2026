@@ -31,6 +31,7 @@ import cv2
 
 from . import bands as bands_mod
 from . import confirm as confirm_mod
+from . import appearance
 from . import panelmatch as panelmatch_mod
 from . import (checks, config, fonttrust, ocr, pixdiff, report, vocab,
                zones as zones_mod)
@@ -366,21 +367,31 @@ def _pixel_compare(insp_dir: str, zone_list: List[dict],
         if res.get("status") != pixdiff.OK or img_a is None:
             continue                       # เทียบไม่ได้ ⇒ ใช้ผลชั้นข้อความเดิม
 
-        def _read(which, px, _a=img_a, _b=img_b):
-            """อ่านข้อความเฉพาะบริเวณที่ต่าง — ครอปเล็ก ๆ อ่านได้นิ่งกว่ามาก.
-            อ่านไม่ได้ = คืนค่าว่าง **ห้ามเดา** (กฎเหล็กข้อ 2)"""
-            img = _a if which == "a" else _b
-            pad = 14
-            x, y, w, h = px
-            y0, y1 = max(0, y - pad), min(img.shape[0], y + h + pad)
-            x0, x1 = max(0, x - pad), min(img.shape[1], x + w + pad)
-            crop = img[y0:y1, x0:x1]
-            if crop.size == 0:
-                return ""
-            r = ocr.read_image(crop)
-            return (r or {}).get("text", "")
+        def _inspect(px, _a=img_a, _b=img_b):
+            """ตรวจบริเวณที่ต่างหนึ่งจุด — อ่านข้อความสองฝั่ง + วัดรูปลักษณ์.
 
-        found = panelmatch_mod.regions_to_defects(res, za, zb, _read)
+            ⚠️ **ต้องขยายกรอบให้ถึงขอบคำก่อนอ่าน** — กรอบที่ได้จากการเทียบ
+               ครอบเฉพาะ *พิกเซลที่ต่าง* ซึ่งกรณีฟอนต์ต่างจะกระจุกอยู่บาง
+               ส่วนของคำ ⇒ อ่านตามกรอบตรง ๆ ได้ข้อความไม่ครบ (วัดจริงบน
+               สถานี: ได้ ``Manuf``/``Manufa`` แทน ``Manufacturing``)
+               ``expand_box`` ขยายเฉพาะที่ว่างทั้งสองฝั่ง ⇒ ใช้ได้ทุกภาษา
+               และไม่มีทางกินคำข้าง ๆ
+            """
+            box = appearance.expand_box(_a, _b, px)
+            ca, cb = appearance.crop(_a, box), appearance.crop(_b, box)
+            if getattr(ca, "size", 0) == 0 or getattr(cb, "size", 0) == 0:
+                return None
+            ta = (ocr.read_image(ca) or {}).get("text", "")
+            tb = (ocr.read_image(cb) or {}).get("text", "")
+            rel = appearance.relation(ta, tb)
+            # วัดรูปลักษณ์เฉพาะตอนที่ตัวอักษรเหมือนกัน — ถ้าตัวอักษรต่างกัน
+            # อยู่แล้ว ตัวเลขความหนา/ขนาดไม่ได้บอกอะไรเพิ่ม
+            look = appearance.look_delta(ca, cb) if rel == "same" else None
+            return {"a": ta, "b": tb, "relation": rel, "look": look,
+                    "box": box}
+
+        found = panelmatch_mod.regions_to_defects(
+            res, za, zb, inspect_region=_inspect)
         # ⚠️ **พบ 0 บริเวณ ห้ามลบผลชั้นข้อความ** — "ภาพไม่เห็น" ไม่ใช่ "ไม่มี"
         #    เกิดจริงบนสถานี 5 ก.ย.: แผงเล็กทำให้ความต่างเหลือ 5 พิกเซล ⇒
         #    พบ 0 บริเวณ ⇒ ลบ MISMATCH ของชั้นข้อความทิ้ง ⇒ **รายงานขึ้น 0 ทุกช่อง
@@ -781,7 +792,7 @@ def run_ocr_only(rec_id: str, zone_list: List[dict],
 def zone_crop_jpg(rec_id: str, zone_bbox: List[float],
                   dpi: Optional[int] = None, doc: str = "a",
                   rotate="0", highlight: str = "",
-                  zone_id: str = "") -> bytes:
+                  zone_id: str = "", box: Optional[List[float]] = None) -> bytes:
     """High-DPI crop of one zone — used by the UI defect table / preview.
     ``doc="b"`` crops from the attached reference file. ``rotate`` is an
     angle 0/90/180/270 or "auto" (detect + rotate vertical → upright), so
@@ -812,12 +823,46 @@ def zone_crop_jpg(rec_id: str, zone_bbox: List[float],
     angle = resolve_rotation(rotate, page_auto=False, crop=crop) \
         if rotate == "auto" else (int(rotate) if str(rotate) in
                                   ("0", "90", "180", "270") else 0)
+    # ── กรอบที่ "วัดมา" (โหมดเทียบพิกเซล) ────────────────────────────
+    # ต่างจาก ``highlight`` ตรงที่ไม่ต้องค้นหาคำ ⇒ ใช้ได้ทุกภาษา และใช้ได้
+    # แม้อ่านข้อความตรงนั้นไม่ออกเลย. วาด **ก่อนหมุน** เพื่อให้กรอบหมุนตาม
+    # ภาพเอง ไม่ต้องแปลงพิกัดเอง (แปลงเองพลาดง่ายและกรอบจะไปผิดที่)
+    if box and crop.size:
+        crop = _draw_measured_box(crop, box)
     if angle:
         crop = apply_rotation(crop, angle)
 
     if highlight and zone_id and config.HIGHLIGHT_DEFECT_WORD:
         crop = _highlight_crop(rec_id, crop, highlight, zone_id, angle)
     return encode_jpg(crop, quality=88)
+
+
+def _draw_measured_box(crop, box):
+    """วาดกรอบแดงจากพิกัดสัดส่วนของโซน (0..1) ที่ **วัดมาแล้ว**.
+
+    ใช้กับโหมดเทียบพิกเซลซึ่งรู้ตำแหน่งจากการทาบภาพ ไม่ใช่จากการค้นหาคำ
+    ⇒ ไม่ผูกกับภาษา และวาดได้ทั้งฝั่งหลักและฝั่งอ้างอิง. เพี้ยน/ผิดรูป =
+    คืนภาพเดิม (แสดงผลอย่างเดียว ห้ามทำให้การ์ดพัง)
+    """
+    try:
+        x, y, w, h = [float(v) for v in box]
+    except (TypeError, ValueError):
+        return crop
+    if not (0.0 <= x < 1.0 and 0.0 <= y < 1.0 and 0.0 < w <= 1.0
+            and 0.0 < h <= 1.0):
+        return crop
+    H, W = crop.shape[:2]
+    x0, y0 = int(round(x * W)), int(round(y * H))
+    x1, y1 = int(round((x + w) * W)), int(round((y + h) * H))
+    pad = max(2, int(0.004 * max(W, H)))
+    x0, y0 = max(0, x0 - pad), max(0, y0 - pad)
+    x1, y1 = min(W - 1, x1 + pad), min(H - 1, y1 + pad)
+    if x1 <= x0 or y1 <= y0:
+        return crop
+    out = crop.copy()
+    cv2.rectangle(out, (x0, y0), (x1, y1), (0, 0, 220),
+                  max(2, int(0.003 * max(W, H))))
+    return out
 
 
 def _highlight_crop(rec_id: str, crop, found: str, zone_id: str,

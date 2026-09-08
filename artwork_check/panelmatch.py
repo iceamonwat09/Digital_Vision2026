@@ -284,6 +284,7 @@ def compare_ex(path_a: str, bbox_a, path_b: str, bbox_b,
     # ``px``  = พิกัดในภาพที่ align แล้ว (aa/bb) — ผู้เรียกใช้ครอปอ่านข้อความ
     # ``px_a`` = พิกัดเดียวกันบน "โซน a เต็มใบ" — ใช้บอกตำแหน่งให้คนดู
     ah, aw = a.shape[:2]
+    bh, bw = b.shape[:2]
     for g in res.get("regions") or []:
         px = list(g["px"])
         px[0] += m
@@ -293,6 +294,14 @@ def compare_ex(path_a: str, bbox_a, path_b: str, bbox_b,
         g["px_a"] = pa_
         g["bbox"] = [round(pa_[0] / float(aw), 5), round(pa_[1] / float(ah), 5),
                      round(pa_[2] / float(aw), 5), round(pa_[3] / float(ah), 5)]
+        # กรอบเดียวกันในระบบพิกัดของ **โซน b** — ย้อนการย่อ (scale) และ
+        # ตำแหน่งที่ครอปกลับ ⇒ วาดกรอบแดงบนภาพฝั่งอ้างอิงได้ด้วยพิกัดที่
+        # **วัดมา** ไม่ใช่การค้นหาคำ (ซึ่งล้มเหลวเมื่อครอปตัดคำ)
+        sc = float(scale) or 1.0
+        g["bbox_b"] = [round((px[0] + bx0) / sc / float(bw), 5),
+                       round((px[1] + by0) / sc / float(bh), 5),
+                       round(px[2] / sc / float(bw), 5),
+                       round(px[3] / sc / float(bh), 5)]
     mmpp = 25.4 / float(dpi)
     res.update(scale=round(scale, 4), ncc=round(ncc, 4), ecc=round(ecc, 4),
                size=[w, h], zone_size=[aw, ah], offset=[ax0, ay0],
@@ -324,11 +333,17 @@ def region_center_mm(region: dict, size_px, mm_per_px: float):
 #    (กฎเหล็กข้อ 2: กรอบที่ชี้ผิด แย่กว่าไม่มีกรอบ)
 
 def regions_to_defects(res: dict, zone_a: dict, zone_b: dict,
-                       read_region=None) -> List[dict]:
+                       read_region=None, inspect_region=None) -> List[dict]:
     """``(ผลจาก compare, โซน a, โซน b)`` → รายการ defect.
 
-    ``read_region(which, px)`` = ฟังก์ชันอ่านข้อความของบริเวณหนึ่ง
-    (``which`` เป็น ``"a"`` หรือ ``"b"``) — ส่ง ``None`` ได้ ถ้าไม่มี OCR
+    ``read_region(which, px)`` = อ่านข้อความของบริเวณหนึ่ง (ทางเดิม)
+    ``inspect_region(px)``     = ตรวจบริเวณหนึ่งแบบเต็ม (ทางใหม่) คืน dict
+        ``{"a", "b", "relation", "look"}`` — ดู ``pipeline._pixel_compare``
+
+    ⚠️ **ทำไมต้องมี ``relation``** (ผลรันจริง 8 ก.ย.): กลุ่มหนึ่งของสถานี
+       ต่างกันเพราะ **ฟอนต์ตัวหนา vs ตัวธรรมดา** ตัวอักษรเหมือนกันเป๊ะ แต่
+       การ์ดขึ้นว่า ``พบ: Manuf เทียบกับ: Manufa`` (ครอปตัดกลางคำ) ⇒ ผู้ตรวจ
+       ไปตามหาคำสะกดผิดที่ไม่มีอยู่จริง = ผลที่ผิดแบบมั่นใจ (กฎเหล็กข้อ 2)
     """
     from . import checks as _checks
     out: List[dict] = []
@@ -339,25 +354,59 @@ def regions_to_defects(res: dict, zone_a: dict, zone_b: dict,
     grp = zone_a.get("group") or ""
     for g in res.get("regions") or []:
         x_mm, y_mm = region_center_mm(g, size, mmpp)
-        found = ref = ""
-        if read_region is not None:
-            try:
-                found = (read_region("a", g["px"]) or "").strip()
-                ref = (read_region("b", g["px"]) or "").strip()
-            except Exception:                    # pragma: no cover - กันพังล้วน
-                found = ref = ""
         where = "ตำแหน่ง %.1f, %.1f mm จากมุมซ้ายบนของโซน" % (x_mm, y_mm)
-        if found or ref:
-            msg = ("กลุ่ม %s: %s กับ %s ต่างกันที่ %s" % (grp, la, lb, where))
+        found = ref = ""
+        rel = "unknown"
+        note = ""
+        info = None
+        if inspect_region is not None:
+            try:
+                info = inspect_region(g["px"]) or None
+            except Exception:                # pragma: no cover - กันพังล้วน
+                info = None
+        elif read_region is not None:
+            try:
+                a_txt = (read_region("a", g["px"]) or "").strip()
+                b_txt = (read_region("b", g["px"]) or "").strip()
+                info = {"a": a_txt, "b": b_txt}
+            except Exception:                # pragma: no cover - กันพังล้วน
+                info = None
+        if info:
+            from . import appearance as _ap
+            found, ref = info.get("a", "") or "", info.get("b", "") or ""
+            rel = info.get("relation") or _ap.relation(found, ref)
+            note = ((info.get("look") or {}).get("note") or "")
+
+        if rel == "different":
+            msg = "กลุ่ม %s: %s กับ %s ต่างกันที่ %s" % (grp, la, lb, where)
+        elif rel == "same":
+            # ตัวอักษรเหมือนกัน ⇒ ความต่างอยู่ที่รูปลักษณ์ **ห้ามโชว์เป็น
+            # "พบ X เทียบกับ Y"** เพราะจะอ่านเหมือนคำสะกดผิด
+            msg = ("กลุ่ม %s: %s กับ %s — ตัวอักษรเหมือนกัน (\u201c%s\u201d) "
+                   "แต่ภาพต่างกันที่ %s%s"
+                   % (grp, la, lb, found[:60], where,
+                      " · " + note if note else ""))
+            found = ref = ""
+        elif rel == "truncated":
+            # ครอปตัดกลางคำ — ข้อความที่ได้ไม่ใช่ความต่างของงาน
+            msg = ("กลุ่ม %s: %s กับ %s ต่างกันที่ %s "
+                   "(อ่านข้อความตรงนั้นได้ไม่ครบ โปรดดูด้วยตา)"
+                   % (grp, la, lb, where))
+            found = ref = ""
         else:
             msg = ("กลุ่ม %s: %s กับ %s ต่างกันที่ %s "
                    "(เทียบจากภาพ — อ่านข้อความตรงนั้นไม่ได้ โปรดดูด้วยตา)"
                    % (grp, la, lb, where))
+            found = ref = ""
         d = _checks._defect("MISMATCH_PANELS", zone_a["id"], msg,
                             found=found, reference=ref,
                             ref_zone_ids=[zone_b["id"]])
-        # พิกัดที่ **วัดมา** ไม่ใช่ค้นหาเอา — ชั้นกรอบแดงใช้ได้ตรง ๆ
+        # พิกัดที่ **วัดมา** ไม่ใช่ค้นหาเอา — ชั้นกรอบแดงใช้ได้ตรง ๆ ทั้งสองฝั่ง
         d["pixel_bbox"] = list(g.get("bbox") or [])
+        d["pixel_bbox_b"] = list(g.get("bbox_b") or [])
         d["pixel_px"] = list(g.get("px") or [])
+        d["pixel_relation"] = rel
+        if note:
+            d["pixel_look"] = note
         out.append(d)
     return out

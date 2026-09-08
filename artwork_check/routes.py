@@ -300,9 +300,20 @@ def api_crop(rec_id):
         return jsonify({"error": "rotate ต้องเป็น 0/90/180/270/auto"}), 400
     highlight = (request.args.get("hl", "") or "")[:120]
     zone_id = (request.args.get("zid", "") or "")[:40]
+    # box=x,y,w,h (สัดส่วนของโซน) = กรอบที่โหมดเทียบพิกเซล **วัดมาแล้ว**
+    # ไม่ต้องค้นหาคำ ⇒ ใช้ได้ทุกภาษาและใช้ได้แม้อ่านข้อความไม่ออก
+    box = None
+    raw = (request.args.get("box", "") or "")[:80]
+    if raw:
+        try:
+            parts = [float(v) for v in raw.split(",")]
+            box = parts if len(parts) == 4 else None
+        except ValueError:
+            box = None
     try:
         jpg = pipeline.zone_crop_jpg(rec_id, bbox, doc=doc, rotate=rotate,
-                                     highlight=highlight, zone_id=zone_id)
+                                     highlight=highlight, zone_id=zone_id,
+                                     box=box)
     except (ValueError, FileNotFoundError) as e:
         return jsonify({"error": str(e)}), 404
     import io

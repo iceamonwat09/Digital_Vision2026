@@ -326,8 +326,18 @@ HIGHLIGHT_USE_TESSERACT = os.getenv(
     "ARTWORK_HIGHLIGHT_TESSERACT", "1").strip().lower() not in ("0", "false", "")
 HIGHLIGHT_USE_PROFILE = os.getenv(
     "ARTWORK_HIGHLIGHT_PROFILE", "0").strip().lower() not in ("0", "false", "")
+# ⬇️ "auto" = เลือกภาษาจาก **สคริปต์ของคำที่กำลังหา** ทีละคำ
+#    (ดู highlight.script_langs) — ไม่ใช่โหลดทุกภาษาพร้อมกัน
+#
+# ⚠️ ก่อนหน้านี้ default เป็น "eng" ⇒ เครื่องที่ลง traineddata ไว้ 24 ภาษา
+#    **ก็ยังเรียกใช้แค่ eng ภาษาเดียว** ⇒ คำอาหรับ/ไทย/จีน ไม่เคยได้กรอบแดง
+#    เลย (``_resolve_langs`` เป็นตัว **กรองออก** ไม่ใช่ตัวเพิ่มเข้า)
+# ⚠️ ห้ามตั้งเป็นรายการยาว ๆ เช่น "eng+ara+tha+chi_tra" — วัดแล้ว 2 เรื่อง:
+#    ① โหลดหลายภาษาพร้อมกันช้าลง ~3.5 เท่าโดยความแม่นเท่าเดิม
+#    ② ผสมภาษาทำให้แย่ลง (ara เดี่ยว 18/21 คำ · ara+eng 16/21)
+# ตั้ง ARTWORK_HIGHLIGHT_TESS_LANG=eng = กลับพฤติกรรมก่อน 8 ก.ย. เป๊ะ
 HIGHLIGHT_TESSERACT_LANG = os.getenv("ARTWORK_HIGHLIGHT_TESS_LANG",
-                                     "eng").strip() or "eng"
+                                     "auto").strip() or "auto"
 # จำนวนกรอบสูงสุดต่อ 1 defect: คำผิดมักพิมพ์ซ้ำหลายแถวในตารางเดียวกัน
 # (เช่น "Cude" ใน Cude Protein / Cude Fat / Cude Fiber) — วาดจุดเดียวทำให้
 # ผู้ตรวจแก้ไม่ครบ. 6 = เห็นครบทุกจุดในตารางปกติ แต่ไม่ท่วมรูปถ้าคำนั้น

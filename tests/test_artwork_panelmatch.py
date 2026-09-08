@@ -603,3 +603,135 @@ def test_pixel_layer_still_replaces_when_it_has_something_to_say(
     assert stale not in out
     assert len(out) == 1 and out[0]["class"] == "MISMATCH_PANELS"
     assert info["used"] == 1
+
+
+# ══════════════════════════════════════════════════════════════════════
+# ชุดที่เพิ่มหลังผลรันจริงบนสถานี 8 ก.ย. 2026
+#
+# โหมด pixel จับความต่างจริงได้ 2 อย่าง — อย่างที่สองคือ **ฟอนต์ตัวหนา vs
+# ตัวธรรมดา** ของบรรทัดเดียวกัน (ตัวอักษรเหมือนกันเป๊ะ) ซึ่งชั้นเทียบข้อความ
+# ไม่มีทางเห็น. แต่การ์ดขึ้นว่า "พบ: Manuf เทียบกับ: Manufa" เพราะครอปตัด
+# กลางคำ ⇒ ผู้ตรวจไปตามหาคำสะกดผิดที่ไม่มีอยู่จริง (กฎเหล็กข้อ 2)
+# ══════════════════════════════════════════════════════════════════════
+
+def _region(res):
+    return (res.get("regions") or [None])[0]
+
+
+def test_same_text_is_reported_as_a_look_difference_not_a_spelling_one(
+        tmp_path, base):
+    """ตัวอักษรเหมือนกัน ⇒ ต้องบอกว่า "รูปลักษณ์ต่าง" และ **ห้ามใส่
+    found/reference** ซึ่งการ์ดจะแสดงเป็น "พบ X เทียบกับ Y" = อ่านเหมือน
+    คำสะกดผิด."""
+    other = _panel(tmp_path / "b.pdf", dv=24)
+    r = compare(base, other)
+    ds = PM.regions_to_defects(
+        r, {"id": "z1", "group": "A"}, {"id": "b2"},
+        inspect_region=lambda px: {"a": "Manufacturing", "b": "Manufacturing",
+                                   "relation": "same",
+                                   "look": {"note": "น้ำหนักเส้นต่างกัน 15%"}})
+    assert ds and ds[0]["found"] == "" and ds[0]["reference"] == ""
+    assert "ตัวอักษรเหมือนกัน" in ds[0]["message"]
+    assert "น้ำหนักเส้น" in ds[0]["message"]
+    assert ds[0]["pixel_relation"] == "same"
+
+
+def test_a_truncated_read_never_becomes_found_versus_reference(tmp_path, base):
+    """``Manuf`` / ``Manufa`` เป็นสิ่งประดิษฐ์จากการครอป — ห้ามแสดงเป็น
+    ความต่างของข้อความ."""
+    other = _panel(tmp_path / "b.pdf", dv=24)
+    r = compare(base, other)
+    ds = PM.regions_to_defects(
+        r, {"id": "z1", "group": "A"}, {"id": "b2"},
+        inspect_region=lambda px: {"a": "Manuf", "b": "Manufa"})
+    assert ds[0]["found"] == "" and ds[0]["reference"] == ""
+    assert ds[0]["pixel_relation"] == "truncated"
+    assert "ไม่ครบ" in ds[0]["message"]
+
+
+def test_a_real_text_change_still_shows_found_and_reference(tmp_path, base):
+    """ทางเดิมต้องไม่เปลี่ยน — ตัวเลขเปลี่ยนจริงยังโชว์ พบ/เทียบกับ."""
+    other = _panel(tmp_path / "b.pdf", dv=24)
+    r = compare(base, other)
+    ds = PM.regions_to_defects(
+        r, {"id": "z1", "group": "A"}, {"id": "b2"},
+        inspect_region=lambda px: {"a": "24%", "b": "20%"})
+    assert ds[0]["found"] == "24%" and ds[0]["reference"] == "20%"
+    assert ds[0]["pixel_relation"] == "different"
+
+
+def test_an_exploding_inspector_never_breaks_the_run(tmp_path, base):
+    other = _panel(tmp_path / "b.pdf", dv=24)
+    r = compare(base, other)
+
+    def boom(px):
+        raise RuntimeError("พัง")
+    ds = PM.regions_to_defects(r, {"id": "z1", "group": "A"}, {"id": "b2"},
+                               inspect_region=boom)
+    assert ds and ds[0]["found"] == ""
+
+
+def test_the_region_is_located_in_the_reference_zone_too(tmp_path, base):
+    """``bbox_b`` = กรอบเดียวกันในพิกัดของโซนอ้างอิง ⇒ วาดกรอบแดงได้ทั้งสอง
+    ฝั่งด้วยพิกัดที่ **วัดมา** ไม่ใช่การค้นหาคำ (ซึ่งล้มเหลวเมื่อครอปตัดคำ)."""
+    other = _panel(tmp_path / "b.pdf", dv=24)
+    r = compare(base, other)
+    g = _region(r)
+    assert g and len(g["bbox_b"]) == 4
+    assert all(0.0 <= v <= 1.0 for v in g["bbox_b"])
+    # โซนสองฝั่งลากเท่ากันและสเกล 1 ⇒ ต้องชี้จุดเดียวกัน
+    for u, v in zip(g["bbox"], g["bbox_b"]):
+        assert abs(u - v) < 0.05
+    ds = PM.regions_to_defects(r, {"id": "z1", "group": "A"}, {"id": "b2"})
+    assert len(ds[0]["pixel_bbox_b"]) == 4
+
+
+@pytest.mark.parametrize("k,bigger", [(1.25, True), (0.75, False)])
+def test_bbox_b_follows_the_scale_of_the_reference_panel(tmp_path, base,
+                                                         k, bigger):
+    """แผงอ้างอิงที่พิมพ์ **ใหญ่กว่า** ⇒ บริเวณเดียวกันกินสัดส่วนของโซน b
+    มากกว่า (และกลับกันเมื่อพิมพ์เล็กกว่า).
+
+    ถ้าไม่ย้อนสเกล กรอบแดงฝั่งอ้างอิงจะไปผิดที่ทุกครั้งที่สองแผงพิมพ์คนละ
+    ขนาด — ซึ่งเป็นกรณีปกติของงานจริง (วัดได้ 0.784 บนคู่ไฟล์สถานี)
+    """
+    other = _panel(tmp_path / ("s%.2f.pdf" % k), dv=24, k=k)
+    r = PM.compare(base, ZONE, other, ZONE, dpi=TEST_DPI)
+    g = _region(r)
+    assert r["status"] == pixdiff.OK and g, "จับคู่แผงที่สเกล %.2f ไม่ได้" % k
+    if bigger:
+        assert g["bbox_b"][2] > g["bbox"][2]
+    else:
+        assert g["bbox_b"][2] < g["bbox"][2]
+
+
+# ── กรอบแดงจากพิกัดที่ "วัดมา" (ไม่ต้องค้นหาคำ) ──────────────────────
+#
+# ⚠️ ชั้นกรอบแดงเดิมทำงานด้วยการ **ค้นหาคำ** จาก ``found`` ⇒ ล้มเหลวทันที
+#    เมื่อครอปตัดคำ (ฝั่งอ้างอิงหา "Manufa" ไม่เจอ ⇒ ไม่มีกรอบ) และล้มเหลว
+#    กับภาษาที่ไม่มี traineddata. โหมด pixel รู้ตำแหน่งจากการทาบภาพอยู่แล้ว
+
+def test_a_measured_box_is_drawn_without_searching_for_a_word():
+    from artwork_check import pipeline
+    img = np.full((200, 300, 3), 255, np.uint8)
+    out = pipeline._draw_measured_box(img, [0.3, 0.4, 0.2, 0.2])
+    assert out is not img and out.shape == img.shape
+    # ต้องมีพิกเซลสีแดงเกิดขึ้นจริง (BGR: แดง = ช่อง 2 สูง · 0/1 ต่ำ)
+    red = ((out[:, :, 2] > 150) & (out[:, :, 0] < 100) & (out[:, :, 1] < 100))
+    assert red.sum() > 0, "ไม่ได้วาดกรอบเลย"
+    # และต้องอยู่แถว ๆ ที่สั่ง ไม่ใช่ทั้งภาพ
+    ys, xs = np.where(red)
+    assert 40 <= xs.min() <= 100 and 60 <= ys.min() <= 110
+    assert red.sum() < img.size * 0.2
+
+
+@pytest.mark.parametrize("bad", [
+    None, [], [0.1, 0.2], [0.1, 0.2, 0.3], ["a", "b", "c", "d"],
+    [-0.1, 0.2, 0.3, 0.4], [0.1, 0.2, 0.0, 0.4], [0.1, 0.2, 2.0, 0.4],
+])
+def test_a_bad_box_never_breaks_the_crop(bad):
+    """แสดงผลอย่างเดียว — ข้อมูลเพี้ยนต้องคืนภาพเดิม ไม่ใช่พังทั้งการ์ด."""
+    from artwork_check import pipeline
+    img = np.full((60, 80, 3), 255, np.uint8)
+    out = pipeline._draw_measured_box(img, bad)
+    assert np.array_equal(out, img)

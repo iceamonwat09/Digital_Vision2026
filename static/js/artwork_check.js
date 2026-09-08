@@ -249,6 +249,13 @@
                  ? " (" + p.areas_mm2.map(esc).join(", ") + " mm²)" : ""));
       h += '<div class="aw-confirm-item"><code>' + esc(p.group) + "</code> " +
         body;
+      // วัดไว้บนไฟล์จริง: ความต่างของงานจริงอยู่ที่ 0.011-0.014% ส่วนเคสที่
+      // โซนลากครอบเนื้อหานอกแผงได้ 0.37-6.85% ⇒ เกิน 0.2% = ควรเตือน
+      if (p.diff_ratio != null && p.diff_ratio > 0.002)
+        h += ' · <b>โซนนี้ต่างกัน ' + (p.diff_ratio * 100).toFixed(2) +
+             "% ซึ่งสูงกว่าการแก้ไขฉลากปกติมาก</b>" +
+             " (งานจริงมักต่ำกว่า 0.02%) — น่าจะลากครอบเนื้อหานอกแผงเข้ามา" +
+             " ผลอาจไม่ครบ ลากให้กระชับแล้วลองใหม่";
       if (p.edge_regions)
         h += ' · <b>ตัดทิ้ง ' + esc(p.edge_regions) + " บริเวณที่ติดขอบโซน</b>" +
              " (เนื้อหารอบแผงที่ลากเกินเข้ามา — ลากให้ครอบเฉพาะแผงจะแม่นกว่า)";
@@ -447,11 +454,17 @@
         const hlParam = d.found
           ? "&hl=" + encodeURIComponent(d.found) + "&zid=" + encodeURIComponent(d.zone_id)
           : "";
+        // กรอบที่ "วัดมา" จากโหมดเทียบพิกเซล — แม่นกว่าการค้นหาคำ และใช้ได้
+        // ทุกภาษา/แม้อ่านข้อความตรงนั้นไม่ออก (ค้นหาคำล้มเหลวเมื่อครอปตัดคำ)
+        const boxOf = (arr) => (Array.isArray(arr) && arr.length === 4)
+          ? "&box=" + arr.map(Number).join(",") : "";
+        const boxA = boxOf(d.pixel_bbox);
+        const boxB = boxOf(d.pixel_bbox_b);
         if (z && refZ) {
           const qA = "x=" + z.bbox[0] + "&y=" + z.bbox[1] + "&w=" + z.bbox[2] + "&h=" + z.bbox[3] + "&doc=" + docOf(z) + rotOf(z);
           const qB = "x=" + refZ.bbox[0] + "&y=" + refZ.bbox[1] + "&w=" + refZ.bbox[2] + "&h=" + refZ.bbox[3] + "&doc=" + docOf(refZ) + rotOf(refZ);
-          const cropA = "/api/artwork/" + esc(rep.id) + "/crop?" + qA + hlParam;
-          const cropB = "/api/artwork/" + esc(rep.id) + "/crop?" + qB;
+          const cropA = "/api/artwork/" + esc(rep.id) + "/crop?" + qA + hlParam + boxA;
+          const cropB = "/api/artwork/" + esc(rep.id) + "/crop?" + qB + boxB;
           const labelA = docTag(z) + d.zone_id + (z.label ? " · " + z.label : "");
           const labelB = docTag(refZ) + refZ.id + (refZ.label ? " · " + refZ.label : "") + " (อ้างอิง)";
           html += '<div class="aw-img-pair" style="margin-top:8px;">' +
@@ -471,7 +484,7 @@
         } else if (z) {
           // fallback: แค่โซนเดียว (ไม่มี ref zone)
           const q = "x=" + z.bbox[0] + "&y=" + z.bbox[1] + "&w=" + z.bbox[2] + "&h=" + z.bbox[3] + "&doc=" + docOf(z) + rotOf(z);
-          const cropUrl = "/api/artwork/" + esc(rep.id) + "/crop?" + q + hlParam;
+          const cropUrl = "/api/artwork/" + esc(rep.id) + "/crop?" + q + hlParam + boxA;
           const caption = docTag(z) + d.zone_id + (z.label ? " · " + z.label : "");
           html += '<div style="margin-top:8px;">' +
             '<img src="' + esc(cropUrl) + '" alt="crop"' +
