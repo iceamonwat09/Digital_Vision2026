@@ -41,6 +41,47 @@
   .aw-confirm-list { margin-top:6px; }
   .aw-confirm-item { font-size:12px; color:#6d4c41; padding-left:10px; }
   .aw-confirm-item code { background:#eceff1; border-radius:3px; padding:0 4px; }
+  /* ── เส้นความคืบหน้าแนวนอน + จุดเช็คพอยต์ (โหมดตรวจ) ────────────── */
+  .aw-flow { margin:10px 0 4px; }
+  .aw-flow-line { display:flex; align-items:flex-start; gap:0;
+                  overflow-x:auto; padding:6px 2px 2px; }
+  .aw-flow-step { flex:1 1 0; min-width:74px; position:relative;
+                  text-align:center; font-size:11px; color:#78909c; }
+  .aw-flow-step::before { content:""; position:absolute; top:9px; left:0;
+                  width:50%; height:2px; background:#cfd8dc; }
+  .aw-flow-step::after { content:""; position:absolute; top:9px; left:50%;
+                  width:50%; height:2px; background:#cfd8dc; }
+  .aw-flow-step:first-child::before,
+  .aw-flow-step:last-child::after { background:transparent; }
+  .aw-flow-dot { position:relative; z-index:1; display:inline-flex;
+                 align-items:center; justify-content:center;
+                 width:20px; height:20px; border-radius:50%;
+                 background:#eceff1; border:2px solid #cfd8dc;
+                 color:#fff; font-size:11px; font-weight:700; line-height:1; }
+  .aw-flow-label { display:block; margin-top:3px; line-height:1.25; }
+  .aw-flow-ms { display:block; font-size:10px; color:#b0bec5; }
+  .aw-flow-step.running .aw-flow-dot { background:#1e88e5; border-color:#1e88e5;
+                 animation:awFlowPulse 1s ease-in-out infinite; }
+  .aw-flow-step.running { color:#1565c0; font-weight:700; }
+  .aw-flow-step.ok .aw-flow-dot { background:#2e7d32; border-color:#2e7d32; }
+  .aw-flow-step.ok { color:#2e7d32; }
+  .aw-flow-step.warn .aw-flow-dot { background:#ef6c00; border-color:#ef6c00; }
+  .aw-flow-step.warn { color:#ef6c00; }
+  .aw-flow-step.fail .aw-flow-dot { background:#c62828; border-color:#c62828; }
+  .aw-flow-step.fail { color:#c62828; }
+  .aw-flow-step.skip .aw-flow-dot { background:#fff; border-style:dashed;
+                 color:#b0bec5; }
+  @keyframes awFlowPulse { 0%,100%{transform:scale(1)} 50%{transform:scale(1.25)} }
+  .aw-flow-detail { margin-top:6px; font-size:12px; }
+  .aw-flow-row { padding:3px 8px; border-left:3px solid #cfd8dc;
+                 margin-bottom:3px; background:#fafafa; color:#455a64; }
+  .aw-flow-row.ok { border-left-color:#2e7d32; }
+  .aw-flow-row.warn { border-left-color:#ef6c00; background:#fff8e1; }
+  .aw-flow-row.fail { border-left-color:#c62828; background:#ffebee; }
+  .aw-flow-row.skip { border-left-color:#cfd8dc; color:#90a4ae; }
+  .aw-flow-row.running { border-left-color:#1e88e5; background:#e3f2fd; }
+  .aw-flow-note { font-size:11px; color:#78909c; padding-left:10px;
+                  font-family:ui-monospace,Menlo,Consolas,monospace; }
   .aw-confirm-num { font-size:11px; color:#8d6e63; padding-left:10px; font-family:ui-monospace,Menlo,Consolas,monospace; }
 
 

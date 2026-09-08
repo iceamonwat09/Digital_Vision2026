@@ -14,7 +14,7 @@ import os
 from flask import (Blueprint, Response, g, jsonify, render_template, request,
                    send_file, send_from_directory)
 
-from . import (config, ownership, pipeline, report, translate, vocab,
+from . import (config, ownership, pipeline, progress, report, translate, vocab,
                zones as zones_mod)
 
 logger = logging.getLogger(__name__)
@@ -197,19 +197,38 @@ def api_inspect(rec_id):
     confirm_reads = bool(body.get("confirm_reads"))
     # โหมดทดลอง: เทียบแผงต่อแผงระดับพิกเซลแทนชั้นเทียบข้อความ
     pixel_check = bool(body.get("pixel_check"))
+    # จุดเช็คพอยต์ให้หน้าเว็บ poll ระหว่างตรวจ (advisory ล้วน ไม่แตะผลตรวจ)
+    pg = progress.begin(rec_id, {"force_ocr": force_ocr,
+                                 "split_bands": split_bands,
+                                 "confirm_reads": confirm_reads,
+                                 "pixel_check": pixel_check})
     try:
         rep = pipeline.run_inspection(rec_id, zone_list, brand=brand,
                                       auto_rotate=auto_rotate,
                                       force_ocr=force_ocr,
                                       split_bands=split_bands,
                                       confirm_reads=confirm_reads,
-                                      pixel_check=pixel_check)
+                                      pixel_check=pixel_check,
+                                      progress=pg)
     except (ValueError, FileNotFoundError) as e:
+        pg.finish(progress.FAIL, str(e))
         return jsonify({"error": str(e)}), 404
     except Exception as e:
+        pg.finish(progress.FAIL, str(e))
         logger.exception("[artwork] inspection failed for %s", rec_id)
         return jsonify({"error": f"ตรวจไม่สำเร็จ: {e}"}), 500
     return jsonify(_with_owner(rec_id, rep))
+
+
+@artwork_bp.route("/api/artwork/<rec_id>/progress")
+def api_progress(rec_id):
+    """ความคืบหน้าของการตรวจที่กำลังรันอยู่ — หน้าเว็บ poll มาวาดเส้น.
+
+    ไม่มีข้อมูล = ยังไม่เริ่ม/หมดอายุแล้ว ⇒ ตอบ ``{"steps": []}`` ไม่ใช่ 404
+    เพื่อให้ฝั่งหน้าเว็บไม่ต้องแยกเคส (แสดงผลอย่างเดียว)
+    """
+    snap = progress.snapshot(rec_id)
+    return jsonify(snap or {"id": rec_id, "done": False, "steps": []})
 
 
 @artwork_bp.route("/api/artwork/<rec_id>/pixdiff", methods=["POST"])

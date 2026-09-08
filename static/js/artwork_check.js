@@ -343,6 +343,73 @@
   }
   window.awPixdiffHtml = pixdiffHtml;
 
+  // ── เส้นความคืบหน้าแนวนอน พร้อมจุดเช็คพอยต์จริง ─────────────────
+  //
+  // แทนข้อความคงที่ "กำลัง OCR ทีละโซน…" ซึ่งไม่ได้บอกอะไรเลย — โดยเฉพาะ
+  // **โหมดที่ติ๊กไว้ได้ทำงานจริงไหม หรือตกเงื่อนไขไปเงียบ ๆ** (โหมด pixel
+  // ต้องมีโซน panel สองโซนในกลุ่มเดียวกันและเป็น PDF ทั้งคู่)
+  const FLOW_ICON = { pending: "", running: "", ok: "✓", skip: "–",
+                      warn: "!", fail: "✕" };
+
+  function flowHtml(pr) {
+    const steps = (pr && pr.steps) || [];
+    if (!steps.length) return "";
+    let h = '<div class="aw-flow">';
+    h += '<div class="aw-flow-line">';
+    steps.forEach((st) => {
+      h += '<div class="aw-flow-step ' + esc(st.status) + '">' +
+             '<span class="aw-flow-dot">' + (FLOW_ICON[st.status] || "") + "</span>" +
+             '<span class="aw-flow-label">' + esc(st.label) + "</span>" +
+             (st.ms != null && st.status !== "skip"
+                ? '<span class="aw-flow-ms">' + (st.ms / 1000).toFixed(1) + "s</span>"
+                : "") +
+           "</div>";
+    });
+    h += "</div>";
+    // รายละเอียดของแต่ละขั้น — คือ "เช็คพอยต์" ที่เอาไปไล่ปัญหาร่วมกันได้
+    h += '<div class="aw-flow-detail">';
+    steps.forEach((st) => {
+      if (!st.detail && !(st.notes || []).length) return;
+      h += '<div class="aw-flow-row ' + esc(st.status) + '">' +
+             "<b>" + esc(st.label) + "</b> " + esc(st.detail || "");
+      (st.notes || []).forEach((n) => {
+        h += '<div class="aw-flow-note">' + esc(n) + "</div>";
+      });
+      h += "</div>";
+    });
+    h += "</div></div>";
+    return h;
+  }
+  window.awFlowHtml = flowHtml;
+
+  // poll ระหว่างที่ POST /inspect ยังค้างอยู่ — คืนฟังก์ชันสำหรับหยุด
+  function startFlowPoll(recId, box) {
+    let stopped = false;
+    const tick = async () => {
+      if (stopped) return;
+      try {
+        const r = await fetch("/api/artwork/" + encodeURIComponent(recId) +
+                              "/progress", { cache: "no-store" });
+        if (r.ok) {
+          const pr = await r.json();
+          const html = flowHtml(pr);
+          if (html && !stopped) {
+            box.innerHTML =
+              '<div class="aw-empty" style="text-align:left;">' +
+              '<span class="aw-spin"></span>กำลังตรวจ… ' +
+              esc((pr.elapsed_s || 0).toFixed ? pr.elapsed_s.toFixed(1) : pr.elapsed_s) +
+              " วินาที</div>" + html;
+          }
+        }
+      } catch (e) { /* แสดงผลอย่างเดียว — ล้มเหลวเงียบ */ }
+      if (!stopped) setTimeout(tick, 500);
+    };
+    tick();
+    return () => { stopped = true; };
+  }
+
+
+
   function renderReport(rep, box) {
     const vClass = rep.verdict === "PASS" ? "aw-v-pass"
       : rep.verdict === "REVIEW" ? "aw-v-review" : "aw-v-fail";
@@ -2049,8 +2116,8 @@
     }
     setBusy(true);
     resultBox.innerHTML =
-      '<div class="aw-empty"><span class="aw-spin"></span>กำลัง OCR ทีละโซนและตรวจทุกชั้น — ' +
-      "โซนเยอะอาจใช้เวลาหลายสิบวินาที…</div>";
+      '<div class="aw-empty"><span class="aw-spin"></span>กำลังเริ่มตรวจ…</div>';
+    const stopFlow = startFlowPoll(inspectionId, resultBox);
     try {
       const rep = await api("/api/artwork/" + inspectionId + "/inspect", {
         method: "POST",
@@ -2061,6 +2128,7 @@
                                confirm_reads: confirmReadsOn(),
                                pixel_check: pixelCheckOn() }),
       });
+      stopFlow();
       renderReport(rep, resultBox);
       showTabs(true);
       switchTab("result");
@@ -2068,9 +2136,19 @@
       setResultsWide(true);   // results exist → widen the results panel
       scrollToResults();      // ② อยู่ล่าง — พาไปดูผลให้เลย
     } catch (e) {
-      resultBox.innerHTML = '<div class="aw-empty">ตรวจไม่สำเร็จ: ' + esc(e.message) + "</div>";
+      stopFlow();
+      // แสดงเส้นความคืบหน้าค้างไว้ด้วย — จะได้รู้ว่าพังที่ขั้นไหน
+      let last = "";
+      try {
+        const r = await fetch("/api/artwork/" + encodeURIComponent(inspectionId) +
+                              "/progress", { cache: "no-store" });
+        if (r.ok) last = flowHtml(await r.json());
+      } catch (_) { /* ไม่เป็นไร */ }
+      resultBox.innerHTML = '<div class="aw-empty">ตรวจไม่สำเร็จ: ' +
+        esc(e.message) + "</div>" + last;
       scrollToResults();      // ข้อความ error ก็อยู่ในกล่อง ② เช่นกัน
     } finally {
+      stopFlow();
       setBusy(false);
     }
   });

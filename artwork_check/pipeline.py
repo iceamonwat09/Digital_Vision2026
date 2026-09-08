@@ -33,6 +33,7 @@ from . import bands as bands_mod
 from . import confirm as confirm_mod
 from . import appearance
 from . import panelmatch as panelmatch_mod
+from . import progress as progress_mod
 from . import (checks, config, fonttrust, ocr, pixdiff, report, vocab,
                zones as zones_mod)
 from .pdf_ingest import (ArtworkDocument, apply_rotation, encode_jpg,
@@ -311,7 +312,7 @@ def _unify_group_engines(docs: dict, zone_list: List[dict],
 
 
 def _pixel_compare(insp_dir: str, zone_list: List[dict],
-                   defects: List[dict]):
+                   defects: List[dict], progress=None):
     """โหมดทดลอง: เทียบ "แผงต่อแผง" ระดับพิกเซลแทนชั้นเทียบข้อความ.
 
     ทำเฉพาะกลุ่มที่มีโซนชนิด panel **สองโซนพอดี** และทั้งคู่มาจากไฟล์ PDF —
@@ -332,10 +333,12 @@ def _pixel_compare(insp_dir: str, zone_list: List[dict],
             continue
         by_group.setdefault(z.get("group") or "", []).append(z)
 
+    pg = progress or progress_mod.NullRun()
     replaced_groups = set()
     new_defects: List[dict] = []
     pairs = []
     for g, zs in sorted(by_group.items()):
+        pg.start("pixel", "กำลังเทียบกลุ่ม %s" % g)
         if not g or len(zs) != 2:
             continue
         za, zb = zs
@@ -420,17 +423,28 @@ def run_inspection(rec_id: str, zone_list: List[dict],
                    force_ocr: bool = False,
                    split_bands: bool = False,
                    confirm_reads: bool = False,
-                   pixel_check: bool = False) -> dict:
+                   pixel_check: bool = False,
+                   progress=None) -> dict:
+    # ``progress`` = ตัวบันทึกจุดเช็คพอยต์ให้หน้าเว็บวาดเส้นความคืบหน้า
+    # (advisory ล้วน — ไม่แตะผลตรวจ · ไม่ส่งมา = ไม่บันทึกอะไรเลย)
+    pg = progress or progress_mod.NullRun()
+    pg.start("prepare")
     d = report.inspection_dir(rec_id)
     src = _find_source(d)
     zone_list = zones_mod.sanitize_zones(zone_list)
     zones_a, zones_b = _split_docs(zone_list)
+    n_zone = len([z for z in zone_list if z.get("type") != "ignore"])
+    pg.done("prepare", progress_mod.OK,
+            "%d โซน (ไฟล์หลัก %d · ไฟล์อ้างอิง %d)"
+            % (n_zone, len(zones_a), len(zones_b)))
 
     t0 = time.time()
+    pg.start("ocr", "กำลังอ่าน %d โซน" % n_zone)
     ocr_results, trust = _read_all_docs(d, zones_a, zones_b,
                                         auto_rotate=auto_rotate,
                                         force_ocr=force_ocr,
                                         split_bands=split_bands)
+    _report_ocr_progress(pg, ocr_results, trust)
     # Record the concrete angle actually applied back onto each OCR'd zone
     # so the saved report, overlay crops and OCR-review show what OCR read.
     # (ignore-type zones are not OCR'd → left as the user set them.)
@@ -451,9 +465,16 @@ def run_inspection(rec_id: str, zone_list: List[dict],
                                      vocab_words=vocab_words,
                                      vocab_phrases=vocab_phrases)
 
+    pg.start("checks")
     defects = _checks(ocr_results)
+    pg.done("checks", progress_mod.OK,
+            "พบ %d รายการจากชั้นข้อความ" % len(defects))
+
     confirm_info = None
+    if not confirm_reads:
+        pg.skip("confirm", "ไม่ได้ติ๊กช่อง “อ่านซ้ำ 2 รอบ”")
     if confirm_reads:
+        pg.start("confirm", "อ่านรอบที่สองด้วยเส้นทางเดียวกัน")
         # โหมดทดลอง: อ่านซ้ำอีกรอบด้วยเส้นทางเดียวกันเป๊ะ แล้วเชื่อเฉพาะ
         # defect ที่โผล่ทั้งสองรอบ. เป็นการ **กรอง** ไม่ใช่การสร้างใหม่ ⇒
         # ผลที่แสดงกับผู้ใช้หน้าตาเหมือนเดิมทุกประการ แค่เหลือน้อยลง
@@ -468,6 +489,15 @@ def run_inspection(rec_id: str, zone_list: List[dict],
             defects, unconfirmed = confirm_mod.confirm([defects, r2])
             confirm_info = confirm_mod.summary(defects, unconfirmed, 2,
                                                [n1, len(r2)])
+            ag = confirm_info.get("agreement")
+            pg.done("confirm",
+                    progress_mod.WARN if (ag is not None and ag < 0.5)
+                    else progress_mod.OK,
+                    "แต่ละรอบฟ้อง %d · %d รายการ · ยืนยันได้ %d · ตกไป %d%s"
+                    % (n1, len(r2), confirm_info["confirmed"],
+                       confirm_info["unconfirmed"],
+                       "" if ag is None
+                       else " · ตรงกัน %d%%" % round(ag * 100)))
         except Exception:
             # อ่านรอบสองไม่สำเร็จ = ยืนยันไม่ได้ ⇒ **คงผลรอบแรกไว้ทั้งหมด**
             # (ห้ามทิ้ง defect เพราะเหตุขัดข้องของเราเอง) พร้อมบอกให้เห็น
@@ -475,18 +505,32 @@ def run_inspection(rec_id: str, zone_list: List[dict],
             confirm_info = {"rounds": 1, "confirmed": len(defects),
                             "unconfirmed": 0, "items": [],
                             "error": "อ่านรอบที่สองไม่สำเร็จ — ผลนี้มาจากการอ่านรอบเดียว"}
+            pg.done("confirm", progress_mod.FAIL,
+                    "อ่านรอบที่สองไม่สำเร็จ — ใช้ผลรอบเดียว")
 
     pixel_info = None
+    if not pixel_check:
+        pg.skip("pixel", "ไม่ได้ติ๊กช่อง “เทียบแผงระดับพิกเซล”")
     if pixel_check:
+        pg.start("pixel", "จับคู่กลุ่มที่มีโซน panel สองโซน")
         try:
-            defects, pixel_info = _pixel_compare(d, zone_list, defects)
+            defects, pixel_info = _pixel_compare(d, zone_list, defects,
+                                                 progress=pg)
+            _report_pixel_progress(pg, pixel_info)
         except Exception:
             logger.exception("[artwork] เทียบพิกเซลไม่สำเร็จ — ใช้ผลชั้นข้อความ")
             pixel_info = {"pairs": [], "used": 0,
                           "error": "เทียบพิกเซลไม่สำเร็จ — ผลนี้มาจากชั้นข้อความเหมือนเดิม"}
+            pg.done("pixel", progress_mod.FAIL,
+                    "เทียบพิกเซลไม่สำเร็จ — ใช้ผลชั้นข้อความ")
 
+    pg.start("coverage")
     _tag_highlight_risk(d, zone_list)
 
+    cov = checks.check_coverage(zone_list, ocr_results)
+    _report_coverage_progress(pg, cov)
+
+    pg.start("report", "วาดภาพสรุปและบันทึก")
     preview = cv2.imread(os.path.join(d, "preview.png"))
     if preview is None:
         preview = ArtworkDocument(src).render(config.PREVIEW_DPI)
@@ -517,7 +561,7 @@ def run_inspection(rec_id: str, zone_list: List[dict],
         # ชั้นไหน "ได้ทำงานจริง" กับงานใบนี้ — advisory ล้วน คำนวณ *หลัง*
         # ได้ defects แล้ว จึงไม่มีทางกระทบ verdict/การนับ. ต้องมีเพราะ
         # PASS ไม่ได้แปลว่าตรวจครบ (ดู checks.check_coverage)
-        "coverage": checks.check_coverage(zone_list, ocr_results),
+        "coverage": cov,
         # อ่านทั้งใบด้วย OCR ตามที่ผู้ใช้สั่งหรือไม่ — บันทึกไว้เพื่อให้อ่าน
         # รายงานย้อนหลังแล้วรู้ว่าข้อความมาจากเส้นทางไหน
         "force_ocr": bool(force_ocr),
@@ -538,9 +582,89 @@ def run_inspection(rec_id: str, zone_list: List[dict],
         rep["has_ref"] = True
         rep["filename_b"] = os.path.basename(_find_source(d, "source_b"))
     report.save_report(rec_id, rep)
+    pg.done("report", progress_mod.OK,
+            "%s · %d รายการ · %.1f วินาที"
+            % (rep["verdict"], len(defects), rep["elapsed_s"]))
+    pg.finish(progress_mod.OK, rep["verdict"])
     logger.info("[artwork] done %s verdict=%s defects=%d in %.1fs",
                 rec_id, rep["verdict"], len(defects), rep["elapsed_s"])
     return rep
+
+
+# ── ตัวช่วยรายงานความคืบหน้า (advisory ล้วน — แยกออกมาให้ทดสอบได้ตรง ๆ) ──
+def _report_ocr_progress(pg, ocr_results, trust) -> None:
+    """สรุปผลชั้นอ่านข้อความลงจุดเช็คพอยต์ — บอกว่าโซนไหนใช้ engine อะไร."""
+    eng = {}
+    bad = 0
+    for r in ocr_results or []:
+        e = str(r.get("engine", "?"))
+        eng[e] = eng.get(e, 0) + 1
+        if r.get("error") or not (r.get("text") or "").strip():
+            bad += 1
+        pg.note("ocr", "%s · %s · %d ตัวอักษร%s"
+                % (r.get("zone_id", "?"), e, len((r.get("text") or "")),
+                   " · %s" % r["error"] if r.get("error") else ""))
+    mix = " · ".join("%s %d" % (k, v) for k, v in sorted(eng.items()))
+    pg.done("ocr", progress_mod.WARN if bad else progress_mod.OK,
+            "%s%s" % (mix, " · อ่านไม่ได้ %d โซน" % bad if bad else ""))
+    # ชั้นฟอนต์ทำงานก่อนหน้าเสมอ (อยู่ใน _read_all_docs) — รายงานย้อนหลัง
+    susp = []
+    for doc, tr in (trust or {}).items():
+        try:
+            names = list((fonttrust.summary(tr) or {}).get("suspect", []) or [])
+        except Exception:
+            names = []
+        susp += ["%s:%s" % (doc, n) for n in names]
+    if susp:
+        pg.done("fonttrust", progress_mod.WARN,
+                "ฟอนต์ที่ถอดข้อความไม่ได้ %d ตัว — โซนที่ใช้ฟอนต์นี้ถูกส่งไป OCR แทน"
+                % len(susp))
+        for n in susp[:20]:
+            pg.note("fonttrust", n)
+    else:
+        pg.done("fonttrust", progress_mod.OK, "ไม่พบฟอนต์ที่น่าสงสัย")
+
+
+def _report_pixel_progress(pg, info) -> None:
+    """บอกว่ากลุ่มไหนเทียบด้วยภาพได้จริง กลุ่มไหนตกเงื่อนไข — และเพราะอะไร."""
+    pairs = (info or {}).get("pairs") or []
+    if not pairs:
+        pg.done("pixel", progress_mod.SKIP,
+                "ไม่มีกลุ่มที่เข้าเงื่อนไข (ต้องมีโซน panel สองโซนในกลุ่มเดียวกัน "
+                "และเป็น PDF ทั้งคู่)")
+        return
+    used = int((info or {}).get("used") or 0)
+    for p in pairs:
+        if p.get("status") != "ok":
+            pg.note("pixel", "กลุ่ม %s · เทียบไม่ได้ (%s) → ใช้ผลชั้นข้อความ"
+                    % (p.get("group"), p.get("reason") or p.get("status")))
+        elif p.get("kept_text_layer"):
+            pg.note("pixel", "กลุ่ม %s · เทียบแล้วไม่พบความต่าง → คงผลชั้นข้อความ"
+                    % p.get("group"))
+        else:
+            pg.note("pixel", "กลุ่ม %s · พบ %s บริเวณ%s · ต่าง %s%%"
+                    % (p.get("group"), p.get("regions"),
+                       " · ตัดทิ้งติดขอบ %s" % p["edge_regions"]
+                       if p.get("edge_regions") else "",
+                       round((p.get("diff_ratio") or 0) * 100, 4)))
+    pg.done("pixel",
+            progress_mod.OK if used else progress_mod.WARN,
+            "ใช้ผลจากภาพ %d จาก %d กลุ่ม" % (used, len(pairs)))
+
+
+def _report_coverage_progress(pg, cov) -> None:
+    """ชั้นไหน "ได้ทำงานจริง" — ตัวเดียวกับแถบ coverage บนรายงาน."""
+    ran, missed = [], []
+    for name, v in (cov or {}).items():
+        if not isinstance(v, dict):
+            continue
+        (ran if v.get("ran") else missed).append(name)
+        if not v.get("ran"):
+            pg.note("coverage", "%s — ไม่ได้ทำงาน (%s)"
+                    % (name, v.get("reason") or "ไม่ระบุ"))
+    pg.done("coverage", progress_mod.WARN if missed else progress_mod.OK,
+            "ทำงาน %d ชั้น%s"
+            % (len(ran), " · ไม่ได้ทำงาน %d ชั้น" % len(missed) if missed else ""))
 
 
 # ── OCR-only pass (advisory translate tab, BEFORE a full inspection) ──
