@@ -647,11 +647,17 @@ def run_inspection(rec_id: str, zone_list: List[dict],
         # Cross-file compare was used — the report page shows both docs.
         rep["has_ref"] = True
         rep["filename_b"] = os.path.basename(_find_source(d, "source_b"))
-    report.save_report(rec_id, rep)
     pg.done("report", progress_mod.OK,
             "%s · %d รายการ · %.1f วินาที"
             % (rep["verdict"], len(defects), rep["elapsed_s"]))
     pg.finish(progress_mod.OK, rep["verdict"])
+    # เส้นความคืบหน้าต้อง **อยู่ต่อหลังตรวจเสร็จ** — เก็บลงรายงานเลย ไม่ใช่
+    # อ่านจาก registry ในหน่วยความจำ (ซึ่งเก็บแค่ 32 ครั้ง และหายตอนรีสตาร์ต)
+    # ⇒ หน้าประวัติเห็นด้วย · advisory ล้วน ไม่แตะ defects/verdict/การนับ
+    snap = progress_mod.snapshot(rec_id)
+    if snap:
+        rep["flow"] = snap
+    report.save_report(rec_id, rep)
     logger.info("[artwork] done %s verdict=%s defects=%d in %.1fs",
                 rec_id, rep["verdict"], len(defects), rep["elapsed_s"])
     return rep

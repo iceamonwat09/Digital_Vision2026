@@ -358,10 +358,21 @@
   const FLOW_ICON = { pending: "", running: "", ok: "✓", skip: "–",
                       warn: "!", fail: "✕" };
 
-  function flowHtml(pr) {
+  function flowHtml(pr, done) {
     const steps = (pr && pr.steps) || [];
     if (!steps.length) return "";
-    let h = '<div class="aw-flow">';
+    let h = '<div class="aw-flow' + (done ? " done" : "") + '">';
+    if (done) {
+      // สรุปหนึ่งบรรทัดว่า "ขั้นไหนไม่ได้ทำงาน" — ที่ผู้ตรวจต้องอ่านจริง ๆ
+      const nSkip = steps.filter((s) => s.status === "skip").length;
+      const nBad = steps.filter((s) => s.status === "fail" ||
+                                       s.status === "warn").length;
+      h += '<div class="aw-flow-head">กระบวนการที่ทำไปจริง' +
+           (nSkip ? " · ไม่ได้ทำงาน " + nSkip + " ขั้น" : "") +
+           (nBad ? " · ต้องดู " + nBad + " ขั้น" : "") +
+           (pr.elapsed_s != null ? " · รวม " + esc(pr.elapsed_s) + " วินาที" : "") +
+           "</div>";
+    }
     h += '<div class="aw-flow-line">';
     steps.forEach((st) => {
       h += '<div class="aw-flow-step ' + esc(st.status) + '">' +
@@ -447,6 +458,10 @@
     // โหมดอ่านซ้ำ (ถ้าเปิด) — บอกว่ากรองอะไรออกไป ไม่ให้หายเงียบ
     html += confirmHtml(rep.confirm);
     html += pixelHtml(rep.pixel);
+    // เส้นความคืบหน้าต้อง **ไม่หายไปหลังตรวจเสร็จ** — ผู้ตรวจใช้ยืนยันว่า
+    // แต่ละขั้นทำงานจริงหรือตกเงื่อนไข. อ่านจาก rep.flow ที่ฝังใน report.json
+    // ⇒ หน้าประวัติและหลังรีสตาร์ตก็ยังเห็น (registry ในหน่วยความจำหายไปแล้ว)
+    html += flowHtml(rep.flow, true);
 
     // การ์ดของชั้นที่ "ไม่ได้ทำงานในปุ่มนี้แล้ว" ต้องไม่โชว์เลข 0 ค้างไว้ —
     // ช่องที่ไม่มีทางเป็นค่าอื่นได้ทำให้ผู้ใช้สับสนกว่าไม่มีช่อง. อ่านจาก

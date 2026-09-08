@@ -192,3 +192,108 @@ def test_the_coverage_step_lists_layers_that_did_not_run():
     s = next(x for x in PG.snapshot("r12")["steps"] if x["key"] == "coverage")
     assert s["status"] == PG.WARN and "ไม่ได้ทำงาน 2 ชั้น" in s["detail"]
     assert any("no_zoom_zone" in n for n in s["notes"])
+
+
+# ── เส้นต้อง "อยู่ต่อ" หลังตรวจเสร็จ (ผู้ใช้ 8 ก.ย. รอบ 4) ──────────────
+#
+# อาการ: กดส่งตรวจ เห็นเส้นวิ่งสวยงาม แต่พอเสร็จ ``renderReport`` เขียนทับ
+# กล่องผล ⇒ **เส้นหายไปทั้งเส้น** ⇒ ผู้ตรวจย้อนดูไม่ได้ว่าขั้นไหนตกเงื่อนไข
+#
+# ทางแก้ที่เลือก: ฝัง snapshot ลง ``report.json`` เลย ไม่ใช่ให้ JS อ่านจาก
+# registry ในหน่วยความจำ (ซึ่งเก็บแค่ 32 ครั้ง และหายตอนรีสตาร์ต Flask)
+# ⇒ ได้ผลพลอยได้คือ **หน้าประวัติเห็นด้วย**
+
+def _run_min_inspection(tmp_path, monkeypatch, rec_id):
+    """รัน ``run_inspection`` แบบเบาที่สุด (แพทเทิร์นเดียวกับ
+    ``test_run_inspection_writes_applied_rotation``) เพื่อดูรายงานจริง."""
+    np = pytest.importorskip("numpy")
+    cv2 = pytest.importorskip("cv2")
+    import os
+    from artwork_check import report as report_mod
+    monkeypatch.setattr(report_mod.config, "INSPECTIONS_DIR", str(tmp_path))
+    d = report_mod.inspection_dir(rec_id, create=True)
+    with open(os.path.join(d, "source.png"), "wb") as f:
+        f.write(b"x")
+    with open(os.path.join(d, "preview.png"), "wb") as f:
+        f.write(cv2.imencode(".png", np.full((50, 80, 3), 255, np.uint8))[1])
+    monkeypatch.setattr(pipeline, "ArtworkDocument", lambda *a, **k: object())
+    monkeypatch.setattr(
+        pipeline.ocr, "read_all_zones",
+        lambda doc, zones, page_auto=False, force_ocr=False,
+               split_bands=False, font_trust=None: [
+            {"zone_id": z["id"], "text": "T", "engine": "stub",
+             "conf": None, "rotate": 0} for z in zones])
+    run = PG.begin(rec_id)
+    return pipeline.run_inspection(
+        rec_id,
+        [{"id": "z1", "type": "panel", "group": "A",
+          "bbox": [0.1, 0.1, 0.2, 0.2]},
+         {"id": "z2", "type": "panel", "group": "A",
+          "bbox": [0.3, 0.1, 0.2, 0.2]}],
+        progress=run)
+
+
+def test_the_flow_is_saved_into_the_report_so_it_survives(tmp_path, monkeypatch):
+    """หลังตรวจเสร็จ รายงานต้องพก "เส้น" ติดตัวไป — ไม่ใช่ต้องไปอ่านจาก
+    หน่วยความจำที่หายได้ (registry เก็บแค่ 32 ครั้ง · หายตอนรีสตาร์ต)."""
+    rec = "20260101-000000-aa1101"
+    rep = _run_min_inspection(tmp_path, monkeypatch, rec)
+    assert "flow" in rep, "รายงานต้องมีคีย์ flow"
+    assert rep["flow"]["steps"], "flow ต้องมีขั้นตอนจริง"
+    from artwork_check import report as report_mod
+    on_disk = report_mod.load_report(rec)
+    assert on_disk.get("flow") == rep["flow"], \
+        "flow ต้องถูก **บันทึกลงไฟล์** ด้วย ไม่ใช่แนบตอนตอบเท่านั้น"
+
+
+def test_the_saved_flow_is_already_finished(tmp_path, monkeypatch):
+    """เส้นที่เก็บไว้ต้องเป็นสถานะ "จบแล้ว" — ถ้าเก็บก่อน ``finish`` ขั้น
+    สุดท้ายจะค้างเป็น running ตลอดกาลบนหน้าประวัติ."""
+    rep = _run_min_inspection(tmp_path, monkeypatch, "20260101-000000-aa1102")
+    flow = rep["flow"]
+    assert flow["done"] is True
+    assert not any(s["status"] == PG.RUNNING for s in flow["steps"])
+    assert not any(s["status"] == PG.PENDING for s in flow["steps"])
+
+
+def test_the_saved_flow_still_shows_the_layers_that_did_not_run(tmp_path,
+                                                                monkeypatch):
+    """คุณค่าทั้งหมดของการเก็บเส้นไว้ = ย้อนดูได้ว่า **ขั้นไหนตกเงื่อนไข**
+    ⇒ ขั้นที่ข้ามต้องยังอยู่พร้อมเหตุผล ไม่ใช่ถูกตัดทิ้งตอนบันทึก."""
+    rep = _run_min_inspection(tmp_path, monkeypatch, "20260101-000000-aa1103")
+    skipped = [s for s in rep["flow"]["steps"] if s["status"] == PG.SKIP]
+    assert skipped, "โหมด confirm/pixel ไม่ได้ติ๊ก ⇒ ต้องมีขั้นที่ skip"
+    assert all(s["detail"] for s in skipped), "ทุกขั้นที่ข้ามต้องมีเหตุผล"
+
+
+def test_a_report_without_a_flow_is_still_valid():
+    """รายงานเก่า (ก่อนมีฟีเจอร์นี้) ต้องไม่พัง — ``snapshot`` คืน None
+    แล้วคีย์ ``flow`` ก็ไม่มี เท่านั้น."""
+    assert PG.snapshot("never-existed") is None
+
+
+def test_running_without_a_recorder_does_not_add_a_flow(tmp_path, monkeypatch):
+    """เส้นทางที่ไม่ส่ง ``progress`` (สคริปต์/เทสต์เดิม) ต้องได้รายงาน
+    เหมือนเดิมเป๊ะ — ไม่มีคีย์ flow และไม่พัง."""
+    np = pytest.importorskip("numpy")
+    cv2 = pytest.importorskip("cv2")
+    import os
+    from artwork_check import report as report_mod
+    rec = "20260101-000000-aa1104"
+    monkeypatch.setattr(report_mod.config, "INSPECTIONS_DIR", str(tmp_path))
+    d = report_mod.inspection_dir(rec, create=True)
+    with open(os.path.join(d, "source.png"), "wb") as f:
+        f.write(b"x")
+    with open(os.path.join(d, "preview.png"), "wb") as f:
+        f.write(cv2.imencode(".png", np.full((50, 80, 3), 255, np.uint8))[1])
+    monkeypatch.setattr(pipeline, "ArtworkDocument", lambda *a, **k: object())
+    monkeypatch.setattr(
+        pipeline.ocr, "read_all_zones",
+        lambda doc, zones, page_auto=False, force_ocr=False,
+               split_bands=False, font_trust=None: [
+            {"zone_id": z["id"], "text": "T", "engine": "stub",
+             "conf": None, "rotate": 0} for z in zones])
+    rep = pipeline.run_inspection(
+        rec, [{"id": "z1", "type": "panel", "group": "A",
+               "bbox": [0.1, 0.1, 0.2, 0.2]}])
+    assert "flow" not in rep
