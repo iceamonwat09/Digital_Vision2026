@@ -499,15 +499,19 @@ def _case_only_defects(gname: str, panels: List[dict],
     for k, per_zone in buckets.items():
         forms = {zid: set(v) for zid, v in per_zone.items()}
         base_id = next(z["id"] for z in order if z["id"] in per_zone)
-        if len({frozenset(f) for f in forms.values()}) < 2:
-            continue                    # ทุกโซนมีชุดรูปแบบเดียวกัน — ไม่ต่าง
-        if (base_id, k) in seen:
-            continue                    # ชั้นหลักรายงานบรรทัดนี้ไปแล้ว
-        base_z = next(z for z in order if z["id"] == base_id)
+        # โซนที่ชุดรูปแบบต่างจากฝั่งที่ถูกตรวจ. ว่าง = ทุกโซนมีชุดเดียวกัน
+        # (รวมกรณีโซนหนึ่งมีทั้งสองรูปแบบเหมือนกันทั้งคู่ = บรรทัดซ้ำ ซึ่ง
+        # ไม่ใช่ "ไม่ตรงกันระหว่าง panel")
         other_ids = [zid for zid in per_zone
                      if zid != base_id and forms[zid] != forms[base_id]]
         if not other_ids:
             continue
+        # ⚠️ ชั้นหลักรายงานบรรทัดนี้ไปแล้วหรือยัง — เกิดขึ้นจริงเมื่อกลุ่มมี
+        #    panel เยอะพอที่เสียงข้างมากจะไม่ยกโทษให้ (วัดแล้วที่ 6 panel)
+        #    ⇒ ต้องไม่ฟ้องซ้ำ (กติกา "ไม่แตะ defect เดิม")
+        if (base_id, k) in seen:
+            continue
+        base_z = next(z for z in order if z["id"] == base_id)
         oid = other_ids[0]
         # รูปแบบที่ "มีเฉพาะฝั่งนี้" คือสิ่งที่ต้องชี้ให้ผู้ตรวจเห็น
         only_base = [c for c in per_zone[base_id] if c not in per_zone[oid]]

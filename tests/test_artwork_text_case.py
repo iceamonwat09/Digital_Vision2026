@@ -239,3 +239,75 @@ def test_the_severity_can_be_lowered_to_review(monkeypatch):
 def test_a_single_panel_group_never_fires():
     zones = [{"id": "z1", "type": "panel", "group": "A", "doc": "a"}]
     assert checks.check_group_consistency(zones, {"z1": Z_ING}) == []
+
+
+# ── ⑦ ด่านกันรายงานซ้ำ (เกิดขึ้นจริงเมื่อ panel เยอะพอ) ─────────────
+
+_MANY = ["z1", "b2", "c3", "d4", "e5", "f6"]
+_MANY_TEXT = {"z1": "D-Calcium X\nSHARED", "b2": "D-calcium X\nSHARED",
+              "c3": "D-calcium X\nSHARED", "d4": "SHARED",
+              "e5": "SHARED", "f6": "SHARED"}
+
+
+def _many():
+    zones = [{"id": i, "type": "panel", "group": "A", "doc": "a"}
+             for i in _MANY]
+    return checks.check_group_consistency(zones, _MANY_TEXT)
+
+
+def test_with_enough_panels_the_main_layer_reports_the_line_itself():
+    """เสียงข้างมากไม่ยกโทษแล้ว (hits+1 = 3 < majority 4) ⇒ เข้า extra จริง"""
+    assert len(_of(_many(), "MISMATCH_PANELS")) == 3
+
+
+def test_a_line_the_main_layer_already_reported_is_not_reported_twice():
+    """กติกา "ไม่แตะ defect เดิม" — ห้ามมีทั้ง MISMATCH_PANELS และ
+    MISMATCH_CASE ของบรรทัดเดียวกัน"""
+    assert _of(_many(), "MISMATCH_CASE") == []
+
+
+def test_the_layer_still_fires_on_a_line_the_main_layer_stayed_silent_on():
+    """บรรทัดอื่นในกลุ่มเดียวกันที่ถูกยกโทษ ยังต้องถูกฟ้องตามปกติ"""
+    txt = dict(_MANY_TEXT)
+    for zid in ("b2", "c3", "d4", "e5", "f6"):
+        txt[zid] = txt[zid].replace("SHARED", "Shared")
+    zones = [{"id": i, "type": "panel", "group": "A", "doc": "a"}
+             for i in _MANY]
+    got = checks.check_group_consistency(zones, txt)
+    case = _of(got, "MISMATCH_CASE")
+    assert [d["found"] for d in case] == ["SHARED"]
+
+
+# ── ⑧ ชี้เฉพาะโซนที่ต่างจริง และรูปแบบที่ต่างจริง ───────────────────
+
+def test_only_the_disagreeing_zone_is_listed_as_reference():
+    """โซนที่ตัวพิมพ์ตรงกับฝั่งที่ถูกตรวจ ต้องไม่ถูกอ้างว่าเป็นฝั่งที่ต่าง
+    — ไม่งั้นผู้ตรวจไปเปิดโซนที่ถูกต้องแล้วหาไม่เจอ"""
+    zones = [{"id": "z1", "type": "panel", "group": "A", "doc": "a"},
+             {"id": "b2", "type": "panel", "group": "A", "doc": "b"},
+             {"id": "c3", "type": "panel", "group": "A", "doc": "b"}]
+    got = checks.check_group_consistency(zones, {
+        "z1": "SODIUM X\nSHARED", "b2": "Sodium X\nSHARED",
+        "c3": "SODIUM X\nSHARED"})
+    case = _of(got, "MISMATCH_CASE")
+    assert len(case) == 1
+    assert case[0]["ref_zone_ids"] == ["b2"]
+
+
+def test_an_extra_case_variant_inside_one_zone_is_pointed_at():
+    """โซนหนึ่งพิมพ์บรรทัดเดียวกันสองรูปแบบ อีกโซนมีรูปเดียว ⇒ ต้องชี้ที่
+    **รูปแบบที่มีเฉพาะฝั่งนี้** ไม่ใช่รูปแบบที่ทั้งสองฝั่งมีเหมือนกัน"""
+    got = _run("SODIUM X\nSodium X\nSHARED", "SODIUM X\nSHARED")
+    case = _of(got, "MISMATCH_CASE")
+    assert len(case) == 1
+    assert case[0]["found"] == "Sodium X"
+    assert case[0]["reference"] == "SODIUM X"
+
+
+def test_an_extra_case_variant_on_the_reference_side_is_pointed_at():
+    """ภาพสะท้อนของเทสต์ก่อนหน้า — ฝั่งอ้างอิงเป็นตัวที่มีรูปแบบเกิน"""
+    got = _run("SODIUM X\nSHARED", "SODIUM X\nSodium X\nSHARED")
+    case = _of(got, "MISMATCH_CASE")
+    assert len(case) == 1
+    assert case[0]["found"] == "SODIUM X"
+    assert case[0]["reference"] == "Sodium X"
