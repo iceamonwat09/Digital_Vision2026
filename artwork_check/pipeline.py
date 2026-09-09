@@ -328,6 +328,25 @@ def _read_pair(crop_a, crop_b):
         return fa.result(), fb.result()
 
 
+def _pixel_untrusted(res: dict) -> Optional[str]:
+    """ผลชั้นภาพชุดนี้ดีพอจะ **แทนที่** ผลชั้นข้อความไหม — ไม่ใช่ก็คืนเหตุผล
+
+    ⚠️ ตัวเลขทั้งสองตัวเป็นค่าที่รายงานแสดงอยู่แล้ว ไม่ใช่เกณฑ์ที่คิดขึ้นใหม่:
+       ``diff_ratio`` คือค่าเดียวกับที่หน้าจอเตือนว่า "สูงกว่าการแก้ไขฉลาก
+       ปกติมาก" อยู่แล้ว ⇒ ถ้าระบบเตือนตัวเองว่าผลอาจไม่ครบ มันก็ไม่ควร
+       เอาผลนั้นไปลบผลของชั้นอื่นทิ้ง (กฎเหล็กข้อ 2)
+    """
+    if not config.PIXEL_TRUST_GATE:
+        return None
+    dr = res.get("diff_ratio")
+    if dr is not None and float(dr) > config.PIXEL_TRUST_MAX_DIFF:
+        return "ต่างกัน %.2f%% ซึ่งสูงกว่าการแก้ไขฉลากปกติมาก" % (100.0 * float(dr))
+    ecc = res.get("ecc")
+    if ecc is not None and float(ecc) < config.PIXEL_TRUST_MIN_ECC:
+        return "คุณภาพการทาบต่ำ (%.4f)" % float(ecc)
+    return None
+
+
 def _pixel_compare(insp_dir: str, zone_list: List[dict],
                    defects: List[dict], progress=None, deadline=None):
     """โหมดทดลอง: เทียบ "แผงต่อแผง" ระดับพิกเซลแทนชั้นเทียบข้อความ.
@@ -445,8 +464,23 @@ def _pixel_compare(insp_dir: str, zone_list: List[dict],
         #    พบ 0 บริเวณ ⇒ ลบ MISMATCH ของชั้นข้อความทิ้ง ⇒ **รายงานขึ้น 0 ทุกช่อง
         #    ทั้งที่ OCR สองฝั่งอ่าน 20% กับ 24% ต่างกันชัด ๆ** (กฎเหล็กข้อ 2)
         #    ⇒ แทนที่ได้ก็ต่อเมื่อชั้นภาพ "มีอะไรจะพูด" เท่านั้น
-        if not found:
+        # ── ด่านความน่าเชื่อถือของชั้นภาพเอง ────────────────────────
+        #
+        # ชั้นภาพกับชั้นข้อความ **จับคนละอย่าง** — ชั้นภาพเห็นฟอนต์หนา-บาง
+        # ที่ OCR มองไม่เห็น ส่วนชั้นข้อความทนการที่ข้อความไหลใหม่ ⇒ ไม่มี
+        # ชั้นไหนดีกว่าเสมอ. การให้ชั้นหนึ่ง "ลบ" อีกชั้นทิ้งจึงต้องมีเงื่อนไข
+        #
+        # เกิดจริงบนสถานี 9 ก.ย.: คู่ไฟล์ที่เนื้อหาต่างกันยกบรรทัด (ฝั่งหนึ่ง
+        # มีโอเมกา-3/แคลเซียม/ฟอสฟอรัสเพิ่ม) ⇒ ข้อความไหลใหม่ทั้งครึ่งล่าง
+        # ⇒ ชั้นภาพฟ้อง 35 บริเวณ (ecc 0.51 · ต่าง 19.73%) ไปลบผลชั้นข้อความ
+        # 7 รายการที่ตรงกับความต่างจริงพอดี
+        why = _pixel_untrusted(res)
+        if not found or why:
             entry["kept_text_layer"] = True
+            if why:
+                entry["untrusted"] = why
+                pg.note("pixel", "กลุ่ม %s · ผลชั้นภาพยังไม่น่าเชื่อถือ (%s) "
+                                 "→ คงผลชั้นข้อความไว้" % (g, why))
             continue
         new_defects += found
         replaced_groups.add(g)

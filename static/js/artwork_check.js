@@ -450,6 +450,33 @@
   }
   window.awFlowHtml = flowHtml;
 
+  // ── ไฮไลต์เฉพาะส่วนที่ต่างในบรรทัดยาว ───────────────────────────
+  //
+  // คงบรรทัดเต็มไว้ (บริบทสำคัญกับผู้ตรวจ) แล้วทำเครื่องหมายเฉพาะช่วงที่
+  // ต่างจริง ⇒ ไม่ต้องไล่อ่านข้อความยาวสองก้อนเพื่อหาว่าต่างตรงไหน
+  //
+  // ⚠️ ``found``/``reference`` ไม่ถูกแตะ — ช่วงที่ต่างมาในคีย์แยกต่างหาก
+  //    (found_spans/ref_spans = ดัชนีตัวอักษร) เพราะสองค่านั้นถูกใช้ไป
+  //    ค้นคำเพื่อวาดกรอบแดงบนภาพ crop (``/crop?hl=``)
+  // ⚠️ ไฮไลต์เกือบทั้งบรรทัด = การจับคู่อาจไม่ใช่บรรทัดเดียวกัน — ผู้ตรวจ
+  //    เห็นเองได้ทันทีจากปริมาณสีที่ขึ้น ไม่ต้องเดา
+  // ⚠️ รายงานเก่าไม่มีคีย์นี้ ⇒ คืนข้อความเดิมทั้งบรรทัด (ไม่พัง)
+  function markDiff(text, spans) {
+    if (!text) return "";
+    if (!Array.isArray(spans) || !spans.length) return esc(text);
+    var out = "", at = 0, i, a, b;
+    for (i = 0; i < spans.length; i++) {
+      if (!Array.isArray(spans[i])) continue;
+      a = spans[i][0]; b = spans[i][1];
+      if (!(b > a) || a < at || b > text.length) continue;   // ข้อมูลเพี้ยน = ข้าม
+      out += esc(text.slice(at, a)) + '<mark class="aw-dx">' +
+             esc(text.slice(a, b)) + "</mark>";
+      at = b;
+    }
+    return out + esc(text.slice(at));
+  }
+  window.awMarkDiff = markDiff;
+
   // poll ระหว่างที่ POST /inspect ยังค้างอยู่ — คืนฟังก์ชันสำหรับหยุด
   function startFlowPoll(recId, box) {
     let stopped = false;
@@ -573,8 +600,8 @@
           '<span class="aw-defect-class">' + esc(d.class) + "</span>" +
           "<b>" + esc(d.zone_id) + (z && z.label ? " · " + esc(z.label) : "") + "</b><br>" +
           esc(d.message);
-        if (d.found)     html += '<br>พบ: <span class="found">' + esc(d.found) + "</span>";
-        if (d.reference) html += ' &nbsp;เทียบกับ: <span class="ref">' + esc(d.reference) + "</span>";
+        if (d.found)     html += '<br>พบ: <span class="found">' + markDiff(d.found, d.found_spans) + "</span>";
+        if (d.reference) html += ' &nbsp;เทียบกับ: <span class="ref">' + markDiff(d.reference, d.ref_spans) + "</span>";
 
         // ── 2-crop comparison (auto-load ทันที ไม่ต้องคลิก) ───────────
         // crop ต้องดึงจากไฟล์ของโซนนั้นเอง (doc a/b) — report เก่าไม่มี
