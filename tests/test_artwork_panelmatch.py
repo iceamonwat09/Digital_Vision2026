@@ -735,3 +735,163 @@ def test_a_bad_box_never_breaks_the_crop(bad):
     img = np.full((60, 80, 3), 255, np.uint8)
     out = pipeline._draw_measured_box(img, bad)
     assert np.array_equal(out, img)
+
+
+# ── ด่านตัดสิน: ย้ายจาก "ก่อนทาบด้วย NCC" ไป "หลังทาบด้วย diff_ratio" ──
+#
+# 🔑 หลักฐานที่ทำให้ต้องย้าย (วัดบนคู่ PURINA ONE ของผู้ใช้):
+#      แผงเดียวกันที่ข้อความถูกเขียนใหม่   ncc 0.4012 → ด่านเดิม **ปฏิเสธ**
+#      บล็อกไทย เทียบ บล็อกอังกฤษ (คนละบล็อก) ncc 0.6687 → ด่านเดิม **ยอมรับ**
+#    ⇒ ของจริงได้คะแนน *ต่ำกว่า* ของปลอม ⇒ ไม่มีเกณฑ์ใดบน NCC ที่ถูกต้องได้
+#    ต้นตอ: find_scale ให้คะแนนจากใจกลาง 56% ของโซนเท่านั้น
+#    ยืนยันชุด 19 เคสจริง: diff_ratio ของจริง 0.00-19.96% · ของปลอม 33.63-96.95%
+
+def _blank_page(path, text="COMPLETELY UNRELATED"):
+    doc = fitz.open()
+    page = doc.new_page(width=600, height=420)
+    page.insert_text((150, 150), text, fontsize=20)
+    doc.save(str(path))
+    doc.close()
+    return str(path)
+
+
+DENSE = ["NUTRITION FACTS PER 100 g SERVING SIZE 25 g",
+         "Energy 1450 kJ  Total fat 7 g  Saturated 1 g",
+         "Cholesterol 50 mg  Sodium 475 mg  {dv}% DV",
+         "Total carbohydrate 0 g  Sugars 0 g  Fibre 0 g",
+         "Protein 26 g  Calcium 120 mg  Iron 2.4 mg",
+         "Vitamin A 350 ug  Vitamin D 5 ug  Zinc 3 mg"] * 4
+
+
+def _dense(path, body=None, dv=20, band=None):
+    """แผงที่ **หมึกแน่นพอ** ให้เข้าระบอบของด่านใหม่.
+
+    ⚠️ ``_panel`` (fixture เดิมของไฟล์นี้) มีหมึกแค่ ~2.9% ⇒ ตกไประบอบ
+    "หมึกน้อย" ซึ่งใช้ด่าน NCC แบบเดิม ⇒ **ทดสอบด่านใหม่ไม่ได้เลย**
+    แผงจริงในชุดยืนยันมีหมึก 11-44% ต่อฝั่ง
+    """
+    doc = fitz.open()
+    page = doc.new_page(width=600, height=420)
+    if band:
+        page.draw_rect(fitz.Rect(*band), color=(0.15,) * 3, fill=(0.15,) * 3)
+    for i, t in enumerate(body or DENSE):
+        page.insert_text((103, 78 + i * 9), t.format(dv=dv),
+                         fontsize=8, fontname="cour")
+    doc.save(str(path))
+    doc.close()
+    return str(path)
+
+
+def test_the_gate_is_on_by_default():
+    from artwork_check import config as C
+    assert C.PIXEL_ALIGN_GATE is True
+    # ค่าที่วัดมาบนชุด 19 เคสจริง: ของจริงสูงสุด 19.96% · ของปลอมต่ำสุด 33.63%
+    assert 0.1996 < C.PIXEL_MAX_DIFF < 0.3363
+
+
+def test_a_dense_fixture_really_is_dense(tmp_path):
+    """กันเทสต์ที่ไร้ความหมาย — ถ้า ``_dense`` หลุดไประบอบหมึกน้อยเมื่อไร
+    เทสต์ด่านใหม่ทุกตัวจะกลายเป็นการทดสอบทางเดิมโดยไม่มีใครรู้."""
+    r = PM.compare(_dense(tmp_path / "a.pdf"), ZONE,
+                   _dense(tmp_path / "b.pdf"), ZONE, dpi=TEST_DPI)
+    assert r["sparse"] is False
+
+
+def test_a_panel_rewritten_in_the_middle_is_still_compared(tmp_path):
+    """หัวใจของรอบนี้: NCC ต่ำ แต่ทาบติดและต่างกันน้อย ⇒ ต้อง **เทียบได้**.
+
+    จำลองอาการของคู่ PURINA ONE: ใจกลางโซน (= ที่เดียวที่ ``find_scale``
+    ให้คะแนน) ถูกเขียนใหม่ทั้งบล็อก ส่วนที่เหลือของแผงเหมือนกัน
+    """
+    mid = list(DENSE)
+    for i in range(8, 16):
+        mid[i] = "REWRITTEN BLOCK LINE %02d COMPLETELY NEW TEXT" % i
+    a = _dense(tmp_path / "a.pdf")
+    b = _dense(tmp_path / "b.pdf", mid)
+    r = PM.compare(a, ZONE, b, ZONE, dpi=TEST_DPI)
+    assert r["ncc"] < PM.MIN_SCALE_NCC, \
+        "fixture ต้องได้ ncc ต่ำ ไม่งั้นเทสต์ไม่ได้ทดสอบอะไรเลย"
+    assert r["status"] == pixdiff.OK, "ด่านเดิมปฏิเสธตรงนี้ = บั๊กที่ผู้ใช้เจอ"
+    assert r["regions"], "เทียบได้แล้วต้องชี้จุดที่ต่างจริงด้วย"
+
+
+def test_turning_the_gate_off_restores_the_old_ncc_behaviour(tmp_path,
+                                                             monkeypatch):
+    """flag ปิด = ทางเดิมเป๊ะ (กฎเหล็กข้อ 1 — ต้องถอยกลับได้เสมอ)."""
+    from artwork_check import config as C
+    mid = list(DENSE)
+    for i in range(8, 16):
+        mid[i] = "REWRITTEN BLOCK LINE %02d COMPLETELY NEW TEXT" % i
+    a = _dense(tmp_path / "a.pdf")
+    b = _dense(tmp_path / "b.pdf", mid)
+    assert PM.compare(a, ZONE, b, ZONE, dpi=TEST_DPI)["status"] == pixdiff.OK
+    monkeypatch.setattr(C, "PIXEL_ALIGN_GATE", False)
+    assert PM.compare(a, ZONE, b, ZONE,
+                      dpi=TEST_DPI)["status"] == pixdiff.SKIPPED
+
+
+def test_too_different_after_alignment_is_refused_with_its_number(tmp_path):
+    """ปฏิเสธแล้วต้องบอก **ตัวเลขที่วัดมา** ไม่ใช่เหตุผลลอย ๆ."""
+    from artwork_check import config as C
+    other = ["ZZZZ QQQQ WWWW XXXX YYYY VVVV UUUU TTTT SSSS RRRR"] * 24
+    a = _dense(tmp_path / "a.pdf")
+    b = _dense(tmp_path / "b.pdf", other, band=(100, 70, 400, 160))
+    r = PM.compare(a, ZONE, b, ZONE, dpi=TEST_DPI)
+    assert r["status"] == pixdiff.SKIPPED
+    assert r["reason"] == "panel_too_different"
+    assert r["sparse"] is False, "ต้องถูกปฏิเสธด้วยด่านใหม่ ไม่ใช่ด่านเดิม"
+    assert r["diff_ratio"] > C.PIXEL_MAX_DIFF
+    assert r["regions"] == []
+    # เหตุผลต้องมีคำอธิบายภาษาไทยให้ผู้ตรวจอ่าน ไม่ใช่โผล่เป็นรหัสดิบ
+    assert pixdiff.reason_text("panel_too_different")
+
+
+def test_a_sparse_zone_keeps_the_old_gate(tmp_path, base):
+    """โซนหมึกน้อย: ``diff_ratio`` พูดแทนไม่ได้เชิงโครงสร้าง ⇒ คงด่านเดิม.
+
+    วัดได้: แผงโภชนาการ (หมึก 2.9%) เทียบหน้าที่มีข้อความบรรทัดเดียว
+    (2.3%) ⇒ ต่อให้ต่างกันทุกจุด diff_ratio ขึ้นได้แค่ ~5.6% ซึ่งไม่มีทาง
+    ถึงเกณฑ์ 25% ⇒ ถ้าปล่อยให้ด่านใหม่ตัดสิน จะยอมรับคนละเนื้อหา
+    """
+    other = _blank_page(tmp_path / "x.pdf")
+    r = compare(base, other)
+    assert r["status"] == pixdiff.SKIPPED
+    assert r["regions"] == []
+    assert r["sparse"] is True
+    # และต้องเป็นเพราะหมึกน้อยจริง ไม่ใช่บังเอิญ
+    from artwork_check import config as C
+    assert r["ink_a"] + r["ink_b"] < C.PIXEL_MIN_INK
+
+
+def test_a_dense_zone_never_falls_back_to_the_ncc_gate(tmp_path, base):
+    """แผงจริงในชุดยืนยันบางที่สุดมีหมึกรวม 26.5% ⇒ ต้องไม่เข้าระบอบหมึกน้อย."""
+    r = compare(base, _panel(tmp_path / "b.pdf", dv=24))
+    assert r["status"] == pixdiff.OK
+    from artwork_check import config as C
+    # แผงทดสอบนี้บาง (สังเคราะห์) แต่เกณฑ์ต้องอยู่ต่ำกว่าแผงจริงที่บางสุด
+    assert C.PIXEL_MIN_INK < 0.265
+
+
+def test_full_page_pixdiff_keeps_its_own_cut(tmp_path):
+    """ปุ่ม "เทียบภาพเก่า/ใหม่" (โหมดทั้งหน้า) ต้องไม่ถูกแตะเลย.
+
+    ``compare_images`` ได้พารามิเตอร์ ``max_diff_ratio`` ใหม่ — ค่าเริ่มต้น
+    ต้องยังเป็น ``MAX_DIFF_RATIO`` เดิม ไม่งั้นโหมดทั้งหน้าเปลี่ยนพฤติกรรม
+    """
+    import inspect
+    sig = inspect.signature(pixdiff.compare_images)
+    assert sig.parameters["max_diff_ratio"].default == pixdiff.MAX_DIFF_RATIO
+    assert pixdiff.MAX_DIFF_RATIO == 0.20
+
+    a = np.full((200, 200, 3), 255, np.uint8)
+    b = a.copy()
+    b[:, :120] = 0                                   # ต่างกัน 60% ของภาพ
+    assert pixdiff.compare_images(a, b)["status"] == pixdiff.SKIPPED
+    # ส่งค่าเองแล้วต้องผ่านด่านนั้นได้ (เส้นทางที่ panelmatch ใช้)
+    assert pixdiff.compare_images(a, b, max_diff_ratio=1.01)["status"] == pixdiff.OK
+
+
+def test_ncc_still_travels_for_the_reader_but_never_decides(tmp_path, base):
+    """ncc ยังต้องรายงานอยู่ (ผู้ใช้เอาไปดูประกอบ) แค่ไม่ใช่ตัวตัดสิน."""
+    r = compare(base, _panel(tmp_path / "b.pdf", dv=24))
+    assert r["ncc"] is not None and r["ecc"] is not None

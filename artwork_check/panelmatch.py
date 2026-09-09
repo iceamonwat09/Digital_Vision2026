@@ -33,7 +33,7 @@ from .pdf_ingest import apply_rotation
 import cv2
 import numpy as np
 
-from . import pixdiff
+from . import config, pixdiff
 
 # ── ค่าจูน (ที่มาของทุกตัวเลขอยู่ใน docstring ข้างบน) ────────────────
 DPI = 400                  # แผงโภชนาการมีตัวเลขเล็ก — 400 ให้ bbox ที่ใช้ได้จริง
@@ -62,6 +62,8 @@ MIN_SIDE_PX = 1000
 PRESCALE_MAX_SIDE_PX = 4000
 # ความหนาเส้นขั้นต่ำที่ยัง "วัดเป็นเปอร์เซ็นต์" ได้อย่างมีความหมาย
 MIN_STROKE_PX = 3.0
+# ระดับสีที่ถือว่า "มีหมึก" ตอนวัดความหนาแน่นของโซน (ดู ``ink_frac``)
+INK_LEVEL = 200
 DPI_MAX_FACTOR = 4.0       # เพดานเดียวกับ config.OCR_DPI_MAX_FACTOR
 TRIM_PX = 12               # ตัดขอบทิ้งก่อนหาบริเวณ (ขอบ = ที่เดียวที่ข้อมูลไม่ทับกัน)
 BLUR_SIGMA = 1.0
@@ -429,22 +431,48 @@ def compare_ex(path_a: str, bbox_a, path_b: str, bbox_b,
                     prescaled = True
     dpi = dpi_a          # บริเวณทั้งหมดอยู่ในระบบพิกัดของ a
 
-    if ncc < MIN_SCALE_NCC:
-        # ไม่มั่นใจว่าเป็นเนื้อหาเดียวกัน ⇒ ไม่รายงานดีกว่าชี้ผิดที่
-        #
-        # ⚠️ แยก "แผงสองฝั่งขนาดต่างกันมาก" ออกจาก "จับคู่ไม่ได้" — สองอย่าง
-        #    นี้ผู้ใช้แก้คนละทาง และการบอกรวม ๆ ว่า "อาจลากโซนคนละส่วน"
-        #    ส่งผู้ใช้ไปแก้ของที่ไม่ได้พัง (เขาลากถูกแล้ว)
-        # ⚠️ ``scale_out_of_range`` ใช้เฉพาะเมื่อ **ปรับสเกลให้ไม่ได้/ไม่พอ**
-        #    ถ้าปรับได้แล้วยังจับคู่ไม่ติด แปลว่าเนื้อหาต่างกันจริง ไม่ใช่
-        #    เรื่องขนาด — โทษเรื่องขนาดตรงนั้นคือการชี้ผิด
-        why = "align_failed"
+    # ความหนาแน่นของโซน — เลือก *ระบอบ* ของด่านตัดสิน (ดู config.PIXEL_MIN_INK)
+    ink_a, ink_b = ink_frac(ga), ink_frac(gb)
+    sparse = bool((ink_a + ink_b) < config.PIXEL_MIN_INK)
+
+    def _why(default="align_failed"):
+        """เหตุผลที่ปฏิเสธ — แยก "ขนาดต่างเกินปรับ" ออกจากเหตุอื่นเสมอ.
+
+        ⚠️ ``scale_out_of_range`` ใช้เฉพาะเมื่อ **ปรับสเกลให้ไม่ได้/ไม่พอ**
+           ถ้าปรับได้แล้วยังไม่ผ่าน แปลว่าเนื้อหาต่างกันจริง ไม่ใช่เรื่องขนาด
+           — โทษเรื่องขนาดตรงนั้นคือการชี้ผู้ใช้ไปแก้ของที่ไม่ได้พัง
+        """
         if (zone_ratio and not prescaled
                 and not (SCALE_LO <= zone_ratio <= SCALE_HI)):
-            why = "scale_out_of_range"
-        return (dict(pixdiff._skip(why), scale=scale, ncc=ncc, ecc=0.0,
-                     zone_ratio=zone_ratio, prescaled=prescaled,
-                     dpi_a=dpi_a, dpi_b=dpi_b), None, None)
+            return "scale_out_of_range"
+        return default
+
+    def _bail(why, **kw):
+        base = dict(pixdiff._skip(why), scale=scale, ncc=ncc, ecc=0.0,
+                    zone_ratio=zone_ratio, prescaled=prescaled,
+                    dpi_a=dpi_a, dpi_b=dpi_b, rotate_a=rot_a, rotate_b=rot_b,
+                    ink_a=round(ink_a, 4), ink_b=round(ink_b, 4),
+                    sparse=sparse)
+        base.update(kw)
+        return base, None, None
+
+    # ── ด่านแบบเดิม (NCC ก่อนทาบ) — เหลือไว้เป็นทางกลับเท่านั้น ────────
+    #
+    # 🔑 **ตัวเลขนี้พิสูจน์แล้วว่ากลับด้านบนงานจริง** (คู่ PURINA ONE):
+    #    แผงเดียวกันที่ข้อความถูกเขียนใหม่ ได้ ncc 0.4012 → ถูกปฏิเสธ
+    #    บล็อกไทย เทียบ บล็อกอังกฤษ (คนละบล็อกกันเลย) ได้ 0.6687 → ถูกยอมรับ
+    #    ⇒ ไม่มีเกณฑ์ใดบน NCC ที่ถูกต้องได้ เพราะของจริงได้คะแนน**ต่ำกว่า**ของปลอม
+    #
+    #    ต้นตอ: ``find_scale`` ให้คะแนนจาก **ใจกลาง 56% ของโซน a** เท่านั้น
+    #    (TEMPLATE_MARGIN_FRAC) ⇒ ถ้าบล็อกที่ถูกแก้มากที่สุดอยู่ตรงกลางพอดี
+    #    คะแนนจะสะท้อนบล็อกที่แย่ที่สุด ไม่ใช่ทั้งแผง. วัดรายแถบของคอลัมน์
+    #    เดียวกันได้ 0.87 / 0.71 / **0.31** / 0.57 / 0.97 / 0.99
+    #
+    # ⇒ ตอนนี้ย้ายไปตัดสิน **หลังทาบ** ด้วย ``diff_ratio`` (ดู config)
+    #    ⚠️ ยกเว้น **โซนที่หมึกน้อย** ซึ่ง diff_ratio พูดแทนไม่ได้เชิง
+    #       โครงสร้าง (ดู ``config.PIXEL_MIN_INK``) ⇒ ตรงนั้นคงด่านเดิมไว้
+    if (sparse or not config.PIXEL_ALIGN_GATE) and ncc < MIN_SCALE_NCC:
+        return _bail(_why())
 
     interp = cv2.INTER_AREA if scale < 1.0 else cv2.INTER_CUBIC
     rb = cv2.resize(b, None, fx=scale, fy=scale, interpolation=interp)
@@ -463,8 +491,8 @@ def compare_ex(path_a: str, bbox_a, path_b: str, bbox_b,
     h = min(a.shape[0] - ay0, rb.shape[0] - by0)
     w = min(a.shape[1] - ax0, rb.shape[1] - bx0)
     if h < 8 or w < 8:
-        return (dict(pixdiff._skip("align_failed"), scale=scale, ncc=ncc,
-                     ecc=0.0), None, None)
+        # ทาบแล้วเหลือพื้นที่ทับกันไม่พอจะเทียบ = "จับคู่ไม่ได้" ของจริง
+        return _bail("align_failed")
     aa = a[ay0:ay0 + h, ax0:ax0 + w]
     bb = rb[by0:by0 + h, bx0:bx0 + w]
 
@@ -474,9 +502,44 @@ def compare_ex(path_a: str, bbox_a, path_b: str, bbox_b,
     m = max(0, min(int(trim_px), h // 4, w // 4))
     ai = aa[m:h - m, m:w - m] if m else aa
     bi = bb[m:h - m, m:w - m] if m else bb
+    # เพดาน "ต่างเกินไป" ของโหมดโซนต้องเป็นตัวเดียวกับด่านด้านล่าง ไม่ใช่
+    # เพดานของโหมดทั้งหน้า (0.20) ซึ่งวัดแล้วชิดของจริงเกินไป — แผงเดียวกัน
+    # ที่แก้ข้อความยกบล็อกวัดได้ 19.96% เหลือระยะถึงเพดานแค่ 0.04 จุด
     res = pixdiff.compare_images(ai, bi, blur_sigma=BLUR_SIGMA,
                                  tolerance_px=TOLERANCE_PX,
-                                 min_region_px=MIN_REGION_PX)
+                                 min_region_px=MIN_REGION_PX,
+                                 max_diff_ratio=(
+                                     1.01
+                                     if (config.PIXEL_ALIGN_GATE
+                                         and not sparse)
+                                     else pixdiff.MAX_DIFF_RATIO))
+
+    # ── ด่านความมั่นใจตัวจริง: ตัดสิน **หลังทาบภาพแล้ว** ────────────────
+    #
+    # คำถามที่ต้องตอบคือ *"การแปลงที่หามาได้เชื่อถือได้ไหม"* ไม่ใช่
+    # *"เนื้อหาเหมือนกันไหม"* — สองอย่างนี้คนละเรื่อง และ NCC ก่อนทาบตอบ
+    # อย่างหลัง ซึ่งเป็นสิ่งที่เรากำลังตามหาพอดี (ดูคอมเมนต์ด่านเดิมด้านบน)
+    #
+    # 📊 วัด 19 เคส (บวก 8 · ลบ 11) จาก 4 คู่ไฟล์จริง:
+    #      ``diff_ratio`` ของ **แผงเดียวกัน** 0.00 – 19.96%
+    #      ``diff_ratio`` ของ **คนละแผง**    33.63 – 96.95%
+    #    ⇒ แยกขาด 19/19 ขณะที่ด่าน NCC เดิมผิด 4 เคส
+    #    เหตุผลเชิงกายภาพ: ครอปคนละเนื้อหาต่างกันเกือบทั้งภาพ ส่วนแผงเดียวกัน
+    #    ที่ถูกเขียนข้อความใหม่ยกบล็อกยังต่างไม่ถึง 1 ใน 5 ของพิกเซล
+    #
+    # ⚠️ ปฏิเสธแล้ว **ไม่เงียบ** — พก ``diff_ratio`` ที่วัดได้ไปด้วยเสมอ
+    #    เพื่อให้รายงานบอกตัวเลขจริง ไม่ใช่เดาว่า "อาจเป็นคนละแผง"
+    if (config.PIXEL_ALIGN_GATE and not sparse
+            and res.get("status") == pixdiff.OK):
+        dr = float(res.get("diff_ratio") or 0.0)
+        if dr > config.PIXEL_MAX_DIFF:
+            # ⚠️ ถึงตรงนี้แปลว่า **ทาบภาพติดและวัดความต่างได้แล้ว** ⇒ หลักฐาน
+            #    ชิ้นนี้แรงกว่า "ขนาดโซนต่างกัน" เสมอ จึงไม่ยกเรื่องขนาดมาเป็น
+            #    เหตุผลหลัก (ยังพก zone_ratio ไปให้ UI บอกเป็นบริบทได้)
+            return _bail("panel_too_different", ecc=round(ecc, 4),
+                         diff_ratio=res.get("diff_ratio"),
+                         size=[w, h], dpi=dpi, trim_px=m,
+                         mm_per_px=round(25.4 / float(dpi), 4))
     # ── แยก "ความต่างของแผง" ออกจาก "ของที่ลากเกินแผงเข้ามา" ──────────
     # บริเวณที่แตะขอบพื้นที่เทียบ = อยู่ในวงแหวนที่ผู้ใช้ลากเลยแผงออกไป
     # ซึ่งสองไฟล์มีเนื้อหารอบแผงคนละอย่าง ⇒ ต่างจริงแต่ **ไม่ใช่คำตอบ**
@@ -540,6 +603,8 @@ def compare_ex(path_a: str, bbox_a, path_b: str, bbox_b,
                dpi=dpi, trim_px=m, mm_per_px=round(mmpp, 4),
                dpi_a=dpi_a, dpi_b=dpi_b, zone_ratio=zone_ratio,
                prescaled=prescaled, rotate_a=rot_a, rotate_b=rot_b,
+               ink_a=round(ink_a, 4), ink_b=round(ink_b, 4),
+               sparse=sparse,
                # ความหนาหมึกของ **ทั้งแผง** — ต่างกันเล็กน้อยแต่สม่ำเสมอ
                # ทำให้ขอบตัวอักษรทุกตัวต่าง ⇒ ฟ้องนับร้อยบริเวณ
                panel_ink=panel_ink(ai, bi),
@@ -551,6 +616,22 @@ def compare_ex(path_a: str, bbox_a, path_b: str, bbox_b,
     # คืนภาพที่ align แล้วทั้งสองฝั่ง (พิกัดตรงกันแล้ว) เพื่อให้ผู้เรียกครอป
     # บริเวณเดียวกันจากทั้งสองไฟล์ไปอ่านข้อความได้
     return res, aa, bb
+
+
+def ink_frac(gray) -> float:
+    """สัดส่วนพิกเซลที่ "มีหมึก" ของภาพเทา — ใช้เลือก *ระบอบ* ของด่านเท่านั้น
+
+    ไม่ใช่ตัววัดคุณภาพงานพิมพ์ (ตัวนั้นคือ ``panel_ink``) จึงตั้งใจให้หยาบ
+    และไม่ขึ้นกับการทาบภาพ ⇒ คำนวณได้ตั้งแต่ก่อน align
+    """
+    try:
+        import numpy as _np
+        g = gray
+        if getattr(g, "ndim", 2) == 3:                      # pragma: no cover
+            g = cv2.cvtColor(g, cv2.COLOR_BGR2GRAY)
+        return float((_np.asarray(g) < INK_LEVEL).mean())
+    except Exception:                                       # pragma: no cover
+        return 0.0
 
 
 def panel_ink(img_a, img_b) -> Optional[dict]:
