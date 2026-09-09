@@ -749,5 +749,11 @@
 {% endblock %}
 
 {% block extra_js %}
+<script>
+  // ธง "กรอบแดง" (ดู artwork_check/config.py) — ต้องประกาศ **ก่อน**
+  // โหลดสคริปต์ เพราะ hlTargets() อ่านตอนสร้าง URL ของภาพ crop
+  window.AW_HL_BY_SPANS = {{ 'true' if hl_by_spans else 'false' }};
+  window.AW_HL_REF_SIDE = {{ 'true' if hl_ref_side else 'false' }};
+</script>
 <script src="{{ url_for('static', filename='js/artwork_check.js') }}?v={{ config_version }}"></script>
 {% endblock %}

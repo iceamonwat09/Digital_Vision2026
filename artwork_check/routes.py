@@ -105,17 +105,26 @@ def _ownership_guard():
 
 # ── Pages ─────────────────────────────────────────────────────────────
 
+def _hl_flags() -> dict:
+    """ธงของ "กรอบแดง" ที่ตัดสินฝั่ง JS — ต้องส่งให้ **ทั้งสองหน้า** เพราะ
+    ``renderReport()`` เป็นตัวเดียวกันทั้งหน้าตรวจและหน้าประวัติ. ปิดแล้ว
+    ได้พฤติกรรมก่อน 9 ก.ย. เป๊ะ (ยิงทั้งบรรทัด · ฝั่งอ้างอิงไม่มีกรอบ)"""
+    return {"hl_by_spans": config.HIGHLIGHT_BY_SPANS,
+            "hl_ref_side": config.HIGHLIGHT_REF_SIDE}
+
+
 @artwork_bp.route("/artwork_check")
 def artwork_page():
     # ``pixdiff_ui`` = แสดงปุ่ม "🔍 เทียบภาพเก่า/ใหม่" หรือไม่ (default: ซ่อน).
     # ปุ่มยังอยู่ใน DOM เสมอ แค่ถูกซ่อนด้วย CSS — ดูเหตุผลที่ config.PIXDIFF_UI
     return render_template("artwork_check.html",
-                           pixdiff_ui=config.PIXDIFF_UI)
+                           pixdiff_ui=config.PIXDIFF_UI,
+                           **_hl_flags())
 
 
 @artwork_bp.route("/artwork_check/history")
 def artwork_history_page():
-    return render_template("artwork_check_history.html")
+    return render_template("artwork_check_history.html", **_hl_flags())
 
 
 # ── Inspection flow ───────────────────────────────────────────────────
@@ -317,7 +326,14 @@ def api_crop(rec_id):
     rotate = request.args.get("rotate", "0")
     if rotate not in ("0", "90", "180", "270", "auto"):
         return jsonify({"error": "rotate ต้องเป็น 0/90/180/270/auto"}), 400
-    highlight = (request.args.get("hl", "") or "")[:120]
+    # ``hl`` ซ้ำได้หลายค่า = "ช่วงที่ต่าง" หลายจุดของบรรทัดเดียว (ดู
+    # config.HIGHLIGHT_MAX_TARGETS). ค่าเดียวยังใช้ได้เหมือนเดิมทุกประการ.
+    # ⚠️ เพดานเดิม 120 ตัวอักษร **ตัดกลางคำ** ของบรรทัดจริงทุกเส้น (ยาว
+    #    139-143) ⇒ token สุดท้ายเป็นเศษคำ แล้วการจับคู่วลีล้มเหลวเงียบ ๆ
+    _cap = max(1, int(config.HIGHLIGHT_TARGET_MAX_CHARS))
+    highlights = [h[:_cap] for h in request.args.getlist("hl") if h]
+    highlights = highlights[:max(1, int(config.HIGHLIGHT_MAX_TARGETS))]
+    highlight = highlights[0] if highlights else ""
     zone_id = (request.args.get("zid", "") or "")[:40]
     # box=x,y,w,h (สัดส่วนของโซน) = กรอบที่โหมดเทียบพิกเซล **วัดมาแล้ว**
     # ไม่ต้องค้นหาคำ ⇒ ใช้ได้ทุกภาษาและใช้ได้แม้อ่านข้อความไม่ออก
@@ -332,11 +348,17 @@ def api_crop(rec_id):
     try:
         jpg = pipeline.zone_crop_jpg(rec_id, bbox, doc=doc, rotate=rotate,
                                      highlight=highlight, zone_id=zone_id,
-                                     box=box)
+                                     box=box, highlights=highlights)
     except (ValueError, FileNotFoundError) as e:
         return jsonify({"error": str(e)}), 404
     import io
-    return send_file(io.BytesIO(jpg), mimetype="image/jpeg", max_age=0)
+    # ``rv`` = รุ่นของรายงานที่ฝั่ง JS ใส่มา ⇒ URL หนึ่ง = ภาพหนึ่งเสมอ
+    # (พารามิเตอร์คุมการเรนเดอร์ครบทุกตัว และรายงานที่ใช้วาดกรอบก็ถูกผูกไว้)
+    # ⇒ ปล่อยให้เบราว์เซอร์เก็บไว้ใช้ซ้ำได้ แทนที่จะยิงใหม่ทุกครั้งที่เลื่อน
+    # หรือเปิดรายงานเดิม. ไม่มี ``rv`` (เช่นตัวแก้โซนที่ใส่ ``t`` เอง หรือ
+    # สคริปต์เก่า) ⇒ ไม่แคช = พฤติกรรมเดิมเป๊ะ
+    fresh = 0 if not request.args.get("rv") else config.CROP_HTTP_MAX_AGE
+    return send_file(io.BytesIO(jpg), mimetype="image/jpeg", max_age=fresh)
 
 
 @artwork_bp.route("/api/artwork/<rec_id>/snap", methods=["POST"])

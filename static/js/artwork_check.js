@@ -477,6 +477,33 @@
   }
   window.awMarkDiff = markDiff;
 
+  // ── คำค้นที่ส่งให้เซิร์ฟเวอร์วาดกรอบแดงบนภาพ crop ────────────────────
+  // ยิงที่ **ช่วงที่ต่าง** ก่อนเสมอ ไม่ใช่ทั้งบรรทัด: ตัวจับคู่วลีฝั่ง
+  // เซิร์ฟเวอร์ต้องหาคำติดกันในแถวเดียวกันให้ครบทุกคำ ซึ่งบรรทัดจริงยาว
+  // 24-25 คำบนแผงคอลัมน์แคบทำไม่ได้เลย (วัดได้ 0/16 เคส) ส่วนช่วงที่ต่าง
+  // มี 1-3 คำ (วัดได้ 16/16) และ **ชี้จุดที่ต่างจริง** แทนการล้อมทั้งบรรทัด
+  // ⚠️ ต้องตรงกับ config.HIGHLIGHT_MAX_TARGETS ฝั่ง Python (มีเทสต์เทียบ)
+  const HL_MAX_TARGETS = 4;
+  // ช่วงที่สั้นเกินไป/เป็นเครื่องหมายล้วน หาเจอได้หลายที่ ⇒ กรอบผิดจุด
+  // ซึ่งแย่กว่าไม่มีกรอบ (กฎเหล็กข้อ 2) ⇒ ข้ามไปใช้ทั้งบรรทัดแทน
+  const HL_PUNCT = /[\s.,;:!?()\[\]{}"'`|/\\\-\u2013\u2014\u00b7\u060c\u061b\u061f\u2026]/g;
+  function hlTargets(text, spans) {
+    if (!text) return [];
+    const out = [];
+    if (window.AW_HL_BY_SPANS !== false && Array.isArray(spans)) {
+      for (let i = 0; i < spans.length && out.length < HL_MAX_TARGETS; i++) {
+        const sp = spans[i];
+        if (!Array.isArray(sp)) continue;
+        const a = sp[0], b = sp[1];
+        if (!(b > a) || a < 0 || b > text.length) continue;
+        const piece = text.slice(a, b).trim();
+        if (piece.replace(HL_PUNCT, "").length >= 2) out.push(piece);
+      }
+    }
+    return out.length ? out : [text];
+  }
+  window.awHlTargets = hlTargets;
+
   // poll ระหว่างที่ POST /inspect ยังค้างอยู่ — คืนฟังก์ชันสำหรับหยุด
   function startFlowPoll(recId, box) {
     let stopped = false;
@@ -617,20 +644,34 @@
         // กรอบแดงที่ "คำที่มีปัญหา" — เฉพาะรูปฝั่ง subject (โซนของ defect
         // นี้). ถ้าไม่มีคำ (เช่น defect แบบ "ข้อความหายไป") ก็ไม่ส่ง →
         // ครอปธรรมดา. เซิร์ฟเวอร์หาไม่เจอก็คืนครอปเดิม (แสดงผลอย่างเดียว)
-        const hlParam = d.found
-          ? "&hl=" + encodeURIComponent(d.found) + "&zid=" + encodeURIComponent(d.zone_id)
-          : "";
+        const hlOf = (text, spans, zid) => {
+          if (!text || !zid) return "";
+          return hlTargets(text, spans)
+                   .map((t) => "&hl=" + encodeURIComponent(t)).join("") +
+                 "&zid=" + encodeURIComponent(zid);
+        };
+        const hlParam = hlOf(d.found, d.found_spans, d.zone_id);
         // กรอบที่ "วัดมา" จากโหมดเทียบพิกเซล — แม่นกว่าการค้นหาคำ และใช้ได้
         // ทุกภาษา/แม้อ่านข้อความตรงนั้นไม่ออก (ค้นหาคำล้มเหลวเมื่อครอปตัดคำ)
         const boxOf = (arr) => (Array.isArray(arr) && arr.length === 4)
           ? "&box=" + arr.map(Number).join(",") : "";
         const boxA = boxOf(d.pixel_bbox);
         const boxB = boxOf(d.pixel_bbox_b);
+        // ``rv`` = รุ่นของรายงาน (ไม่ใช่ Date.now()) ⇒ URL ของ crop เดิม
+        // ให้ภาพเดิมเสมอ ⇒ เบราว์เซอร์เก็บแคชไว้ใช้ซ้ำได้ตอนเลื่อน/เปิดใหม่
+        // และเปลี่ยนเองเมื่อกด "ส่งตรวจสอบ" ซ้ำบน id เดิม (รายงานถูกเขียนทับ)
+        const rv = "&rv=" + encodeURIComponent(rep.created_at || rep.id || "");
         if (z && refZ) {
           const qA = "x=" + z.bbox[0] + "&y=" + z.bbox[1] + "&w=" + z.bbox[2] + "&h=" + z.bbox[3] + "&doc=" + docOf(z) + rotOf(z);
           const qB = "x=" + refZ.bbox[0] + "&y=" + refZ.bbox[1] + "&w=" + refZ.bbox[2] + "&h=" + refZ.bbox[3] + "&doc=" + docOf(refZ) + rotOf(refZ);
-          const cropA = "/api/artwork/" + esc(rep.id) + "/crop?" + qA + hlParam + boxA;
-          const cropB = "/api/artwork/" + esc(rep.id) + "/crop?" + qB + boxB;
+          // ฝั่งอ้างอิง (ชิ้นงาน) ก็ต้องได้กรอบด้วย — เดิมไม่เคยส่ง ``hl``
+          // ให้เลย ⇒ ไม่มีทางมีกรอบจากการค้นคำ และการ์ด "ข้อความนี้หายไป
+          // จาก…" (ซึ่ง ``found`` ว่าง) ไม่มีกรอบทั้งสองฝั่ง ทั้งที่ข้อความ
+          // มีอยู่จริงบนฝั่งนี้
+          const hlParamB = (window.AW_HL_REF_SIDE === false) ? ""
+            : hlOf(d.reference, d.ref_spans, refZ.id);
+          const cropA = "/api/artwork/" + esc(rep.id) + "/crop?" + qA + hlParam + boxA + rv;
+          const cropB = "/api/artwork/" + esc(rep.id) + "/crop?" + qB + hlParamB + boxB + rv;
           const labelA = docTag(z) + d.zone_id + (z.label ? " · " + z.label : "");
           const labelB = docTag(refZ) + refZ.id + (refZ.label ? " · " + refZ.label : "") + " (อ้างอิง)";
           html += '<div class="aw-img-pair" style="margin-top:8px;">' +
@@ -650,7 +691,7 @@
         } else if (z) {
           // fallback: แค่โซนเดียว (ไม่มี ref zone)
           const q = "x=" + z.bbox[0] + "&y=" + z.bbox[1] + "&w=" + z.bbox[2] + "&h=" + z.bbox[3] + "&doc=" + docOf(z) + rotOf(z);
-          const cropUrl = "/api/artwork/" + esc(rep.id) + "/crop?" + q + hlParam + boxA;
+          const cropUrl = "/api/artwork/" + esc(rep.id) + "/crop?" + q + hlParam + boxA + rv;
           const caption = docTag(z) + d.zone_id + (z.label ? " · " + z.label : "");
           html += '<div style="margin-top:8px;">' +
             '<img src="' + esc(cropUrl) + '" alt="crop"' +

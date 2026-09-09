@@ -628,7 +628,7 @@ def _tess_words_uncached(crop, lang: str, psm: int):
 
 
 def _tess_boxes(crop, found: str, lang: str = "eng",
-                ocr_text: str = "") -> List[Box]:
+                ocr_text: str = "", limit: int = 0) -> List[Box]:
     """Every Tesseract word box matching ``found`` (best tier first)."""
     if not _tesseract_available():
         return []
@@ -642,7 +642,7 @@ def _tess_boxes(crop, found: str, lang: str = "eng",
         hits = _match_boxes(w, found)
         if not hits:
             continue
-        verified = _verify_boxes(crop, hits, found, lang)
+        verified = _verify_boxes(crop, hits, found, lang, limit=limit)
         if verified:
             return verified
         # every candidate of this mode failed the pixel check — that is a
@@ -823,7 +823,8 @@ def _upscale_for_ocr(crop):
 
 
 def _verify_boxes(crop, boxes: List[Box], found: str, lang: str,
-                  require_positive: bool = False) -> List[Box]:
+                  require_positive: bool = False,
+                  limit: int = 0) -> List[Box]:
     """Self-check: re-OCR each candidate box and drop the ones whose pixels
     do not back up the claim.
 
@@ -856,6 +857,16 @@ def _verify_boxes(crop, boxes: List[Box], found: str, lang: str,
     H, W = crop.shape[:2]
     kept = []
     for b in boxes:
+        # ⚡ พอได้ครบตามที่ผู้เรียกจะใช้จริงก็หยุด — การพิสูจน์แต่ละกล่องคือ
+        # การอ่านภาพซ้ำ (Tesseract สูงสุด 3 รอบต่อกล่อง) ซึ่งเป็นต้นทุนหลัก
+        # ของ /crop ทั้งคำขอ. วัดบนแผงจริง: คำที่ซ้ำ 30 แถว ⇒ พิสูจน์ 25 กล่อง
+        # 2.49 วินาที เพื่อเก็บไว้ 6 ⇒ ทิ้ง 19 กล่องที่จ่ายเวลาไปแล้ว
+        # **ผลลัพธ์เท่าเดิมทุกกล่อง**: ``_match_boxes`` คืนกล่องที่ผ่าน
+        # ``_dedupe_boxes`` มาแล้วทั้งสองทาง (คำเดียว/วลี) ⇒ ``_dedupe_boxes``
+        # ใน ``locate_all`` ไม่ตัดอะไรอีก ⇒ การตัดที่ ``max_boxes`` ทีหลัง
+        # ได้ชุดเดียวกันกับการหยุดพิสูจน์ตรงนี้ (มีเทสต์ล็อกไว้)
+        if limit and len(kept) >= limit:
+            break
         pad = max(3, (b[3] - b[1]) // 4)
         x0, y0 = max(0, b[0] - pad), max(0, b[1] - pad)
         x1, y1 = min(W, b[2] + pad), min(H, b[3] + pad)
@@ -1022,6 +1033,14 @@ def _phrase_matches(words, ftokens: List[str]) -> list:
     fkey = "".join(ftokens)
     if not fkey:
         return []
+    # ⚠️ คำที่ normalize แล้วว่าง (เครื่องหมายล้วน: "/" "," "،" "·") ต้อง
+    # **ข้ามทิ้ง** ไม่ใช่ทำให้หน้าต่างที่มันอยู่ถูกโยนทิ้งทั้งอัน. ``ftokens``
+    # ถูกกรองแบบนี้ไปแล้วตั้งแต่ ``_match_boxes`` ⇒ ถ้าฝั่ง ``words`` ไม่กรอง
+    # ด้วย ขนาดหน้าต่างจะไม่มีวันตรงกัน. วัดจริงบนบรรทัดของสถานี:
+    # "محتوى الطاقة: 520 كيلو كالوري / 100 غرام" มี "/" เดี่ยว ๆ 1 ตัว ⇒
+    # หน้าต่างขนาด n-1..n+1 **ทุกอัน** ต้องคลุมตำแหน่งนั้น ⇒ 0 กรอบเสมอ
+    # ไม่ว่า Tesseract จะอ่านถูกแค่ไหน. กรองแล้วได้ 1 กรอบ
+    words = [(k, b) for k, b in words if k]
     n = len(ftokens)
     cands = []          # (window_key, union_box) for every same-line run
     for size in (n, n + 1, n - 1):
@@ -1029,8 +1048,6 @@ def _phrase_matches(words, ftokens: List[str]) -> list:
             continue
         for i in range(len(words) - size + 1):
             win = words[i:i + size]
-            if any(not k for k, _ in win):
-                continue
             boxes = [b for _, b in win]
             if not all(_same_line(boxes[0], b) for b in boxes[1:]):
                 continue
@@ -1206,7 +1223,8 @@ def locate_all(crop, found: str, ocr_text: str,
     if crop is None or getattr(crop, "size", 0) == 0 or not found:
         return []
     H, W = crop.shape[:2]
-    hits = (_tess_boxes(crop, found, tess_lang, ocr_text or "")
+    hits = (_tess_boxes(crop, found, tess_lang, ocr_text or "",
+                        limit=max(0, int(max_boxes or 0)))
             if use_tesseract else [])
     if not hits:
         blk = _block_boxes(found, blocks or [], W, H, ocr_wh)

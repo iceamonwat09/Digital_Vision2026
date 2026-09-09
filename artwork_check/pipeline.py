@@ -24,7 +24,9 @@ import hashlib
 import json
 import logging
 import os
+import threading
 import time
+from collections import OrderedDict
 from typing import List, Optional, Tuple
 
 import cv2
@@ -1041,7 +1043,8 @@ def run_ocr_only(rec_id: str, zone_list: List[dict],
 def zone_crop_jpg(rec_id: str, zone_bbox: List[float],
                   dpi: Optional[int] = None, doc: str = "a",
                   rotate="0", highlight: str = "",
-                  zone_id: str = "", box: Optional[List[float]] = None) -> bytes:
+                  zone_id: str = "", box: Optional[List[float]] = None,
+                  highlights: Optional[List[str]] = None) -> bytes:
     """High-DPI crop of one zone — used by the UI defect table / preview.
     ``doc="b"`` crops from the attached reference file. ``rotate`` is an
     angle 0/90/180/270 or "auto" (detect + rotate vertical → upright), so
@@ -1052,10 +1055,55 @@ def zone_crop_jpg(rec_id: str, zone_bbox: List[float],
     in red. This is display-only: locating uses the saved OCR text/blocks
     of that zone, never re-runs a check, and any failure just returns the
     plain crop (identical to omitting ``highlight``)."""
+    base_dpi = dpi or config.OCR_DPI
+    crop = _render_zone_cached(rec_id, zone_bbox, base_dpi, doc)
+    angle = resolve_rotation(rotate, page_auto=False, crop=crop) \
+        if rotate == "auto" else (int(rotate) if str(rotate) in
+                                  ("0", "90", "180", "270") else 0)
+    # ── กรอบที่ "วัดมา" (โหมดเทียบพิกเซล) ────────────────────────────
+    # ต่างจาก ``highlight`` ตรงที่ไม่ต้องค้นหาคำ ⇒ ใช้ได้ทุกภาษา และใช้ได้
+    # แม้อ่านข้อความตรงนั้นไม่ออกเลย. วาด **ก่อนหมุน** เพื่อให้กรอบหมุนตาม
+    # ภาพเอง ไม่ต้องแปลงพิกัดเอง (แปลงเองพลาดง่ายและกรอบจะไปผิดที่)
+    if box and crop.size:
+        crop = _draw_measured_box(crop, box)
+    if angle:
+        crop = apply_rotation(crop, angle)
+
+    targets = [t for t in (highlights or ([highlight] if highlight else []))
+               if t]
+    if targets and zone_id and config.HIGHLIGHT_DEFECT_WORD:
+        crop = _highlight_crop(rec_id, crop, targets, zone_id, angle)
+    return encode_jpg(crop, quality=88)
+
+
+# ── แคชภาพ crop ที่เรนเดอร์แล้ว ────────────────────────────────────────
+# การ์ด defect หนึ่งใบขอรูป 2 ใบ (ฝั่งหลัก + ฝั่งอ้างอิง) และรายงานหนึ่งใบมี
+# หลายการ์ดที่มัก **ชี้ไปที่โซนเดิม** ⇒ เดิมเรนเดอร์ PDF โซนเดียวกันซ้ำ
+# 10-20 ครั้งต่อการเปิดรายงานหนึ่งครั้ง (และโซนเล็กเรนเดอร์ 2 รอบต่อครั้ง)
+# การเรนเดอร์เป็น deterministic ⇒ แคชได้โดยผลไม่เปลี่ยนแม้แต่พิกเซลเดียว
+_CROP_CACHE: "OrderedDict" = OrderedDict()
+_CROP_LOCK = threading.Lock()
+
+
+def _render_zone_cached(rec_id: str, zone_bbox: List[float],
+                        base_dpi: int, doc: str):
+    """``render_zone`` + ชั้นเพิ่ม DPI ของโซนเล็ก พร้อมแคช LRU.
+
+    คืน **สำเนา** เสมอ เพื่อไม่ให้ผู้เรียกที่วาดกรอบทับไปแก้ของในแคช
+    (วันนี้ทุกทางวาดบนสำเนาอยู่แล้ว — นี่คือกันไว้เชิงโครงสร้าง)
+    """
+    key = (rec_id, doc, tuple(round(float(v), 6) for v in zone_bbox),
+           int(base_dpi))
+    if config.CROP_CACHE_MAX > 0:
+        with _CROP_LOCK:
+            hit = _CROP_CACHE.get(key)
+            if hit is not None:
+                _CROP_CACHE.move_to_end(key)
+                return hit.copy()
+
     d = report.inspection_dir(rec_id)
     base = "source_b" if doc == "b" else "source"
     document = ArtworkDocument(_find_source(d, base))
-    base_dpi = dpi or config.OCR_DPI
     crop = document.render_zone(zone_bbox, dpi=base_dpi, max_side=1600)
     # A SMALL zone renders small even at OCR_DPI (a 78 pt wide zone is only
     # ~490 px at 450 dpi). Tesseract goes blind at that size — measured on a
@@ -1069,21 +1117,14 @@ def zone_crop_jpg(rec_id: str, zone_bbox: List[float],
             factor = min(4.0, config.CROP_MIN_SIDE / float(longest))
             crop = document.render_zone(zone_bbox, dpi=int(base_dpi * factor),
                                         max_side=1600)
-    angle = resolve_rotation(rotate, page_auto=False, crop=crop) \
-        if rotate == "auto" else (int(rotate) if str(rotate) in
-                                  ("0", "90", "180", "270") else 0)
-    # ── กรอบที่ "วัดมา" (โหมดเทียบพิกเซล) ────────────────────────────
-    # ต่างจาก ``highlight`` ตรงที่ไม่ต้องค้นหาคำ ⇒ ใช้ได้ทุกภาษา และใช้ได้
-    # แม้อ่านข้อความตรงนั้นไม่ออกเลย. วาด **ก่อนหมุน** เพื่อให้กรอบหมุนตาม
-    # ภาพเอง ไม่ต้องแปลงพิกัดเอง (แปลงเองพลาดง่ายและกรอบจะไปผิดที่)
-    if box and crop.size:
-        crop = _draw_measured_box(crop, box)
-    if angle:
-        crop = apply_rotation(crop, angle)
-
-    if highlight and zone_id and config.HIGHLIGHT_DEFECT_WORD:
-        crop = _highlight_crop(rec_id, crop, highlight, zone_id, angle)
-    return encode_jpg(crop, quality=88)
+    if config.CROP_CACHE_MAX > 0:
+        with _CROP_LOCK:
+            _CROP_CACHE[key] = crop
+            _CROP_CACHE.move_to_end(key)
+            while len(_CROP_CACHE) > config.CROP_CACHE_MAX:
+                _CROP_CACHE.popitem(last=False)
+        return crop.copy()
+    return crop
 
 
 def _draw_measured_box(crop, box):
@@ -1114,15 +1155,24 @@ def _draw_measured_box(crop, box):
     return out
 
 
-def _highlight_crop(rec_id: str, crop, found: str, zone_id: str,
+def _highlight_crop(rec_id: str, crop, found, zone_id: str,
                     angle: int = 0):
-    """Draw the red word-box on ``crop`` using the saved data of
+    """Draw the red word-box(es) on ``crop`` using the saved data of
     ``zone_id``. Strategy, most reliable first:
       ② exact PDF text-layer word box (when the zone was read from a live
          text layer — any script, no OCR);
       ①③ then hl.annotate (OCR-backend bbox → Tesseract).
     Isolated + fully guarded: any problem returns the crop untouched so the
-    defect card still shows the plain image."""
+    defect card still shows the plain image.
+
+    ``found`` may be one string or a LIST of strings ("ช่วงที่ต่าง" หลายจุด
+    ของบรรทัดเดียว). แต่ละตัวถูกค้นแยกกันแล้วรวมกรอบ — การอ่านภาพด้วย
+    Tesseract ถูกแคชไว้ต่อ (รูป, ภาษา, psm) แล้ว ⇒ ตัวที่สองเป็นต้นไป
+    แทบไม่มีต้นทุนเพิ่มเมื่ออยู่ภาษาเดียวกัน"""
+    targets = [found] if isinstance(found, str) else list(found or [])
+    targets = [t for t in targets if t]
+    if not targets:
+        return crop
     try:
         from . import highlight as hl
         rep = report.load_report(rec_id)
@@ -1134,17 +1184,27 @@ def _highlight_crop(rec_id: str, crop, found: str, zone_id: str,
             return crop
 
         if config.HIGHLIGHT_USE_PDF_TEXT and entry.get("engine") == "pdf-text":
-            boxes = _pdf_text_boxes(rec_id, rep, zone_id, found, crop, angle)
+            boxes = []
+            for t in targets:
+                boxes += _pdf_text_boxes(rec_id, rep, zone_id, t, crop, angle)
             if boxes:
-                return hl.draw_boxes(crop, boxes)
+                return hl.draw_boxes(crop, boxes[:config.HIGHLIGHT_MAX_BOXES]
+                                     if config.HIGHLIGHT_MAX_BOXES else boxes)
 
-        return hl.annotate(crop, found, entry.get("text", ""),
-                           entry.get("blocks"), entry.get("ocr_wh"),
-                           use_tesseract=config.HIGHLIGHT_USE_TESSERACT,
-                           use_profile=config.HIGHLIGHT_USE_PROFILE,
-                           tess_lang=config.HIGHLIGHT_TESSERACT_LANG,
-                           max_boxes=config.HIGHLIGHT_MAX_BOXES,
-                           row_verify=config.HIGHLIGHT_ROW_VERIFY)
+        boxes = []
+        for t in targets:
+            boxes += hl.locate_all(crop, t, entry.get("text", ""),
+                                   entry.get("blocks"), entry.get("ocr_wh"),
+                                   use_tesseract=config.HIGHLIGHT_USE_TESSERACT,
+                                   use_profile=config.HIGHLIGHT_USE_PROFILE,
+                                   tess_lang=config.HIGHLIGHT_TESSERACT_LANG,
+                                   max_boxes=config.HIGHLIGHT_MAX_BOXES,
+                                   row_verify=config.HIGHLIGHT_ROW_VERIFY)
+        if not boxes:
+            return crop
+        if config.HIGHLIGHT_MAX_BOXES:
+            boxes = boxes[:config.HIGHLIGHT_MAX_BOXES]
+        return hl.draw_boxes(crop, boxes)
     except Exception:
         logger.debug("[artwork] highlight skipped for %s/%s",
                      rec_id, zone_id, exc_info=True)
