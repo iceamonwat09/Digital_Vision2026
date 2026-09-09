@@ -23,6 +23,7 @@
   // ── report rendering (shared with history page via window.*) ──────
   const CLASS_LABELS = {
     MISMATCH_PANELS: "ไม่ตรงกันระหว่าง panel",
+    MISMATCH_CASE: "ตัวพิมพ์ใหญ่-เล็กไม่ตรง",
     MISMATCH_ZOOM: "zoom ไม่ตรงฉลากจริง",
     NUMBER_FAIL: "ตัวเลข/บาร์โค้ดผิด",
     PHRASE_FAIL: "วลีแบรนด์สะกดเพี้ยน",

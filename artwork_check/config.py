@@ -548,6 +548,36 @@ PIXDIFF_DPI = int(os.getenv("ARTWORK_PIXDIFF_DPI", "200"))
 # เพดานเวลาต่อการเทียบหนึ่งครั้ง (วินาที) — ไฟล์ใหญ่สุดที่วัดได้ใช้ ~4 วิ
 PIXDIFF_TIMEOUT_S = float(os.getenv("ARTWORK_PIXDIFF_TIMEOUT_S", "120"))
 
+# ── ตัวพิมพ์ใหญ่-เล็ก (ชั้นที่สอง ต่อจากการโหวตบรรทัด) ───────────────
+# ทุกเส้นทางเทียบใน checks.py พับตัวพิมพ์ด้วย ``.upper()`` ⇒ บรรทัดที่ต่าง
+# **เฉพาะตัวพิมพ์** ถูก "ยกโทษ" ที่ด่าน containment ของ ``_vote_panels``
+# แล้วไม่เข้า ``extra`` เลย ⇒ เงียบสนิท. เคสจริงที่พลาด (AvoDerm
+# Master1/Master2): ``D-Calcium Pantothenate`` vs ``D-calcium Pantothenate``
+#
+# 🔬 ตัวพิมพ์ **ไม่ใช่ noise ของ OCR** — ต่างจากเครื่องหมายวรรคตอนซึ่ง
+#    ``_norm_key`` ตัดทิ้งอย่างถูกต้อง (สองรอบอ่านไม่ตรงกันเป็นประจำ).
+#    วัดแล้ว 3 ทาง: Gemini↔Tesseract 237 คำร่วม **ตัวพิมพ์ผิด 0** ·
+#    PDF text layer (เฉลย)↔Tesseract 4 ไฟล์จริง 1,006 คำ **ผิด 0** ·
+#    Tesseract 300↔400 dpi 497 คำ ผิด 1 (คำจาก metadata ไม่ใช่บนฉลาก)
+#    ⇒ รวม 1,243 คำ ผิด 0
+#
+# ⚠️ **ห้ามแก้ ``_norm_key`` ให้สนใจตัวพิมพ์ทั้งก้อน** — ถูกใช้ 16 จุด รวม
+#    ``check_phrases`` (คลังวลีแบรนด์) ซึ่งฉลากพิมพ์โลโก้เป็น ``AVODERM``
+#    แต่คลังเก็บ ``AvoDerm`` ⇒ ฟ้องผิดทันที. ชั้นนี้จึงเป็นการ **เพิ่ม**
+#    เฉพาะบรรทัดที่ "เท่ากันแบบพับตัวพิมพ์ แต่ไม่เท่ากันแบบสนใจตัวพิมพ์"
+#    ⇒ ไม่แตะ defect เดิมแม้แต่รายการเดียว
+#
+# ⚠️ วัดบนสคริปต์ **ละติน** เท่านั้น · อาหรับ/ไทย/CJK ไม่มีตัวพิมพ์ใหญ่-เล็ก
+#    จึงไม่ได้รับผลกระทบโดยธรรมชาติ · ซีริลลิก/กรีกยังไม่เคยวัด
+TEXT_CASE_SENSITIVE = os.getenv(
+    "ARTWORK_TEXT_CASE_SENSITIVE", "1").strip().lower() not in ("0", "false", "")
+# ผู้ใช้ระบุว่า "ถือว่าผิดเหมือนกัน ไม่ควรปล่อยผ่าน" ⇒ critical (FAIL).
+# ตั้ง ``warning`` = ขึ้น REVIEW ให้คนยืนยันแทน
+TEXT_CASE_SEVERITY = os.getenv(
+    "ARTWORK_TEXT_CASE_SEVERITY", "critical").strip().lower()
+if TEXT_CASE_SEVERITY not in ("critical", "warning", "info"):
+    TEXT_CASE_SEVERITY = "critical"
+
 # ── Defect classes (severity drives the verdict) ─────────────────────
 #   critical → FAIL, warning → REVIEW, info → shown only
 DEFECT_CLASSES = {
@@ -561,6 +591,8 @@ DEFECT_CLASSES = {
                         "label": "วลีมาตรฐานแบรนด์สะกดไม่ตรงกับที่ approve"},
     "SPELL_FAIL":      {"severity": "warning",
                         "label": "คำไม่อยู่ใน dictionary (ต้องให้คนยืนยัน)"},
+    "MISMATCH_CASE":   {"severity": TEXT_CASE_SEVERITY,
+                        "label": "ตัวพิมพ์ใหญ่-เล็กไม่ตรงกันระหว่าง panel"},
     "UNREADABLE":      {"severity": "warning",
                         "label": "OCR อ่านไม่ชัด — ขอให้คนตรวจดูจุดนี้เอง"},
 }

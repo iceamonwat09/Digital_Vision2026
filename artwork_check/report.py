@@ -31,6 +31,7 @@ logger = logging.getLogger(__name__)
 _SEVERITY_RANK = {"critical": 2, "warning": 1, "info": 0}
 _CLASS_COLORS_BGR = {
     "MISMATCH_PANELS": (40, 40, 220),    # red
+    "MISMATCH_CASE":   (200, 60, 60),    # blue-ish red
     "MISMATCH_ZOOM":   (0, 140, 255),    # orange
     "NUMBER_FAIL":     (180, 0, 180),    # magenta
     "PHRASE_FAIL":     (0, 0, 160),      # dark red
