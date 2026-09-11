@@ -11,11 +11,12 @@ from __future__ import annotations
 import logging
 import os
 
+import cv2
 from flask import (Blueprint, Response, g, jsonify, render_template, request,
                    send_file, send_from_directory)
 
-from . import (config, ownership, pipeline, progress, report, translate, vocab,
-               zones as zones_mod)
+from . import (config, ownership, pdf_ingest, pipeline, progress, report,
+               translate, vocab, zones as zones_mod)
 
 logger = logging.getLogger(__name__)
 
@@ -206,6 +207,12 @@ def api_inspect(rec_id):
     confirm_reads = bool(body.get("confirm_reads"))
     # โหมดทดลอง: เทียบแผงต่อแผงระดับพิกเซลแทนชั้นเทียบข้อความ
     pixel_check = bool(body.get("pixel_check"))
+    # มุมที่ปุ่ม "↻ หมุนจอ" ค้างอยู่ตอนลากโซน — บันทึกลงรายงานเพื่อให้ภาพ
+    # ทั้งหน้าในรายงานอยู่แนวเดียวกับที่ผู้ใช้เพิ่งจัดมา (แสดงผลล้วน)
+    try:
+        page_rot = int(body.get("page_rot") or 0)
+    except (TypeError, ValueError):
+        page_rot = 0
     # จุดเช็คพอยต์ให้หน้าเว็บ poll ระหว่างตรวจ (advisory ล้วน ไม่แตะผลตรวจ)
     pg = progress.begin(rec_id, {"force_ocr": force_ocr,
                                  "split_bands": split_bands,
@@ -218,6 +225,7 @@ def api_inspect(rec_id):
                                       split_bands=split_bands,
                                       confirm_reads=confirm_reads,
                                       pixel_check=pixel_check,
+                                      page_rot=page_rot,
                                       progress=pg)
     except (ValueError, FileNotFoundError) as e:
         pg.finish(progress.FAIL, str(e))
@@ -300,14 +308,45 @@ def api_overlay_b(rec_id):
     return _send_artifact(rec_id, "overlay_b.png")
 
 
+def _rot_arg() -> int:
+    """``?rot=90|180|270`` — หมุนภาพ **ตอนเสิร์ฟ** เท่านั้น (แสดงผลล้วน).
+
+    ค่าอื่น/ไม่ส่ง/ปิดธง ⇒ ``0`` = เส้นทางเดิมเป๊ะ (``send_from_directory``
+    ส่งไฟล์บนดิสก์ตรง ๆ ไม่มีการถอดรหัส/เข้ารหัสภาพเลย)
+    """
+    if not config.REPORT_VIEW_ROTATE:
+        return 0
+    try:
+        r = int(request.args.get("rot", 0))
+    except (TypeError, ValueError):
+        return 0
+    return r if r in (90, 180, 270) else 0
+
+
 def _send_artifact(rec_id, name):
     try:
         d = report.inspection_dir(rec_id)
     except ValueError:
         return jsonify({"error": "bad id"}), 400
-    if not os.path.exists(os.path.join(d, name)):
+    path = os.path.join(d, name)
+    if not os.path.exists(path):
         return jsonify({"error": "not found"}), 404
-    return send_from_directory(d, name, max_age=0)
+    rot = _rot_arg()
+    if not rot:
+        return send_from_directory(d, name, max_age=0)
+    # หมุนแล้วส่งเป็น PNG ในหน่วยความจำ — ไฟล์บนดิสก์ไม่ถูกแตะ ⇒ ทุกชั้นที่
+    # อ่านไฟล์นี้ต่อ (propose_zones / snap_bbox / autopair) เห็นของเดิม
+    try:
+        img = cv2.imread(path, cv2.IMREAD_COLOR)
+        if img is None:
+            return send_from_directory(d, name, max_age=0)
+        ok, buf = cv2.imencode(".png", pdf_ingest.apply_rotation(img, rot))
+        if not ok:
+            return send_from_directory(d, name, max_age=0)
+    except Exception:
+        logger.exception("[artwork] rotate %s failed for %s", name, rec_id)
+        return send_from_directory(d, name, max_age=0)
+    return Response(buf.tobytes(), mimetype="image/png")
 
 
 @artwork_bp.route("/api/artwork/<rec_id>/crop")

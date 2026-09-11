@@ -509,10 +509,14 @@ def run_inspection(rec_id: str, zone_list: List[dict],
                    split_bands: bool = False,
                    confirm_reads: bool = False,
                    pixel_check: bool = False,
+                   page_rot: int = 0,
                    progress=None) -> dict:
     # ``progress`` = ตัวบันทึกจุดเช็คพอยต์ให้หน้าเว็บวาดเส้นความคืบหน้า
     # (advisory ล้วน — ไม่แตะผลตรวจ · ไม่ส่งมา = ไม่บันทึกอะไรเลย)
     pg = progress or progress_mod.NullRun()
+    # มุมที่ "จอหมุนอยู่" ตอนผู้ใช้ลากโซน — เก็บไว้เพื่อให้รายงานแสดงภาพ
+    # ทั้งหน้าในแนวเดียวกับที่คนเพิ่งจัดมา (แสดงผลล้วน ไม่แตะพิกัด/ผลตรวจ)
+    page_rot = page_rot if page_rot in (90, 180, 270) else 0
     pg.start("prepare")
     d = report.inspection_dir(rec_id)
     src = _find_source(d)
@@ -542,8 +546,25 @@ def run_inspection(rec_id: str, zone_list: List[dict],
     # (ignore-type zones are not OCR'd → left as the user set them.)
     rot_by_id = {r["zone_id"]: r.get("rotate", 0) for r in ocr_results}
     for z in zone_list:
+        # ⚠️ ต้องอ่านมุมที่ผู้ใช้ "ปักหมุด" ไว้ **ก่อน** บรรทัดที่ทับด้านล่าง
+        pinned = z.get("rotate") if z.get("rotate") in (90, 180, 270) else None
         if z["id"] in rot_by_id:
             z["rotate"] = rot_by_id[z["id"]]
+        # ── มุมสำหรับ "แสดงผล" เท่านั้น (ผู้ใช้ 11 ก.ย.) ─────────────
+        #
+        # ``rotate`` ข้างบนแปลว่า "OCR หมุนภาพไปกี่องศาก่อนอ่าน" ซึ่ง
+        # **เป็น 0 เสมอ** ในเส้นทาง ``pdf-text``/``none`` (อ่านจาก text
+        # layer ไม่ได้หมุนภาพเลย) ⇒ พอเอาไปทับ มุมที่ผู้ใช้ปักหมุดหายไป
+        # ⇒ การ์ด defect ของไฟล์ PDF ที่มี text layer ไม่เคยหมุนตามที่ตั้ง
+        # ไว้เลย ทั้งที่ภาพบนจอตอนลากโซนหมุนอยู่ (= สิ่งที่ผู้ใช้ร้องขอ)
+        #
+        # แยกเป็นคีย์ใหม่แทนการแก้ ``rotate`` โดยตั้งใจ: ``rotate`` ยังต้อง
+        # บอกความจริงว่า OCR ทำอะไร (เส้นความคืบหน้า/แท็บข้อความอ่านค่านี้)
+        # และ **ชั้น pixel ใช้ค่านี้ตัดสินใจหมุนก่อนทาบภาพ** ⇒ แตะไม่ได้
+        if config.REPORT_VIEW_ROTATE:
+            view = pinned if pinned is not None else z.get("rotate")
+            if view in (90, 180, 270):
+                z["view_rot"] = view
 
     vocab_words: set = set()
     vocab_phrases: List[str] = []
@@ -668,6 +689,9 @@ def run_inspection(rec_id: str, zone_list: List[dict],
         "summary": report.summarize(defects),
         "defects": defects,
         "zones": zone_list,
+        # มุมที่จอหมุนอยู่ตอนลากโซน — รายงาน (และหน้าประวัติ) หมุนภาพทั้งหน้า
+        # ตามค่านี้ **ตอนแสดงผลเท่านั้น** ไฟล์ preview/overlay ไม่ถูกแตะ
+        "page_rot": page_rot,
         "ocr": ocr_results,
         "elapsed_s": round(time.time() - t0, 2),
         "spell_layer_available": checks.spell_layer_available(),

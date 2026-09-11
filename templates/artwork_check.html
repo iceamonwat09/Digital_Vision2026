@@ -526,6 +526,15 @@
         </div>
       </div>
 
+      <!-- ภาพตัวอย่าง "ที่ OCR จะเห็น" ของโซนที่เลือก — อยู่ใต้กล่องภาพ
+           (ไม่ใช่ในแผง properties ที่ต้องเลื่อนจอลงไปดู) เพื่อให้เทียบกับ
+           ภาพบนจอได้ในสายตาเดียว. ตัวมันซ่อน/แสดงเองตามการเลือกโซน
+           (updateRotPreview) จึงย้ายออกมานอก #awProps ได้ตรง ๆ -->
+      <div id="awRotPreview" class="aw-rot-preview" style="display:none;">
+        <div class="aw-rot-cap">🔎 ภาพที่ OCR จะเห็น (<span id="awRotState"></span>) — คลิก ↻ ที่มุมโซนเพื่อหมุน</div>
+        <img id="awRotThumb" class="aw-rot-thumb" alt="ตัวอย่างที่หมุนแล้ว">
+      </div>
+
       <div class="aw-row">
         <button id="awAddZone" class="aw-btn" disabled>+ เพิ่มโซน (ลากวาดบนภาพ)</button>
         <button id="awClearZones" class="aw-btn aw-btn-danger" disabled>🗑 ลบโซนทั้งหมด</button>
@@ -646,10 +655,6 @@
         </div>
         <div id="awHlHint" class="aw-hl-hint" style="display:none;"></div>
         <div id="awSizeHint" class="aw-size-hint" style="display:none;"></div>
-        <div id="awRotPreview" class="aw-rot-preview" style="display:none;">
-          <div class="aw-rot-cap">🔎 ภาพที่ OCR จะเห็น (<span id="awRotState"></span>) — คลิก ↻ ที่มุมโซนเพื่อหมุน</div>
-          <img id="awRotThumb" class="aw-rot-thumb" alt="ตัวอย่างที่หมุนแล้ว">
-        </div>
       </div>
 
       <div class="aw-hint">

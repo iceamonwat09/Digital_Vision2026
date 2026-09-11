@@ -600,14 +600,19 @@
         '</div>' +
       '</div>';
     }
-    const previewUrl = "/api/artwork/" + esc(rep.id) + "/preview.png?t=" + ts;
-    const overlayUrl = "/api/artwork/" + esc(rep.id) + "/overlay.png?t=" + ts;
+    // ภาพทั้งหน้าหมุนตาม "มุมที่จอหมุนอยู่ตอนลากโซน" — ผู้ตรวจเพิ่งจัดให้
+    // อ่านออกมาแล้ว รายงานไม่ควรเหวี่ยงกลับไปแนวเดิม. แสดงผลล้วน: หมุน
+    // ตอนเสิร์ฟไฟล์ ไม่แตะพิกัดโซน/ผลตรวจ · รายงานเก่าไม่มีคีย์ = ไม่หมุน
+    const pr = rep.page_rot;
+    const rotQ = (pr === 90 || pr === 180 || pr === 270) ? "&rot=" + pr : "";
+    const previewUrl = "/api/artwork/" + esc(rep.id) + "/preview.png?t=" + ts + rotQ;
+    const overlayUrl = "/api/artwork/" + esc(rep.id) + "/overlay.png?t=" + ts + rotQ;
     html += imgPairHtml(previewUrl, overlayUrl,
       (hasRef ? "🅰 " : "") + "🖼 Artwork ต้นฉบับ",
       (hasRef ? "🅰 " : "") + "🔍 ผลตรวจ — โซนที่พบปัญหา", false);
     if (hasRef) {
-      const previewUrlB = "/api/artwork/" + esc(rep.id) + "/preview_b.png?t=" + ts;
-      const overlayUrlB = "/api/artwork/" + esc(rep.id) + "/overlay_b.png?t=" + ts;
+      const previewUrlB = "/api/artwork/" + esc(rep.id) + "/preview_b.png?t=" + ts + rotQ;
+      const overlayUrlB = "/api/artwork/" + esc(rep.id) + "/overlay_b.png?t=" + ts + rotQ;
       html += imgPairHtml(previewUrlB, overlayUrlB,
         "🅱 ไฟล์อ้างอิง (ชิ้นงาน)", "🅱 ผลตรวจ — โซนที่พบปัญหา", true);
     }
@@ -636,10 +641,13 @@
         // field doc → เป็น "a" เหมือนเดิม
         const docOf = (zz) => (zz.doc === "b" ? "b" : "a");
         const docTag = (zz) => (hasRef ? (docOf(zz) === "b" ? "🅱 " : "🅰 ") : "");
-        // report ที่เซฟไว้เก็บองศาที่ใช้จริงเป็นเลข (0/90/180/270);
-        // report เก่าไม่มี field → 0 (crop เหมือนเดิม)
+        // ``view_rot`` = มุมที่ผู้ใช้ปักหมุดไว้ (มุมที่เขา "เห็นด้วยตา"
+        // ตอนลากโซน) · ``rotate`` = มุมที่ OCR หมุนจริง ซึ่งเป็น 0 เสมอใน
+        // เส้นทาง text layer ⇒ ถ้าดูแต่ ``rotate`` การ์ดของไฟล์ที่มี text
+        // layer จะไม่หมุนตามเลย. รายงานเก่าไม่มีคีย์ใหม่ ⇒ ถอยไปใช้ของเดิม
         const rotOf = (zz) => {
-          const rr = zz.rotate;
+          const rr = (zz.view_rot === 90 || zz.view_rot === 180 ||
+                      zz.view_rot === 270) ? zz.view_rot : zz.rotate;
           return (rr === 90 || rr === 180 || rr === 270) ? "&rotate=" + rr : "";
         };
         // กรอบแดงที่ "คำที่มีปัญหา" — เฉพาะรูปฝั่ง subject (โซนของ defect
@@ -2339,7 +2347,10 @@
                                auto_rotate: autoRotate, force_ocr: forceOcrOn(),
                                split_bands: splitBandsOn(),
                                confirm_reads: confirmReadsOn(),
-                               pixel_check: pixelCheckOn() }),
+                               pixel_check: pixelCheckOn(),
+                               // มุมที่ "↻ หมุนจอ" ค้างอยู่ตอนลากโซน —
+                               // รายงานจะแสดงภาพทั้งหน้าในแนวเดียวกัน
+                               page_rot: pageRot }),
       });
       stopFlow();
       renderReport(rep, resultBox);
