@@ -90,6 +90,7 @@ def highlight_risk(bbox, page_w_pt: float, page_h_pt: float,
     return ""
 
 import json
+import math
 import os
 import re
 import time
@@ -102,6 +103,153 @@ from . import config
 
 
 VALID_TYPES = ("panel", "zoom", "header", "ignore")
+
+
+# ── ขนาดโซน ↔ ความละเอียดที่ตัวอ่าน OCR ได้จริง (advisory ล้วน) ────────
+# Google ประกาศกฎการรับภาพของ Gemini ไว้ว่า: ภาพที่ด้านใดด้านหนึ่งเกิน
+# 384 px จะถูกหั่นเป็นไทล์ขนาด clamp(min(W,H)/1.5, 256, 768) แล้ว
+# **ทุกไทล์ถูกขยายเป็น 768x768** ⇒ กำลังขยายที่โมเดลเห็น = 768 / tile.
+#
+# ผลที่สวนสามัญสำนึกและเป็นหัวใจของด่านนี้: **ยิ่งด้านสั้นของภาพใหญ่
+# ยิ่งได้ขยายน้อยลง** และพอด้านสั้นแตะ 768*1.5 = 1152 px ก็ไม่ได้ขยาย
+# อีกเลยไม่ว่าจะส่งภาพใหญ่แค่ไหน (= 65.0 mm ที่ OCR_DPI 450)
+#
+# วัดกับไฟล์จริง (John West · แผงโภชนาการเดียวกันของสองไฟล์ ·
+# gemini-2.5-flash · อ่าน 3 รอบ):
+#   69.8x66.2 mm -> 1236x1172 px -> 4 ไทล์ -> ขยาย 1.00 -> เลขอาหรับ
+#                   (٧ ١ ٠) หายเกือบทุกรอบ  => defect ปลอม 3-5 รายการ
+#   72.8x50.4 mm -> 1289x892  px -> 6 ไทล์ -> ขยาย 1.29 -> อ่านครบทุกรอบ
+# เกณฑ์ข้างล่างตั้งจากช่องว่างที่วัดได้นั้น ไม่ใช่จากทฤษฎี
+#
+# ⚠️ ค่าเหล่านี้ถูกคัดลอกไว้ใน static/js/artwork_check.js ด้วย (คำเตือน
+#    ต้องขึ้นตอนกำลังลากโซน = ต้องคำนวณฝั่งเบราว์เซอร์) —
+#    tests/test_artwork_zone_quality.py อ่านไฟล์ JS มาเทียบกันกันค่าเพี้ยน
+GEM_SMALL_SIDE = 384        # ทั้งสองด้าน <= นี้ = ไทล์เดียว ไม่หั่น
+GEM_TILE_DIV = 1.5
+GEM_TILE_MIN = 256
+GEM_TILE_MAX = 768
+# ── เกณฑ์ตัดสิน: "ความละเอียดที่โมเดลเห็น (dpi)" ────────────────────
+#
+# ⚠️ เดิมตัดสินด้วย **กำลังขยาย (mag)** ซึ่งวัดแล้วว่า **ไร้ความหมายกับ
+#    โซนเล็ก** — ชั้นเพิ่ม DPI (OCR_CROP_MIN_SIDE) ตรึงด้านยาวของภาพที่ส่ง
+#    ไว้ที่ 1200 px ⇒ กำลังขยายกับความละเอียดต้นทางหักล้างกันพอดี วัดได้ว่า
+#    โซน 28x29 (เต็มแผงพอดี) กับ 28x34 (เลยขอบแผง) โมเดลเห็นเท่ากันเป๊ะ
+#    (~1050 dpi ทั้งคู่) แต่ป้ายเดิมให้ ✗ กับ ✓ ⇒ **บอกให้ผู้ใช้ตัดเนื้อหาทิ้ง**
+#    ซึ่งแย่กว่าไม่แนะนำเลย (กฎเหล็กข้อ 2)
+#
+# dpi ที่โมเดลเห็นรวมทุกชั้นแล้ว (เพิ่ม DPI + ย่อเพราะชนเพดาน + กำลังขยาย
+# จากการหั่นไทล์) ⇒ ใช้ได้ทั้งโซนเล็กและโซนใหญ่ และตรงกับที่วัดจริง 2 จุด:
+#   450 dpi (= พื้นของ OCR_DPI พอดี) -> เลขอาหรับหายเกือบทุกรอบ
+#   581 dpi                           -> อ่านครบทุกรอบ
+# ⚠️ **มีแค่ 2 จุด** — เกณฑ์ข้างล่างวางให้คร่อมทั้งสอง ไม่ใช่เส้นที่พิสูจน์แล้ว
+ZONE_DPI_OK = 580.0         # >= นี้ = เท่ากับเคสที่วัดว่าอ่านครบ
+ZONE_DPI_BAD = 500.0        # < นี้ = ใกล้พื้น 450 ซึ่งวัดว่าอ่านตก
+# 1 ไทล์ = 258 token เสมอ (ทุกไทล์ถูกขยายเป็น 768x768 เท่ากันหมด) ⇒
+# "จำนวนไทล์" คือ **โควตาความสนใจ** ที่โมเดลมีให้กับภาพนี้ และเป็นตัวเลข
+# ที่ผู้ใช้เทียบสองโซนกันได้ตรง ๆ
+#
+# ⚠️ ทำไมต้องพูดถึงไทล์ ไม่ใช่ "กำลังขยาย": วัดสองโซนที่ผลอ่านต่างกันจริง
+#    แล้วพบว่า **ตัวหนังสือในสายตาโมเดลเท่ากัน** (z1 = 71.1 px · b2 = 68.9
+#    px ต่างกัน 3%) เพราะแผงของ z1 ใหญ่กว่าบนแผ่นจริง กำลังขยายที่น้อยกว่า
+#    จึงหักล้างกันพอดี ⇒ ป้ายเดิมที่เขียนว่า "ไม่ได้ขยาย" **บอกสาเหตุผิด**
+#    สิ่งที่ต่างจริงคือ token ต่อบรรทัด (z1 ~62 · b2 ~93) ⇒ z1 ต้องเลือกว่า
+#    จะพิมพ์อะไรทิ้ง แล้วแถวสั้น ๆ ที่ซ้ำกันหายก่อน (ตรงกับที่วัดได้จริง)
+GEM_TOKENS_PER_TILE = 258
+# ⚠️ กับดักที่วัดเจอตอนทดสอบบนเบราว์เซอร์: เกณฑ์จริงคือ "ด้านสั้นของ **ภาพ
+#    ที่ส่งจริง**" ไม่ใช่ "ด้านสั้นของโซนเป็นมิลลิเมตร" — เพราะชั้นเพิ่ม DPI
+#    ให้โซนเล็ก (OCR_CROP_MIN_SIDE = 1200) ดันโซน "เกือบจัตุรัส" ให้ทั้งสอง
+#    ด้านไปอยู่ใกล้ 1200 พร้อมกัน ⇒ ด้านสั้นทะลุ 1152 ทั้งที่โซนเล็กกว่า 65 mm
+#    วัดจริงบนโซนกว้าง 60 mm:  สูง 50 -> ok · 60-62 -> bad · 66 -> warn · 70 -> warn
+#    ⇒ ข้อความบน UI ต้องอ้าง "ด้านสั้นของภาพที่ส่ง (px)" และแนะให้ทำโซนให้
+#      **แบนลง** (ไม่ใช่แค่ "เล็กลง") ห้ามไปอ้างเลข mm ตายตัว
+
+
+def ocr_crop_size(bbox, page_w_pt: float, page_h_pt: float) -> tuple:
+    """``(กว้าง_px, สูง_px, ตัวคูณ)`` ของภาพที่ ``ocr._render_for_ocr``
+    จะส่งให้ OCR backend สำหรับ ``bbox`` นี้ — เลขคณิตล้วน ไม่เรนเดอร์.
+
+    ``ตัวคูณ < 1.0`` = ภาพโดนเพดาน ``OCR_CROP_MAX_SIDE`` ย่อลง
+    (เสีย dpi จริง ไม่ใช่แค่เสียกำลังขยาย).
+    """
+    x, y, w, h = [float(v) for v in bbox]
+    pw = max(1.0, w * page_w_pt) / 72.0 * config.OCR_DPI
+    ph = max(1.0, h * page_h_pt) / 72.0 * config.OCR_DPI
+    scale = 1.0
+    longest = max(pw, ph)
+    if config.OCR_CROP_MAX_SIDE and longest > config.OCR_CROP_MAX_SIDE:
+        scale = config.OCR_CROP_MAX_SIDE / longest
+        pw, ph = pw * scale, ph * scale
+    # ชั้น "เพิ่ม DPI ให้โซนเล็ก" ของ _render_for_ocr — ผลลัพธ์ไม่มีทาง
+    # เกิน OCR_CROP_MIN_SIDE (factor = min(4, MIN/longest)) จึงไม่ต้อง
+    # เช็คเพดานซ้ำเหมือน predict_crop_size ของชั้นกรอบแดง
+    longest = max(pw, ph)
+    if config.OCR_CROP_MIN_SIDE and longest < config.OCR_CROP_MIN_SIDE:
+        f = min(config.OCR_DPI_MAX_FACTOR,
+                config.OCR_CROP_MIN_SIDE / longest)
+        pw, ph = pw * f, ph * f
+    return pw, ph, scale
+
+
+def gemini_tiling(w_px: float, h_px: float) -> tuple:
+    """``(จำนวนไทล์, กำลังขยาย)`` ตามกฎที่ Google ประกาศ."""
+    if w_px <= GEM_SMALL_SIDE and h_px <= GEM_SMALL_SIDE:
+        return 1, 1.0
+    tile = min(w_px, h_px) / GEM_TILE_DIV
+    tile = max(float(GEM_TILE_MIN), min(float(GEM_TILE_MAX), tile))
+    return (int(math.ceil(w_px / tile)) * int(math.ceil(h_px / tile)),
+            GEM_TILE_MAX / tile)
+
+
+def zone_short_side_limit_mm() -> float:
+    """ด้านสั้นของโซน (มม.) ที่เกินแล้วจะไม่ได้กำลังขยายจาก OCR อีกเลย."""
+    return GEM_TILE_MAX * GEM_TILE_DIV / float(config.OCR_DPI) * 25.4
+
+
+def zone_ocr_quality(bbox, page_w_pt: float, page_h_pt: float) -> dict:
+    """โซนนี้จะถูกส่งให้ OCR ด้วยความละเอียดที่โมเดลเห็นเท่าไร.
+
+    ``level``:
+      ``"bad"``  โดนย่อเพราะชนเพดาน หรือไม่ได้กำลังขยายเลย
+      ``"warn"`` ได้ขยายบ้างแต่ยังต่ำกว่าที่วัดว่าปลอดภัย
+      ``"ok"``   ปลอดภัย
+    advisory 100% — ไม่ห้ามวาด ไม่แตะ defect/verdict/การนับ
+    """
+    try:
+        pw, ph, scale = ocr_crop_size(bbox, page_w_pt, page_h_pt)
+        tiles, mag = gemini_tiling(pw, ph)
+    except Exception:                            # pragma: no cover
+        return {}
+    w_mm = max(1e-6, float(bbox[2]) * page_w_pt) / 72.0 * 25.4
+    h_mm = max(1e-6, float(bbox[3]) * page_h_pt) / 72.0 * 25.4
+    downscaled = scale < 0.999
+    # ⚠️ ห้ามคิดจาก ``scale`` — มันรายงานเฉพาะ "ย่อเพราะชนเพดาน" ไม่รวม
+    #    ชั้นเพิ่ม DPI ให้โซนเล็ก ⇒ eff_dpi เดิมรายงาน 450 ให้โซนที่จริง ๆ
+    #    ถูกเรนเดอร์ที่ 1051 dpi (ต่ำกว่าความจริง 2.3 เท่า)
+    eff_dpi = pw / max(1e-6, w_mm / 25.4) * mag
+    if eff_dpi >= ZONE_DPI_OK:
+        level = "ok"
+    elif eff_dpi >= ZONE_DPI_BAD:
+        level = "warn"
+    else:
+        level = "bad"
+    return {"level": level, "w": int(round(pw)), "h": int(round(ph)),
+            "tiles": tiles, "mag": round(mag, 2),
+            "tokens": int(tiles) * GEM_TOKENS_PER_TILE,
+            # ด้านของไทล์ (px ของภาพต้นทางที่ 1 ไทล์กิน) — ตัวเลขเดียวที่
+            # **เทียบข้ามขนาดโซนได้** เพราะไม่ขึ้นกับพื้นที่: ยิ่งเล็ก =
+            # สุ่มตัวอย่างละเอียด = token ต่อเนื้อหาเท่าเดิมยิ่งมาก และ
+            # ตันที่ GEM_TILE_MAX (768) ซึ่งคือเงื่อนไขของ level "bad"
+            #   ⚠️ "จำนวนไทล์" ห้ามเอาไปเป็นป้ายตัดสิน — มันโตตามพื้นที่
+            #      โซนด้วย ⇒ โซนใหญ่ได้ไทล์เยอะทั้งที่หยาบที่สุด
+            "tile_px": int(round(GEM_TILE_MAX / mag)),
+            "eff_dpi": int(round(eff_dpi)),
+            "w_mm": round(w_mm, 1), "h_mm": round(h_mm, 1),
+            "short_mm": round(min(w_mm, h_mm), 1),
+            "short_px": int(round(min(pw, ph))),
+            "limit_px": int(round(GEM_TILE_MAX * GEM_TILE_DIV)),
+            "limit_mm": round(zone_short_side_limit_mm(), 1),
+            "downscaled": downscaled}
+
 
 # ลำดับ group อัตโนมัติ — ข้าม I/O กันสับสนกับเลข 1/0 (ชุดเดียวกับที่
 # ฝั่ง JS ใช้ตอนลากวาดโซนเพิ่มเอง — ห้ามแก้ข้างเดียว)

@@ -32,6 +32,66 @@
      — จำกัดความกว้างเฉพาะกล่องพวกนี้ ส่วน stage/ตารางยังใช้เต็มความกว้าง */
   .aw-props, .aw-hint, .aw-warn { max-width: 1100px; }
 
+  /* โหมดทดลอง "อ่านซ้ำ 2 รอบ แล้วยืนยันผล" — advisory ล้วน ไม่แตะ verdict.
+     ปกติ = เทา (แค่บอกว่ายืนยันแล้ว) · มีรายการตกไป = เหลืองอ่อน */
+  .aw-confirm { margin-top:8px; padding:8px 12px; border-radius:6px;
+                background:#f8fafc; border:1px solid #e3e7ec;
+                font-size:12px; color:#546e7a; line-height:1.7; }
+  .aw-confirm.warn { background:#fff8e1; border-color:#ffe082; color:#6d4c41; }
+  .aw-confirm-list { margin-top:6px; }
+  .aw-confirm-item { font-size:12px; color:#6d4c41; padding-left:10px; }
+  .aw-confirm-item code { background:#eceff1; border-radius:3px; padding:0 4px; }
+  /* ── เส้นความคืบหน้าแนวนอน + จุดเช็คพอยต์ (โหมดตรวจ) ────────────── */
+  .aw-flow { margin:10px 0 4px; }
+  .aw-flow.done { border:1px solid #e0e0e0; border-radius:8px;
+                  padding:8px 10px; background:#fafafa; }
+  /* ส่วนที่ต่างของบรรทัด — คงบรรทัดเต็มไว้ แต่ชี้ให้เห็นว่าต่างตรงไหน */
+  mark.aw-dx { background:#ffcdd2; color:#b71c1c; font-weight:700;
+               border-radius:2px; padding:0 1px; }
+  .aw-flow-head { font-size:12px; font-weight:700; color:#546e7a;
+                  margin-bottom:6px; }
+  .aw-flow-line { display:flex; align-items:flex-start; gap:0;
+                  overflow-x:auto; padding:6px 2px 2px; }
+  .aw-flow-step { flex:1 1 0; min-width:74px; position:relative;
+                  text-align:center; font-size:11px; color:#78909c; }
+  .aw-flow-step::before { content:""; position:absolute; top:9px; left:0;
+                  width:50%; height:2px; background:#cfd8dc; }
+  .aw-flow-step::after { content:""; position:absolute; top:9px; left:50%;
+                  width:50%; height:2px; background:#cfd8dc; }
+  .aw-flow-step:first-child::before,
+  .aw-flow-step:last-child::after { background:transparent; }
+  .aw-flow-dot { position:relative; z-index:1; display:inline-flex;
+                 align-items:center; justify-content:center;
+                 width:20px; height:20px; border-radius:50%;
+                 background:#eceff1; border:2px solid #cfd8dc;
+                 color:#fff; font-size:11px; font-weight:700; line-height:1; }
+  .aw-flow-label { display:block; margin-top:3px; line-height:1.25; }
+  .aw-flow-ms { display:block; font-size:10px; color:#b0bec5; }
+  .aw-flow-step.running .aw-flow-dot { background:#1e88e5; border-color:#1e88e5;
+                 animation:awFlowPulse 1s ease-in-out infinite; }
+  .aw-flow-step.running { color:#1565c0; font-weight:700; }
+  .aw-flow-step.ok .aw-flow-dot { background:#2e7d32; border-color:#2e7d32; }
+  .aw-flow-step.ok { color:#2e7d32; }
+  .aw-flow-step.warn .aw-flow-dot { background:#ef6c00; border-color:#ef6c00; }
+  .aw-flow-step.warn { color:#ef6c00; }
+  .aw-flow-step.fail .aw-flow-dot { background:#c62828; border-color:#c62828; }
+  .aw-flow-step.fail { color:#c62828; }
+  .aw-flow-step.skip .aw-flow-dot { background:#fff; border-style:dashed;
+                 color:#b0bec5; }
+  @keyframes awFlowPulse { 0%,100%{transform:scale(1)} 50%{transform:scale(1.25)} }
+  .aw-flow-detail { margin-top:6px; font-size:12px; }
+  .aw-flow-row { padding:3px 8px; border-left:3px solid #cfd8dc;
+                 margin-bottom:3px; background:#fafafa; color:#455a64; }
+  .aw-flow-row.ok { border-left-color:#2e7d32; }
+  .aw-flow-row.warn { border-left-color:#ef6c00; background:#fff8e1; }
+  .aw-flow-row.fail { border-left-color:#c62828; background:#ffebee; }
+  .aw-flow-row.skip { border-left-color:#cfd8dc; color:#90a4ae; }
+  .aw-flow-row.running { border-left-color:#1e88e5; background:#e3f2fd; }
+  .aw-flow-note { font-size:11px; color:#78909c; padding-left:10px;
+                  font-family:ui-monospace,Menlo,Consolas,monospace; }
+  .aw-confirm-num { font-size:11px; color:#8d6e63; padding-left:10px; font-family:ui-monospace,Menlo,Consolas,monospace; }
+
+
   .aw-panel  { background:#fff; border:1px solid #e3e7ec; border-radius:8px; padding:16px 18px; }
   .aw-panel h3 { margin:0 0 12px 0; font-size:16px; color:#0d47a1; }
 
@@ -73,10 +133,23 @@
   .aw-zone.doc-b.selected .aw-zone-tag { background:rgba(229,57,53,.92); }
   .aw-img-label.ref-label { background:#e0f2f1; color:#00695c; border-bottom-color:#b2dfdb; }
 
-  /* rubber-band rectangle while drawing a new zone */
+  /* rubber-band rectangle while drawing a new zone.
+     สีของกรอบนี้เป็น "ช่องว่าง" ช่องเดียวที่ยังไม่มีความหมายอื่น จึงเอามา
+     บอกคุณภาพขนาดโซนสด ๆ ได้ (สีขอบของ .aw-zone ถูกใช้บอกชนิดโซน/ไฟล์/
+     ถูกเลือกอยู่ไปหมดแล้ว — ทับแล้วผู้ใช้แยกไม่ออก) */
   .aw-drawbox { position:absolute; border:2px dashed #1565c0;
                 background:rgba(21,101,192,.12); pointer-events:none;
                 box-sizing:border-box; z-index:5; }
+  .aw-drawbox.q-ok   { border-color:#2e7d32; background:rgba(46,125,50,.12); }
+  .aw-drawbox.q-warn { border-color:#f9a825; background:rgba(249,168,37,.14); }
+  .aw-drawbox.q-bad  { border-color:#c62828; background:rgba(198,40,40,.14); }
+  .aw-drawbox-tag { position:absolute; left:0; bottom:100%; margin-bottom:2px;
+                    background:rgba(38,50,56,.92); color:#fff; font-size:11px;
+                    line-height:1.5; padding:1px 6px; border-radius:4px;
+                    white-space:nowrap; font-weight:600; }
+  .aw-drawbox.q-ok   .aw-drawbox-tag { background:rgba(46,125,50,.95); }
+  .aw-drawbox.q-warn .aw-drawbox-tag { background:rgba(249,168,37,.97); color:#3e2723; }
+  .aw-drawbox.q-bad  .aw-drawbox-tag { background:rgba(198,40,40,.95); }
 
   /* zone editor */
   /* ช่องมองของตัวแก้โซน. ความกว้างของกล่องนี้ไม่เข้าไปในสูตรพิกัดโซนเลย
@@ -116,6 +189,11 @@
      ทับ และตอนกด "เพิ่มโซน" ถูก crosshair (inline บน .aw-stage) ทับ */
   .aw-stage-box.aw-pannable { cursor:grab; }
   .aw-stage-box.aw-panning, .aw-stage-box.aw-panning * { cursor:grabbing !important; }
+  /* ตัวห่อสำหรับ "หมุนเฉพาะการแสดงผล" — กล่องนี้กินพื้นที่เท่ากับภาพหลัง
+     หมุน ส่วน .aw-stage ข้างในถูก transform ⇒ โซนที่วางทับอยู่หมุนตามไป
+     ด้วยเองโดยไม่ต้องแก้สูตรตำแหน่งของโซนเลย */
+  .aw-stage-rot { position:relative; display:inline-block; line-height:0; }
+  .aw-stage-rot > .aw-stage { transform-origin:0 0; }
   .aw-stage  { position:relative; display:inline-block; line-height:0; }
   /* ห้ามให้เบราว์เซอร์ "ลากรูป" (native image drag) แย่ง event ตอน pan
      ด้วยปุ่มซ้าย — preventDefault ใน JS กันได้แล้ว นี่คือชั้นกันซ้ำ */
@@ -128,6 +206,24 @@
   .aw-zone.t-zoom   { border-style:dashed; border-color:rgba(255,143,0,.9); }
   .aw-zone.t-header { border-color:rgba(106,27,154,.85); }
   .aw-zone.t-ignore { border-color:rgba(120,144,156,.6); background:rgba(120,144,156,.12); }
+  /* คุณภาพขนาดโซน = วงแหวนรอบนอก — ไม่แตะสีขอบ จึงอยู่ร่วมกับ
+     t-zoom/t-header/doc-b/selected ได้ทุกคู่ */
+  .aw-zone.q-warn { box-shadow:0 0 0 3px rgba(249,168,37,.45); }
+  .aw-zone.q-bad  { box-shadow:0 0 0 3px rgba(198,40,40,.40); }
+  .aw-zone-size { position:absolute; left:-1px; bottom:-1px; font-size:9px;
+                  line-height:14px; height:14px; padding:0 4px;
+                  border-radius:0 4px 0 0; white-space:nowrap;
+                  pointer-events:none; opacity:0; transition:opacity .12s;
+                  background:rgba(46,125,50,.92); color:#fff; font-weight:700; }
+  .aw-zone-size.q-warn { background:rgba(249,168,37,.95); color:#3e2723; }
+  .aw-zone-size.q-bad  { background:rgba(198,40,40,.92); }
+  .aw-zone:hover .aw-zone-size, .aw-zone.selected .aw-zone-size { opacity:1; }
+  /* บรรทัดตัวเลขในแผง properties */
+  .aw-size-hint { margin-top:6px; padding:6px 8px; border-radius:6px;
+                  font-size:12px; line-height:1.5; }
+  .aw-size-hint.q-ok   { background:#e8f5e9; color:#1b5e20; }
+  .aw-size-hint.q-warn { background:#fff8e1; color:#7a5900; }
+  .aw-size-hint.q-bad  { background:#ffebee; color:#b71c1c; }
   .aw-zone-tag { position:absolute; top:-1px; left:-1px; background:rgba(25,118,210,.9); color:#fff;
                  font-size:10px; line-height:1; padding:2px 5px; border-radius:0 0 4px 0; pointer-events:none; white-space:nowrap; }
   .aw-zone.selected .aw-zone-tag { background:rgba(229,57,53,.92); }
@@ -408,6 +504,11 @@
           <button id="awZoomFitPage" class="aw-btn aw-btn-sm"
                   title="ย่อให้เห็นทั้งแผ่นในครั้งเดียว — พอดีทั้งกว้างและสูง (ไม่เปลี่ยนพิกัดโซน)">⛶ พอดีทั้งหน้า</button>
         </span>
+        <span class="aw-tb-group">
+          <span class="aw-tb-label">↻ หมุนจอ</span>
+          <button id="awPageRot" class="aw-btn aw-btn-sm"
+                  title="หมุนเฉพาะภาพที่แสดง เพื่อให้อ่านตัวหนังสือที่ตั้งได้ — พิกัดโซนที่เก็บไม่เปลี่ยน และโซนใหม่จะตั้งมุมให้ OCR อ่านแนวนอนให้อัตโนมัติ">0°</button>
+        </span>
         <span class="aw-pan-hint">✋ ลากบนพื้นที่ว่างเพื่อเลื่อนภาพ (หรือกดล้อเมาส์ลาก)</span>
       </div>
 
@@ -418,9 +519,20 @@
           หรือกด "+ เพิ่มโซน" เพื่อกำหนดเอง<br>
           สามารถปรับขนาด ย้าย หรือลบโซน (ปุ่ม Delete) ได้ก่อนส่งตรวจสอบ
         </div>
-        <div id="awStage" class="aw-stage" style="display:none;">
-          <img id="awPreviewImg" alt="artwork preview">
+        <div id="awStageRot" class="aw-stage-rot" style="display:none;">
+          <div id="awStage" class="aw-stage">
+            <img id="awPreviewImg" alt="artwork preview">
+          </div>
         </div>
+      </div>
+
+      <!-- ภาพตัวอย่าง "ที่ OCR จะเห็น" ของโซนที่เลือก — อยู่ใต้กล่องภาพ
+           (ไม่ใช่ในแผง properties ที่ต้องเลื่อนจอลงไปดู) เพื่อให้เทียบกับ
+           ภาพบนจอได้ในสายตาเดียว. ตัวมันซ่อน/แสดงเองตามการเลือกโซน
+           (updateRotPreview) จึงย้ายออกมานอก #awProps ได้ตรง ๆ -->
+      <div id="awRotPreview" class="aw-rot-preview" style="display:none;">
+        <div class="aw-rot-cap">🔎 ภาพที่ OCR จะเห็น (<span id="awRotState"></span>) — คลิก ↻ ที่มุมโซนเพื่อหมุน</div>
+        <img id="awRotThumb" class="aw-rot-thumb" alt="ตัวอย่างที่หมุนแล้ว">
       </div>
 
       <div class="aw-row">
@@ -431,10 +543,15 @@
                 title="วาดกรอบบนไฟล์หลักให้ครบก่อน แล้วกดปุ่มนี้ ระบบจะหาบล็อกเดียวกันบนไฟล์อ้างอิงแล้วสร้างกรอบคู่ให้อัตโนมัติ (ต้องแนบไฟล์อ้างอิงก่อน)">🔗 หากรอบคู่อัตโนมัติ</button>
         <button id="awTranslateMain" class="aw-btn aw-btn-primary" disabled
                 title="อ่านข้อความในโซน ตรวจการสะกด และแปลเป็นอังกฤษ — เปิดแท็บ “ข้อความ + คำแปล” ให้อัตโนมัติ">📖 แปลภาษา →</button>
+        <!-- ⚠️ ปุ่มนี้ถูก "ซ่อน" ไม่ใช่ "ลบ" (config.PIXDIFF_UI = ปิดอยู่) —
+             setBusy() ใน artwork_check.js อ้าง id นี้ ถ้าเอา element ออกจาก
+             DOM ลูปนั้นจะตายแล้วปุ่มที่เหลือค้างทั้งแถบ. ตั้ง env
+             ARTWORK_PIXDIFF_UI=1 แล้วรีสตาร์ต = ปุ่มกลับมาเหมือนเดิม -->
         <button id="awPixdiff" class="aw-btn" disabled
+                {% if not pixdiff_ui %}style="display:none;" aria-hidden="true" tabindex="-1"{% endif %}
                 title="เทียบภาพระดับพิกเซลระหว่างไฟล์หลัก (ฉบับใหม่) กับไฟล์อ้างอิง (ฉบับเก่า) — จับได้ทั้งฟอนต์เปลี่ยน สีเพี้ยน โลโก้ขยับ โดยไม่ง้อ OCR · ต้องแนบไฟล์อ้างอิงและตั้ง 'กลุ่ม' ให้ตรงกันก่อน · ไม่กระทบผลตรวจ">🔍 เทียบภาพเก่า/ใหม่</button>
         <button id="awInspect" class="aw-btn" disabled
-                title="ตรวจครบทุกชั้น (เทียบ panel/กลุ่ม/ไฟล์อ้างอิง) — ฟีเจอร์นี้อยู่ระหว่างการทดสอบ">ส่งตรวจสอบ →
+                title="เทียบความเหมือนระหว่างแผง/กลุ่ม/ไฟล์อ้างอิง + ตรวจตัวเลขและบาร์โค้ด — ไม่ตรวจการสะกดคำ (ใช้ปุ่ม 📖 แปลภาษา สำหรับเรื่องนั้น) · ฟีเจอร์นี้อยู่ระหว่างการทดสอบ">ส่งตรวจสอบ →
           <span class="aw-btn-note">(อยู่ระหว่างการทดสอบ)</span></button>
       </div>
 
@@ -471,6 +588,54 @@
           เปิดเมื่อไฟล์นั้น <b>ฟอนต์พัง</b> จนข้อความใน PDF ใช้ไม่ได้ทั้งใบ</span>
       </div>
 
+      <!-- โหมดทดลอง: หั่นโซนเป็นแถบตามช่องว่างระหว่างบรรทัดก่อนส่ง OCR.
+           Gemini หั่นภาพเป็นไทล์ clamp(min(W,H)/1.5,256,768) แล้วขยายทุก
+           ไทล์เป็น 768x768 ⇒ ด้านสั้นเล็กลง = ตัวหนังสือใหญ่ขึ้นในสายตา
+           โมเดล. วัดบนโซนจริง: บรรทัด 71 -> 213 px และไทล์ 4 -> 30.
+           ⚠️ ย่อภาพลงไม่ช่วย (หักล้างกันพอดี) ต้อง "ตัดชิ้น" เท่านั้น -->
+      <div class="aw-row" style="margin-top:6px;">
+        <label class="aw-rotate-mode" title="ปิด (ค่าเริ่มต้น) = ส่งภาพโซนทั้งใบครั้งเดียวเหมือนเดิม · เปิด = หั่นเป็นแถบตามช่องว่างระหว่างบรรทัดแล้วยิง OCR ทีละแถบ (ช้ากว่าและใช้โควตามากกว่าตามจำนวนแถบ)">
+          <input type="checkbox" id="awSplitBands"> 🧪 หั่นโซนเป็นแถบก่อนส่ง OCR (ทดลอง)
+        </label>
+        <span class="aw-rotate-hint" style="font-size:12px;color:#78909c;">
+          ปิด = เหมือนเดิมทุกอย่าง · เปิดเพื่อ <b>เทียบผล</b> กับของเดิมบนไฟล์เดียวกัน ·
+          ตัดเฉพาะช่องว่างระหว่างบรรทัด (ไม่มีทางตัดผ่านตัวหนังสือ) ·
+          หาจุดตัดที่ปลอดภัยไม่ได้ = ไม่หั่น · <b>กรอบแดงชี้คำจาก OCR ถูกปิดในโหมดนี้</b></span>
+      </div>
+
+      <!-- โหมดทดลอง: อ่านซ้ำ 2 รอบ แล้วเชื่อเฉพาะ defect ที่โผล่ทั้งสองรอบ.
+           ที่มา: วัดจากข้อมูลจริงของสถานี 4 รอบ x 2 โซน — Gemini เข้าโหมด
+           อ่านเพี้ยนราว 50% ของการอ่าน และเพี้ยนแบบเดิมเป๊ะทุกครั้ง ⇒ ถ้า
+           สองฝั่งเพี้ยนพร้อมกัน ผลเทียบยังถูก · defect ปลอมเกิดจาก "เพี้ยน
+           ไม่พร้อมกัน" ล้วน ๆ. ตัดกัน 2 รอบแล้วเหลือความต่างจริงตัวเดียว
+           ทั้ง 6 คู่ที่ทดสอบ. เป็นการ "กรอง" ไม่ใช่สร้างใหม่ ⇒ หน้าตาผล
+           เหมือนเดิมทุกประการ -->
+      <div class="aw-row" style="margin-top:6px;">
+        <label class="aw-rotate-mode" title="ปิด (ค่าเริ่มต้น) = อ่านรอบเดียวเหมือนเดิม · เปิด = อ่านซ้ำอีกรอบแล้วรายงานเฉพาะรายการที่พบทั้งสองรอบ (ช้าขึ้นและใช้โควตา OCR 2 เท่า)">
+          <input type="checkbox" id="awConfirmReads"> 🔁 อ่านซ้ำ 2 รอบ แล้วยืนยันผล (ทดลอง)
+        </label>
+        <span class="aw-rotate-hint" style="font-size:12px;color:#78909c;">
+          ปิด = เหมือนเดิมทุกอย่าง · เปิดแล้ว <b>หน้าตาผลเหมือนเดิมทุกประการ</b>
+          แค่เหลือเฉพาะรายการที่ยืนยันได้ · รายการที่พบรอบเดียวจะย้ายไปอยู่ใน
+          กล่อง “ยังไม่ยืนยัน” ไม่ได้หายไป · <b>ใช้โควตา OCR 2 เท่า</b></span>
+      </div>
+
+      <!-- โหมดทดลอง: เทียบแผงต่อแผงระดับพิกเซล (ไม่ใช้ LLM ตัดสิน).
+           วัดบนไฟล์คู่จริงของสถานี: พบ 1 บริเวณ = เซลล์ 24%/20% พอดี ·
+           ฟ้องผิด 0 · รันซ้ำได้ผลเดิมเป๊ะ · เทียบไฟล์กับตัวเองได้ 0.0000%
+           ทำได้เพราะแก้ 3 จุดที่ทำให้ pixdiff เดิมเทียบไม่ได้: แผงคนละขนาด
+           (0.784 เท่า) · สีทั้งใบต่างกัน (R +17.5) · align จำนวนเต็มพิกเซล -->
+      <div class="aw-row" style="margin-top:6px;">
+        <label class="aw-rotate-mode" title="ปิด (ค่าเริ่มต้น) = เทียบด้วยข้อความจาก OCR เหมือนเดิม · เปิด = เทียบภาพแผงต่อแผงตรง ๆ แล้วอ่านข้อความเฉพาะบริเวณที่ต่าง (ใช้ได้เฉพาะกลุ่มที่มีโซน panel สองโซนและเป็นไฟล์ PDF ทั้งคู่)">
+          <input type="checkbox" id="awPixelCheck"> 🎯 เทียบแผงระดับพิกเซล (ทดลอง)
+        </label>
+        <span class="aw-rotate-hint" style="font-size:12px;color:#78909c;">
+          ปิด = เหมือนเดิมทุกอย่าง · เปิดแล้ว <b>หน้าตาผลเหมือนเดิมทุกประการ</b>
+          แต่ตัดสินจากภาพ ไม่ใช่จากข้อความที่ OCR อ่านได้ ·
+          เทียบไม่ได้เมื่อไร <b>ถอยไปใช้ผลชั้นข้อความของกลุ่มนั้นอัตโนมัติ</b> ·
+          ใช้กับกลุ่มที่มีโซน panel <b>สองโซนพอดี</b> และเป็น PDF ทั้งคู่</span>
+      </div>
+
       <div id="awProps" class="aw-props" style="display:none;">
         <b>โซนที่เลือก: <span id="awPropId"></span></b>
         <span id="awPropDoc" class="aw-doc-badge doc-a" style="display:none;"></span>
@@ -489,10 +654,7 @@
           <button id="awPropDelete" class="aw-btn aw-btn-danger">ลบโซนนี้</button>
         </div>
         <div id="awHlHint" class="aw-hl-hint" style="display:none;"></div>
-        <div id="awRotPreview" class="aw-rot-preview" style="display:none;">
-          <div class="aw-rot-cap">🔎 ภาพที่ OCR จะเห็น (<span id="awRotState"></span>) — คลิก ↻ ที่มุมโซนเพื่อหมุน</div>
-          <img id="awRotThumb" class="aw-rot-thumb" alt="ตัวอย่างที่หมุนแล้ว">
-        </div>
+        <div id="awSizeHint" class="aw-size-hint" style="display:none;"></div>
       </div>
 
       <div class="aw-hint">
@@ -592,5 +754,11 @@
 {% endblock %}
 
 {% block extra_js %}
+<script>
+  // ธง "กรอบแดง" (ดู artwork_check/config.py) — ต้องประกาศ **ก่อน**
+  // โหลดสคริปต์ เพราะ hlTargets() อ่านตอนสร้าง URL ของภาพ crop
+  window.AW_HL_BY_SPANS = {{ 'true' if hl_by_spans else 'false' }};
+  window.AW_HL_REF_SIDE = {{ 'true' if hl_ref_side else 'false' }};
+</script>
 <script src="{{ url_for('static', filename='js/artwork_check.js') }}?v={{ config_version }}"></script>
 {% endblock %}

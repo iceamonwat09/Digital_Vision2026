@@ -447,8 +447,65 @@ def _tesseract_available() -> bool:
 
 _lang_cache: dict = {}
 
+# ── เลือกภาษา Tesseract จาก "สคริปต์ของคำที่กำลังหา" ────────────────
+#
+# ทำไมไม่โหลดทุกภาษาที่ติดตั้งไว้ทีเดียว: วัดแล้ว 2 เรื่อง
+#   ① โหลดหลายภาษาพร้อมกัน **ช้าลง ~3.5 เท่า** โดยความแม่นเท่าเดิม
+#   ② ผสมภาษา **ทำให้แย่ลง** — ``ara`` เดี่ยวอ่านคำอาหรับได้ 18/21 แต่
+#      ``ara+eng`` ได้ 16/21 (วัด 5 ก.ย. บนแผงโภชนาการจริง)
+# ⇒ เลือกเฉพาะภาษาที่ตรงกับสคริปต์ของ **คำนั้น** ทีละคำ
+#
+# ตารางนี้ครอบทุกสคริปต์ที่ tesseract มี traineddata ให้ — ไม่ใช่รายการคำ
+# หรือ dictionary ⇒ เอกสารภาษาใหม่ที่ยังไม่เคยเจอก็ทำงานได้ทันทีถ้าลง
+# traineddata ไว้ (และถ้าไม่ได้ลง ``_resolve_langs`` จะกรองทิ้งให้เอง)
+_SCRIPT_RANGES = (
+    ("ara", ((0x0600, 0x06FF), (0x0750, 0x077F), (0x08A0, 0x08FF),
+             (0xFB50, 0xFDFF), (0xFE70, 0xFEFF))),      # อาหรับ/เปอร์เซีย
+    ("heb", ((0x0590, 0x05FF), (0xFB1D, 0xFB4F))),      # ฮีบรู
+    ("tha", ((0x0E00, 0x0E7F),)),                       # ไทย
+    ("hin", ((0x0900, 0x097F),)),                       # เทวนาครี
+    ("rus", ((0x0400, 0x04FF), (0x0500, 0x052F))),      # ซีริลลิก
+    ("ell", ((0x0370, 0x03FF), (0x1F00, 0x1FFF))),      # กรีก
+    ("kor", ((0xAC00, 0xD7AF), (0x1100, 0x11FF))),      # ฮันกึล
+    ("jpn", ((0x3040, 0x30FF), (0x31F0, 0x31FF))),      # ฮิรางานะ/คาตากานะ
+    ("chi_tra+chi_sim", ((0x4E00, 0x9FFF), (0x3400, 0x4DBF),
+                         (0xF900, 0xFAFF))),            # ฮั่น (แยกจีน/ญี่ปุ่นไม่ได้)
+)
 
-def _resolve_langs(requested: str) -> str:
+
+def script_langs(word: str) -> str:
+    """ภาษา tesseract ที่ควรใช้กับ ``word`` — จากสคริปต์ของตัวอักษรล้วน ๆ.
+
+    ไม่ผูกกับภาษาใดภาษาหนึ่ง (ไม่มีรายการคำ/dictionary) ⇒ ใช้ได้กับเอกสาร
+    ภาษาอะไรก็ได้. คืนสตริง ``+``-joined เรียงตามจำนวนตัวอักษรที่พบมากสุด
+    """
+    if not word:
+        return "eng"
+    counts = {}
+    ascii_alpha = False
+    for ch in str(word):
+        o = ord(ch)
+        if o < 128:
+            if ch.isalpha():
+                ascii_alpha = True
+            continue
+        for name, ranges in _SCRIPT_RANGES:
+            if any(lo <= o <= hi for lo, hi in ranges):
+                counts[name] = counts.get(name, 0) + 1
+                break
+    if not counts:
+        return "eng"
+    order = sorted(counts, key=lambda k: -counts[k])
+    # ฮั่นล้วน + มีคานะด้วย ⇒ ญี่ปุ่นชัดเจน ไม่ต้องลองจีน
+    if "jpn" in counts and "chi_tra+chi_sim" in counts:
+        order = [o for o in order if o != "chi_tra+chi_sim"]
+    langs = "+".join(order)
+    # เติม eng เฉพาะเมื่อคำนั้น **มีตัวอักษรละตินปนจริง** — เติมพร่ำเพรื่อ
+    # ทำให้แย่ลง (วัดแล้ว ara+eng ได้ 16 vs ara เดี่ยว 18)
+    return langs + "+eng" if ascii_alpha else langs
+
+
+def _resolve_langs(requested: str, word: str = "") -> str:
     """Filter a '+'-joined tesseract language string down to the languages
     actually installed. This is the safety net for the config value
     ``ARTWORK_HIGHLIGHT_TESS_LANG``: if it names a language whose
@@ -459,6 +516,9 @@ def _resolve_langs(requested: str) -> str:
     whatever IS present) still works; the missing one just doesn't get
     localized. Falls back to ``eng``. Cached per requested string."""
     req = (requested or "eng").strip() or "eng"
+    # "auto" = เลือกตามสคริปต์ของคำที่กำลังหา (ดู script_langs)
+    if req.lower() == "auto":
+        req = script_langs(word)
     if req in _lang_cache:
         return _lang_cache[req]
     avail = set()
@@ -550,7 +610,7 @@ def _tess_words_uncached(crop, lang: str, psm: int):
         from pytesseract import Output
         img, scale = _upscale_for_ocr(crop)
         rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        data = pytesseract.image_to_data(rgb, lang=_resolve_langs(lang),
+        data = pytesseract.image_to_data(rgb, lang=lang,
                                          config=f"--psm {psm}",
                                          output_type=Output.DICT)
     except Exception:
@@ -568,10 +628,13 @@ def _tess_words_uncached(crop, lang: str, psm: int):
 
 
 def _tess_boxes(crop, found: str, lang: str = "eng",
-                ocr_text: str = "") -> List[Box]:
+                ocr_text: str = "", limit: int = 0) -> List[Box]:
     """Every Tesseract word box matching ``found`` (best tier first)."""
     if not _tesseract_available():
         return []
+    # resolve ที่นี่ครั้งเดียว — ต้องเป็นสตริงจริงก่อนลงไปถึง ``_tess_words``
+    # ไม่งั้น cache key จะเป็น "auto" เหมือนกันหมดทั้งที่อ่านคนละภาษา
+    lang = _resolve_langs(lang, found)
     all_words: list = []
     for psm in _PSM_ORDER:
         w = _tess_words(crop, lang, psm)
@@ -579,7 +642,7 @@ def _tess_boxes(crop, found: str, lang: str = "eng",
         hits = _match_boxes(w, found)
         if not hits:
             continue
-        verified = _verify_boxes(crop, hits, found, lang)
+        verified = _verify_boxes(crop, hits, found, lang, limit=limit)
         if verified:
             return verified
         # every candidate of this mode failed the pixel check — that is a
@@ -760,7 +823,8 @@ def _upscale_for_ocr(crop):
 
 
 def _verify_boxes(crop, boxes: List[Box], found: str, lang: str,
-                  require_positive: bool = False) -> List[Box]:
+                  require_positive: bool = False,
+                  limit: int = 0) -> List[Box]:
     """Self-check: re-OCR each candidate box and drop the ones whose pixels
     do not back up the claim.
 
@@ -793,6 +857,16 @@ def _verify_boxes(crop, boxes: List[Box], found: str, lang: str,
     H, W = crop.shape[:2]
     kept = []
     for b in boxes:
+        # ⚡ พอได้ครบตามที่ผู้เรียกจะใช้จริงก็หยุด — การพิสูจน์แต่ละกล่องคือ
+        # การอ่านภาพซ้ำ (Tesseract สูงสุด 3 รอบต่อกล่อง) ซึ่งเป็นต้นทุนหลัก
+        # ของ /crop ทั้งคำขอ. วัดบนแผงจริง: คำที่ซ้ำ 30 แถว ⇒ พิสูจน์ 25 กล่อง
+        # 2.49 วินาที เพื่อเก็บไว้ 6 ⇒ ทิ้ง 19 กล่องที่จ่ายเวลาไปแล้ว
+        # **ผลลัพธ์เท่าเดิมทุกกล่อง**: ``_match_boxes`` คืนกล่องที่ผ่าน
+        # ``_dedupe_boxes`` มาแล้วทั้งสองทาง (คำเดียว/วลี) ⇒ ``_dedupe_boxes``
+        # ใน ``locate_all`` ไม่ตัดอะไรอีก ⇒ การตัดที่ ``max_boxes`` ทีหลัง
+        # ได้ชุดเดียวกันกับการหยุดพิสูจน์ตรงนี้ (มีเทสต์ล็อกไว้)
+        if limit and len(kept) >= limit:
+            break
         pad = max(3, (b[3] - b[1]) // 4)
         x0, y0 = max(0, b[0] - pad), max(0, b[1] - pad)
         x1, y1 = min(W, b[2] + pad), min(H, b[3] + pad)
@@ -809,7 +883,7 @@ def _verify_boxes(crop, boxes: List[Box], found: str, lang: str,
             txt = ""
             for vpsm in (7, 8, 6):
                 txt = pytesseract.image_to_string(
-                    rgb_sub, lang=_resolve_langs(lang),
+                    rgb_sub, lang=_resolve_langs(lang, found),
                     config=f"--psm {vpsm}")
                 if _norm(txt):
                     break
@@ -959,6 +1033,14 @@ def _phrase_matches(words, ftokens: List[str]) -> list:
     fkey = "".join(ftokens)
     if not fkey:
         return []
+    # ⚠️ คำที่ normalize แล้วว่าง (เครื่องหมายล้วน: "/" "," "،" "·") ต้อง
+    # **ข้ามทิ้ง** ไม่ใช่ทำให้หน้าต่างที่มันอยู่ถูกโยนทิ้งทั้งอัน. ``ftokens``
+    # ถูกกรองแบบนี้ไปแล้วตั้งแต่ ``_match_boxes`` ⇒ ถ้าฝั่ง ``words`` ไม่กรอง
+    # ด้วย ขนาดหน้าต่างจะไม่มีวันตรงกัน. วัดจริงบนบรรทัดของสถานี:
+    # "محتوى الطاقة: 520 كيلو كالوري / 100 غرام" มี "/" เดี่ยว ๆ 1 ตัว ⇒
+    # หน้าต่างขนาด n-1..n+1 **ทุกอัน** ต้องคลุมตำแหน่งนั้น ⇒ 0 กรอบเสมอ
+    # ไม่ว่า Tesseract จะอ่านถูกแค่ไหน. กรองแล้วได้ 1 กรอบ
+    words = [(k, b) for k, b in words if k]
     n = len(ftokens)
     cands = []          # (window_key, union_box) for every same-line run
     for size in (n, n + 1, n - 1):
@@ -966,8 +1048,6 @@ def _phrase_matches(words, ftokens: List[str]) -> list:
             continue
         for i in range(len(words) - size + 1):
             win = words[i:i + size]
-            if any(not k for k, _ in win):
-                continue
             boxes = [b for _, b in win]
             if not all(_same_line(boxes[0], b) for b in boxes[1:]):
                 continue
@@ -1143,7 +1223,8 @@ def locate_all(crop, found: str, ocr_text: str,
     if crop is None or getattr(crop, "size", 0) == 0 or not found:
         return []
     H, W = crop.shape[:2]
-    hits = (_tess_boxes(crop, found, tess_lang, ocr_text or "")
+    hits = (_tess_boxes(crop, found, tess_lang, ocr_text or "",
+                        limit=max(0, int(max_boxes or 0)))
             if use_tesseract else [])
     if not hits:
         blk = _block_boxes(found, blocks or [], W, H, ocr_wh)

@@ -70,7 +70,9 @@ def test_fingerprint_covers_every_ocr_setting():
     expected = {"dpi", "max_side", "min_side", "dpi_max_factor",
                 "embed_min", "garbled", "garbled_tokens", "garbled_ratio",
                 "bad_glyph", "bad_glyph_min", "group_engine",
-                "font_evidence", "font_structure"}
+                "font_evidence", "font_structure",
+                # ค่าจูนการหั่นแถบ — เปลี่ยนแล้วได้แถบคนละชุด ⇒ ข้อความเปลี่ยน
+                "band_target", "band_min", "band_max", "band_quiet"}
     assert set(fp) == expected
 
 

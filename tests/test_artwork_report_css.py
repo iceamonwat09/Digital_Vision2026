@@ -36,6 +36,10 @@ _HELPERS = [
     ("  function coverageHtml(cov, fontTrust) {",
      "  window.awCoverageHtml = coverageHtml;"),
     ("  function pixdiffHtml(pd, recId) {", "  window.awPixdiffHtml = pixdiffHtml;"),
+    ("  function pixelHtml(px) {", "  window.awPixelHtml = pixelHtml;"),
+    ("  function confirmHtml(cf) {", "  window.awConfirmHtml = confirmHtml;"),
+    ("  function flowHtml(pr, done) {", "  window.awFlowHtml = flowHtml;"),
+    ("  function markDiff(text, spans) {", "  window.awMarkDiff = markDiff;"),
 ]
 
 

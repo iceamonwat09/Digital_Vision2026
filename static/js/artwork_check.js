@@ -23,6 +23,7 @@
   // ── report rendering (shared with history page via window.*) ──────
   const CLASS_LABELS = {
     MISMATCH_PANELS: "ไม่ตรงกันระหว่าง panel",
+    MISMATCH_CASE: "ตัวพิมพ์ใหญ่-เล็กไม่ตรง",
     MISMATCH_ZOOM: "zoom ไม่ตรงฉลากจริง",
     NUMBER_FAIL: "ตัวเลข/บาร์โค้ดผิด",
     PHRASE_FAIL: "วลีแบรนด์สะกดเพี้ยน",
@@ -57,6 +58,10 @@
     no_panel_in_group: "โซน zoom ไม่มี panel ในกลุ่มเดียวกันให้เทียบ",
     spellchecker_missing: "ยังไม่ได้ติดตั้ง pyspellchecker บนเครื่องเซิร์ฟเวอร์",
     no_readable_zone: "ไม่มีโซนที่อ่านข้อความออก",
+    // ปุ่มส่งตรวจไม่ตรวจคำสะกดแล้ว (2 ก.ย. 2026) — ต้องบอกให้ชัดว่าไป
+    // ตรวจที่ไหนแทน ไม่งั้น ✅ PASS จะถูกอ่านว่า "ไม่มีคำผิด" ซึ่งไม่จริง
+    moved_to_translate: 'ย้ายไปตรวจที่แท็บ "ข้อความ + คำแปล" แล้ว ' +
+      "(ปุ่มนี้เทียบความเหมือนของไฟล์/แผง ไม่ตรวจการสะกด)",
   };
   const COV_FIX = {
     no_shared_group: 'โซนที่ควรมีข้อความเหมือนกัน (เช่นแผงเดียวกันที่พิมพ์ซ้ำ ' +
@@ -68,7 +73,10 @@
   // ต้องคิดจากที่เดียวกัน ไม่งั้นแถบเตือนแต่หัวเรื่องบอกว่าไม่พบประเด็น
   function coverageGaps(cov) {
     if (!cov) return [];
-    const benign = { no_zoom_zone: 1, single_zone: 1 };
+    // benign = "ไม่ได้ทำงานเพราะไม่มีของให้ตรวจ / ย้ายไปที่อื่นแล้ว" — ไม่ใช่
+    // ช่องโหว่ที่ผู้ใช้ต้องไปแก้ ⇒ ต้องไม่ทำให้แถบเป็นสีเตือนและไม่เปลี่ยน
+    // หัวเรื่องเป็น "PASS — ไม่พบประเด็นในชั้นที่ตรวจ" ทุกใบตลอดกาล
+    const benign = { no_zoom_zone: 1, single_zone: 1, moved_to_translate: 1 };
     return [cov.cross_panel, cov.zoom, cov.numbers, cov.spelling]
       .filter((c) => c && !c.ran && !benign[c.reason]);
   }
@@ -78,6 +86,22 @@
   // ข้อความจาก text layer ที่เพิ่งสั่งให้ข้ามไป = ขัดกันเองบนหน้าจอเดียว)
   function forceOcrOn() {
     return !!(($("awForceOcr") || {}).checked);
+  }
+
+  // โหมดทดลอง: หั่นโซนเป็นแถบก่อนส่ง OCR (ไม่ติ๊ก = ทางเดิมเป๊ะ)
+  function splitBandsOn() {
+    return !!(($("awSplitBands") || {}).checked);
+  }
+
+  // โหมดทดลอง "อ่านซ้ำ 2 รอบ แล้วยืนยันผล" — ใช้กับปุ่มส่งตรวจสอบเท่านั้น
+  // (แท็บแปลไม่เกี่ยว เพราะมันไม่ได้ตัดสิน defect)
+  function confirmReadsOn() {
+    return !!(($("awConfirmReads") || {}).checked);
+  }
+
+  // โหมดทดลอง "เทียบแผงระดับพิกเซล" — ใช้กับปุ่มส่งตรวจสอบเท่านั้น
+  function pixelCheckOn() {
+    return !!(($("awPixelCheck") || {}).checked);
   }
 
   function coverageHtml(cov, fontTrust) {
@@ -149,6 +173,154 @@
     h += "</div></div>";
     return h;
   }
+  // ── โหมดทดลอง "อ่านซ้ำ 2 รอบ" — กล่องบอกว่ากรองอะไรออกไป ────────────
+  // ⚠️ ต้องแสดงรายการที่ "ยังไม่ยืนยัน" เสมอ — การกรองที่มองไม่เห็นคือการ
+  //    ซ่อนข้อมูลจากผู้ตรวจ (กฎเหล็กข้อ 2). รายงานเก่าไม่มีคีย์นี้ = ไม่แสดง
+  function confirmHtml(cf) {
+    if (!cf) return "";
+    if (cf.error) {
+      return '<div class="aw-confirm warn">🔁 โหมดอ่านซ้ำ: ' + esc(cf.error) +
+        "</div>";
+    }
+    const n = cf.unconfirmed || 0;
+    let h = '<div class="aw-confirm' + (n ? " warn" : "") + '">' +
+      "🔁 ยืนยันด้วยการอ่าน " + esc(cf.rounds) + " รอบ · รายงาน " +
+      esc(cf.confirmed) + " รายการที่พบทุกรอบ";
+    const stat = [];
+    if (cf.per_round && cf.per_round.length)
+      stat.push("แต่ละรอบฟ้อง " + cf.per_round.map(esc).join(" · ") + " รายการ");
+    if (cf.agreement != null)
+      stat.push("สองรอบเห็นตรงกัน " + Math.round(cf.agreement * 100) + "%" +
+                (cf.agreement < 0.5 ? " (ต่ำ — การอ่านไม่เสถียรในงานใบนี้)" : ""));
+    const num = stat.length
+      ? '<div class="aw-confirm-num">' + esc(stat.join(" · ")) + "</div>" : "";
+    if (!n) return h + " · ไม่มีรายการที่ตกไป" + num + "</div>";
+    h += " · <b>ตกไป " + esc(n) + " รายการที่พบรอบเดียว</b>" +
+      '<div class="aw-confirm-list">รายการที่ยังยืนยันไม่ได้ ' +
+      "(ไม่นับเป็นข้อผิดพลาด แต่ควรดูด้วยตา):";
+    (cf.items || []).slice(0, 20).forEach((it) => {
+      h += '<div class="aw-confirm-item"><code>' + esc(it.zone_id) + "</code> " +
+        esc(it["class"]) + (it.found ? " — “" + esc(it.found) + "”" : "") +
+        "</div>";
+    });
+    if ((cf.items || []).length > 20)
+      h += '<div class="aw-confirm-item">… และอีก ' +
+           esc(cf.items.length - 20) + " รายการ</div>";
+    return h + "</div>" + num + "</div>";
+  }
+  // ── โหมดทดลอง "เทียบแผงระดับพิกเซล" — กล่องบอกว่ากลุ่มไหนใช้ผลจากภาพ ──
+  // ⚠️ ต้องบอกให้ชัดว่ากลุ่มไหน "เทียบไม่ได้แล้วถอยไปใช้ชั้นข้อความ" —
+  //    ไม่งั้นผู้ใช้เข้าใจว่าทุกกลุ่มถูกเทียบด้วยภาพแล้ว (กฎเหล็กข้อ 2)
+  function pixelHtml(px) {
+    if (!px) return "";
+    if (px.error)
+      return '<div class="aw-confirm warn">🎯 เทียบพิกเซล: ' + esc(px.error) +
+        "</div>";
+    const pairs = px.pairs || [];
+    if (!pairs.length)
+      return '<div class="aw-confirm">🎯 เทียบพิกเซล: ' +
+        "ไม่มีกลุ่มที่เข้าเงื่อนไข (ต้องมีโซน panel สองโซนในกลุ่มเดียวกัน " +
+        "และเป็นไฟล์ PDF ทั้งคู่) — ผลทั้งหมดมาจากชั้นข้อความเหมือนเดิม</div>";
+    const fell = pairs.filter((p) => p.status !== "ok");
+    const stopped = px.stopped
+      ? '<div class="aw-confirm-item"><b>⏱ ' + esc(px.stopped) + "</b></div>"
+      : "";
+    let h = '<div class="aw-confirm' + (fell.length ? " warn" : "") + '">' +
+      "🎯 เทียบแผงระดับพิกเซล · ใช้ผลจากภาพ " + esc(px.used) + " กลุ่ม";
+    h += '<div class="aw-confirm-list">' + stopped;
+    // ตัวเลขวินิจฉัยครบชุด — ผู้ใช้ต้องเอาไปพัฒนาต่อได้โดยไม่ต้องเดา
+    pairs.forEach((p) => {
+      const ok = p.status === "ok";
+      const num = [];
+      if (p.scale != null) num.push("สเกล " + esc(p.scale));
+      if (p.ecc != null) num.push("คุณภาพการทาบ " + esc(p.ecc));
+      // ⚠️ ncc เป็น "ข้อมูลดู" เท่านั้น ห้ามใช้ตัดสิน — วัดแล้วว่ากลับด้าน
+      //    (แผงเดียวกันได้ 0.40 · คนละบล็อกได้ 0.67 บนฉลากใบเดียวกัน)
+      if (p.ncc != null) num.push("ความคล้ายใจกลางโซน " + esc(p.ncc) +
+                                  " (ดูประกอบ ไม่ได้ใช้ตัดสิน)");
+      if (p.diff_ratio != null)
+        num.push("ต่าง " + (p.diff_ratio * 100).toFixed(4) + "%");
+      if (p.size) num.push("ภาพ " + esc(p.size[0]) + "×" + esc(p.size[1]) +
+                           " px @" + esc(p.dpi) + " dpi");
+      if (p.min_region_mm2 != null)
+        num.push("เห็นได้ตั้งแต่ " + esc(p.min_region_mm2) + " mm²");
+      // ⚠️ "ภาพไม่เห็นความต่าง" ไม่เท่ากับ "ไม่มีความต่าง" — ต้องบอกให้ชัด
+      //    ว่ากลุ่มนี้ยังใช้ผลชั้นข้อความอยู่ ไม่ใช่ปล่อยให้เข้าใจว่ายืนยันแล้ว
+      // ⚠️ ปฏิเสธเพราะ "ต่างกันมาก" ต้องบอก **ตัวเลขที่วัดได้** ไม่ใช่เดา
+      //    ว่า "อาจเป็นคนละแผง" — สองอย่างนี้ผู้ตรวจทำต่อคนละทาง
+      const tooDiff = (p.reason === "panel_too_different");
+      const body = !ok
+        ? (tooDiff
+             ? "<b>ทาบภาพติดแล้ว แต่ต่างกัน " +
+               ((p.diff_ratio || 0) * 100).toFixed(1) + "% ของพิกเซล</b> — " +
+               "มากเกินกว่าจะชี้เป็นจุด ๆ ได้ (แผงเดียวกันที่แก้ข้อความยกบล็อก " +
+               "ยังต่างไม่ถึง 20%) ⇒ ใช้ผลชั้นข้อความของกลุ่มนี้แทน · " +
+               "ดูภาพผลตรวจสองฝั่งด้วยตา ถ้าเป็นแผงเดียวกันจริงให้ลากโซน " +
+               "ให้แคบลงทีละบล็อกแล้วส่งใหม่"
+             : "เทียบไม่ได้ (" + esc(PD_WHY[p.reason] || p.reason || p.status) +
+               ") — ใช้ผลชั้นข้อความของกลุ่มนี้แทน")
+        : (p.kept_text_layer
+            ? "เทียบด้วยภาพแล้ว <b>ไม่พบความต่าง</b> — " +
+              "ผลของกลุ่มนี้ยังมาจากชั้นข้อความ (ภาพไม่เห็น ≠ ไม่มี)"
+            : "เทียบด้วยภาพ · พบ " + esc(p.regions) + " บริเวณ" +
+              ((p.areas_mm2 && p.areas_mm2.length)
+                 ? " (" + p.areas_mm2.map(esc).join(", ") + " mm²)" : ""));
+      h += '<div class="aw-confirm-item"><code>' + esc(p.group) + "</code> " +
+        body;
+      // วัดไว้บนไฟล์จริง: ความต่างของงานจริงอยู่ที่ 0.011-0.014% ส่วนเคสที่
+      // โซนลากครอบเนื้อหานอกแผงได้ 0.37-6.85% ⇒ เกิน 0.2% = ควรเตือน
+      if (p.diff_ratio != null && p.diff_ratio > 0.002)
+        h += ' · <b>โซนนี้ต่างกัน ' + (p.diff_ratio * 100).toFixed(2) +
+             "% ซึ่งสูงกว่าการแก้ไขฉลากปกติมาก</b>" +
+             " (งานจริงมักต่ำกว่า 0.02%) — น่าจะลากครอบเนื้อหานอกแผงเข้ามา" +
+             " ผลอาจไม่ครบ ลากให้กระชับแล้วลองใหม่";
+      if (Array.isArray(p.ocr_capped) && p.ocr_capped.length === 2)
+        h += ' · <b>อ่านข้อความ ' + esc(p.ocr_capped[0]) + " จาก " +
+             esc(p.ocr_capped[1]) + " บริเวณ</b> (ถึงเพดานที่ตั้งไว้ — " +
+             "บริเวณที่เหลือรายงานตำแหน่งอย่างเดียว ไม่เดาข้อความ)";
+      if (p.edge_regions)
+        h += ' · <b>ตัดทิ้ง ' + esc(p.edge_regions) + " บริเวณที่ติดขอบโซน</b>" +
+             " (เนื้อหารอบแผงที่ลากเกินเข้ามา — ลากให้ครอบเฉพาะแผงจะแม่นกว่า)";
+      // ── แผงสองฝั่งขนาดจริงต่างกันกี่เท่า (ปรู๊ฟย่อ ฯลฯ) ───────────
+      // บอกเสมอเมื่ออยู่นอกช่วงที่จับคู่ได้เอง ไม่ว่าจะปรับให้แล้วหรือไม่ —
+      // เดิมเคสนี้ตอบรวม ๆ ว่า "อาจลากโซนคนละส่วน" ซึ่งส่งผู้ใช้ไปแก้ของที่
+      // ไม่ได้พัง (เขาลากถูกแล้ว แค่ไฟล์หนึ่งเป็นฉบับย่อ)
+      if (p.zone_ratio != null && (p.zone_ratio < 0.6 || p.zone_ratio > 1.7))
+        h += ' · <b>แผงในสองไฟล์ขนาดต่างกัน ' + esc(p.zone_ratio) + " เท่า</b>" +
+             (p.prescaled
+                ? " — ระบบเรนเดอร์ฝั่งที่เล็กกว่าที่ความละเอียดสูงขึ้น" +
+                  " (a " + esc(p.dpi_a) + " dpi · b " + esc(p.dpi_b) +
+                  " dpi) ให้เท่ากันก่อนเทียบแล้ว"
+                : " — เกินกว่าจะปรับให้เท่ากันได้");
+      // ── มุมที่ชั้นภาพใช้จริง (มาจากค่าของโซน = ที่ OCR ใช้) ───────
+      if (p.rotate_a || p.rotate_b)
+        h += " · หมุนก่อนเทียบ a " + esc(p.rotate_a || 0) + "° · b " +
+             esc(p.rotate_b || 0) + "°";
+      // ── ความหนาหมึกของทั้งแผง ─────────────────────────────────────
+      // ต่างกันเล็กน้อยแต่สม่ำเสมอ ⇒ ขอบตัวอักษรทุกตัวต่าง ⇒ ฟ้องนับร้อย
+      // บริเวณทั้งที่ไม่มีคำไหนผิด ⇒ บอกครั้งเดียวว่านี่คือที่มา
+      // ⚠️ ยกเปอร์เซ็นต์มาพูดได้เฉพาะตอนเส้นหนาพอจะวัด (reliable)
+      const pi = p.panel_ink;
+      if (pi && Math.abs(pi.stroke_pct) >= 3) {
+        h += pi.reliable
+          ? ' · <b>ทั้งแผงหนากว่ากัน ' + Math.abs(pi.stroke_pct).toFixed(1) +
+            "%</b> (เส้น " + esc(pi.stroke_a) + " vs " + esc(pi.stroke_b) +
+            " px) ⇒ ขอบตัวอักษรทุกตัวจะต่าง — บริเวณที่ฟ้องส่วนใหญ่มาจาก" +
+            "เรื่องนี้ ไม่ใช่คำผิด"
+          : ' · <b>ทั้งแผงหนาไม่เท่ากัน</b> (เส้น ' + esc(pi.stroke_a) +
+            " vs " + esc(pi.stroke_b) + " px) — บางเกินกว่าจะบอกเป็น" +
+            "เปอร์เซ็นต์ได้อย่างมีความหมาย จึงบอกค่าที่วัดได้ตรง ๆ";
+      }
+      if (num.length)
+        h += '<div class="aw-confirm-num">' + esc(num.join(" · ")) + "</div>";
+      h += "</div>";
+    });
+    return h + "</div></div>";
+  }
+  window.awPixelHtml = pixelHtml;
+
+  window.awConfirmHtml = confirmHtml;
+
   window.awCoverageHtml = coverageHtml;
 
   // ── เทียบภาพเก่า/ใหม่ระดับพิกเซล (advisory ล้วน) ──────────────────
@@ -158,10 +330,17 @@
     no_pair: "ไม่มีโซนคู่ในไฟล์อ้างอิง",
     page_size_mismatch: "ขนาดหน้าสองไฟล์ไม่เท่ากัน",
     scale_mismatch: "เนื้อหาถูกย่อ/ขยาย — สเกลไม่ตรงกัน",
-    align_failed: "จับคู่ตำแหน่งไม่ได้ — อาจเป็นคนละแผง",
+    // ⚠️ ข้อความนี้ใช้ได้เฉพาะ "ทาบไม่ติดจริง ๆ" — เคส "ทาบติดแต่ต่างมาก"
+    //    ย้ายไป panel_too_different แล้ว (เดิมสองเคสนี้ถูกยุบเป็นข้อความเดียว
+    //    ซึ่งส่งผู้ใช้ไปลากโซนใหม่ทั้งที่ลากถูกแล้ว)
+    align_failed: "ทาบภาพไม่ติด — พื้นที่ทับกันไม่พอ หรือเป็นคนละแผง",
+    panel_too_different:
+      "ทาบติดแล้วแต่ต่างกันเกินเพดาน — ไม่ชี้จุดดีกว่าชี้ผิดที่",
+    scale_out_of_range: "แผงสองฝั่งขนาดจริงต่างกันเกินกว่าจะปรับให้เท่ากันได้",
     zone_blank: "โซนแทบไม่มีเนื้อหาให้เทียบ",
     zone_too_different: "ต่างกันมากเกินกว่าจะเป็นการแก้ไข",
     too_different: "ต่างกันทั้งใบ",
+    edge_only: "ความต่างอยู่ติดขอบโซนทั้งหมด = เนื้อหารอบแผงที่ลากเกินเข้ามา",
     zone_empty: "โซนอยู่นอกหน้า/เล็กเกินไป",
     not_pdf: "รองรับเฉพาะ PDF",
     file_not_found: "ไม่พบไฟล์",
@@ -222,6 +401,138 @@
   }
   window.awPixdiffHtml = pixdiffHtml;
 
+  // ── เส้นความคืบหน้าแนวนอน พร้อมจุดเช็คพอยต์จริง ─────────────────
+  //
+  // แทนข้อความคงที่ "กำลัง OCR ทีละโซน…" ซึ่งไม่ได้บอกอะไรเลย — โดยเฉพาะ
+  // **โหมดที่ติ๊กไว้ได้ทำงานจริงไหม หรือตกเงื่อนไขไปเงียบ ๆ** (โหมด pixel
+  // ต้องมีโซน panel สองโซนในกลุ่มเดียวกันและเป็น PDF ทั้งคู่)
+  const FLOW_ICON = { pending: "", running: "", ok: "✓", skip: "–",
+                      warn: "!", fail: "✕" };
+
+  function flowHtml(pr, done) {
+    const steps = (pr && pr.steps) || [];
+    if (!steps.length) return "";
+    let h = '<div class="aw-flow' + (done ? " done" : "") + '">';
+    if (done) {
+      // สรุปหนึ่งบรรทัดว่า "ขั้นไหนไม่ได้ทำงาน" — ที่ผู้ตรวจต้องอ่านจริง ๆ
+      const nSkip = steps.filter((s) => s.status === "skip").length;
+      const nBad = steps.filter((s) => s.status === "fail" ||
+                                       s.status === "warn").length;
+      h += '<div class="aw-flow-head">กระบวนการที่ทำไปจริง' +
+           (nSkip ? " · ไม่ได้ทำงาน " + nSkip + " ขั้น" : "") +
+           (nBad ? " · ต้องดู " + nBad + " ขั้น" : "") +
+           (pr.elapsed_s != null ? " · รวม " + esc(pr.elapsed_s) + " วินาที" : "") +
+           "</div>";
+    }
+    h += '<div class="aw-flow-line">';
+    steps.forEach((st) => {
+      h += '<div class="aw-flow-step ' + esc(st.status) + '">' +
+             '<span class="aw-flow-dot">' + (FLOW_ICON[st.status] || "") + "</span>" +
+             '<span class="aw-flow-label">' + esc(st.label) + "</span>" +
+             (st.ms != null && st.status !== "skip"
+                ? '<span class="aw-flow-ms">' + (st.ms / 1000).toFixed(1) + "s</span>"
+                : "") +
+           "</div>";
+    });
+    h += "</div>";
+    // รายละเอียดของแต่ละขั้น — คือ "เช็คพอยต์" ที่เอาไปไล่ปัญหาร่วมกันได้
+    h += '<div class="aw-flow-detail">';
+    steps.forEach((st) => {
+      if (!st.detail && !(st.notes || []).length) return;
+      h += '<div class="aw-flow-row ' + esc(st.status) + '">' +
+             "<b>" + esc(st.label) + "</b> " + esc(st.detail || "");
+      (st.notes || []).forEach((n) => {
+        h += '<div class="aw-flow-note">' + esc(n) + "</div>";
+      });
+      h += "</div>";
+    });
+    h += "</div></div>";
+    return h;
+  }
+  window.awFlowHtml = flowHtml;
+
+  // ── ไฮไลต์เฉพาะส่วนที่ต่างในบรรทัดยาว ───────────────────────────
+  //
+  // คงบรรทัดเต็มไว้ (บริบทสำคัญกับผู้ตรวจ) แล้วทำเครื่องหมายเฉพาะช่วงที่
+  // ต่างจริง ⇒ ไม่ต้องไล่อ่านข้อความยาวสองก้อนเพื่อหาว่าต่างตรงไหน
+  //
+  // ⚠️ ``found``/``reference`` ไม่ถูกแตะ — ช่วงที่ต่างมาในคีย์แยกต่างหาก
+  //    (found_spans/ref_spans = ดัชนีตัวอักษร) เพราะสองค่านั้นถูกใช้ไป
+  //    ค้นคำเพื่อวาดกรอบแดงบนภาพ crop (``/crop?hl=``)
+  // ⚠️ ไฮไลต์เกือบทั้งบรรทัด = การจับคู่อาจไม่ใช่บรรทัดเดียวกัน — ผู้ตรวจ
+  //    เห็นเองได้ทันทีจากปริมาณสีที่ขึ้น ไม่ต้องเดา
+  // ⚠️ รายงานเก่าไม่มีคีย์นี้ ⇒ คืนข้อความเดิมทั้งบรรทัด (ไม่พัง)
+  function markDiff(text, spans) {
+    if (!text) return "";
+    if (!Array.isArray(spans) || !spans.length) return esc(text);
+    var out = "", at = 0, i, a, b;
+    for (i = 0; i < spans.length; i++) {
+      if (!Array.isArray(spans[i])) continue;
+      a = spans[i][0]; b = spans[i][1];
+      if (!(b > a) || a < at || b > text.length) continue;   // ข้อมูลเพี้ยน = ข้าม
+      out += esc(text.slice(at, a)) + '<mark class="aw-dx">' +
+             esc(text.slice(a, b)) + "</mark>";
+      at = b;
+    }
+    return out + esc(text.slice(at));
+  }
+  window.awMarkDiff = markDiff;
+
+  // ── คำค้นที่ส่งให้เซิร์ฟเวอร์วาดกรอบแดงบนภาพ crop ────────────────────
+  // ยิงที่ **ช่วงที่ต่าง** ก่อนเสมอ ไม่ใช่ทั้งบรรทัด: ตัวจับคู่วลีฝั่ง
+  // เซิร์ฟเวอร์ต้องหาคำติดกันในแถวเดียวกันให้ครบทุกคำ ซึ่งบรรทัดจริงยาว
+  // 24-25 คำบนแผงคอลัมน์แคบทำไม่ได้เลย (วัดได้ 0/16 เคส) ส่วนช่วงที่ต่าง
+  // มี 1-3 คำ (วัดได้ 16/16) และ **ชี้จุดที่ต่างจริง** แทนการล้อมทั้งบรรทัด
+  // ⚠️ ต้องตรงกับ config.HIGHLIGHT_MAX_TARGETS ฝั่ง Python (มีเทสต์เทียบ)
+  const HL_MAX_TARGETS = 4;
+  // ช่วงที่สั้นเกินไป/เป็นเครื่องหมายล้วน หาเจอได้หลายที่ ⇒ กรอบผิดจุด
+  // ซึ่งแย่กว่าไม่มีกรอบ (กฎเหล็กข้อ 2) ⇒ ข้ามไปใช้ทั้งบรรทัดแทน
+  const HL_PUNCT = /[\s.,;:!?()\[\]{}"'`|/\\\-\u2013\u2014\u00b7\u060c\u061b\u061f\u2026]/g;
+  function hlTargets(text, spans) {
+    if (!text) return [];
+    const out = [];
+    if (window.AW_HL_BY_SPANS !== false && Array.isArray(spans)) {
+      for (let i = 0; i < spans.length && out.length < HL_MAX_TARGETS; i++) {
+        const sp = spans[i];
+        if (!Array.isArray(sp)) continue;
+        const a = sp[0], b = sp[1];
+        if (!(b > a) || a < 0 || b > text.length) continue;
+        const piece = text.slice(a, b).trim();
+        if (piece.replace(HL_PUNCT, "").length >= 2) out.push(piece);
+      }
+    }
+    return out.length ? out : [text];
+  }
+  window.awHlTargets = hlTargets;
+
+  // poll ระหว่างที่ POST /inspect ยังค้างอยู่ — คืนฟังก์ชันสำหรับหยุด
+  function startFlowPoll(recId, box) {
+    let stopped = false;
+    const tick = async () => {
+      if (stopped) return;
+      try {
+        const r = await fetch("/api/artwork/" + encodeURIComponent(recId) +
+                              "/progress", { cache: "no-store" });
+        if (r.ok) {
+          const pr = await r.json();
+          const html = flowHtml(pr);
+          if (html && !stopped) {
+            box.innerHTML =
+              '<div class="aw-empty" style="text-align:left;">' +
+              '<span class="aw-spin"></span>กำลังตรวจ… ' +
+              esc((pr.elapsed_s || 0).toFixed ? pr.elapsed_s.toFixed(1) : pr.elapsed_s) +
+              " วินาที</div>" + html;
+          }
+        }
+      } catch (e) { /* แสดงผลอย่างเดียว — ล้มเหลวเงียบ */ }
+      if (!stopped) setTimeout(tick, 500);
+    };
+    tick();
+    return () => { stopped = true; };
+  }
+
+
+
   function renderReport(rep, box) {
     const vClass = rep.verdict === "PASS" ? "aw-v-pass"
       : rep.verdict === "REVIEW" ? "aw-v-review" : "aw-v-fail";
@@ -249,9 +560,22 @@
     // ผลเทียบพิกเซลครั้งล่าสุด (ถ้าเคยกด) — advisory ล้วน อยู่ใต้ coverage
     // เพื่อไม่ให้ปนกับผล PASS/FAIL ด้านบน. รายงานเก่าไม่มีคีย์นี้ = ไม่แสดง
     html += pixdiffHtml(rep.pixdiff, rep.id);
+    // โหมดอ่านซ้ำ (ถ้าเปิด) — บอกว่ากรองอะไรออกไป ไม่ให้หายเงียบ
+    html += confirmHtml(rep.confirm);
+    html += pixelHtml(rep.pixel);
+    // เส้นความคืบหน้าต้อง **ไม่หายไปหลังตรวจเสร็จ** — ผู้ตรวจใช้ยืนยันว่า
+    // แต่ละขั้นทำงานจริงหรือตกเงื่อนไข. อ่านจาก rep.flow ที่ฝังใน report.json
+    // ⇒ หน้าประวัติและหลังรีสตาร์ตก็ยังเห็น (registry ในหน่วยความจำหายไปแล้ว)
+    html += flowHtml(rep.flow, true);
 
+    // การ์ดของชั้นที่ "ไม่ได้ทำงานในปุ่มนี้แล้ว" ต้องไม่โชว์เลข 0 ค้างไว้ —
+    // ช่องที่ไม่มีทางเป็นค่าอื่นได้ทำให้ผู้ใช้สับสนกว่าไม่มีช่อง. อ่านจาก
+    // coverage ที่ server ส่งมา ⇒ **รายงานเก่ายังโชว์การ์ดพร้อมจำนวนจริง**
+    const spellOff = !!(rep.coverage && rep.coverage.spelling &&
+                        rep.coverage.spelling.reason === "moved_to_translate");
     html += '<div class="aw-summary">';
     Object.keys(CLASS_LABELS).forEach((cls) => {
+      if (cls === "SPELL_FAIL" && spellOff) return;
       const n = (rep.summary && rep.summary[cls]) || 0;
       html += '<div class="aw-sumcard' + (n ? " hit" : "") + '">' +
         esc(CLASS_LABELS[cls]) + "<b>" + n + "</b></div>";
@@ -276,14 +600,19 @@
         '</div>' +
       '</div>';
     }
-    const previewUrl = "/api/artwork/" + esc(rep.id) + "/preview.png?t=" + ts;
-    const overlayUrl = "/api/artwork/" + esc(rep.id) + "/overlay.png?t=" + ts;
+    // ภาพทั้งหน้าหมุนตาม "มุมที่จอหมุนอยู่ตอนลากโซน" — ผู้ตรวจเพิ่งจัดให้
+    // อ่านออกมาแล้ว รายงานไม่ควรเหวี่ยงกลับไปแนวเดิม. แสดงผลล้วน: หมุน
+    // ตอนเสิร์ฟไฟล์ ไม่แตะพิกัดโซน/ผลตรวจ · รายงานเก่าไม่มีคีย์ = ไม่หมุน
+    const pr = rep.page_rot;
+    const rotQ = (pr === 90 || pr === 180 || pr === 270) ? "&rot=" + pr : "";
+    const previewUrl = "/api/artwork/" + esc(rep.id) + "/preview.png?t=" + ts + rotQ;
+    const overlayUrl = "/api/artwork/" + esc(rep.id) + "/overlay.png?t=" + ts + rotQ;
     html += imgPairHtml(previewUrl, overlayUrl,
       (hasRef ? "🅰 " : "") + "🖼 Artwork ต้นฉบับ",
       (hasRef ? "🅰 " : "") + "🔍 ผลตรวจ — โซนที่พบปัญหา", false);
     if (hasRef) {
-      const previewUrlB = "/api/artwork/" + esc(rep.id) + "/preview_b.png?t=" + ts;
-      const overlayUrlB = "/api/artwork/" + esc(rep.id) + "/overlay_b.png?t=" + ts;
+      const previewUrlB = "/api/artwork/" + esc(rep.id) + "/preview_b.png?t=" + ts + rotQ;
+      const overlayUrlB = "/api/artwork/" + esc(rep.id) + "/overlay_b.png?t=" + ts + rotQ;
       html += imgPairHtml(previewUrlB, overlayUrlB,
         "🅱 ไฟล์อ้างอิง (ชิ้นงาน)", "🅱 ผลตรวจ — โซนที่พบปัญหา", true);
     }
@@ -304,31 +633,54 @@
           '<span class="aw-defect-class">' + esc(d.class) + "</span>" +
           "<b>" + esc(d.zone_id) + (z && z.label ? " · " + esc(z.label) : "") + "</b><br>" +
           esc(d.message);
-        if (d.found)     html += '<br>พบ: <span class="found">' + esc(d.found) + "</span>";
-        if (d.reference) html += ' &nbsp;เทียบกับ: <span class="ref">' + esc(d.reference) + "</span>";
+        if (d.found)     html += '<br>พบ: <span class="found">' + markDiff(d.found, d.found_spans) + "</span>";
+        if (d.reference) html += ' &nbsp;เทียบกับ: <span class="ref">' + markDiff(d.reference, d.ref_spans) + "</span>";
 
         // ── 2-crop comparison (auto-load ทันที ไม่ต้องคลิก) ───────────
         // crop ต้องดึงจากไฟล์ของโซนนั้นเอง (doc a/b) — report เก่าไม่มี
         // field doc → เป็น "a" เหมือนเดิม
         const docOf = (zz) => (zz.doc === "b" ? "b" : "a");
         const docTag = (zz) => (hasRef ? (docOf(zz) === "b" ? "🅱 " : "🅰 ") : "");
-        // report ที่เซฟไว้เก็บองศาที่ใช้จริงเป็นเลข (0/90/180/270);
-        // report เก่าไม่มี field → 0 (crop เหมือนเดิม)
+        // ``view_rot`` = มุมที่ผู้ใช้ปักหมุดไว้ (มุมที่เขา "เห็นด้วยตา"
+        // ตอนลากโซน) · ``rotate`` = มุมที่ OCR หมุนจริง ซึ่งเป็น 0 เสมอใน
+        // เส้นทาง text layer ⇒ ถ้าดูแต่ ``rotate`` การ์ดของไฟล์ที่มี text
+        // layer จะไม่หมุนตามเลย. รายงานเก่าไม่มีคีย์ใหม่ ⇒ ถอยไปใช้ของเดิม
         const rotOf = (zz) => {
-          const rr = zz.rotate;
+          const rr = (zz.view_rot === 90 || zz.view_rot === 180 ||
+                      zz.view_rot === 270) ? zz.view_rot : zz.rotate;
           return (rr === 90 || rr === 180 || rr === 270) ? "&rotate=" + rr : "";
         };
         // กรอบแดงที่ "คำที่มีปัญหา" — เฉพาะรูปฝั่ง subject (โซนของ defect
         // นี้). ถ้าไม่มีคำ (เช่น defect แบบ "ข้อความหายไป") ก็ไม่ส่ง →
         // ครอปธรรมดา. เซิร์ฟเวอร์หาไม่เจอก็คืนครอปเดิม (แสดงผลอย่างเดียว)
-        const hlParam = d.found
-          ? "&hl=" + encodeURIComponent(d.found) + "&zid=" + encodeURIComponent(d.zone_id)
-          : "";
+        const hlOf = (text, spans, zid) => {
+          if (!text || !zid) return "";
+          return hlTargets(text, spans)
+                   .map((t) => "&hl=" + encodeURIComponent(t)).join("") +
+                 "&zid=" + encodeURIComponent(zid);
+        };
+        const hlParam = hlOf(d.found, d.found_spans, d.zone_id);
+        // กรอบที่ "วัดมา" จากโหมดเทียบพิกเซล — แม่นกว่าการค้นหาคำ และใช้ได้
+        // ทุกภาษา/แม้อ่านข้อความตรงนั้นไม่ออก (ค้นหาคำล้มเหลวเมื่อครอปตัดคำ)
+        const boxOf = (arr) => (Array.isArray(arr) && arr.length === 4)
+          ? "&box=" + arr.map(Number).join(",") : "";
+        const boxA = boxOf(d.pixel_bbox);
+        const boxB = boxOf(d.pixel_bbox_b);
+        // ``rv`` = รุ่นของรายงาน (ไม่ใช่ Date.now()) ⇒ URL ของ crop เดิม
+        // ให้ภาพเดิมเสมอ ⇒ เบราว์เซอร์เก็บแคชไว้ใช้ซ้ำได้ตอนเลื่อน/เปิดใหม่
+        // และเปลี่ยนเองเมื่อกด "ส่งตรวจสอบ" ซ้ำบน id เดิม (รายงานถูกเขียนทับ)
+        const rv = "&rv=" + encodeURIComponent(rep.created_at || rep.id || "");
         if (z && refZ) {
           const qA = "x=" + z.bbox[0] + "&y=" + z.bbox[1] + "&w=" + z.bbox[2] + "&h=" + z.bbox[3] + "&doc=" + docOf(z) + rotOf(z);
           const qB = "x=" + refZ.bbox[0] + "&y=" + refZ.bbox[1] + "&w=" + refZ.bbox[2] + "&h=" + refZ.bbox[3] + "&doc=" + docOf(refZ) + rotOf(refZ);
-          const cropA = "/api/artwork/" + esc(rep.id) + "/crop?" + qA + hlParam;
-          const cropB = "/api/artwork/" + esc(rep.id) + "/crop?" + qB;
+          // ฝั่งอ้างอิง (ชิ้นงาน) ก็ต้องได้กรอบด้วย — เดิมไม่เคยส่ง ``hl``
+          // ให้เลย ⇒ ไม่มีทางมีกรอบจากการค้นคำ และการ์ด "ข้อความนี้หายไป
+          // จาก…" (ซึ่ง ``found`` ว่าง) ไม่มีกรอบทั้งสองฝั่ง ทั้งที่ข้อความ
+          // มีอยู่จริงบนฝั่งนี้
+          const hlParamB = (window.AW_HL_REF_SIDE === false) ? ""
+            : hlOf(d.reference, d.ref_spans, refZ.id);
+          const cropA = "/api/artwork/" + esc(rep.id) + "/crop?" + qA + hlParam + boxA + rv;
+          const cropB = "/api/artwork/" + esc(rep.id) + "/crop?" + qB + hlParamB + boxB + rv;
           const labelA = docTag(z) + d.zone_id + (z.label ? " · " + z.label : "");
           const labelB = docTag(refZ) + refZ.id + (refZ.label ? " · " + refZ.label : "") + " (อ้างอิง)";
           html += '<div class="aw-img-pair" style="margin-top:8px;">' +
@@ -348,7 +700,7 @@
         } else if (z) {
           // fallback: แค่โซนเดียว (ไม่มี ref zone)
           const q = "x=" + z.bbox[0] + "&y=" + z.bbox[1] + "&w=" + z.bbox[2] + "&h=" + z.bbox[3] + "&doc=" + docOf(z) + rotOf(z);
-          const cropUrl = "/api/artwork/" + esc(rep.id) + "/crop?" + q + hlParam;
+          const cropUrl = "/api/artwork/" + esc(rep.id) + "/crop?" + q + hlParam + boxA + rv;
           const caption = docTag(z) + d.zone_id + (z.label ? " · " + z.label : "");
           html += '<div style="margin-top:8px;">' +
             '<img src="' + esc(cropUrl) + '" alt="crop"' +
@@ -532,10 +884,19 @@
               sug[w].map((s) => "<code>" + esc(s) + "</code>").join(" ") + "</span>";
         });
       } else if (r.status === "unsupported") {
-        // dict ตัดสินภาษานี้ไม่ได้ — ไม่ใช่ "สะกดผิด" แค่ dict ไม่ครอบคลุม
+        // ⚠️ เดิมเขียนว่า "dict ไม่รองรับคำนี้" ซึ่งผู้ตรวจอ่านได้ว่า
+        //    "ระบบไม่ได้ตรวจ" แล้วเลื่อนผ่าน — วัดบนฉลากจริงแล้วไม่จริง:
+        //    dict อาหรับมี 143,678 คำ และ **ตรวจแล้วจริง ๆ** · คำผิดจริง
+        //    كربوهيدات ไม่อยู่ใน dict ส่วนรูปที่ถูก كربوهيدرات อยู่ ⇒ เป็น
+        //    หลักฐาน "อ่อนแต่มีจริง" ไม่ใช่ "ไม่มีข้อมูล"
+        //    วัดได้ 1 คำผิดจริง : 4 คำจริงที่ dict ขาด (คำนำหน้า/ทับศัพท์)
+        //    ⇒ พูดว่า "สะกดผิด" ไม่ได้ (จะเป็นผลที่ผิดแบบมั่นใจ) แต่ต้อง
+        //    ไม่พูดว่า "ไม่ได้ตรวจ" เช่นกัน · คำแนะนำยังปิดอยู่เพราะพิสูจน์
+        //    แล้วว่าเดาผิด (مهدرجة → مدرجة คนละคำ)
         const langs = (r.unsupported_langs || []).join("/") || "ภาษานี้";
-        st = '<span class="aw-status-info">ℹ️ dict ไม่รองรับคำนี้ (' +
-          esc(langs) + ") — พิจารณาผล AI</span>";
+        st = '<span class="aw-status-info">ℹ️ ไม่อยู่ใน dict ' + esc(langs) +
+          " — อาจเป็นคำเฉพาะ/มีคำนำหน้า หรือสะกดผิด · ไม่มีคำแนะนำ" +
+          " (ดูผล AI ประกอบ)</span>";
       }
       html += "<td>" + st + "</td>";
       // Advisory AI spell-check (Gemini, via the translate webhook).
@@ -633,6 +994,7 @@
   const fileInput = $("awFile"), brandInput = $("awBrand");
   const fileInputB = $("awFileB");
   const stage = $("awStage"), stageEmpty = $("awStageEmpty");
+  const stageRot = $("awStageRot");
   const previewImg = $("awPreviewImg");
   const propsBox = $("awProps");
   const resultBox = $("awResult");
@@ -715,7 +1077,10 @@
     ["awInspect", "awTranslateMain", "awAddZone", "awClearZones", "awRedetect",
      "awPairAuto", "awTemplateLoad", "awTemplateSave", "awRefToggle",
      "awPixdiff"].forEach((id) => {
-      $(id).disabled = b || !inspectionId;
+      // ⚠️ ต้องเช็ค null — ปุ่มที่ถูกปิดด้วย flag อาจไม่มีใน DOM แล้ว
+      // ($("id") ที่ไม่มีจริงจะทำให้ลูปนี้ตายทั้งก้อน = ปุ่มที่เหลือค้างหมด)
+      const el = $(id);
+      if (el) el.disabled = b || !inspectionId;
     });
     fileInputB.disabled = b;
   }
@@ -739,6 +1104,9 @@
         refAttached: refAttached,
         autoRotate: !!($("awAutoRotate") || {}).checked,
         forceOcr: forceOcrOn(),
+        splitBands: splitBandsOn(),
+        confirmReads: confirmReadsOn(),
+        pixelCheck: pixelCheckOn(),
         brand: ($("awBrand") || {}).value || "",
         savedAt: Date.now(),
       }));
@@ -790,12 +1158,16 @@
     refAttached = !!s.refAttached && !!docMeta.b;
     if ($("awAutoRotate")) $("awAutoRotate").checked = !!s.autoRotate;
     if ($("awForceOcr")) $("awForceOcr").checked = !!s.forceOcr;
+    if ($("awSplitBands")) $("awSplitBands").checked = !!s.splitBands;
+    if ($("awConfirmReads")) $("awConfirmReads").checked = !!s.confirmReads;
+    if ($("awPixelCheck")) $("awPixelCheck").checked = !!s.pixelCheck;
     if ($("awBrand") && s.brand) $("awBrand").value = s.brand;
     showTabs(true);
     switchTab("result");
     resetTextTab();
     showDoc("a");
     stage.style.display = "inline-block";
+    if (stageRot) stageRot.style.display = "inline-block";
     stageEmpty.style.display = "none";
     $("awZoomBar").style.display = "";
     $("awStageBox").classList.remove("is-empty");
@@ -846,7 +1218,7 @@
       cancelDraw();
       // ไฟล์หลักใหม่ = inspection record ใหม่ → สถานะไฟล์อ้างอิงเดิมหลุด
       // (ถ้าผู้ใช้ยังเลือกไฟล์ 🅱 ค้างไว้ จะผูกกับ record ใหม่ให้อัตโนมัติด้านล่าง)
-      docMeta.a = { w: res.preview_size[0], h: res.preview_size[1],
+      docMeta.a = { w: res.preview_size[0], h: res.preview_size[1], pdf: !!res.is_pdf,
                     url: "/api/artwork/" + inspectionId + "/preview.png?t=" + Date.now() };
       docMeta.b = null;
       refAttached = false;
@@ -857,6 +1229,7 @@
       resetTextTab();
       showDoc("a");
       stage.style.display = "inline-block";
+      if (stageRot) stageRot.style.display = "inline-block";
       stageEmpty.style.display = "none";
       // แถบเครื่องมือโผล่เหนือกล่อง → กล่องเลิกเป็น "กล่องเปล่ารอรับไฟล์"
       // (มุมบนตรง ต่อกับแถบ, เส้นทึบแทนเส้นประ)
@@ -872,8 +1245,9 @@
         warns.push("✅ ไฟล์นี้มี text layer — โซนที่อ่านได้จากตัว PDF จะแม่น 100% โดยไม่ใช้ OCR");
       if (!res.ocr_available)
         warns.push("⚠️ ยังไม่ได้ตั้งค่า N8N_OCR_WEBHOOK_URL — โซนที่ไม่มี text layer จะถูกรายงานเป็น 'อ่านไม่ได้'");
+      // การสะกดถูกตรวจที่แท็บแปล (ไม่ใช่ปุ่มส่งตรวจ) แล้ว — ชี้ให้ตรงที่
       if (!res.spell_layer_available)
-        warns.push("⚠️ ยังไม่ได้ติดตั้ง pyspellchecker — ชั้นตรวจ dictionary จะถูกข้าม (pip install pyspellchecker)");
+        warns.push('⚠️ ยังไม่ได้ติดตั้ง pyspellchecker — การตรวจคำสะกดในแท็บ "ข้อความ + คำแปล" จะถูกข้าม (pip install pyspellchecker)');
       const w = $("awEnvWarn");
       w.style.display = warns.length ? "" : "none";
       w.innerHTML = warns.map(esc).join("<br>");
@@ -897,7 +1271,7 @@
       fd.append("file", f);
       const res = await api("/api/artwork/" + inspectionId + "/upload_ref",
                             { method: "POST", body: fd });
-      docMeta.b = { w: res.preview_size[0], h: res.preview_size[1],
+      docMeta.b = { w: res.preview_size[0], h: res.preview_size[1], pdf: !!res.is_pdf,
                     url: "/api/artwork/" + inspectionId + "/preview_b.png?t=" + Date.now() };
       refAttached = true;
       // โซนฝั่ง b ของไฟล์ก่อนหน้า (ถ้ามี) ทิ้ง — ไฟล์เปลี่ยนแล้ว. เริ่มจาก
@@ -966,6 +1340,15 @@
     autoRotate = !!ev.target.checked;
     renderZones();
     updateRotPreview();
+  });
+
+  // ช่องติ๊กที่เปลี่ยน "วิธีอ่านข้อความ" ต้องถูกจำไว้ในงานที่ค้าง —
+  // เดิมค่าถูกบันทึกก็ต่อเมื่อมีการแก้โซน (saveSession ถูกเรียกจาก
+  // renderZones) ⇒ ติ๊กแล้วรีเฟรชทันทีจะได้ค่าเก่ากลับมาแบบเงียบ
+  ["awForceOcr", "awSplitBands", "awConfirmReads",
+   "awPixelCheck"].forEach((id) => {
+    const el = $(id);
+    if (el) el.addEventListener("change", saveSessionSoon);
   });
 
   $("awDocTabA").addEventListener("click", () => { if (activeDoc !== "a") showDoc("a"); });
@@ -1129,9 +1512,67 @@
     }
   }
 
+  // ── หมุนเฉพาะการแสดงผล (ผู้ใช้ 8 ก.ย.) ────────────────────────────
+  //
+  // ทำไมต้องมี: ฉลากซองจำนวนมากวางตัวหนังสือ "ตั้ง" ทั้งใบ ⇒ ลากโซนโดยอ่าน
+  // ไม่ออก และมุมที่ระบบเดาเองยังผิดทางได้ (วัดจริง: auto เลือก 270° ได้
+  // 6-9 คำ ส่วนที่ถูกคือ 90° ได้ 93 คำ — แย่กว่าไม่หมุนเลย)
+  //
+  // ⚠️ **หมุนแค่ภาพที่แสดง — พิกัดที่เก็บยังเป็นของหน้าที่ไม่หมุนเสมอ**
+  //    ⇒ preview.png / crop / propose_zones / snap_bbox / autopair /
+  //      overlay / pixdiff / highlight ไม่ต้องแก้เลยสักตัว
+  const PAGE_ROT = [0, 90, 180, 270];
+  let pageRot = 0;
+
+  // มุมนี้ทำให้ภาพบนจอเป็นแนวนอน ⇒ โซนใหม่ควรตั้ง rotate เท่านี้เพื่อให้
+  // OCR เห็นภาพแบบเดียวกับที่คนเห็น (ชั้น pixel ก็ใช้ค่าเดียวกันนี้)
+  function rotForNewZone() { return pageRot; }
+
+  // จุดบนจอ (เทียบกับมุมซ้ายบนของกล่องที่หมุนแล้ว) → พิกัดในภาพที่ยังไม่หมุน
+  // ที่มาของสูตร: ภาพถูก transform เป็น translate(...) rotate(deg) รอบจุด 0,0
+  function unrotPoint(sx, sy, W, H) {
+    if (pageRot === 90) return { x: sy, y: H - sx };
+    if (pageRot === 180) return { x: W - sx, y: H - sy };
+    if (pageRot === 270) return { x: W - sy, y: sx };
+    return { x: sx, y: sy };
+  }
+
+  function applyPageRot() {
+    if (!stageRot) return;
+    const W = dispW(), H = dispH();
+    const st = stage.style;
+    if (!W || !H) return;
+    if (pageRot === 90) {
+      st.transform = "translate(" + H + "px, 0) rotate(90deg)";
+      stageRot.style.width = H + "px"; stageRot.style.height = W + "px";
+    } else if (pageRot === 180) {
+      st.transform = "translate(" + W + "px, " + H + "px) rotate(180deg)";
+      stageRot.style.width = W + "px"; stageRot.style.height = H + "px";
+    } else if (pageRot === 270) {
+      st.transform = "translate(0, " + W + "px) rotate(270deg)";
+      stageRot.style.width = H + "px"; stageRot.style.height = W + "px";
+    } else {
+      st.transform = "";
+      stageRot.style.width = W + "px"; stageRot.style.height = H + "px";
+    }
+    const btn = $("awPageRot");
+    if (btn) btn.textContent = pageRot + "\u00b0";
+    updatePannable();
+  }
+
+  const pageRotBtn = $("awPageRot");
+  if (pageRotBtn) {
+    pageRotBtn.addEventListener("click", () => {
+      if (busy) return;
+      pageRot = PAGE_ROT[(PAGE_ROT.indexOf(pageRot) + 1) % PAGE_ROT.length];
+      applyPageRot();
+    });
+  }
+
   function applyZoom() {
     if (!natW) return;
     previewImg.style.width = Math.round(natW * zoomPct / 100) + "px";
+    applyPageRot();          // ขนาดภาพเปลี่ยน ⇒ กล่องที่หมุนต้องตามด้วย
     updatePannable();
   }
   function dispW() { return previewImg.clientWidth || natW; }
@@ -1150,9 +1591,13 @@
     // แสดงเฉพาะโซนของไฟล์ที่ stage กำลังแสดง (โหมดไฟล์เดียว = doc a ทั้งหมด)
     zones.filter((z) => docOfZone(z) === activeDoc).forEach((z) => {
       const el = document.createElement("div");
+      // คุณภาพขนาดโซน = วงแหวนรอบนอก (box-shadow) ไม่ใช่สีขอบ — สีขอบถูก
+      // ใช้บอกชนิดโซน/ไฟล์/ถูกเลือกอยู่ไปหมดแล้ว ทับแล้วอ่านไม่ออกทั้งคู่
+      const qz = z.type === "ignore" ? null : zoneQuality(z.bbox);
       el.className = "aw-zone t-" + z.type +
         (docOfZone(z) === "b" ? " doc-b" : "") +
-        (z.id === selectedId ? " selected" : "");
+        (z.id === selectedId ? " selected" : "") +
+        (qz && qz.level !== "ok" ? " q-" + qz.level : "");
       el.dataset.zid = z.id;
       el.style.left = (z.bbox[0] * W) + "px";
       el.style.top = (z.bbox[1] * H) + "px";
@@ -1167,6 +1612,14 @@
       const handle = document.createElement("div");
       handle.className = "aw-handle";
       el.appendChild(handle);
+      if (qz) {
+        const sz = document.createElement("div");
+        sz.className = "aw-zone-size q-" + qz.level;
+        sz.textContent = zoneQualityTag(qz);
+        sz.title = "ความละเอียดที่ OCR จะเห็น ~" + qz.effDpi + " dpi (" +
+                   qz.w + "×" + qz.h + " px · " + qz.tiles + " ไทล์)";
+        el.appendChild(sz);
+      }
       // ชิปหมุน ↻ (มุมบนขวา) — คลิกวนสถานะการหมุนของโซนนี้
       const chip = document.createElement("div");
       const ci = rotChipInfo(z);
@@ -1347,35 +1800,136 @@
       pp.textContent = "";
     }
     renderHlHint(z);
+    renderSizeHint(z);
     updateRotPreview();
   }
 
   // เตือนตั้งแต่ตอนจัดโซน (ก่อนส่งตรวจ) ว่าโซนนี้จะชี้ตำแหน่งคำไม่ได้
   // คำนวณจากเรขาคณิตอย่างเดียว — ต้องให้ผลตรงกับ zones.highlight_risk ฝั่ง
   // เซิร์ฟเวอร์ (ดูค่าคงที่ในไฟล์นั้น)
-  const HL_DPI = 450, HL_MAX_SIDE = 1600, HL_MIN_SIDE = 1200;
+  const HL_MAX_SIDE = 1600, HL_MIN_SIDE = 1200;
   const HL_MIN_SHORT = 700, HL_MAX_ASPECT = 4.0;
-  function predictCrop(bbox, pageW, pageH) {
-    let pw = Math.max(1, bbox[2] * pageW) / 72 * HL_DPI;
-    let ph = Math.max(1, bbox[3] * pageH) / 72 * HL_DPI;
-    let lo = Math.max(pw, ph);
-    if (lo > HL_MAX_SIDE) { const s = HL_MAX_SIDE / lo; pw *= s; ph *= s; }
-    lo = Math.max(pw, ph);
-    if (lo < HL_MIN_SIDE) {
-      const s = Math.min(4, HL_MIN_SIDE / lo); pw *= s; ph *= s;
-      lo = Math.max(pw, ph);
-      if (lo > HL_MAX_SIDE) { const s2 = HL_MAX_SIDE / lo; pw *= s2; ph *= s2; }
-    }
-    return [Math.round(pw), Math.round(ph)];
+
+  // ── ค่าคงที่ที่ต้องตรงกับฝั่ง Python ──────────────────────────────
+  // PREVIEW_DPI/OCR_* มาจาก artwork_check/config.py · GEM_*/ZONE_DPI_*
+  // มาจาก artwork_check/zones.py — ห้ามแก้ข้างเดียว
+  // (tests/test_artwork_zone_quality.py อ่านไฟล์นี้มาเทียบ)
+  const PREVIEW_DPI = 150, OCR_DPI = 450;
+  const OCR_CROP_MAX_SIDE = 3000, OCR_CROP_MIN_SIDE = 1200;
+  const OCR_DPI_MAX_FACTOR = 4.0;
+  const GEM_SMALL_SIDE = 384, GEM_TILE_DIV = 1.5;
+  const GEM_TILE_MIN = 256, GEM_TILE_MAX = 768;
+  const ZONE_DPI_OK = 580, ZONE_DPI_BAD = 500;
+  const GEM_TOKENS_PER_TILE = 258;
+
+  // คั่นหลักพันแบบคงที่ — ห้ามใช้ toLocaleString() เพราะผลขึ้นกับ locale
+  // ของเบราว์เซอร์ (บาง locale ให้เลขไทย) แล้วเทสต์/หน้าจอจะไม่ตรงกัน
+  function thousands(n) {
+    return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
   }
+
+  // พิกเซลของ crop "ก่อนผ่านเพดาน/การเพิ่ม DPI"
+  // ⚠️ เดิมโค้ดนี้ hard-code ขนาดหน้าเป็น 842 pt (A4 แนวนอน) แล้วเดา
+  //    ความสูงจากสัดส่วนภาพ ⇒ บนงานแผ่นใหญ่ (เช่น 757 mm) คลาด 2.5 เท่า
+  //    ตอนนี้คิดจากขนาด preview จริง ซึ่งเรนเดอร์ที่ PREVIEW_DPI = เป๊ะ
+  // ⚠️ ไฟล์ raster ไม่มี dpi — พิกเซลของ preview คือพิกเซลของไฟล์ต้นทาง
+  //    ตรง ๆ (pdf_ingest.render ไม่สนใจ dpi เมื่อไม่ใช่ PDF)
+  function cropBasePx(bbox, dpi) {
+    const m = docMeta[activeDoc];
+    const w = natW || (previewImg && previewImg.naturalWidth);
+    const h = natH || (previewImg && previewImg.naturalHeight);
+    if (!m || !w || !h || m.pdf === undefined) return null;  // ไม่รู้ = ไม่เดา
+    const k = m.pdf ? (dpi / PREVIEW_DPI) : 1;
+    return [Math.max(1, bbox[2] * w) * k, Math.max(1, bbox[3] * h) * k];
+  }
+
+  // เพดานด้านยาว + การเพิ่ม DPI ให้โซนเล็ก — ลำดับเดียวกับฝั่ง Python
+  // คืน [w, h, ตัวคูณ] · ตัวคูณ < 1 = โดนเพดานย่อลง (เสีย dpi จริง)
+  function capBoost(pw, ph, maxSide, minSide) {
+    let scale = 1, lo = Math.max(pw, ph);
+    if (maxSide && lo > maxSide) { scale = maxSide / lo; pw *= scale; ph *= scale; }
+    lo = Math.max(pw, ph);
+    if (minSide && lo < minSide) {
+      const f = Math.min(OCR_DPI_MAX_FACTOR, minSide / lo);
+      pw *= f; ph *= f;
+      lo = Math.max(pw, ph);
+      if (maxSide && lo > maxSide) {
+        const s2 = maxSide / lo; pw *= s2; ph *= s2; scale *= s2;
+      }
+    }
+    return [pw, ph, scale];
+  }
+
+  // กฎการหั่นไทล์ของ Gemini: ภาพที่ด้านใดด้านหนึ่งเกิน 384 px ถูกหั่นเป็น
+  // ไทล์ clamp(min(W,H)/1.5, 256, 768) แล้วทุกไทล์ถูกขยายเป็น 768x768
+  // ⇒ ด้านสั้นยิ่งใหญ่ ยิ่งได้ขยายน้อย และตันที่ 1152 px (= ไม่ขยายเลย)
+  function gemTiling(w, h) {
+    if (w <= GEM_SMALL_SIDE && h <= GEM_SMALL_SIDE) return [1, 1];
+    let t = Math.min(w, h) / GEM_TILE_DIV;
+    t = Math.max(GEM_TILE_MIN, Math.min(GEM_TILE_MAX, t));
+    return [Math.ceil(w / t) * Math.ceil(h / t), GEM_TILE_MAX / t];
+  }
+
+  // โซนนี้จะถูกส่งให้ OCR ด้วยความละเอียดที่โมเดล "เห็น" เท่าไร
+  // advisory 100% — ไม่ห้ามวาด ไม่แตะผลตรวจ/verdict/การนับ
+  function zoneQuality(bbox) {
+    if (!bbox || !(bbox[2] > 0) || !(bbox[3] > 0)) return null;
+    const base = cropBasePx(bbox, OCR_DPI);
+    if (!base) return null;
+    const m = docMeta[activeDoc];
+    const r = capBoost(base[0], base[1], OCR_CROP_MAX_SIDE,
+                       m.pdf ? OCR_CROP_MIN_SIDE : 0);
+    const pw = r[0], ph = r[1], scale = r[2];
+    const t = gemTiling(pw, ph), tiles = t[0], mag = t[1];
+    const down = scale < 0.999;
+    let mm = null;
+    if (m.pdf) {
+      const w = natW || previewImg.naturalWidth;
+      const h = natH || previewImg.naturalHeight;
+      mm = [bbox[2] * w / PREVIEW_DPI * 25.4, bbox[3] * h / PREVIEW_DPI * 25.4];
+    }
+    // ความละเอียดที่โมเดลเห็นจริง — รวมชั้นเพิ่ม DPI + ย่อเพราะชนเพดาน +
+    // กำลังขยายจากการหั่นไทล์. ⚠️ ห้ามคิดจาก scale (ไม่รวมชั้นเพิ่ม DPI)
+    // และห้ามตัดสินด้วย mag ล้วน (ไร้ความหมายกับโซนเล็ก — ดู zones.py)
+    const effDpi = mm ? pw / Math.max(1e-6, mm[0] / 25.4) * mag
+                      : OCR_DPI * scale * mag;
+    const level = effDpi >= ZONE_DPI_OK ? "ok"
+                : (effDpi >= ZONE_DPI_BAD ? "warn" : "bad");
+    return { level: level, w: Math.round(pw), h: Math.round(ph),
+             tiles: tiles, mag: mag, tokens: tiles * GEM_TOKENS_PER_TILE,
+             tilePx: Math.round(GEM_TILE_MAX / mag),
+             effDpi: Math.round(effDpi),
+             mm: mm, shortPx: Math.round(Math.min(pw, ph)), downscaled: down };
+  }
+
+  // ป้ายสั้น ๆ ที่ติดบนกรอบตอนลาก/บนโซน
+  // ⚠️ ห้ามอ้างเลข mm ตายตัวเป็นเหตุผล — เกณฑ์จริงคือ "ด้านสั้นของภาพที่
+  //    ส่งจริง" ซึ่งชั้นเพิ่ม DPI ให้โซนเล็กทำให้โซนเกือบจัตุรัสทะลุเกณฑ์
+  //    ได้ทั้งที่ยังเล็กกว่า 65 mm (วัดเจอตอนขับเบราว์เซอร์จริง)
+  // ⚠️ และห้ามพูดว่า "ไม่ได้ขยาย = ตัวหนังสือเล็ก" — วัดสองโซนที่ผลอ่าน
+  //    ต่างกันจริงแล้ว ตัวหนังสือในสายตาโมเดลเท่ากัน (71.1 vs 68.9 px)
+  //    สิ่งที่ต่างคือ **จำนวนไทล์ = โควตา token** ดู zones.GEM_TOKENS_PER_TILE
+  function zoneQualityTag(q) {
+    if (!q) return "";
+    const size = q.mm
+      ? q.mm[0].toFixed(0) + "×" + q.mm[1].toFixed(0) + " mm"
+      : q.w + "×" + q.h + " px";
+    if (q.downscaled) return size + " · ใหญ่เกิน ระบบต้องย่อ ✗";
+    // ⚠️ ตัวเลขบนป้ายต้องเป็น "ความละเอียดที่โมเดลเห็น" ไม่ใช่ไทล์/กำลังขยาย
+    //    — สองตัวหลังไร้ความหมายกับโซนเล็ก (ดู zones.ZONE_DPI_OK)
+    const t = " · โมเดลเห็น " + q.effDpi + " dpi";
+    if (q.level === "bad") return size + t + " ✗";
+    if (q.level === "warn") return size + t + " ⚠";
+    return size + t + " ✓";
+  }
+
   function renderHlHint(z) {
     const el = $("awHlHint");
     if (!el) return;
-    // ขนาดหน้าเป็นจุด (pt) — ประมาณจากสัดส่วนภาพ preview ที่โหลดมา
-    const img = $("awPreviewImg");
-    if (!z || !img || !img.naturalWidth) { el.style.display = "none"; return; }
-    const pageW = 842, pageH = pageW * (img.naturalHeight / img.naturalWidth);
-    const [pw, ph] = predictCrop(z.bbox, pageW, pageH);
+    const base = z ? cropBasePx(z.bbox, OCR_DPI) : null;
+    if (!base) { el.style.display = "none"; return; }
+    const r = capBoost(base[0], base[1], HL_MAX_SIDE, HL_MIN_SIDE);
+    const pw = r[0], ph = r[1];
     const short = Math.min(pw, ph), aspect = Math.max(pw, ph) / (short || 1);
     if (short >= HL_MIN_SHORT) { el.style.display = "none"; return; }
     el.style.display = "";
@@ -1383,6 +1937,39 @@
       ? "⚠ โซนนี้กว้างมาก — กรอบแดงชี้คำอาจไม่ขึ้น"
       : "⚠ โซนนี้เล็กไป — กรอบแดงชี้คำอาจไม่ขึ้น") +
       " (ผลตรวจไม่กระทบ) ดับเบิลคลิกที่โซนให้ระบบจัดให้พอดี หรือลากใหม่ให้กระชับเฉพาะบล็อกข้อความ";
+  }
+
+  // บรรทัดตัวเลขเต็มในแผง properties (ทำไมโซนนี้ถึงเขียว/เหลือง/แดง)
+  function renderSizeHint(z) {
+    const el = $("awSizeHint");
+    if (!el) return;
+    const q = z ? zoneQuality(z.bbox) : null;
+    if (!q) { el.style.display = "none"; return; }
+    el.style.display = "";
+    el.className = "aw-size-hint q-" + q.level;
+    // ⚠️ ช่วง warn = ยังไม่เคยวัดที่ความละเอียดนี้ ไม่ใช่ "มีปัญหา"
+    //    (มีจุดวัดจริงแค่ 2 จุด: 450 อ่านตก · 581 อ่านครบ) ⇒ ห้ามเขียนให้
+    //    อ่านเหมือนพบข้อผิดพลาด และห้ามสั่งให้แก้ของที่ยังไม่รู้ว่าพัง
+    const head = q.level === "ok" ? "🟢 ความละเอียดที่โมเดลเห็นเพียงพอ"
+               : q.level === "warn" ? "🟡 ยังไม่เคยวัดที่ความละเอียดนี้"
+               : "🔴 ความละเอียดที่โมเดลเห็นต่ำ";
+    let tip = "";
+    if (q.downscaled)
+      tip = " — โซนใหญ่เกิน " + OCR_CROP_MAX_SIDE +
+            " px ระบบต้องย่อภาพลงก่อนส่ง จึงเสียความละเอียดจริง";
+    else if (q.level === "warn")
+      tip = " — อยู่ระหว่าง 450 (วัดว่าอ่านตก) กับ 581 (วัดว่าอ่านครบ)" +
+            " จึงยังบอกไม่ได้ว่าพอหรือไม่พอ · ถ้าอยากให้แน่ ลากโซนให้กระชับ" +
+            "เฉพาะบล็อกข้อความที่ต้องอ่าน (ยิ่งโซนเล็ก ระบบยิ่งเรนเดอร์" +
+            "ละเอียดขึ้นให้)";
+    else if (q.level === "bad")
+      tip = " — ต่ำกว่าค่าที่วัดว่าอ่านตกจริง · ลากโซนให้กระชับเฉพาะบล็อก" +
+            "ข้อความที่ต้องอ่าน (ยิ่งโซนเล็ก ระบบยิ่งเรนเดอร์ละเอียดขึ้นให้)" +
+            " · แบ่งเป็นสองโซน · หรือติ๊ก \u201cหั่นโซนเป็นแถบ\u201d";
+    el.textContent = head + " ~" + q.effDpi + " dpi" + tip +
+      " · วัดจริง: 581 dpi อ่านครบ · 450 dpi เลขอาหรับหาย" +
+      " · ภาพที่ส่ง " + q.w + "×" + q.h + " px · " + q.tiles + " ไทล์ (ละ " +
+      q.tilePx + " px) = " + thousands(q.tokens) + " token";
   }
   $("awPropType").addEventListener("change", () => {
     const z = selectedZone(); if (z) { z.type = $("awPropType").value; renderZones(); }
@@ -1433,11 +2020,18 @@
   });
 
   function drawPoint(ev) {
-    const r = previewImg.getBoundingClientRect();
-    return {
-      x: Math.min(Math.max(ev.clientX - r.left, 0), r.width),
-      y: Math.min(Math.max(ev.clientY - r.top, 0), r.height),
-    };
+    // ⚠️ ตอนหมุนจอ ``previewImg.getBoundingClientRect()`` คืนกรอบ
+    //    **แนวแกน** ของภาพที่หมุนแล้ว ซึ่งไม่ใช่ระบบพิกัดของภาพเอง
+    //    ⇒ ต้องวัดจากกล่องที่หมุน (stageRot) แล้วแปลงกลับด้วย unrotPoint
+    //    ไม่งั้นโซนจะไปวางผิดที่แบบเงียบ ๆ (บั๊กที่แย่ที่สุดของ repo นี้)
+    const host = (pageRot && stageRot) ? stageRot : previewImg;
+    const r = host.getBoundingClientRect();
+    const W = dispW(), H = dispH();
+    const sx = Math.min(Math.max(ev.clientX - r.left, 0), r.width);
+    const sy = Math.min(Math.max(ev.clientY - r.top, 0), r.height);
+    const q = pageRot ? unrotPoint(sx, sy, W, H) : { x: sx, y: sy };
+    return { x: Math.min(Math.max(q.x, 0), W),
+             y: Math.min(Math.max(q.y, 0), H) };
   }
   function drawRect(ev) {
     const p = drawPoint(ev);
@@ -1454,6 +2048,10 @@
     const p = drawPoint(ev);
     draw = { x0: p.x, y0: p.y, el: document.createElement("div") };
     draw.el.className = "aw-drawbox";
+    draw.tag = document.createElement("div");
+    draw.tag.className = "aw-drawbox-tag";
+    draw.tag.style.display = "none";
+    draw.el.appendChild(draw.tag);
     stage.appendChild(draw.el);
   });
 
@@ -1464,6 +2062,18 @@
     draw.el.style.top = q.y + "px";
     draw.el.style.width = q.w + "px";
     draw.el.style.height = q.h + "px";
+    // ทาสีสดตามความละเอียดที่ OCR จะได้จากโซนขนาดนี้ (เขียว/เหลือง/แดง)
+    // กรอบยางลบเป็นสีเดียวที่ "ว่าง" อยู่ — สีขอบโซนจริงถูกใช้บอกชนิด
+    // โซน/ไฟล์/สถานะถูกเลือกไปหมดแล้ว จึงห้ามเอามาทับ
+    const W = dispW(), H = dispH();
+    const qual = (W && H)
+      ? zoneQuality([q.x / W, q.y / H, q.w / W, q.h / H]) : null;
+    draw.el.className = "aw-drawbox" + (qual ? " q-" + qual.level : "");
+    if (draw.tag) {
+      const txt = (q.w >= 8 && q.h >= 8) ? zoneQualityTag(qual) : "";
+      draw.tag.textContent = txt;
+      draw.tag.style.display = txt ? "" : "none";
+    }
   });
 
   document.addEventListener("mouseup", (ev) => {
@@ -1485,7 +2095,11 @@
     while (zones.some((z) => z.id === prefix + n)) n++;
     const z = {
       id: prefix + n, type: "panel", group: nextGroupLetter(activeDoc),
-      doc: activeDoc, rotate: "default",
+      doc: activeDoc,
+      // จอหมุนอยู่เท่าไร โซนใหม่ตั้งเท่านั้น ⇒ OCR (และชั้น pixel) เห็นแผง
+      // ในแนวเดียวกับที่คนเห็นและยืนยันด้วยตาแล้ว. ไม่ได้หมุน = "default"
+      // = พฤติกรรมเดิมเป๊ะ
+      rotate: rotForNewZone() || "default",
       bbox: [q.x / W, q.y / H, q.w / W, q.h / H]
         .map((v) => Math.round(v * 1e5) / 1e5),
       label: (activeDoc === "b" ? "อ้างอิง " : "โซน ") + n,
@@ -1669,7 +2283,9 @@
 
   // ── inspect ────────────────────────────────────────────────────────
   // ── เทียบภาพเก่า/ใหม่ (advisory) — ต้องกดเอง ไม่วิ่งตอนส่งตรวจสอบ ──
-  $("awPixdiff").addEventListener("click", async () => {
+  // ปุ่มอาจถูกซ่อน/ถอดออกด้วย config.PIXDIFF_UI — ผูก listener เมื่อมีจริง
+  // เท่านั้น (เส้นทาง API และการแสดงผลรายงานเก่ายังทำงานเหมือนเดิมทุกอย่าง)
+  if ($("awPixdiff")) $("awPixdiff").addEventListener("click", async () => {
     if (!inspectionId || busy) return;
     if (!refAttached) {
       alert("ต้องแนบ 🅱 ไฟล์อ้างอิง (ฉบับเก่า/ที่อนุมัติแล้ว) ก่อน — " +
@@ -1721,15 +2337,22 @@
     }
     setBusy(true);
     resultBox.innerHTML =
-      '<div class="aw-empty"><span class="aw-spin"></span>กำลัง OCR ทีละโซนและตรวจทุกชั้น — ' +
-      "โซนเยอะอาจใช้เวลาหลายสิบวินาที…</div>";
+      '<div class="aw-empty"><span class="aw-spin"></span>กำลังเริ่มตรวจ…</div>';
+    const stopFlow = startFlowPoll(inspectionId, resultBox);
     try {
       const rep = await api("/api/artwork/" + inspectionId + "/inspect", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ zones: zones, brand: brandInput.value.trim(),
-                               auto_rotate: autoRotate, force_ocr: forceOcrOn() }),
+                               auto_rotate: autoRotate, force_ocr: forceOcrOn(),
+                               split_bands: splitBandsOn(),
+                               confirm_reads: confirmReadsOn(),
+                               pixel_check: pixelCheckOn(),
+                               // มุมที่ "↻ หมุนจอ" ค้างอยู่ตอนลากโซน —
+                               // รายงานจะแสดงภาพทั้งหน้าในแนวเดียวกัน
+                               page_rot: pageRot }),
       });
+      stopFlow();
       renderReport(rep, resultBox);
       showTabs(true);
       switchTab("result");
@@ -1737,9 +2360,19 @@
       setResultsWide(true);   // results exist → widen the results panel
       scrollToResults();      // ② อยู่ล่าง — พาไปดูผลให้เลย
     } catch (e) {
-      resultBox.innerHTML = '<div class="aw-empty">ตรวจไม่สำเร็จ: ' + esc(e.message) + "</div>";
+      stopFlow();
+      // แสดงเส้นความคืบหน้าค้างไว้ด้วย — จะได้รู้ว่าพังที่ขั้นไหน
+      let last = "";
+      try {
+        const r = await fetch("/api/artwork/" + encodeURIComponent(inspectionId) +
+                              "/progress", { cache: "no-store" });
+        if (r.ok) last = flowHtml(await r.json());
+      } catch (_) { /* ไม่เป็นไร */ }
+      resultBox.innerHTML = '<div class="aw-empty">ตรวจไม่สำเร็จ: ' +
+        esc(e.message) + "</div>" + last;
       scrollToResults();      // ข้อความ error ก็อยู่ในกล่อง ② เช่นกัน
     } finally {
+      stopFlow();
       setBusy(false);
     }
   });
@@ -1796,7 +2429,8 @@
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ zones: zones, brand: brandInput.value.trim(),
-                               auto_rotate: autoRotate, force_ocr: forceOcrOn() }),
+                               auto_rotate: autoRotate, force_ocr: forceOcrOn(),
+                               split_bands: splitBandsOn() }),
       });
       renderTextTable(textResult, textTableWrap, onlyIssuesCb.checked);
       setResultsWide(true);   // table now has data → widen the results panel

@@ -23,7 +23,8 @@ from __future__ import annotations
 import re
 import unicodedata
 from collections import Counter
-from typing import Dict, List, Optional
+from difflib import SequenceMatcher
+from typing import Dict, List, Optional, Tuple
 
 from . import config
 
@@ -98,10 +99,25 @@ def _norm_key(s: str) -> str:
     "التخزين" ≠ "التحزين"). European accents are kept (é ≠ e is a real
     spelling difference on ES/FR labels).
     """
+    return re.sub(r"[\W_]+", "", _norm_core(s).upper())
+
+
+def _norm_core(s: str) -> str:
+    """ส่วนที่ ``_norm_key`` และ ``_norm_key_cs`` ใช้ร่วมกัน — NFKC +
+    อักขรวิธีอาหรับ + เลขอาหรับ-อินดิก (ยังไม่พับตัวพิมพ์ ยังไม่ตัดสัญลักษณ์)"""
     s = unicodedata.normalize("NFKC", s)
     s = _AR_MARKS.sub("", s)
-    s = s.translate(_AR_LETTERS).translate(_AR_DIGITS).upper()
-    return re.sub(r"[\W_]+", "", s)
+    return s.translate(_AR_LETTERS).translate(_AR_DIGITS)
+
+
+def _norm_key_cs(s: str) -> str:
+    """เหมือน ``_norm_key`` ทุกอย่าง **ยกเว้นไม่พับตัวพิมพ์ใหญ่-เล็ก**
+
+    ใช้เฉพาะ "ชั้นที่สอง" ที่ตรวจตัวพิมพ์ (``_case_only_defects``) และ
+    ``diff_spans(case=True)`` เท่านั้น — ชั้นเทียบหลักยังใช้ ``_norm_key``
+    เหมือนเดิมทุกจุด (ดูเหตุผลที่ ``config.TEXT_CASE_SENSITIVE``)
+    """
+    return re.sub(r"[\W_]+", "", _norm_core(s))
 
 
 def _key_tokens(line: str, min_len: int = 2) -> List[str]:
@@ -224,7 +240,13 @@ def check_group_consistency(zones: List[dict],
 
         readable = [z for z in panels if texts.get(z["id"], "").strip()]
         if len(readable) >= 2:
-            defects += _vote_panels(gname, readable, texts)
+            voted = _vote_panels(gname, readable, texts)
+            defects += voted
+            # ชั้นที่สอง: บรรทัดที่ต่าง **เฉพาะตัวพิมพ์ใหญ่-เล็ก** ซึ่งชั้น
+            # โหวตข้างบนยกโทษให้เสมอ (ทุก key พับตัวพิมพ์) ⇒ เดิมเงียบสนิท.
+            # ส่ง ``voted`` เข้าไปเพื่อไม่รายงานซ้ำบรรทัดที่ฟ้องไปแล้ว
+            if config.TEXT_CASE_SENSITIVE:
+                defects += _case_only_defects(gname, readable, texts, voted)
 
         if zooms and readable:
             defects += _check_zooms(gname, zooms, readable, texts)
@@ -337,12 +359,188 @@ def _vote_panels(gname: str, panels: List[dict],
     # พร้อมข้อความอ้างอิงจากไฟล์อ้างอิง. scope เฉพาะคู่ข้ามไฟล์เท่านั้น —
     # กลุ่ม 2 panel ภายในไฟล์เดียวพฤติกรรมเดิมทุกอย่าง.
     if n == 2 and panels[0].get("doc", "a") != panels[1].get("doc", "a"):
-        defects = _pair_cross_doc_extras(gname, panels, defects)
+        defects = _pair_cross_doc_extras(gname, panels, defects, texts)
+    return defects
+
+
+def _words(text: str, case: bool = False):
+    """คำของบรรทัด → ``[(คีย์เทียบ, เริ่ม, จบ)]`` โดยคีย์ใช้ ``_norm_key``
+
+    ``case=True`` = ใช้ ``_norm_key_cs`` (ไม่พับตัวพิมพ์) — สำหรับหาช่วงที่
+    ต่างของบรรทัดที่เหมือนกันทุกตัวอักษรยกเว้นตัวพิมพ์
+
+    🔑 ใช้ normaliser ตัวเดียวกับที่ชั้นเทียบใช้อยู่แล้ว (จัดการอักขรวิธี
+       อาหรับ · เลขอาหรับ-อินดิก · ตัดเครื่องหมาย) — จำเป็นจริง ไม่ใช่การ
+       ผ่อนเกณฑ์: OCR สองฝั่งอ่าน ``المكونات:`` กับ ``المكونات :`` ต่างกัน
+       แค่ช่องว่างหน้าโคลอน ถ้าไม่ normalize ช่วงคำที่ติดกันจะถูกหักตรงนั้น
+       แล้วบรรทัดที่ควรจับคู่ได้จะหลุด (เจอจริงกับบรรทัดส่วนผสมของ PURINA ONE)
+
+    คงตำแหน่งตัวอักษรของคำ **ในสตริงต้นฉบับ** ไว้ เพื่อให้ไฮไลต์ชี้ถูกที่
+    """
+    out, at = [], 0
+    for w in (text or "").split():
+        i = (text or "").find(w, at)
+        if i < 0:                                       # ไม่ควรเกิด — กันไว้
+            continue
+        at = i + len(w)
+        k = _norm_key_cs(w) if case else _norm_key(w)
+        if k:                                           # ข้ามคำที่เป็นเครื่องหมายล้วน
+            out.append((k, i, at))
+    return out
+
+
+def line_run_ratio(a: str, b: str) -> float:
+    """สัดส่วน "ช่วงคำที่ติดกันยาวที่สุด" ของสองบรรทัด (0..1).
+
+    🔑 ทำไมต้องวัด **ความติดกัน** ไม่ใช่จำนวนคำร่วม — การที่ OCR ตัดบรรทัด
+       คนละที่ **รักษาลำดับคำที่ติดกันไว้** ส่วนบรรทัดคนละเรื่องบนฉลาก
+       เดียวกันบังเอิญใช้คำซ้ำกันแบบ *กระจาย* (หน่วย ตัวเลข ชื่อแบรนด์)
+
+    วัดบนข้อความจริงหลายภาษา 1,236 คู่ + 400 เคสที่ไม่ควรจับ:
+      ช่วงติดกัน ≥ 0.40   → จับคู่ถูก 100% · ผิด 4.8%
+      คำร่วมทั้งหมด ≥ 0.40 → จับคู่ถูก 100% · **ผิด 13.8%**
+    """
+    ka = [w[0] for w in _words(a)]
+    kb = [w[0] for w in _words(b)]
+    if not ka or not kb:
+        return 0.0
+    m = SequenceMatcher(None, ka, kb).find_longest_match(0, len(ka), 0, len(kb))
+    return m.size / float(min(len(ka), len(kb)))
+
+
+def diff_spans(a: str, b: str,
+               full_a: str = "", full_b: str = "",
+               case: bool = False
+               ) -> Tuple[List[List[int]], List[List[int]]]:
+    """ช่วง **ตัวอักษร** ที่ต่างกันของสองบรรทัด — สำหรับไฮไลต์บนรายงาน
+
+    ⚠️ **แสดงผลล้วน** — ไม่แตะ ``found``/``reference`` เด็ดขาด เพราะสองค่านั้น
+       ถูกใช้ไปค้นหาคำเพื่อวาดกรอบแดงบนภาพ crop (``/crop?hl=``) ⇒ แก้แล้ว
+       กรอบแดงจะหายหรือไปโผล่ผิดที่
+
+    ⚠️ **หัว-ท้ายที่เกิดจากการตัดบรรทัดคนละที่ ต้องไม่ถูกไฮไลต์** — ข้อความ
+       ท่อนนั้น *มีอยู่* ในอีกฝั่ง แค่ไปอยู่คนละบรรทัด ⇒ ทาแดงเท่ากับชี้ว่า
+       "ตรงนี้ต่าง" ทั้งที่ไม่ต่าง (กฎเหล็กข้อ 2). ส่ง ``full_a``/``full_b``
+       (ข้อความทั้งแผงของแต่ละฝั่ง) มาด้วยเพื่อให้คัดออกได้
+    """
+    nk = _norm_key_cs if case else _norm_key
+    wa, wb = _words(a, case), _words(b, case)
+    if not wa or not wb:
+        return [], []
+    ka = [w[0] for w in wa]
+    kb = [w[0] for w in wb]
+    ops = [op for op in SequenceMatcher(None, ka, kb).get_opcodes()
+           if op[0] != "equal"]
+    key_b, key_a = nk(full_b or ""), nk(full_a or "")
+
+    def keep(text, at_edge, other_key):
+        """ช่วงที่ *ติดขอบบรรทัด* และไปโผล่ในอีกฝั่งอยู่แล้ว = แค่ตัดบรรทัดต่าง"""
+        if not at_edge or not other_key:
+            return True
+        k = nk(text)
+        return not (k and k in other_key)
+
+    sa, sb = [], []
+    for idx, (tag, i1, i2, j1, j2) in enumerate(ops):
+        edge = (idx == 0) or (idx == len(ops) - 1)
+        if i1 < i2:
+            lo, hi = wa[i1][1], wa[i2 - 1][2]
+            if keep(a[lo:hi], edge and (i1 == 0 or i2 == len(ka)), key_b):
+                sa.append([lo, hi])
+        if j1 < j2:
+            lo, hi = wb[j1][1], wb[j2 - 1][2]
+            if keep(b[lo:hi], edge and (j1 == 0 or j2 == len(kb)), key_a):
+                sb.append([lo, hi])
+    return sa, sb
+
+
+def _case_only_defects(gname: str, panels: List[dict],
+                       texts: Dict[str, str],
+                       existing: Optional[List[dict]] = None) -> List[dict]:
+    """บรรทัดที่ **เท่ากันแบบพับตัวพิมพ์ แต่ไม่เท่ากันแบบสนใจตัวพิมพ์**
+
+    เคสจริงที่ระบบเคยพลาด (AvoDerm Master1/Master2):
+    ``D-Calcium Pantothenate`` vs ``D-calcium Pantothenate``
+
+    **ทำไมชั้นเทียบหลักมองไม่เห็น** — ด่าน containment ใน ``_vote_panels``
+    ยกโทษบรรทัดนี้ (``_norm_flat``/``_norm_key`` พับตัวพิมพ์ทั้งคู่) ⇒ นับว่า
+    อีกฝั่งมีบรรทัดนี้แล้ว ⇒ ไม่เข้า ``extra`` เลย
+
+    🔑 **เป็นการ *เพิ่ม* ในที่ที่เดิมเงียบ ไม่ใช่การเปลี่ยนผลเดิม** — ยิงเฉพาะ
+       บรรทัดที่ ``_norm_key`` เท่ากัน (= ชั้นหลักถือว่าเหมือนกันแน่นอน) และ
+       ข้ามบรรทัดที่ชั้นหลักฟ้องไปแล้ว ⇒ ไม่มี defect เดิมรายการไหนถูกแตะ
+
+    ⚠️ อาหรับ/ไทย/CJK ไม่มีตัวพิมพ์ใหญ่-เล็ก ⇒ ``_norm_key_cs`` เท่ากับ
+       ``_norm_key`` โดยธรรมชาติ ⇒ ชั้นนี้เงียบกับสคริปต์เหล่านั้นเสมอ
+    """
+    # ไฟล์หลัก (doc "a") ก่อน · ฉลากจริงก่อน header — ตัวแรกที่มีบรรทัดนั้น
+    # คือฝั่งที่ถูกตรวจ (``found``) ที่เหลือเป็นฝั่งอ้างอิง
+    order = sorted(panels,
+                   key=lambda z: (0 if z.get("doc", "a") == "a" else 1,
+                                  0 if z.get("type") == "panel" else 1))
+    seen = set()
+    for d in (existing or []):
+        for side in ("found", "reference"):
+            if d.get(side):
+                seen.add((d.get("zone_id"), _norm_key(d[side])))
+
+    # key พับตัวพิมพ์ → โซน → {คีย์สนใจตัวพิมพ์: บรรทัดตามที่ OCR อ่านได้}
+    # ⚠️ ต้องเทียบเป็น **ชุดของรูปแบบต่อโซน** ไม่ใช่ไล่ทีละบรรทัด — โซนที่มี
+    #    ทั้งสองรูปแบบเหมือนกันทั้งคู่ (บรรทัดซ้ำ) ไม่ใช่ "ไม่ตรงกันระหว่าง panel"
+    buckets: Dict[str, Dict[str, Dict[str, str]]] = {}
+    for z in order:
+        for line in _lines(texts.get(z["id"], "")):
+            k = _norm_key(line)
+            if k:
+                (buckets.setdefault(k, {}).setdefault(z["id"], {})
+                 .setdefault(_norm_key_cs(line), line))
+
+    defects: List[dict] = []
+    for k, per_zone in buckets.items():
+        forms = {zid: set(v) for zid, v in per_zone.items()}
+        base_id = next(z["id"] for z in order if z["id"] in per_zone)
+        # โซนที่ชุดรูปแบบต่างจากฝั่งที่ถูกตรวจ. ว่าง = ทุกโซนมีชุดเดียวกัน
+        # (รวมกรณีโซนหนึ่งมีทั้งสองรูปแบบเหมือนกันทั้งคู่ = บรรทัดซ้ำ ซึ่ง
+        # ไม่ใช่ "ไม่ตรงกันระหว่าง panel")
+        other_ids = [zid for zid in per_zone
+                     if zid != base_id and forms[zid] != forms[base_id]]
+        if not other_ids:
+            continue
+        # ⚠️ ชั้นหลักรายงานบรรทัดนี้ไปแล้วหรือยัง — เกิดขึ้นจริงเมื่อกลุ่มมี
+        #    panel เยอะพอที่เสียงข้างมากจะไม่ยกโทษให้ (วัดแล้วที่ 6 panel)
+        #    ⇒ ต้องไม่ฟ้องซ้ำ (กติกา "ไม่แตะ defect เดิม")
+        if (base_id, k) in seen:
+            continue
+        base_z = next(z for z in order if z["id"] == base_id)
+        oid = other_ids[0]
+        # รูปแบบที่ "มีเฉพาะฝั่งนี้" คือสิ่งที่ต้องชี้ให้ผู้ตรวจเห็น
+        only_base = [c for c in per_zone[base_id] if c not in per_zone[oid]]
+        only_other = [c for c in per_zone[oid] if c not in per_zone[base_id]]
+        base_line = per_zone[base_id][
+            only_base[0] if only_base else next(iter(per_zone[base_id]))]
+        ref_line = per_zone[oid][
+            only_other[0] if only_other else next(iter(per_zone[oid]))]
+        if _norm_key_cs(base_line) == _norm_key_cs(ref_line):
+            continue
+        d = _defect(
+            "MISMATCH_CASE", base_id,
+            f"กลุ่ม {gname}: ตัวพิมพ์ใหญ่-เล็กไม่ตรงกันใน "
+            f"{base_z.get('label') or base_id} "
+            f"(ตัวอักษรอื่นเหมือนกันทุกตัว)",
+            found=base_line, reference=ref_line,
+            ref_zone_ids=other_ids)
+        # ⚠️ ต้องเทียบแบบ **สนใจตัวพิมพ์** ไม่งั้นหาช่วงที่ต่างไม่เจอเลย
+        #    (สองบรรทัดเท่ากันทุกประการเมื่อพับตัวพิมพ์) ⇒ ไฮไลต์แดงจะว่าง
+        fs, rs = diff_spans(base_line, ref_line, case=True)
+        if fs or rs:
+            d["found_spans"], d["ref_spans"] = fs, rs
+        defects.append(d)
     return defects
 
 
 def _pair_cross_doc_extras(gname: str, panels: List[dict],
-                           defects: List[dict]) -> List[dict]:
+                           defects: List[dict],
+                           texts: Optional[Dict[str, str]] = None) -> List[dict]:
     """Merge complementary found-only defects of a 2-panel cross-file
     group into single found/reference defects attributed to the primary
     file. Verdict-neutral: pairs stay MISMATCH_PANELS (critical);
@@ -362,17 +560,31 @@ def _pair_cross_doc_extras(gname: str, panels: List[dict],
     pairs = []
     used_b: set = set()
     for da in a_list:
-        best, best_d = None, None
+        # ── เกณฑ์จับคู่ ────────────────────────────────────────────────
+        # ระยะแก้ไข **ทั้งบรรทัด** พังเมื่อ OCR สองฝั่งตัดบรรทัดคนละที่:
+        # หัว-ท้ายที่ต่างกันเพราะการตัดบรรทัดกินโควตาจนหมด ทั้งที่เนื้อหา
+        # ต่างจริงแค่คำเดียว (วัดบนสถานี: Lev 101 · เพดาน 71 · ต่างจริง
+        # "520" vs "510") ⇒ ความต่างจริงหนึ่งอย่างถูกแยกเป็นสองใบที่ไม่ชี้
+        # ว่าต่างตรงไหน. ``line_run_ratio`` วัดความติดกันซึ่งการตัดบรรทัด
+        # ใหม่รักษาไว้เสมอ (ดู config.TEXT_PAIR_MIN_RUN)
+        by_run = config.TEXT_PAIR_BY_RUN
+        best, best_s = None, None
         for idx, db in enumerate(b_list):
             if idx in used_b:
                 continue
-            d = levenshtein(da["found"].upper(), db["found"].upper())
-            if best_d is None or d < best_d:
-                best, best_d = idx, d
+            if by_run:
+                sc = line_run_ratio(da["found"], db["found"])
+                better = best_s is None or sc > best_s
+            else:
+                sc = levenshtein(da["found"].upper(), db["found"].upper())
+                better = best_s is None or sc < best_s
+            if better:
+                best, best_s = idx, sc
         if best is not None:
             db = b_list[best]
-            # เกณฑ์ความใกล้เดียวกับการจับคู่ extra↔missing เดิม
-            if best_d <= max(len(da["found"]), len(db["found"])) // 2:
+            ok = (best_s >= config.TEXT_PAIR_MIN_RUN if by_run else
+                  best_s <= max(len(da["found"]), len(db["found"])) // 2)
+            if ok:
                 used_b.add(best)
                 pairs.append((da, db))
     if not pairs:
@@ -381,11 +593,19 @@ def _pair_cross_doc_extras(gname: str, panels: List[dict],
     drop = {id(d) for pair in pairs for d in pair}
     out = [d for d in defects if id(d) not in drop]
     for da, db in pairs:
-        out.append(_defect(
+        d = _defect(
             "MISMATCH_PANELS", prim["id"],
             f"กลุ่ม {gname}: ข้อความบนไฟล์หลักไม่ตรงกับไฟล์อ้างอิง (ชิ้นงาน)",
             found=da["found"], reference=db["found"],
-            ref_zone_ids=[ref["id"]]))
+            ref_zone_ids=[ref["id"]])
+        # ⚠️ แสดงผลล้วน — ``found``/``reference`` ต้องไม่ถูกแตะ (ถูกใช้ค้นคำ
+        #    เพื่อวาดกรอบแดงบนภาพ crop). ช่วงที่ต่างไปอยู่ในคีย์แยกต่างหาก
+        tx = texts or {}
+        fs, rs = diff_spans(da["found"], db["found"],
+                            tx.get(prim["id"], ""), tx.get(ref["id"], ""))
+        if fs or rs:
+            d["found_spans"], d["ref_spans"] = fs, rs
+        out.append(d)
     return out
 
 
@@ -601,14 +821,29 @@ _RE_WORD = re.compile(
 # ไม่ใช่คำสะกด ไม่ควรฟ้อง SPELL_FAIL (เช่น "https" จาก https://…)
 _SPELL_STOPLIST = {"http", "https", "www", "mailto"}
 
-# Scripts whose pyspellchecker dictionary is unreliable enough that a
-# "not in dictionary" result is NOT trustworthy evidence of a typo, so a
-# failed word must NOT raise SPELL_FAIL (would falsely push the verdict
-# to REVIEW) and must NOT get an edit-distance suggestion (Arabic
-# morphology makes single-edit guesses wrong — "المهدرجة"→"المدرجة" is a
-# different word). These words are surfaced advisory-only in the
-# translate tab as "dict ไม่รองรับคำนี้ (<script>)" and defer to the AI
-# column + cross-panel comparison. Maps a script key → Thai name.
+# Scripts whose pyspellchecker dictionary is too weak to *decide* a typo,
+# so a failed word must NOT raise SPELL_FAIL (would falsely push the
+# verdict to REVIEW) and must NOT get an edit-distance suggestion.
+#
+# ⚠️ วัดจริงบนฉลาก John West ทั้งสองฉบับ (OCR ด้วย tesseract-ara แล้วกรอง
+#    conf >= 85 เหลือคำอาหรับ 69 คำ) — ผลไม่ได้แปลว่า "dict ใช้ไม่ได้":
+#      dict รู้จัก 57/69 = 82.6%
+#      ไม่รู้จัก 12 คำ  แยกได้เป็น
+#        1  คำผิดจริงที่เรากำลังตามหา  (كربوهيدات — รูปที่ถูก كربوهيدرات
+#           **อยู่ใน dict**) ⇒ ชั้นนี้คือชั้นเดียวที่มีโอกาสจับมันได้ เพราะ
+#           ไฟล์ทั้งสองฉบับพิมพ์คำผิดเหมือนกัน ชั้นเทียบข้ามไฟล์จึงไม่มีทางเห็น
+#        4  คำจริงที่ dict ขาด (مهدرجة · للتصنيع = มีคำนำหน้า ل ·
+#           المصفى · كوليسترول = ทับศัพท์)
+#        7  Tesseract อ่านผิดเอง (المئوية→المثوية ฯลฯ) — ไม่ใช่ความผิด dict
+#
+#    ⇒ 1 จริง : 4 ปลอม ⇒ **ตัดสินไม่ได้** (ยังคง advisory ต่อไป) แต่
+#      **ไม่ใช่ "ไม่มีข้อมูล"** ⇒ ข้อความบน UI ต้องบอกว่า "ไม่อยู่ใน dict"
+#      ไม่ใช่ "dict ไม่รองรับ" ซึ่งผู้ตรวจอ่านว่า "ระบบไม่ได้ตรวจ"
+#    ⇒ คำแนะนำยังต้องปิดสนิท: พิสูจน์แล้วว่าเดาผิด — "مهدرجة"→"مدرجة"
+#      เป็นคนละคำ (Arabic morphology ทำให้ edit-distance 1 ไร้ความหมาย)
+#
+# These words are surfaced advisory-only in the translate tab and defer to
+# the AI column + cross-panel comparison. Maps a script key → Thai name.
 UNSUPPORTED_SCRIPT_NAMES = {"arabic": "อาหรับ"}
 
 # Arabic Unicode blocks (base + supplement + extended-A + presentation
@@ -900,6 +1135,17 @@ def check_coverage(zones: List[dict], ocr_results: List[dict]) -> dict:
 
     n_read = len([z for z in active if readable(z)])
     spell_ok = bool(spell_layer_available())
+    # ⚠️ ต้องสะท้อนเงื่อนไขใน ``run_all_checks`` เป๊ะ — ถ้าชั้นนี้ถูกปิดแล้ว
+    # ยังรายงานว่า "ทำงาน" คือคำตอบที่ผิดแบบมั่นใจ (กฎเหล็กข้อ 2) และเป็น
+    # กับดักเดียวกับที่ docstring ของฟังก์ชันนี้เตือนไว้เอง
+    if not config.INSPECT_SPELL_LAYER:
+        spelling = {"ran": False, "zones": n_read,
+                    "reason": "moved_to_translate"}
+    else:
+        spelling = {"ran": spell_ok and n_read > 0, "zones": n_read,
+                    "reason": ("ok" if spell_ok and n_read
+                               else ("spellchecker_missing" if not spell_ok
+                                     else "no_readable_zone"))}
     # กลุ่มที่เทียบข้าม engine (text layer ปนกับ OCR) — ความต่างที่เห็นอาจ
     # มาจาก "วิธีอ่าน" ไม่ใช่ "งานพิมพ์". advisory ล้วน ไม่แตะ defects
     mixed = engine_mix_groups(zones, ocr_results)
@@ -911,10 +1157,7 @@ def check_coverage(zones: List[dict], ocr_results: List[dict]) -> dict:
         # มีข้อความให้ตรวจจริง (โซนที่อ่านไม่ออกจะขึ้น UNREADABLE อยู่แล้ว)
         "numbers": {"ran": n_read > 0, "zones": n_read,
                     "reason": "ok" if n_read else "no_readable_zone"},
-        "spelling": {"ran": spell_ok and n_read > 0, "zones": n_read,
-                     "reason": ("ok" if spell_ok and n_read
-                                else ("spellchecker_missing" if not spell_ok
-                                      else "no_readable_zone"))},
+        "spelling": spelling,
         "zones_total": len(active),
         "zones_readable": n_read,
     }
@@ -929,7 +1172,13 @@ def run_all_checks(zones: List[dict], ocr_results: List[dict],
     defects: List[dict] = []
     defects += check_group_consistency(zones, texts)
     defects += check_numbers(zones, texts)
-    defects += check_spelling(zones, texts, vocab_words=vocab_words)
+    # ชั้น dictionary ย้ายไปอยู่ที่แท็บ "ข้อความ + คำแปล" เท่านั้น (default) —
+    # ปุ่มส่งตรวจตอบเรื่อง "สองไฟล์/สองแผงเหมือนกันไหม" ไม่ใช่เรื่องการสะกด.
+    # ⚠️ ``check_spelling`` **ยังต้องอยู่** เพราะแท็บแปลและเทสต์เรียกใช้ตรง ๆ
+    # (แท็บแปลมี spell pass ของตัวเองผ่าน ``_get_spellcheckers`` ⇒ การปิดตรงนี้
+    #  ไม่กระทบตารางแปลแม้แต่แถวเดียว)
+    if config.INSPECT_SPELL_LAYER:
+        defects += check_spelling(zones, texts, vocab_words=vocab_words)
     defects += check_phrases(zones, texts, vocab_phrases or [])
     defects += check_readability(zones, ocr_results)
     return defects

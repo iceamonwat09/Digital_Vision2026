@@ -634,7 +634,7 @@ def test_run_ocr_only_caches_and_stays_isolated(tmp_path, monkeypatch):
     calls = {"n": 0}
 
     def fake_read(doc, zones, page_auto=False, force_ocr=False,
-                  font_trust=None):
+                  split_bands=False, font_trust=None):
         calls["n"] += 1
         return [{"zone_id": z["id"], "text": "Hello", "engine": "stub",
                  "conf": None} for z in zones]
@@ -728,7 +728,8 @@ def test_read_all_docs_routes_each_zone_to_its_own_file(tmp_path, monkeypatch):
                             os.path.basename(path)) or object())
     monkeypatch.setattr(
         pipeline.ocr, "read_all_zones",
-        lambda doc, zones, page_auto=False, force_ocr=False, font_trust=None: [
+        lambda doc, zones, page_auto=False, force_ocr=False,
+               split_bands=False, font_trust=None: [
             {"zone_id": z["id"], "text": "T", "engine": "stub", "conf": None}
             for z in zones])
 
@@ -759,7 +760,8 @@ def test_read_all_docs_missing_ref_file_raises(tmp_path, monkeypatch):
         f.write(b"x")
     monkeypatch.setattr(pipeline, "ArtworkDocument", lambda *a, **k: object())
     monkeypatch.setattr(pipeline.ocr, "read_all_zones",
-                        lambda doc, zones, page_auto=False, force_ocr=False, font_trust=None: [])
+                        lambda doc, zones, page_auto=False, force_ocr=False,
+               split_bands=False, font_trust=None: [])
 
     zb = [{"id": "b1", "type": "panel", "group": "G",
            "bbox": [0.1, 0.1, 0.2, 0.2], "doc": "b"}]
@@ -1494,7 +1496,8 @@ def test_run_inspection_writes_applied_rotation(tmp_path, monkeypatch):
     monkeypatch.setattr(pipeline, "ArtworkDocument", lambda *a, **k: object())
     monkeypatch.setattr(
         pipeline.ocr, "read_all_zones",
-        lambda doc, zones, page_auto=False, force_ocr=False, font_trust=None: [
+        lambda doc, zones, page_auto=False, force_ocr=False,
+               split_bands=False, font_trust=None: [
             {"zone_id": z["id"], "text": "T", "engine": "stub",
              "conf": None, "rotate": 270 if z["id"] == "z1" else 0}
             for z in zones])
@@ -1520,6 +1523,46 @@ def test_ocr_cache_signature_includes_rotate_and_flag():
 
 
 # ── Dict-unsupported script (Arabic): no red, no false REVIEW ──────────
+
+# ── หลักฐานจากการวัดจริง: dict อาหรับ "อ่อน" ไม่ใช่ "ไม่มี" ────────────
+#
+# วัดบนฉลาก John West สองฉบับ (tesseract-ara · conf >= 85 · 69 คำอาหรับ):
+# dict รู้จัก 57 · ไม่รู้จัก 12 = คำผิดจริง 1 (كربوهيدات) + คำจริงที่ dict
+# ขาด 4 + Tesseract อ่านผิดเอง 7 ⇒ 1 จริง : 4 ปลอม ⇒ ตัดสินไม่ได้
+# (ต้อง advisory ต่อไป) แต่ **ตรวจแล้วจริง** ⇒ UI ห้ามพูดว่า "ไม่ได้ตรวจ"
+
+
+def test_the_real_typo_is_absent_but_its_correct_form_is_present():
+    """เหตุผลที่ชั้น dict ยังมีค่ากับอาหรับ — และเป็นชั้นเดียวที่มีโอกาสจับ.
+
+    ไฟล์ทั้งสองฉบับพิมพ์ ``كربوهيدات`` เหมือนกัน ⇒ ชั้นเทียบข้ามไฟล์ไม่มีทาง
+    เห็น. ถ้าเทสต์นี้แดงแปลว่าฐานข้อมูลของ pyspellchecker เปลี่ยนไป และ
+    ข้อสรุปที่บันทึกไว้ใน checks.UNSUPPORTED_SCRIPT_NAMES ต้องวัดใหม่.
+    """
+    checkers = checks._get_spellcheckers()
+    if not checkers:
+        import pytest as _p
+        _p.skip("ไม่ได้ติดตั้ง pyspellchecker")
+    ar = [c for c in checkers if "كربوهيدرات" in c]
+    assert ar, "ไม่ได้เปิด dict อาหรับ (config.SPELL_LANGUAGES)"
+    assert "كربوهيدات" not in ar[0]      # คำผิด — ไม่อยู่ใน dict
+    assert "كربوهيدرات" in ar[0]         # รูปที่ถูก — อยู่ใน dict
+
+
+def test_arabic_never_gets_a_spelling_suggestion():
+    """พิสูจน์แล้วว่าเดาผิด: مهدرجة → مدرجة เป็นคนละคำ.
+
+    ชั้น dict ของอาหรับใช้ "ตรวจจับ" ได้ แต่ "แนะนำคำ" ไม่ได้เด็ดขาด —
+    การเสนอคำที่ผิดคือผลที่ผิดแบบมั่นใจ (กฎเหล็กข้อ 2)
+    """
+    from artwork_check import translate
+    rows = translate.build_table([_zone("z1", group="")],
+                                 [{"zone_id": "z1",
+                                   "text": "الزيوت النباتية المهدرجة"}])
+    ar = rows[0]
+    assert ar["status"] == "unsupported"
+    assert not ar.get("suggest")
+
 
 def test_word_script_arabic_detection():
     from artwork_check import checks
@@ -1548,6 +1591,28 @@ def test_check_spelling_skips_arabic_no_false_review():
 
 @pytest.mark.skipif(not checks.spell_layer_available(),
                     reason="pyspellchecker not installed")
+def test_ui_does_not_tell_the_reviewer_the_check_never_ran():
+    """ข้อความเดิม "dict ไม่รองรับคำนี้" ผู้ตรวจอ่านว่า "ระบบไม่ได้ตรวจ"
+    แล้วเลื่อนผ่าน — แต่ dict อาหรับมี 143,678 คำและตรวจแล้วจริง.
+
+    ต้องรายงานผลที่วัดได้ ("ไม่อยู่ใน dict") พร้อมบอกว่าไม่มีคำแนะนำ.
+    """
+    import os
+    js_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "static", "js", "artwork_check.js")
+    with open(js_path, encoding="utf-8") as f:
+        js = f.read()
+    i = js.index('r.status === "unsupported"')
+    block = js[i:js.index("html += \"<td>\" + st", i)]
+    # เอาเฉพาะโค้ดที่รัน — คอมเมนต์อธิบายว่า "เดิมเขียนว่าอะไร" ได้
+    code = "\n".join(l for l in block.splitlines()
+                     if not l.strip().startswith("//"))
+    assert "dict ไม่รองรับคำนี้" not in code
+    assert "ไม่อยู่ใน dict" in code
+    assert "ไม่มีคำแนะนำ" in code          # บอกข้อจำกัดตรง ๆ
+
+
 def test_build_table_reclassifies_arabic_as_unsupported():
     from artwork_check import translate
     zones = [_zone("z1", group="")]

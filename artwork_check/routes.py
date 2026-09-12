@@ -11,11 +11,12 @@ from __future__ import annotations
 import logging
 import os
 
+import cv2
 from flask import (Blueprint, Response, g, jsonify, render_template, request,
                    send_file, send_from_directory)
 
-from . import (config, ownership, pipeline, report, translate, vocab,
-               zones as zones_mod)
+from . import (config, ownership, pdf_ingest, pipeline, progress, report,
+               translate, vocab, zones as zones_mod)
 
 logger = logging.getLogger(__name__)
 
@@ -105,14 +106,26 @@ def _ownership_guard():
 
 # ── Pages ─────────────────────────────────────────────────────────────
 
+def _hl_flags() -> dict:
+    """ธงของ "กรอบแดง" ที่ตัดสินฝั่ง JS — ต้องส่งให้ **ทั้งสองหน้า** เพราะ
+    ``renderReport()`` เป็นตัวเดียวกันทั้งหน้าตรวจและหน้าประวัติ. ปิดแล้ว
+    ได้พฤติกรรมก่อน 9 ก.ย. เป๊ะ (ยิงทั้งบรรทัด · ฝั่งอ้างอิงไม่มีกรอบ)"""
+    return {"hl_by_spans": config.HIGHLIGHT_BY_SPANS,
+            "hl_ref_side": config.HIGHLIGHT_REF_SIDE}
+
+
 @artwork_bp.route("/artwork_check")
 def artwork_page():
-    return render_template("artwork_check.html")
+    # ``pixdiff_ui`` = แสดงปุ่ม "🔍 เทียบภาพเก่า/ใหม่" หรือไม่ (default: ซ่อน).
+    # ปุ่มยังอยู่ใน DOM เสมอ แค่ถูกซ่อนด้วย CSS — ดูเหตุผลที่ config.PIXDIFF_UI
+    return render_template("artwork_check.html",
+                           pixdiff_ui=config.PIXDIFF_UI,
+                           **_hl_flags())
 
 
 @artwork_bp.route("/artwork_check/history")
 def artwork_history_page():
-    return render_template("artwork_check_history.html")
+    return render_template("artwork_check_history.html", **_hl_flags())
 
 
 # ── Inspection flow ───────────────────────────────────────────────────
@@ -189,16 +202,50 @@ def api_inspect(rec_id):
     # ผู้ใช้สั่งข้ามชั้น text layer แล้วอ่านทุกโซนด้วย OCR (ช่องติ๊กบนหน้าเว็บ)
     # — ใช้กับไฟล์ที่ฟอนต์ subset แมปอักขระผิดจนข้อความใน PDF เชื่อไม่ได้
     force_ocr = bool(body.get("force_ocr"))
+    split_bands = bool(body.get("split_bands"))
+    # โหมดทดลอง: อ่านซ้ำอีกรอบแล้วเชื่อเฉพาะ defect ที่โผล่ทั้งสองรอบ
+    confirm_reads = bool(body.get("confirm_reads"))
+    # โหมดทดลอง: เทียบแผงต่อแผงระดับพิกเซลแทนชั้นเทียบข้อความ
+    pixel_check = bool(body.get("pixel_check"))
+    # มุมที่ปุ่ม "↻ หมุนจอ" ค้างอยู่ตอนลากโซน — บันทึกลงรายงานเพื่อให้ภาพ
+    # ทั้งหน้าในรายงานอยู่แนวเดียวกับที่ผู้ใช้เพิ่งจัดมา (แสดงผลล้วน)
+    try:
+        page_rot = int(body.get("page_rot") or 0)
+    except (TypeError, ValueError):
+        page_rot = 0
+    # จุดเช็คพอยต์ให้หน้าเว็บ poll ระหว่างตรวจ (advisory ล้วน ไม่แตะผลตรวจ)
+    pg = progress.begin(rec_id, {"force_ocr": force_ocr,
+                                 "split_bands": split_bands,
+                                 "confirm_reads": confirm_reads,
+                                 "pixel_check": pixel_check})
     try:
         rep = pipeline.run_inspection(rec_id, zone_list, brand=brand,
                                       auto_rotate=auto_rotate,
-                                      force_ocr=force_ocr)
+                                      force_ocr=force_ocr,
+                                      split_bands=split_bands,
+                                      confirm_reads=confirm_reads,
+                                      pixel_check=pixel_check,
+                                      page_rot=page_rot,
+                                      progress=pg)
     except (ValueError, FileNotFoundError) as e:
+        pg.finish(progress.FAIL, str(e))
         return jsonify({"error": str(e)}), 404
     except Exception as e:
+        pg.finish(progress.FAIL, str(e))
         logger.exception("[artwork] inspection failed for %s", rec_id)
         return jsonify({"error": f"ตรวจไม่สำเร็จ: {e}"}), 500
     return jsonify(_with_owner(rec_id, rep))
+
+
+@artwork_bp.route("/api/artwork/<rec_id>/progress")
+def api_progress(rec_id):
+    """ความคืบหน้าของการตรวจที่กำลังรันอยู่ — หน้าเว็บ poll มาวาดเส้น.
+
+    ไม่มีข้อมูล = ยังไม่เริ่ม/หมดอายุแล้ว ⇒ ตอบ ``{"steps": []}`` ไม่ใช่ 404
+    เพื่อให้ฝั่งหน้าเว็บไม่ต้องแยกเคส (แสดงผลอย่างเดียว)
+    """
+    snap = progress.snapshot(rec_id)
+    return jsonify(snap or {"id": rec_id, "done": False, "steps": []})
 
 
 @artwork_bp.route("/api/artwork/<rec_id>/pixdiff", methods=["POST"])
@@ -261,14 +308,45 @@ def api_overlay_b(rec_id):
     return _send_artifact(rec_id, "overlay_b.png")
 
 
+def _rot_arg() -> int:
+    """``?rot=90|180|270`` — หมุนภาพ **ตอนเสิร์ฟ** เท่านั้น (แสดงผลล้วน).
+
+    ค่าอื่น/ไม่ส่ง/ปิดธง ⇒ ``0`` = เส้นทางเดิมเป๊ะ (``send_from_directory``
+    ส่งไฟล์บนดิสก์ตรง ๆ ไม่มีการถอดรหัส/เข้ารหัสภาพเลย)
+    """
+    if not config.REPORT_VIEW_ROTATE:
+        return 0
+    try:
+        r = int(request.args.get("rot", 0))
+    except (TypeError, ValueError):
+        return 0
+    return r if r in (90, 180, 270) else 0
+
+
 def _send_artifact(rec_id, name):
     try:
         d = report.inspection_dir(rec_id)
     except ValueError:
         return jsonify({"error": "bad id"}), 400
-    if not os.path.exists(os.path.join(d, name)):
+    path = os.path.join(d, name)
+    if not os.path.exists(path):
         return jsonify({"error": "not found"}), 404
-    return send_from_directory(d, name, max_age=0)
+    rot = _rot_arg()
+    if not rot:
+        return send_from_directory(d, name, max_age=0)
+    # หมุนแล้วส่งเป็น PNG ในหน่วยความจำ — ไฟล์บนดิสก์ไม่ถูกแตะ ⇒ ทุกชั้นที่
+    # อ่านไฟล์นี้ต่อ (propose_zones / snap_bbox / autopair) เห็นของเดิม
+    try:
+        img = cv2.imread(path, cv2.IMREAD_COLOR)
+        if img is None:
+            return send_from_directory(d, name, max_age=0)
+        ok, buf = cv2.imencode(".png", pdf_ingest.apply_rotation(img, rot))
+        if not ok:
+            return send_from_directory(d, name, max_age=0)
+    except Exception:
+        logger.exception("[artwork] rotate %s failed for %s", name, rec_id)
+        return send_from_directory(d, name, max_age=0)
+    return Response(buf.tobytes(), mimetype="image/png")
 
 
 @artwork_bp.route("/api/artwork/<rec_id>/crop")
@@ -287,15 +365,39 @@ def api_crop(rec_id):
     rotate = request.args.get("rotate", "0")
     if rotate not in ("0", "90", "180", "270", "auto"):
         return jsonify({"error": "rotate ต้องเป็น 0/90/180/270/auto"}), 400
-    highlight = (request.args.get("hl", "") or "")[:120]
+    # ``hl`` ซ้ำได้หลายค่า = "ช่วงที่ต่าง" หลายจุดของบรรทัดเดียว (ดู
+    # config.HIGHLIGHT_MAX_TARGETS). ค่าเดียวยังใช้ได้เหมือนเดิมทุกประการ.
+    # ⚠️ เพดานเดิม 120 ตัวอักษร **ตัดกลางคำ** ของบรรทัดจริงทุกเส้น (ยาว
+    #    139-143) ⇒ token สุดท้ายเป็นเศษคำ แล้วการจับคู่วลีล้มเหลวเงียบ ๆ
+    _cap = max(1, int(config.HIGHLIGHT_TARGET_MAX_CHARS))
+    highlights = [h[:_cap] for h in request.args.getlist("hl") if h]
+    highlights = highlights[:max(1, int(config.HIGHLIGHT_MAX_TARGETS))]
+    highlight = highlights[0] if highlights else ""
     zone_id = (request.args.get("zid", "") or "")[:40]
+    # box=x,y,w,h (สัดส่วนของโซน) = กรอบที่โหมดเทียบพิกเซล **วัดมาแล้ว**
+    # ไม่ต้องค้นหาคำ ⇒ ใช้ได้ทุกภาษาและใช้ได้แม้อ่านข้อความไม่ออก
+    box = None
+    raw = (request.args.get("box", "") or "")[:80]
+    if raw:
+        try:
+            parts = [float(v) for v in raw.split(",")]
+            box = parts if len(parts) == 4 else None
+        except ValueError:
+            box = None
     try:
         jpg = pipeline.zone_crop_jpg(rec_id, bbox, doc=doc, rotate=rotate,
-                                     highlight=highlight, zone_id=zone_id)
+                                     highlight=highlight, zone_id=zone_id,
+                                     box=box, highlights=highlights)
     except (ValueError, FileNotFoundError) as e:
         return jsonify({"error": str(e)}), 404
     import io
-    return send_file(io.BytesIO(jpg), mimetype="image/jpeg", max_age=0)
+    # ``rv`` = รุ่นของรายงานที่ฝั่ง JS ใส่มา ⇒ URL หนึ่ง = ภาพหนึ่งเสมอ
+    # (พารามิเตอร์คุมการเรนเดอร์ครบทุกตัว และรายงานที่ใช้วาดกรอบก็ถูกผูกไว้)
+    # ⇒ ปล่อยให้เบราว์เซอร์เก็บไว้ใช้ซ้ำได้ แทนที่จะยิงใหม่ทุกครั้งที่เลื่อน
+    # หรือเปิดรายงานเดิม. ไม่มี ``rv`` (เช่นตัวแก้โซนที่ใส่ ``t`` เอง หรือ
+    # สคริปต์เก่า) ⇒ ไม่แคช = พฤติกรรมเดิมเป๊ะ
+    fresh = 0 if not request.args.get("rv") else config.CROP_HTTP_MAX_AGE
+    return send_file(io.BytesIO(jpg), mimetype="image/jpeg", max_age=fresh)
 
 
 @artwork_bp.route("/api/artwork/<rec_id>/snap", methods=["POST"])
@@ -427,10 +529,11 @@ def api_translate(rec_id):
         brand = str(body.get("brand", "")).strip()[:60]
         auto_rotate = bool(body.get("auto_rotate"))
         force_ocr = bool(body.get("force_ocr"))
+        split_bands = bool(body.get("split_bands"))
         try:
             zone_list, ocr_results = pipeline.run_ocr_only(
                 rec_id, zone_list, auto_rotate=auto_rotate,
-                force_ocr=force_ocr)
+                force_ocr=force_ocr, split_bands=split_bands)
         except (ValueError, FileNotFoundError) as e:
             return jsonify({"error": str(e)}), 404
         except Exception as e:

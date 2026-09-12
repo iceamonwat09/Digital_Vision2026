@@ -263,3 +263,106 @@ def test_nested_fences_are_stripped(monkeypatch):
     r = call(monkeypatch, '```json\n```json\n{"text":"%s"}\n```\n```' % WANT,
              "text/plain")
     assert r["text"] == WANT
+
+
+# ── workflow บอกเองว่าอ่านไม่สำเร็จ (คีย์ "error" ในตัว payload) ─────────
+#
+# ต่างจากความล้มเหลวข้างบนทั้งหมด: HTTP 200, JSON ถูกรูป, ไม่มี exception —
+# แต่ node ใน N8N ตรวจแล้วว่าคำตอบของ Gemini ใช้ไม่ได้ (finishReason
+# != "STOP" = ถูกตัดกลางคัน · promptFeedback.blockReason = ปฏิเสธภาพ).
+# เดิม return ตัวสุดท้ายอ่านแค่ text/blocks/engine ⇒ เหตุผลตกหายที่ข้อต่อ
+# สุดท้าย แล้ว checks.check_readability ตกไปสาขา "OCR ไม่พบข้อความ" ซึ่ง
+# อ่านได้ว่า "โซนนี้ไม่มีตัวหนังสือ" = ผลที่ผิดแบบมั่นใจ (กฎเหล็กข้อ 2).
+
+TRUNCATED = "Gemini ตอบไม่จบ (finishReason=MAX_TOKENS)"
+
+
+def test_workflow_error_reaches_the_caller(monkeypatch):
+    r = call(monkeypatch, json.dumps({"error": TRUNCATED, "text": ""}))
+    assert r["error"] == TRUNCATED
+
+
+def test_text_that_was_read_is_kept_by_default(monkeypatch):
+    """🔴 บทเรียน 4 ก.ย.: คีย์ ``error`` มาจาก **workflow ของผู้ใช้**
+    ซึ่งเราคุมเงื่อนไขไม่ได้ ⇒ ห้ามให้มันทิ้งข้อความที่อ่านได้แล้วเป็นค่า
+    เริ่มต้น. ถ้า node ใน N8N ติดธงกว้างไป ทุกโซนจะกลายเป็น "อ่านไม่ได้"
+    พร้อมกันทั้งใบ = แย่กว่าก่อนแก้มาก (กฎเหล็กข้อ 1).
+    """
+    body = json.dumps({"error": TRUNCATED, "text": "دهون كلية ١ جم"})
+    r = call(monkeypatch, body)
+    assert r["text"] == "دهون كلية ١ جم"       # ใช้ต่อเหมือนก่อนแก้
+    assert not r.get("error")                   # ไม่ทำให้โซนตกเป็น UNREADABLE
+    assert r["stub"] is False
+    assert TRUNCATED in r["warning"]            # แต่ต้องเห็นว่าไม่สมบูรณ์
+
+
+def test_empty_text_still_reports_the_real_reason(monkeypatch):
+    """หัวใจของการแก้รอบนี้ — ยังทำงานเต็มที่โดยไม่ต้องเปิด flag ใด ๆ."""
+    r = call(monkeypatch, json.dumps({"error": TRUNCATED, "text": "   "}))
+    assert r["error"] == TRUNCATED
+    assert r["text"] == ""
+    assert r["stub"] is True
+
+
+def test_partial_text_is_dropped_when_the_workflow_reports_an_error(monkeypatch):
+    """หัวใจของด่านนี้ — ข้อความที่ขาดครึ่งอันตรายกว่าไม่มีข้อความ.
+
+    ชั้นเทียบ (``checks.check_group_consistency``) ตัดสิน "อ่านออก" จาก
+    ``texts[zone_id]`` ล้วน ไม่ได้ดู ``error`` ⇒ ถ้าปล่อยข้อความบางส่วน
+    ผ่านไปพร้อม error โซนนั้นจะทั้งขึ้น UNREADABLE **และ** ถูกเอาไปเทียบ
+    ⇒ ฟ้อง defect ปลอมทุกแถวที่หายไป (วัดได้ 30 รายการบนข้อมูลจริง).
+    """
+    monkeypatch.setattr(config, "N8N_OCR_ERROR_DISCARDS_TEXT", True)
+    body = json.dumps({"error": TRUNCATED,
+                       "text": "دهون كلية ١ جم",
+                       "blocks": [{"text": "دهون", "bbox": [0, 0, 9, 9]}]})
+    r = call(monkeypatch, body)
+    assert r["error"] == TRUNCATED
+    assert r["text"] == ""
+    assert r["blocks"] == []
+
+
+def test_workflow_error_marks_stub_so_label_mode_skips_it(monkeypatch):
+    """``inspectors.master_ocr`` (โหมด Label Paper) ใช้ ``ocr_image`` ตัวนี้ด้วย.
+
+    มันเช็ค ``stub`` เพื่อ "ไม่แคชและไม่ใช้ผลนี้" ⇒ ต้องติดธงเหมือนความ
+    ล้มเหลวอื่นทุกตัวของฟังก์ชันนี้ ไม่งั้นโหมด Label จะเดินต่อด้วยผลว่าง
+    แล้วรายงานว่า "sparse" แทนที่จะบอกว่าอ่านไม่สำเร็จ.
+    """
+    r = call(monkeypatch, json.dumps({"error": TRUNCATED, "text": ""}))
+    assert r["stub"] is True
+
+
+def test_empty_error_key_is_ignored(monkeypatch):
+    """workflow ที่ส่ง ``error: ""`` / ``null`` มาเสมอ ต้องไม่ทำให้ทุกโซนพัง."""
+    for val in ("", None, "   "):
+        r = call(monkeypatch, json.dumps({"error": val, "text": WANT}))
+        assert r["text"] == WANT
+        assert not r.get("error")
+        assert r["stub"] is False
+
+
+def test_warning_key_reaches_the_caller_without_failing_the_zone(monkeypatch):
+    """``warning`` = อ่านสำเร็จแต่ควรให้คนเห็น — read_zone แปลงเป็น note.
+
+    ต้องไม่กลายเป็น error ไม่งั้นโซนที่อ่านได้จริงจะตกเป็น UNREADABLE ฟรี ๆ.
+    """
+    r = call(monkeypatch, json.dumps({"warning": "ภาพเบลอ", "text": WANT}))
+    assert r["text"] == WANT
+    assert r["warning"] == "ภาพเบลอ"
+    assert not r.get("error")
+
+
+def test_error_and_warning_can_arrive_together(monkeypatch):
+    monkeypatch.setattr(config, "N8N_OCR_ERROR_DISCARDS_TEXT", True)
+    r = call(monkeypatch, json.dumps({"error": TRUNCATED, "warning": "ภาพเบลอ",
+                                      "text": "ครึ่งเดียว"}))
+    assert r["error"] == TRUNCATED and r["warning"] == "ภาพเบลอ"
+    assert r["text"] == ""
+
+
+def test_error_inside_a_wrapped_payload_is_found(monkeypatch):
+    """N8N ห่อคำตอบใน {"data": "..."} ได้ — error ต้องรอดมาเหมือน text."""
+    inner = json.dumps({"error": TRUNCATED, "text": ""})
+    r = call(monkeypatch, json.dumps({"data": inner}))
+    assert r["error"] == TRUNCATED

@@ -63,7 +63,10 @@ def test_force_ocr_skips_a_perfectly_good_text_layer(ocr_on):
     doc = FakeDoc(embedded=CLEAN_TEXT)
     r = ocr.read_zone(doc, ZONE, force_ocr=True)
     assert r["engine"] == "mock" and r["text"] == "FROM OCR"
-    assert doc.render_calls == 1, "ต้องไปอ่านจากภาพจริง"
+    # ⚠️ ห้าม assert == 1 — ชั้นเพิ่ม DPI ให้โซนเล็ก (OCR_CROP_MIN_SIDE)
+    #    เรนเดอร์ซ้ำอีกรอบเมื่อภาพแรกด้านยาวยังไม่ถึงเกณฑ์ ⇒ จำนวนครั้ง
+    #    ผูกกับค่าคอนฟิก ไม่ใช่กับสิ่งที่เทสต์นี้ตั้งใจทดสอบ
+    assert doc.render_calls >= 1, "ต้องไปอ่านจากภาพจริง"
     assert doc.text_calls == 0, "ไม่ต้องแตะ text layer เลย"
 
 

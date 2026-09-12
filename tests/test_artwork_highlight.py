@@ -927,3 +927,83 @@ def test_row_proof_only_applies_to_non_ascii(tess_stub):
     hits = hl.locate_all(crop, "0 g", AR_TEXT, blocks=blocks,
                          ocr_wh=(400, 500), tess_lang="eng")
     assert hits == []
+
+
+# ══════════════════════════════════════════════════════════════════════
+# เลือกภาษา Tesseract จาก "สคริปต์ของคำ" (8 ก.ย. 2026)
+#
+# ⚠️ ก่อนหน้านี้ ``ARTWORK_HIGHLIGHT_TESS_LANG`` default = ``"eng"`` ⇒ เครื่อง
+#    สถานีที่ลง traineddata ไว้ **24 ภาษา ก็ยังเรียกใช้แค่ eng ภาษาเดียว**
+#    (``_resolve_langs`` เป็นตัว *กรองออก* ไม่ใช่ตัวเพิ่มเข้า) ⇒ คำอาหรับ /
+#    ไทย / จีน ไม่เคยได้กรอบแดงเลย
+#
+# ⚠️ และห้ามแก้ด้วยการโหลดทุกภาษาพร้อมกัน — วัดแล้ว 2 เรื่อง: ช้าลง ~3.5 เท่า
+#    โดยความแม่นเท่าเดิม · และผสมภาษาทำให้ **แย่ลง** (``ara`` เดี่ยวอ่านคำ
+#    อาหรับได้ 18/21 · ``ara+eng`` ได้ 16/21)
+# ══════════════════════════════════════════════════════════════════════
+
+import pytest as _pytest
+
+from artwork_check.highlight import script_langs as _script_langs
+from artwork_check.highlight import _resolve_langs as _rl
+
+
+@_pytest.mark.parametrize("word,lang", [
+    ("Manufacturing", "eng"),
+    ("24%", "eng"),
+    ("475 mg", "eng"),
+    ("صوديوم", "ara"),
+    ("٤٧٥ ملجم", "ara"),
+    ("น้ำหนักสุทธิ", "tha"),
+    ("חלבון", "heb"),
+    ("Белки", "rus"),
+    ("Πρωτεΐνη", "ell"),
+    ("カロリー", "jpn"),
+    ("단백질", "kor"),
+    ("प्रोटीन", "hin"),
+])
+def test_language_is_picked_from_the_script_not_from_a_word_list(word, lang):
+    """ตัดสินจากช่วง Unicode ล้วน ⇒ เอกสารภาษาใหม่ที่ไม่เคยเจอก็ทำงานได้
+    ทันทีถ้าลง traineddata ไว้ — ไม่มีรายการคำ ไม่มี dictionary."""
+    assert _script_langs(word).split("+")[0] == lang
+
+
+def test_han_asks_for_both_chinese_variants_because_it_cannot_tell():
+    """ฮั่นล้วนแยกจีนตัวเต็ม/ตัวย่อไม่ได้ ⇒ ขอทั้งคู่ **ไม่เดา**."""
+    got = _script_langs("碳水化合物").split("+")
+    assert "chi_tra" in got and "chi_sim" in got
+
+
+def test_kana_means_japanese_so_chinese_is_not_asked_for():
+    """มีคานะ = ญี่ปุ่นแน่นอน ⇒ ไม่ต้องลองจีน (ยิ่งน้อยภาษายิ่งแม่น)."""
+    got = _script_langs("タンパク質").split("+")
+    assert "jpn" in got and "chi_tra" not in got
+
+
+def test_english_is_added_only_when_latin_letters_are_really_present():
+    """เติม ``eng`` พร่ำเพรื่อทำให้แย่ลง (ara+eng 16/21 vs ara 18/21)."""
+    assert "eng" not in _script_langs("صوديوم").split("+")
+    assert "eng" not in _script_langs("٤٧٥ ملجم").split("+")   # เลขไม่นับ
+    assert "eng" in _script_langs("صوديوم Sodium").split("+")
+
+
+def test_auto_never_asks_for_a_language_that_is_not_installed():
+    """ขอภาษาที่ไม่ได้ลง = tesseract ล้มทั้ง call ⇒ กรอบแดงหายหมดแม้อังกฤษ."""
+    import pytesseract
+    try:
+        avail = set(pytesseract.get_languages(config="") or [])
+    except Exception:
+        _pytest.skip("ไม่มี tesseract ในเครื่องนี้")
+    for w in ("Manufacturing", "صوديوم", "น้ำหนัก", "碳水化合物", "Белки"):
+        for ln in _rl("auto", w).split("+"):
+            assert ln in avail, "ขอภาษา %r ที่ไม่ได้ติดตั้ง" % ln
+
+
+def test_an_explicit_language_still_behaves_exactly_as_before():
+    """ตั้งค่าเป็นชื่อภาษาตรง ๆ = ทางเดิมเป๊ะ (ไม่สนคำที่กำลังหา)."""
+    assert _rl("eng", "صوديوم") == _rl("eng", "Manufacturing")
+
+
+def test_an_empty_word_falls_back_to_english():
+    assert _script_langs("") == "eng"
+    assert _script_langs(None) == "eng"

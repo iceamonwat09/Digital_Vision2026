@@ -277,10 +277,58 @@ def ocr_image(image_bytes: bytes,
         if isinstance(payload, dict) and payload.get("engine")
         else "n8n"
     )
+    # workflow บอกเองว่าคำตอบใช้ไม่ได้ (finishReason != STOP = ถูกตัดกลางคัน ·
+    # promptFeedback.blockReason = โมเดลปฏิเสธภาพ · โควตาเต็ม). docstring ของ
+    # ฟังก์ชันนี้สัญญาคีย์ "error" ไว้ตั้งแต่แรก และ ocr.read_zone ก็รออ่านอยู่
+    # แต่ return เดิม "ไม่ส่งต่อ" ⇒ ข้อความชี้เหตุตกหายที่ข้อต่อสุดท้าย แล้ว
+    # ผู้ตรวจเห็นแค่ "OCR ไม่พบข้อความ" ซึ่งอ่านได้ว่า "โซนนี้ไม่มีตัวหนังสือ"
+    err = str(payload.get("error") or "").strip() if isinstance(payload, dict) else ""
+    warn = str(payload.get("warning") or "").strip() if isinstance(payload, dict) else ""
 
-    return {
+    if err:
+        # ⚠️ คีย์นี้มาจาก **workflow ของผู้ใช้** ซึ่งเราควบคุมเงื่อนไขไม่ได้
+        #    ⇒ ห้ามให้มันทิ้งข้อความที่อ่านได้แล้วโดยไม่มีทางปิด. ถ้า node
+        #    ใน N8N ตั้งเงื่อนไขกว้างไป (เช่นติด error ทุกครั้งที่
+        #    finishReason != "STOP" โดยไม่ดูว่ามีข้อความไหม) การทิ้งข้อความ
+        #    จะทำให้ทุกโซนกลายเป็น "อ่านไม่ได้" พร้อมกันทั้งใบ
+        #    (กฎเหล็กข้อ 1: ผลที่ต่างจากเดิมต้องเป็น opt-in)
+        keep = bool(text.strip()) and not config.N8N_OCR_ERROR_DISCARDS_TEXT
+        if keep:
+            # อ่านได้ข้อความมาจริง — ใช้ต่อเหมือนเดิม แต่ **ต้องให้ผู้ตรวจ
+            # เห็นว่าคำตอบอาจไม่สมบูรณ์** (read_zone แปลง warning เป็น note)
+            print(f"[N8N→OCR] ⚠ workflow ติดธงว่าอ่านไม่สมบูรณ์: {err}")
+            out = {"text": text, "blocks": blocks, "stub": False,
+                   "engine": engine,
+                   "warning": " · ".join(
+                       x for x in ("N8N รายงานว่าอ่านไม่สมบูรณ์: " + err,
+                                   warn) if x)}
+            return out
+        # ไม่มีข้อความให้ใช้ (หรือผู้ใช้สั่งให้ทิ้ง) ⇒ UNREADABLE พร้อม
+        # **เหตุผลจริง** แทนข้อความเดิม "OCR ไม่พบข้อความ" ซึ่งผู้ตรวจอ่านว่า
+        # "โซนนี้ไม่มีตัวหนังสือ" แล้วเลื่อนผ่าน — นี่คือหัวใจของการแก้รอบนี้
+        print(f"[N8N→OCR] ✗ workflow รายงานว่าอ่านไม่สำเร็จ: {err}")
+        out = {
+            "text": "",
+            "blocks": [],
+            # stub=True เพื่อให้เดินทางเดียวกับความล้มเหลวอื่นของฟังก์ชันนี้
+            # ทุกตัว — สำคัญกับโหมด Label Paper (master_ocr) ซึ่งเช็ค stub
+            # เพื่อ "ไม่แคชและไม่ใช้ผลนี้" อยู่แล้ว
+            "stub": True,
+            "engine": engine,
+            "error": err,
+        }
+        if warn:
+            out["warning"] = warn
+        return out
+
+    out = {
         "text": text,
         "blocks": blocks,
         "stub": False,
         "engine": engine,
     }
+    if warn:
+        # อ่านสำเร็จแต่ workflow ติดธงไว้ (เช่นภาพเบลอ/บางแถบอ่านยาก) —
+        # advisory ล้วน ไม่ทำให้โซนตกเป็น error (read_zone แปลงเป็น note)
+        out["warning"] = warn
+    return out
