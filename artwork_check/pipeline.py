@@ -661,6 +661,7 @@ def run_inspection(rec_id: str, zone_list: List[dict],
 
     pg.start("coverage")
     _tag_highlight_risk(d, zone_list)
+    _tag_highlight_why(defects, zone_list, ocr_results)
 
     cov = checks.check_coverage(zone_list, ocr_results)
     _report_coverage_progress(pg, cov)
@@ -1258,6 +1259,61 @@ def _tag_highlight_risk(insp_dir: str, zone_list: List[dict]) -> None:
                 z.pop("hl_risk", None)
     except Exception:
         logger.debug("[artwork] highlight-risk tagging skipped", exc_info=True)
+
+
+def _tag_highlight_why(defects: List[dict], zone_list: List[dict],
+                       ocr_results: List[dict]) -> None:
+    """ทำไมการ์ดใบนี้ถึงจะ **ไม่มีกรอบแดง** (``hl_why``) — advisory ล้วน.
+
+    ผู้ใช้เห็นว่า "บางครั้งมี บางครั้งไม่มี" แล้วไม่มีอะไรบอกเหตุผล. ที่นี่
+    ตอบเฉพาะเหตุผลที่ **รู้ได้โดยไม่ต้องอ่านภาพเลย** และ **ผู้ใช้แก้ได้เอง**:
+
+      ``no_tesseract``  เครื่องเซิร์ฟเวอร์ยังไม่ได้ติดตั้ง Tesseract
+      ``lang:<codes>``  ไม่มีชุดข้อมูล (traineddata) ของสคริปต์ของคำนี้
+
+    ⚠️ เหตุผลที่รู้ได้ **เฉพาะตอนอ่านภาพ** (เช่น "อ่านได้แต่หาคำไม่เจอ")
+    จงใจไม่เดาไว้ล่วงหน้า — เดาผิดคือคำตอบที่ผิดแบบมั่นใจ ซึ่งแย่กว่าเงียบ
+
+    ไม่แตะ ``found``/``reference``/verdict/การนับ — เพิ่มคีย์แสดงผลอย่างเดียว
+    เหมือน ``found_spans``/``pixel_bbox``
+    """
+    if not (config.HIGHLIGHT_WHY and config.HIGHLIGHT_DEFECT_WORD
+            and config.HIGHLIGHT_USE_TESSERACT):
+        for d in defects or []:
+            d.pop("hl_why", None)
+        return
+    try:
+        from . import highlight as hl
+        engine_of = {r.get("zone_id"): r.get("engine")
+                     for r in (ocr_results or [])}
+        have_tess = hl._tesseract_available()
+        for d in defects or []:
+            d.pop("hl_why", None)
+            found = (d.get("found") or "").strip()
+            if not found:
+                continue            # ไม่มีคำให้ค้น — ไม่ใช่ความผิดของเครื่อง
+            if d.get("pixel_bbox"):
+                continue            # มีกรอบที่ "วัดมา" อยู่แล้ว
+            # โซนที่อ่านจาก text layer ใช้กรอบคำของ PDF ตรง ๆ ได้ทุกสคริปต์
+            # โดยไม่ต้องพึ่ง Tesseract เลย ⇒ ไม่มีอะไรต้องเตือน
+            if (config.HIGHLIGHT_USE_PDF_TEXT
+                    and engine_of.get(d.get("zone_id")) == "pdf-text"):
+                continue
+            if not have_tess:
+                d["hl_why"] = "no_tesseract"
+                continue
+            miss = hl.missing_langs(found)
+            if miss:
+                d["hl_why"] = "lang:" + "+".join(miss)
+                continue
+            # ติดตั้งครบ แต่ค่าตั้ง ARTWORK_HIGHLIGHT_TESS_LANG ตรึงภาษาไว้
+            # จนสคริปต์ของคำนี้ไม่เคยถูกส่งให้ Tesseract — คนละทางแก้กับ
+            # "ยังไม่ได้ติดตั้ง" จึงต้องเป็นคนละเหตุผล
+            unused = hl.unused_langs(found, config.HIGHLIGHT_TESSERACT_LANG)
+            if unused:
+                d["hl_why"] = "langcfg:" + "+".join(unused)
+    except Exception:
+        logger.debug("[artwork] highlight-why tagging skipped", exc_info=True)
 
 
 def _pdf_text_boxes(rec_id: str, rep: dict, zone_id: str, found: str,

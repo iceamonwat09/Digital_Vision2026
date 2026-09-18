@@ -75,11 +75,40 @@ B_ENERGY = ("للقطط. محتوى الطاقة: 510 كيلو كالوري / 10
 
 
 @pytest.mark.parametrize("per_row", [6, 8, 12, 99])
-def test_the_whole_line_cannot_be_found_on_a_wrapping_panel(per_row):
-    """เหตุผลที่ต้องเปลี่ยน — ไม่ใช่เพราะช่วงที่ต่าง "ดีกว่าเฉย ๆ"."""
+def test_the_whole_line_cannot_be_found_on_a_wrapping_panel(per_row, monkeypatch):
+    """เหตุผลที่ต้องเปลี่ยนไปยิงที่ "ช่วงที่ต่าง" — ไม่ใช่เพราะมัน "ดีกว่าเฉย ๆ".
+
+    ⚠️ ล็อกพฤติกรรม **ก่อนมีชั้น wrap-runs (18 ก.ย.)** ไว้โดยเจตนา: ตอนนั้น
+    การยิงทั้งบรรทัดบนแผงที่ข้อความไหลข้ามแถว ให้ 0 กรอบเสมอ ซึ่งคือที่มา
+    ของ ``HIGHLIGHT_BY_SPANS``. ชั้นใหม่แก้ข้อจำกัดนั้นแล้ว (ดูเทสต์ถัดไป)
+    แต่ **ข้อสรุปยังเหมือนเดิม**: ช่วงที่ต่างยังแม่นกว่ามาก
+    """
+    monkeypatch.setattr(config, "HIGHLIGHT_WRAP_RUNS", False)
     if per_row == 99:
         pytest.skip("แผงที่ทั้งบรรทัดอยู่แถวเดียว = เคสที่ของเดิมยังทำได้")
     assert hl._match_boxes(_words(Z_ENERGY, per_row), Z_ENERGY) == []
+
+
+@pytest.mark.parametrize("per_row", [6, 8, 12, 99])
+def test_wrap_runs_box_the_wrapped_line_row_by_row(per_row):
+    """ชั้น wrap-runs: แผงที่ข้อความไหล ได้กรอบ **หนึ่งใบต่อแถว** ⇒ ผลลัพธ์
+    เท่ากับแผงที่ไม่ไหล (ซึ่งได้ 1 กรอบต่อ 1 แถวอยู่แล้ว) ไม่ใช่ของใหม่
+    คนละเรื่อง."""
+    ws = _words(Z_ENERGY, per_row)
+    rows = {b[1] for _, b in ws}
+    assert len(hl._match_boxes(ws, Z_ENERGY)) == len(rows)
+
+
+@pytest.mark.parametrize("per_row", [6, 8, 12])
+def test_the_span_is_still_far_tighter_than_the_wrapped_whole_line(per_row):
+    """ถึงชั้น wrap-runs จะทำให้ทั้งบรรทัดมีกรอบแล้ว **ยิงที่ช่วงที่ต่างยัง
+    ดีกว่ามาก** — 1 กรอบแคบ ๆ ที่ตัวเลข เทียบกับการล้อมทุกแถวของบรรทัด."""
+    ws = _words(Z_ENERGY, per_row)
+    line = hl._match_boxes(ws, Z_ENERGY)
+    span = hl._match_boxes(ws, "520")
+    assert len(span) == 1
+    area = lambda b: (b[2] - b[0]) * (b[3] - b[1])
+    assert area(span[0]) < 0.25 * sum(area(b) for b in line)
 
 
 @pytest.mark.parametrize("per_row", [6, 8, 12, 99])
