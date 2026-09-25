@@ -113,15 +113,23 @@
     return !!(($("awForceOcr") || {}).checked);
   }
 
+  // ช่องติ๊กที่ถูกซ่อนจากหน้าจอ (``data-off`` มาจาก config.EXPERIMENT_OCR_UI)
+  // ต้องถือว่า "ไม่ติ๊ก" เสมอ — งานที่ค้างใน localStorage จำค่าติ๊กเดิมไว้ได้
+  // ⇒ ไม่บังคับตรงนี้ = โหมดทดลองทำงานอยู่ทั้งที่ผู้ใช้มองไม่เห็นช่องติ๊ก
+  function expChecked(id) {
+    const el = $(id);
+    return !!(el && el.checked && !(el.dataset && el.dataset.off));
+  }
+
   // โหมดทดลอง: หั่นโซนเป็นแถบก่อนส่ง OCR (ไม่ติ๊ก = ทางเดิมเป๊ะ)
   function splitBandsOn() {
-    return !!(($("awSplitBands") || {}).checked);
+    return expChecked("awSplitBands");
   }
 
   // โหมดทดลอง "อ่านซ้ำ 2 รอบ แล้วยืนยันผล" — ใช้กับปุ่มส่งตรวจสอบเท่านั้น
   // (แท็บแปลไม่เกี่ยว เพราะมันไม่ได้ตัดสิน defect)
   function confirmReadsOn() {
-    return !!(($("awConfirmReads") || {}).checked);
+    return expChecked("awConfirmReads");
   }
 
   // โหมดทดลอง "เทียบแผงระดับพิกเซล" — ใช้กับปุ่มส่งตรวจสอบเท่านั้น
@@ -1189,8 +1197,8 @@
     refAttached = !!s.refAttached && !!docMeta.b;
     if ($("awAutoRotate")) $("awAutoRotate").checked = !!s.autoRotate;
     if ($("awForceOcr")) $("awForceOcr").checked = !!s.forceOcr;
-    if ($("awSplitBands")) $("awSplitBands").checked = !!s.splitBands;
-    if ($("awConfirmReads")) $("awConfirmReads").checked = !!s.confirmReads;
+    if ($("awSplitBands")) $("awSplitBands").checked = !!s.splitBands && !$("awSplitBands").dataset.off;
+    if ($("awConfirmReads")) $("awConfirmReads").checked = !!s.confirmReads && !$("awConfirmReads").dataset.off;
     if ($("awPixelCheck")) $("awPixelCheck").checked = !!s.pixelCheck;
     if ($("awBrand") && s.brand) $("awBrand").value = s.brand;
     showTabs(true);

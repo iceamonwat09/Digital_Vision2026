@@ -257,6 +257,19 @@ INSPECT_SPELL_LAYER = os.getenv(
 PIXDIFF_UI = os.getenv(
     "ARTWORK_PIXDIFF_UI", "0").strip().lower() in ("1", "true", "yes", "on")
 
+# ── ช่องติ๊กโหมดทดลองด้านการอ่าน OCR (25 ก.ย. 2026) ────────────────────────
+# "🧪 หั่นโซนเป็นแถบก่อนส่ง OCR" และ "🔁 อ่านซ้ำ 2 รอบ แล้วยืนยันผล" ไม่ได้ใช้
+# งานจริงบนสถานี ⇒ ซ่อนจากหน้าจอ (default). ตั้ง 1 = แสดงกลับมาเหมือนเดิม
+#
+# ⚠️ ซ่อนด้วย CSS ไม่ลบ element (เหตุผลเดียวกับ PIXDIFF_UI ข้างบน) และ
+#    **ช่องที่ซ่อนต้องถือว่า "ไม่ติ๊ก" เสมอ** — งานที่ค้างใน localStorage
+#    (``aw.session.v1``) จำค่าติ๊กเดิมไว้ได้ ⇒ ถ้าไม่บังคับ ผู้ใช้ที่เคยติ๊กไว้
+#    จะได้โหมดทดลองทำงานอยู่ทั้งที่มองไม่เห็นช่องติ๊กเลย
+#    (API ``/inspect`` ยังรับ ``split_bands``/``confirm_reads`` ตามเดิม —
+#     สคริปต์และเทสต์ที่เรียกตรงไม่ถูกแตะ)
+EXPERIMENT_OCR_UI = os.getenv(
+    "ARTWORK_EXPERIMENT_OCR_UI", "0").strip().lower() in ("1", "true", "yes", "on")
+
 # ── Checks ───────────────────────────────────────────────────────────
 # Languages tried by the dictionary layer. A word passes if it is valid
 # in ANY enabled language or in the brand vocabulary — labels mix

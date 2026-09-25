@@ -120,6 +120,7 @@ def artwork_page():
     # ปุ่มยังอยู่ใน DOM เสมอ แค่ถูกซ่อนด้วย CSS — ดูเหตุผลที่ config.PIXDIFF_UI
     return render_template("artwork_check.html",
                            pixdiff_ui=config.PIXDIFF_UI,
+                           experiment_ocr_ui=config.EXPERIMENT_OCR_UI,
                            **_hl_flags())
 
 
