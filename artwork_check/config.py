@@ -650,6 +650,42 @@ if TEXT_CASE_SEVERITY not in ("critical", "warning", "info"):
 REPORT_VIEW_ROTATE = os.getenv(
     "ARTWORK_REPORT_VIEW_ROTATE", "1").strip().lower() not in ("0", "false", "")
 
+# ── ลดรายการปลอมของคู่ vector ↔ raster หลายภาษา (25 ก.ย. 2026) ─────────
+#
+# ที่มา: คู่ Friskies Lil Lickables (masterfile vector ↔ ปรู๊ฟ raster 300 dpi)
+# ขึ้น 5-7 รายการ **เป็นของจริงแค่ 1** · เล่นซ้ำออฟไลน์ด้วยข้อความ OCR จริง
+# ของสถานีได้ตรงทุกตัว. ทั้งสามชั้น **ไม่ลบรายการใดทิ้ง** — แค่ลดระดับ +
+# แนบเหตุผล/หลักฐานให้คนดู (ผลที่ผิดแบบมั่นใจ แย่กว่าไม่แสดงผล)
+#
+# F1 — ``NUMBER_FAIL`` ของเลข 12-14 หลักที่ **เห็นชัดว่าไม่ใช่บาร์โค้ด**
+#   (อยู่ในวงเล็บ · เป็นส่วนของรหัสที่มีขีด · ตามหลัง Reg/No./CFPR/Sdn/Bhd/
+#   Tel/ทะเบียน/등록 …) → ``info`` + เหตุผล. บรรทัดที่มีคำ EAN/UPC/GTIN/
+#   บาร์โค้ด ⇒ **ตรวจเสมอ** · เลขที่ไม่เข้าเงื่อนไขใด ⇒ critical เหมือนเดิม
+#   ตั้ง ``0`` = ทุกเลข 12-14 หลักเป็น critical เหมือนก่อน 25 ก.ย. เป๊ะ
+NUMBER_CONTEXT = os.getenv(
+    "ARTWORK_NUMBER_CONTEXT", "1").strip().lower() not in ("0", "false", "")
+#
+# F2 — text layer ของไฟล์เองเป็น **พยาน** ของโซนที่ถูกปฏิเสธ text layer แล้ว
+#   ไปอ่านด้วย OCR: ถ้า OCR ฝั่งนั้นต่างจากพยาน แต่ **อีกฝั่งตรงกับพยานทั้ง
+#   บรรทัด** ⇒ ความต่างนี้มาจาก OCR อ่านเพี้ยน ไม่ใช่สองไฟล์พิมพ์ต่างกัน
+#   ⇒ ลดเป็น ``warning`` (REVIEW — ผู้ใช้เลือก) + แสดงข้อความที่ไฟล์พิมพ์จริง
+#   ใช้เฉพาะ ``MISMATCH_PANELS`` ที่เทียบกับโซนเดียว (คู่ข้ามไฟล์) เท่านั้น
+#   ตั้ง ``0`` = ไม่เก็บพยาน ไม่ลดระดับ = พฤติกรรมเดิมเป๊ะ
+TEXT_WITNESS = os.getenv(
+    "ARTWORK_TEXT_WITNESS", "1").strip().lower() not in ("0", "false", "")
+TEXT_WITNESS_SEVERITY = os.getenv(
+    "ARTWORK_TEXT_WITNESS_SEVERITY", "warning").strip().lower()
+if TEXT_WITNESS_SEVERITY not in ("critical", "warning", "info"):
+    TEXT_WITNESS_SEVERITY = "warning"
+#
+# F3 — ผล OCR ที่มี "คำเดียว" ปนอักษรไทยกับฮันกึล/จีน/คานะ/อาหรับ (เช่น
+#   ``ผลิตภัณฑ์에``) = ลายเซ็นของ OCR ที่ "แปล" คำแทนการอ่าน ⇒ โน้ตเตือน
+#   บนโซน + บนการ์ดที่มีคำนั้น **ไม่แตะระดับความรุนแรง**. ใช้กับผล OCR เท่านั้น
+#   (text layer เกาหลีไม่มีช่องว่าง ⇒ ``กรัม제품명`` ติดกันเป็นเรื่องปกติ)
+#   ตั้ง ``0`` = ไม่มีโน้ต
+FUSED_SCRIPT_NOTE = os.getenv(
+    "ARTWORK_FUSED_SCRIPT_NOTE", "1").strip().lower() not in ("0", "false", "")
+
 # ── Defect classes (severity drives the verdict) ─────────────────────
 #   critical → FAIL, warning → REVIEW, info → shown only
 DEFECT_CLASSES = {

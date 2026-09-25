@@ -788,8 +788,8 @@ def check_numbers(zones: List[dict], texts: Dict[str, str]) -> List[dict]:
         # เลขที่อยู่ติดกันในโซนเดียวกัน: ถ้าคอมโบใด check digit ผ่าน แปลว่า
         # เป็นบาร์โค้ดถูกที่ถูก OCR ตัดแยก ไม่ใช่เลขผิด (deterministic —
         # ทดสอบ segmentation ทางเลือก ไม่ใช่การเดาเลขใหม่).
-        seqs = [m.replace(" ", "")
-                for m in re.findall(r"\d[\d ]*\d|\d", text)]
+        matches = list(_RE_DIGIT_RUN.finditer(text))
+        seqs = [m.group().replace(" ", "") for m in matches]
         for i, digits in enumerate(seqs):
             if len(digits) not in (12, 13, 14) or gs1_check_digit_ok(digits):
                 continue
@@ -802,12 +802,59 @@ def check_numbers(zones: List[dict], texts: Dict[str, str]) -> List[dict]:
                             joined_ok = True
             if joined_ok:
                 continue
-            defects.append(_defect(
+            d = _defect(
                 "NUMBER_FAIL", zid,
                 f"เลขบาร์โค้ด {digits} check digit ไม่ถูกต้อง "
                 f"(ตามสูตร GS1 mod-10)",
-                found=digits))
+                found=digits)
+            if config.NUMBER_CONTEXT:
+                why = not_barcode_reason(text, matches[i].start(),
+                                         matches[i].end())
+                if why:
+                    # ไม่ลบ — ลดเป็น info + บอกเหตุผล ให้คนเห็นว่าระบบข้ามเพราะอะไร
+                    d["severity"] = "info"
+                    d["why"] = why
+            defects.append(d)
     return defects
+
+
+# ── F1: เลข 12-14 หลักที่ "เห็นชัดว่าไม่ใช่บาร์โค้ด" (25 ก.ย. 2026) ─────────
+# ที่มา: ฉลากหลายประเทศพิมพ์เลขทะเบียนบริษัท/เลข CFPR ยาว 12 หลัก เช่น
+# ``Nestlé Products Sdn. Bhd. (200201013615)`` · ``SF-CFI2-26-172683205264``
+# ⇒ ถูกนับเป็นบาร์โค้ดแล้วฟ้อง check digit ผิดทุกใบ (3 ใน 7 รายการของสถานี)
+#
+# ⚠️ **อนุรักษ์นิยมโดยตั้งใจ** — วัดแล้วว่ารุ่นที่เข้มกว่า ("ตรวจเฉพาะเลขที่อยู่
+#    เดี่ยวบนบรรทัด") ทำให้บาร์โค้ดที่ OCR อ่านปนกับข้อความหลุดการตรวจ
+#    ⇒ ที่นี่ข้ามเฉพาะเลขที่มีหลักฐานในบริบทชัดเจนเท่านั้น · บรรทัดที่มีคำ
+#    EAN/UPC/GTIN/บาร์โค้ด ⇒ ตรวจเสมอ
+_RE_DIGIT_RUN = re.compile(r"\d[\d ]*\d|\d")
+_RE_BARCODE_KW = re.compile(
+    r"\b(?:EAN|UPC|GTIN|ITF|JAN)\b|BAR\s*CODE|บาร์โค้ด|바코드|条码|條碼|バーコード",
+    re.IGNORECASE)
+_RE_REG_KW = re.compile(
+    r"(?:\bReg(?:istration)?\b|\bNo\b\.?|\bCFPR\b|\bSdn\b|\bBhd\b|\bLtd\b|"
+    r"\bTel\b|\bPhone\b|\bFax\b|\bLic(?:ense)?\b|ทะเบียน|โทร|등록|전화|许可|注册)",
+    re.IGNORECASE)
+
+
+def not_barcode_reason(text: str, start: int, end: int) -> str:
+    """เหตุผลที่เลขช่วง ``text[start:end]`` ไม่ใช่บาร์โค้ด · ไม่แน่ใจ ⇒ ``""``"""
+    ls = text.rfind("\n", 0, start) + 1
+    le = text.find("\n", end)
+    le = len(text) if le < 0 else le
+    line = text[ls:le]
+    if _RE_BARCODE_KW.search(line):
+        return ""                                 # มีคำว่า EAN/GTIN = บาร์โค้ดแน่นอน
+    before, after = text[ls:start], text[end:le]
+    if before.rstrip().endswith("(") and after.lstrip().startswith(")"):
+        return "อยู่ในวงเล็บ — น่าจะเป็นเลขทะเบียน ไม่ใช่บาร์โค้ด"
+    if re.search(r"-\s*$", before):
+        return "เป็นท้ายของรหัสที่มีขีด — ไม่ใช่บาร์โค้ด"
+    if re.match(r"\s*-[A-Za-z0-9]", after):
+        return "เป็นต้นของรหัสที่มีขีด — ไม่ใช่บาร์โค้ด"
+    if _RE_REG_KW.search(before[-40:]):
+        return "ตามหลังคำว่าเลขทะเบียน/เลขที่/โทร — ไม่ใช่บาร์โค้ด"
+    return ""
 
 
 # ── Layer 3: dictionary + brand vocabulary ────────────────────────────
@@ -1181,4 +1228,13 @@ def run_all_checks(zones: List[dict], ocr_results: List[dict],
         defects += check_spelling(zones, texts, vocab_words=vocab_words)
     defects += check_phrases(zones, texts, vocab_phrases or [])
     defects += check_readability(zones, ocr_results)
+    # ชั้นหลังการตรวจ (25 ก.ย. 2026) — ไม่สร้างรายการใหม่ ไม่ลบรายการใด
+    # แค่ลดระดับ/แนบหลักฐานของรายการที่พิสูจน์ได้ว่ามาจาก OCR อ่านเพี้ยน
+    # (ดู ``witness.py``) · ปิดธงทั้งสอง = รายการเดิมทุกตัวอักษร
+    if config.TEXT_WITNESS or config.FUSED_SCRIPT_NOTE:
+        from . import witness as _wit
+        if config.TEXT_WITNESS:
+            defects = _wit.apply_witness(defects, zones, ocr_results, texts)
+        if config.FUSED_SCRIPT_NOTE:
+            defects = _wit.mark_fused(defects, ocr_results)
     return defects

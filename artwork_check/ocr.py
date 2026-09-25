@@ -332,6 +332,17 @@ def read_zone(doc: ArtworkDocument, zone: dict,
         # ไม่ใช่ error (OCR อ่านสำเร็จ) แต่ผู้ตรวจควรรู้.
         # ต่อท้าย ไม่ทับ — โซนหนึ่งเจอได้ทั้งสองอย่างพร้อมกัน
         out["note"] = " · ".join(x for x in (garbled, out.get("note")) if x)
+        if config.TEXT_WITNESS:
+            # ข้อความที่เพิ่งถูกปฏิเสธ ยังบอกได้ว่าไฟล์พิมพ์อะไรจริงในบรรทัดที่
+            # สะอาด ⇒ เก็บไว้เป็น "พยาน" ให้ชั้นเทียบ (``witness.py``) พิสูจน์ว่า
+            # ความต่างบางรายการมาจาก OCR อ่านเพี้ยน. **ไม่เคยถูกใช้เป็นข้อความ
+            # ที่เอาไปเทียบ** (วัดแล้ว: เอาไปแทน OCR ⇒ MISMATCH แค่ย้ายที่)
+            out["witness"] = embedded
+    if config.FUSED_SCRIPT_NOTE:
+        from .witness import fused_note
+        fn = fused_note(out["text"])
+        if fn:
+            out["note"] = " · ".join(x for x in (out.get("note"), fn) if x)
     if forced:
         # โซนนี้อาจมี text layer ที่ใช้ได้อยู่ แต่ถูกสั่งให้อ่านจากภาพแทน —
         # ต้องบอกไว้ ไม่งั้นผู้ตรวจจะไม่รู้ว่าข้อความที่เห็นมาจาก OCR

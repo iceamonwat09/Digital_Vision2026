@@ -668,6 +668,36 @@
           esc(d.message);
         if (d.found)     html += '<br>พบ: <span class="found">' + markDiff(d.found, d.found_spans) + "</span>";
         if (d.reference) html += ' &nbsp;เทียบกับ: <span class="ref">' + markDiff(d.reference, d.ref_spans) + "</span>";
+        // ── เหตุผล/หลักฐานของชั้นหลังการตรวจ (25 ก.ย. 2026) ───────────────
+        // ไม่มีรายการใดถูกลบ — แค่ลดระดับแล้วบอกว่าทำไม ให้คนตัดสินด้วยตา
+        const qq = (arr) => (arr || []).filter(Boolean)
+          .map((t) => "“" + esc(t) + "”").join(", ");
+        if (d.why) {
+          // F1 — เลขที่เห็นชัดว่าไม่ใช่บาร์โค้ด (ลดเป็น info)
+          html += '<div class="aw-evid">ℹ️ ' + esc(d.why) +
+            " · ไม่นับเป็นข้อผิดพลาด แสดงไว้ให้ตรวจด้วยตา</div>";
+        }
+        if (d.witness && d.witness.file_says) {
+          // F2 — text layer ของไฟล์เองเป็นพยานว่า OCR อ่านเพี้ยน
+          const w = d.witness, wz = esc(w.zone || "");
+          let t = "📄 <b>หลักฐานจากไฟล์</b> (text layer ของ " + wz + "): ไฟล์พิมพ์ว่า " +
+            '<span class="aw-evid-file">' + esc(w.file_says) + "</span><br>";
+          if (w.kind === "pair" && (w.ocr_says || []).length) {
+            t += "OCR ของ " + wz + " อ่านเป็น " + qq(w.ocr_says) +
+              ((w.file_diff || []).length ? " แต่ไฟล์พิมพ์ " + qq(w.file_diff) : "");
+          } else if (w.kind === "extra_here") {
+            t += "บรรทัดนี้อีกฝั่งมีอยู่แล้ว — ข้อความบนการ์ดคือสิ่งที่ OCR ของ " + wz + " อ่านเพี้ยน";
+          } else {
+            t += "ไฟล์ของ " + wz + " ก็พิมพ์บรรทัดนี้ — OCR ของ " + wz + " อ่านเพี้ยนหรืออ่านไม่ครบ";
+          }
+          t += " ⇒ <b>น่าจะเป็น OCR อ่านเพี้ยน ไม่ใช่สองไฟล์พิมพ์ต่างกัน</b> · โปรดยืนยันด้วยตา";
+          html += '<div class="aw-evid">' + t + "</div>";
+        }
+        if (d.fused && d.fused.length) {
+          // F3 — คำเดียวที่ปนอักษรไทยกับอักษรอื่น (ลายเซ็นของ OCR ที่แปลคำ)
+          html += '<div class="aw-evid aw-evid-warn">🈯 ผล OCR มีคำที่อักษรไทยติดกับอักษรภาษาอื่นในคำเดียว (' +
+            qq(d.fused.slice(0, 3)) + ") — มักเกิดจาก OCR แปลคำแทนการอ่าน โปรดดูภาพประกอบ</div>";
+        }
 
         // ── 2-crop comparison (auto-load ทันที ไม่ต้องคลิก) ───────────
         // crop ต้องดึงจากไฟล์ของโซนนั้นเอง (doc a/b) — report เก่าไม่มี
