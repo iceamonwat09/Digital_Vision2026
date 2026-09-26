@@ -1631,6 +1631,22 @@
   // OCR เห็นภาพแบบเดียวกับที่คนเห็น (ชั้น pixel ก็ใช้ค่าเดียวกันนี้)
   function rotForNewZone() { return pageRot; }
 
+  // โซนที่ "ระบบสร้างให้" (26 ก.ย.) — เดิมได้ "default" ตายตัว ⇒ ผู้ใช้หมุน
+  // จอ/ตั้งมุมโซน 🅰 แล้ว โซนคู่ฝั่ง 🅱 ถูกอ่านแบบตะแคง (OCR ตกทั้งท่อน ⇒
+  // การ์ดปลอม) · ธงปิด ⇒ "default" เหมือนเดิมเป๊ะ
+  const inheritRot = () => window.AW_ZONE_ROTATE_INHERIT !== false;
+  // คู่ของโซน src: autopair ค้นแบบไม่หมุน ⇒ จับคู่ติด = วางแนวเดียวกัน
+  function rotForPairOf(src) {
+    if (!inheritRot() || !src || src.rotate === undefined) return "default";
+    return src.rotate;
+  }
+  // โซนที่เสนอขณะหมุนจอ ⇒ ได้มุมของจอ เหมือนโซนที่ลากเอง
+  function rotForProposed(z) {
+    if (!inheritRot() || !pageRot) return z;
+    if (z.rotate !== undefined && z.rotate !== "default") return z;
+    return Object.assign({}, z, { rotate: pageRot });
+  }
+
   // จุดบนจอ (เทียบกับมุมซ้ายบนของกล่องที่หมุนแล้ว) → พิกัดในภาพที่ยังไม่หมุน
   // ที่มาของสูตร: ภาพถูก transform เป็น translate(...) rotate(deg) รอบจุด 0,0
   function unrotPoint(sx, sy, W, H) {
@@ -2264,7 +2280,7 @@
         body: JSON.stringify({ doc: activeDoc }),
       });
       zones = zones.filter((z) => docOfZone(z) !== activeDoc)
-                   .concat(res.zones || []);
+                   .concat((res.zones || []).map(rotForProposed));
       selectedId = null;
       cancelDraw();
       renderZones();
@@ -2318,7 +2334,7 @@
           while (zones.some((z) => z.id === "b" + n)) n++;
           zones.push({
             id: "b" + n, type: src.type || "panel", group: src.group,
-            doc: "b", rotate: "default", bbox: r.bbox,
+            doc: "b", rotate: rotForPairOf(src), bbox: r.bbox,
             label: "อ้างอิง " + (src.label || src.group),
           });
           made++;

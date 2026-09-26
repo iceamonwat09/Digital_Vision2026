@@ -766,6 +766,8 @@
   // โหลดสคริปต์ เพราะ hlTargets() อ่านตอนสร้าง URL ของภาพ crop
   window.AW_HL_BY_SPANS = {{ 'true' if hl_by_spans else 'false' }};
   window.AW_HL_REF_SIDE = {{ 'true' if hl_ref_side else 'false' }};
+  // โซนที่ระบบสร้างให้ (หากรอบคู่/เสนอโซน) ได้มุมหมุนด้วย — ดู config.ZONE_ROTATE_INHERIT
+  window.AW_ZONE_ROTATE_INHERIT = {{ 'true' if zone_rotate_inherit else 'false' }};
 </script>
 <script src="{{ url_for('static', filename='js/artwork_check.js') }}?v={{ config_version }}"></script>
 {% endblock %}

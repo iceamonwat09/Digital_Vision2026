@@ -121,6 +121,7 @@ def artwork_page():
     return render_template("artwork_check.html",
                            pixdiff_ui=config.PIXDIFF_UI,
                            experiment_ocr_ui=config.EXPERIMENT_OCR_UI,
+                           zone_rotate_inherit=config.ZONE_ROTATE_INHERIT,
                            **_hl_flags())
 
 
