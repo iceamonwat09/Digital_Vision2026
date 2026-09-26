@@ -38,6 +38,61 @@
   ],
   "truth": "ของจริง 2: Copper Sulfate. vs Copper Sulphate Pentahydrate. · D-Calcium vs D-calcium (ตัวพิมพ์)"
  },
+ "avoderm3g": {
+  "current": [
+   {
+    "class": "MISMATCH_PANELS",
+    "zone_id": "z1",
+    "severity": "critical",
+    "found": "Potassium Iodide), Choline Chloride, Magnesium Sulfate, Copper Sulfate.",
+    "reference": "Potassium lodide), Choline Chloride, Magnesium Sulfate, Copper Sulphate Pentahydrate.",
+    "witness": false
+   },
+   {
+    "class": "MISMATCH_CASE",
+    "zone_id": "z1",
+    "severity": "critical",
+    "found": "D-Calcium Pantothenate, Thiamine Mononitrate, Beta-carotene, Biotin, Riboflavin",
+    "reference": "D-calcium Pantothenate, Thiamine Mononitrate, Beta-carotene, Biotin, Riboflavin",
+    "witness": false
+   },
+   {
+    "class": "MISMATCH_PANELS",
+    "zone_id": "z2",
+    "severity": "critical",
+    "found": "16321 Arrow Hwy Irwindale, CA 91706 USA",
+    "reference": "16321 Arrow Hwy, Irwindale Park, CA 91706",
+    "witness": false
+   }
+  ],
+  "legacy": [
+   {
+    "class": "MISMATCH_PANELS",
+    "zone_id": "z1",
+    "severity": "critical",
+    "found": "Potassium Iodide), Choline Chloride, Magnesium Sulfate, Copper Sulfate.",
+    "reference": "Potassium lodide), Choline Chloride, Magnesium Sulfate, Copper Sulphate Pentahydrate.",
+    "witness": false
+   },
+   {
+    "class": "MISMATCH_CASE",
+    "zone_id": "z1",
+    "severity": "critical",
+    "found": "D-Calcium Pantothenate, Thiamine Mononitrate, Beta-carotene, Biotin, Riboflavin",
+    "reference": "D-calcium Pantothenate, Thiamine Mononitrate, Beta-carotene, Biotin, Riboflavin",
+    "witness": false
+   },
+   {
+    "class": "MISMATCH_PANELS",
+    "zone_id": "z2",
+    "severity": "critical",
+    "found": "16321 Arrow Hwy Irwindale, CA 91706 USA",
+    "reference": "16321 Arrow Hwy, Irwindale Park, CA 91706",
+    "witness": false
+   }
+  ],
+  "truth": "ของจริง 3 (ยืนยันจากภาพ PDF 300 dpi): Copper Sulfate. vs Copper Sulphate Pentahydrate. · D-Calcium vs D-calcium · ที่อยู่ 'Irwindale, CA 91706 USA' vs 'Irwindale Park, CA 91706' — บาร์โค้ด 0 52907 00241 0 เหมือนกันทั้งสองไฟล์ (OCR แค่แบ่งกลุ่มตัวเลขคนละแบบ ⇒ ต้องไม่มีการ์ด)"
+ },
  "friskies1": {
   "current": [
    {

@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """ธนาคารเคสจริง (P3, 26 ก.ย. 2026) — การ์ดบนรายงานต้องไม่เปลี่ยนเงียบ ๆ
 
-ข้อความ OCR จริงของสถานี 9 ชุด (Friskies 4 รอบ · John West 4 รอบ · AvoDerm)
+ข้อความ OCR จริงของสถานี 10 ชุด (Friskies 4 รอบ · John West 4 รอบ · AvoDerm 2 ชุด)
 เล่นซ้ำด้วย ``run_all_checks`` ตัวจริง. ล็อก 2 ชั้น:
 
 1. **การ์ดทุกใบ** (คลาส · โซน · ระดับ · ข้อความ) ตรงกับ ``expected.json``
@@ -35,7 +35,7 @@ def _defaults(monkeypatch):
 
 def test_bank_has_every_case_and_nothing_extra():
     assert sorted(EXP) == VC.cases()
-    assert len(VC.cases()) == 9
+    assert len(VC.cases()) == 10
 
 
 @pytest.mark.parametrize("name", VC.cases())
@@ -111,3 +111,13 @@ def test_no_card_disappears_only_severities_or_merges_change():
         for d in EXP[n]["legacy"]:
             for t in (d["found"], d["reference"]):
                 assert not t or t in texts, (n, t)
+
+
+def test_avoderm_three_groups_has_only_the_three_real_cards():
+    """สถานี 26 ก.ย.: บาร์โค้ดเหมือนกันทั้งสองไฟล์ (OCR แบ่งกลุ่มตัวเลขคนละ
+    แบบ) — P4 รุ่นแรกขึ้นการ์ดปลอม 3 ใบ · ที่อยู่ต่างจริง (Park/USA)"""
+    c = VC.cards("avoderm3g")
+    assert not [d for d in c if "52907" in d["found"] + d["reference"]
+                or "00241" in d["found"] + d["reference"]]
+    assert any("Irwindale Park" in d["reference"] for d in c)
+    assert len(c) == 3 and all(d["severity"] == "critical" for d in c)

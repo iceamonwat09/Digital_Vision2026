@@ -195,7 +195,10 @@ def _composable_from(key: str, piece_keys: List[str],
 
 
 _RE_NUM_CANON = re.compile(r"\d+(?:[.,]\d+)*")
-_RE_NUM_BEFORE = re.compile(r"\d[.,]?$")
+# ``\Z`` ไม่ใช่ ``$`` — ``$`` ตรงก่อน ``\n`` ตัวสุดท้ายด้วย ⇒ ``"0\n"`` ถูกนับว่า
+# "ติดกับตัวเลข" ทั้งที่ขึ้นบรรทัดคั่น (เจอจริง: บาร์โค้ด ``0\n52907`` ของ
+# AvoDerm ถูกนับว่าหั่นตัวเลข ⇒ การ์ดปลอม)
+_RE_NUM_BEFORE = re.compile(r"\d[.,]?\Z")
 _RE_NUM_AFTER = re.compile(r"[.,]?\d")
 
 
@@ -226,7 +229,66 @@ def _key_char(c: str) -> str:
     return _norm_key(c)
 
 
-def _contained_soundly(line: str, other: str) -> Optional[bool]:
+_RUN_SEP = " \t\r\n.,"
+_RUN_SEP_MAX = 3
+
+
+def _digit_run(text: str, lo: int, hi: int) -> str:
+    """ขยาย ``text[lo:hi]`` ที่ขอบซึ่งเป็นตัวเลข ให้ครอบ **ตัวเลขที่ติดกันทั้งชุด**
+    (ข้ามช่องว่าง/ขึ้นบรรทัด/``.``/``,`` ที่อยู่ **ระหว่างตัวเลข** ≤ 3 ตัว)
+
+    ใช้แยก "OCR แบ่งกลุ่มตัวเลขคนละแบบ" (``5290700241`` ↔ ``52907`` +
+    ``00241``) ออกจาก "ตัวเลขถูกเปลี่ยน" — สองฝั่งได้ชุดตัวเลขเดียวกัน
+    ⇒ ไม่ได้หั่นอะไร"""
+    i = lo
+    while 0 < i and i < len(text) and text[i].isdigit():
+        if text[i - 1].isdigit():
+            i -= 1
+            continue
+        j = i - 1
+        while j >= 0 and i - j <= _RUN_SEP_MAX and text[j] in _RUN_SEP:
+            j -= 1
+        if j >= 0 and i - j <= _RUN_SEP_MAX + 1 and text[j].isdigit():
+            i = j
+        else:
+            break
+    k = hi
+    while 0 < k < len(text) and text[k - 1].isdigit():
+        if text[k].isdigit():
+            k += 1
+            continue
+        j = k
+        while j < len(text) and j - k < _RUN_SEP_MAX and text[j] in _RUN_SEP:
+            j += 1
+        if j < len(text) and j > k and text[j].isdigit():
+            k = j + 1
+        else:
+            break
+    return text[i:k]
+
+
+def _cut_at(kl: str, text: str, lo: int, hi: int) -> bool:
+    return bool((kl[0].isdigit() and _RE_NUM_BEFORE.search(text[:lo]))
+                or (kl[-1].isdigit() and _RE_NUM_AFTER.match(text[hi:])))
+
+
+def _own_runs(line: str, own: str) -> set:
+    """ชุดตัวเลขเต็ม (``_digit_run``) ของบรรทัดนี้ **ในแผงของตัวเอง** —
+    เฉพาะตำแหน่งที่ไม่ได้ถูกหั่นในแผงตัวเอง"""
+    kl, _ = _keyed(line)
+    ko, pos = _keyed(own)
+    out = set()
+    at = ko.find(kl) if kl else -1
+    while at >= 0:
+        lo, hi = pos[at], pos[at + len(kl) - 1] + 1
+        if not _cut_at(kl, own, lo, hi):
+            out.add(tuple(_num_canon(_digit_run(own, lo, hi))))
+        at = ko.find(kl, at + 1)
+    return out
+
+
+def _contained_soundly(line: str, other: str,
+                       own: Optional[str] = None) -> Optional[bool]:
     """บรรทัด ``line`` ที่ถูกยกโทษเพราะ "มีอยู่ในอีกแผง" — ตัวเลขตรงกันจริงไหม
 
     ที่มา (26 ก.ย., เปลี่ยนตัวเลขทีละตัวบนแผงจริง 2,021 เคส): ชั้นเทียบหลัก
@@ -241,26 +303,32 @@ def _contained_soundly(line: str, other: str) -> Optional[bool]:
     · ``False`` = ตรงแค่แบบหั่นตัวเลข/ค่าต่าง ⇒ **ห้ามยกโทษ** ·
     ``None`` = ไม่พบแบบติดกันเลย (ยกโทษมาจากการประกอบบรรทัด) ⇒ ไม่ตัดสิน
 
+    ``own`` (ข้อความแผงของตัวเอง) — ตำแหน่งที่ดู "หั่น" ได้รับการยกเว้นเมื่อ
+    **ชุดตัวเลขเต็ม** ที่ครอบมันเท่ากับของบรรทัดนี้ในแผงตัวเอง (OCR แค่แบ่ง
+    กลุ่มตัวเลขคนละแบบ เช่นบาร์โค้ด ``5290700241`` ↔ ``52907``/``00241``)
+
     ⚠️ ไม่แตะตัวอักษร — เฉพาะ **ตัวเลข** (ขอบคำตัวอักษรชนกับการตัดคำ
     ข้ามบรรทัด ``Pro-``/``tein`` ⇒ ไม่วัด = ไม่ทำ)
     """
     kl, _ = _keyed(line)
     if not kl or not any(c.isdigit() for c in kl):
         return None
-    n_all, n_ok = _occurrences(line, other)
+    n_all, n_ok = _occurrences(line, other, own)
     if n_ok:
         return True
     return False if n_all else None
 
 
-def _occurrences(line: str, other: str) -> Tuple[int, int]:
+def _occurrences(line: str, other: str,
+                 own: Optional[str] = None) -> Tuple[int, int]:
     """(ตำแหน่งที่คีย์ตรงทั้งหมด, ตำแหน่งที่ตัวเลขไม่ถูกหั่นและค่าเท่ากัน)
-    — นับแบบไม่ทับกัน"""
+    — นับแบบไม่ทับกัน · ``own`` ⇒ ดู ``_contained_soundly``"""
     kl, _ = _keyed(line)
     if not kl:
         return 0, 0
     ko, pos = _keyed(other)
     want = _num_canon(line)
+    runs = None
     n_all = n_ok = 0
     at = ko.find(kl)
     while at >= 0:
@@ -269,8 +337,11 @@ def _occurrences(line: str, other: str) -> Tuple[int, int]:
         lo, hi = pos[at], pos[end - 1] + 1
         # ตัวเลขถูกหั่น = ในข้อความดิบ ติดกับตัวเลขอีกตัว (คั่นด้วย ``.``/``,``
         # ได้ไม่เกินหนึ่งตัว) — ขึ้นบรรทัด/ช่องว่างคั่น = คนละจำนวน ไม่ใช่การหั่น
-        cut = ((kl[0].isdigit() and _RE_NUM_BEFORE.search(other[:lo]))
-               or (kl[-1].isdigit() and _RE_NUM_AFTER.match(other[hi:])))
+        cut = _cut_at(kl, other, lo, hi)
+        if cut and own is not None:
+            if runs is None:
+                runs = _own_runs(line, own)
+            cut = tuple(_num_canon(_digit_run(other, lo, hi))) not in runs
         if not cut and _num_canon(other[lo:hi]) == want:
             n_ok += 1
             at = ko.find(kl, end)
@@ -434,7 +505,8 @@ def _vote_panels(gname: str, panels: List[dict],
                            or lk in zone_key[oid]
                            or _composable_from(lk, zone_line_keys[oid]))
                        and not (num_strict
-                                and _contained_soundly(l, texts[oid]) is False))
+                                and _contained_soundly(l, texts[oid],
+                                                       texts[zid]) is False))
             if hits + 1 < majority:
                 extra.append(l)
 

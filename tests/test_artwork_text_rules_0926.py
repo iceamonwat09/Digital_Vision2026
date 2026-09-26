@@ -258,3 +258,42 @@ def test_contained_soundly_answers_three_ways():
 def test_num_canon_keeps_decimals_and_joins_thousands():
     assert K._num_canon("59,9 % 1 000 kcal ٥٫٥") == ["59.9", "1000", "5", "5"]
     assert K._num_canon("5.5") == K._num_canon("5,5")
+
+
+# ── P4 ฟ้องผิดที่เจอบนสถานี (AvoDerm 3 กลุ่ม, 26 ก.ย.) ─────────────────
+# บาร์โค้ด ``0 52907 00241 0`` เหมือนกันทั้งสองไฟล์ (ยืนยันจากภาพ PDF) แต่
+# OCR ฝั่งหนึ่งอ่านเป็น ``5290700241`` อีกฝั่ง ``52907`` + ``00241`` ⇒ P4
+# รุ่นแรกขึ้นการ์ด "พบเฉพาะ" ปลอม 3 ใบ
+
+UPC_A = "REFRIGERATE AFTER OPENING\n0\n5290700241\n0\nAvoDerm 13 oz"
+UPC_B = "REFRIGERATE AFTER OPENING\n0\n52907\n00241\n0\nAvoDerm 13 oz"
+
+
+def test_ocr_splitting_digit_groups_differently_is_not_a_difference(
+        monkeypatch):
+    assert _mm(UPC_A, UPC_B, engine="n8n") == []
+    monkeypatch.setattr(config, "TEXT_NUMBER_STRICT", False)
+    assert _mm(UPC_A, UPC_B, engine="n8n") == []
+
+
+def test_line_break_before_a_number_is_not_a_cut():
+    """``$`` ตรงก่อน ``\\n`` ตัวสุดท้าย ⇒ ``"0\\n"`` เคยถูกนับว่าติดตัวเลข"""
+    assert not K._RE_NUM_BEFORE.search("0\n")
+    assert K._RE_NUM_BEFORE.search("x 0")
+    assert K._RE_NUM_BEFORE.search("1,")
+    assert K._contained_soundly("5290700241", UPC_B, UPC_A) is True
+
+
+def test_a_changed_digit_inside_a_split_barcode_is_still_caught():
+    b = UPC_B.replace("00241", "00249")
+    m = _mm(UPC_A, b, engine="n8n")
+    assert m and any("00249" in d["found"] + d["reference"] for d in m)
+
+
+def test_regrouping_is_only_rescued_when_the_whole_run_matches():
+    """ต้องเทียบ **ชุดตัวเลขทั้งชุด** ไม่ใช่แค่ท่อนที่ตรง"""
+    assert K._digit_run("a 0\n52907\n00241\n0 b", 4, 9) == "0\n52907\n00241\n0"
+    assert K._digit_run("Sodium 20%", 7, 9) == "20"
+    assert K._contained_soundly("52907", "0\n5290700249\n0", UPC_B) is False
+    # ไม่ส่งแผงของตัวเอง = กติกาเดิม (หั่น = ไม่ยกโทษ)
+    assert K._contained_soundly("52907", "0\n5290700241\n0") is False
