@@ -309,10 +309,13 @@ def layer_pair(pa: str, ba, pb: str, bb, dpi: int):
 
 
 # ── ชั้น ④ CONFIRM — โหมดอ่านซ้ำ บนผลจริง 4 รอบ ─────────────────────
-def layer_confirm(data_dir: str, real: str = "24%"):
+def layer_confirm(data_dir: str, real: tuple = ("24%", "20%")):
+    # เฉลย = ความต่างจริงข้อเดียว (Sodium) ซึ่งตั้งแต่ 26 ก.ย. ถูกฟ้อง **ทั้ง
+    # สองฝั่ง** (``20%`` ของ z1 เคยถูกยกโทษเพราะอีกแผงมี ``2000``) ⇒ นับทั้ง
+    # สองค่าเป็นของจริง ไม่ใช่ FP/bias
     from artwork_check import checks, confirm as confirm_mod
-    _hr("④ CONFIRM — โหมดอ่านซ้ำ บนผลจริง 4 รอบของสถานี  (เฉลย: %r ตัวเดียว)"
-        % real)
+    _hr("④ CONFIRM — โหมดอ่านซ้ำ บนผลจริง 4 รอบของสถานี  (เฉลย: %s)"
+        % " / ".join(real))
     zones = [{"id": "z1", "type": "panel", "group": "A", "label": "z1"},
              {"id": "b2", "type": "panel", "group": "A", "label": "b2"}]
 
@@ -331,7 +334,7 @@ def layer_confirm(data_dir: str, real: str = "24%"):
 
     print("   รอบเดี่ยว (ไม่ใช้โหมด):")
     for i, ds in sorted(rounds.items()):
-        fp = [d for d in ds if confirm_mod.defect_key(d)[2] != real]
+        fp = [d for d in ds if confirm_mod.defect_key(d)[2] not in real]
         print("      รอบ %d: %d รายการ  (จริง %d · ปลอม %d)"
               % (i, len(ds), len(ds) - len(fp), len(fp)))
 
@@ -346,8 +349,8 @@ def layer_confirm(data_dir: str, real: str = "24%"):
                 continue
             c, u = confirm_mod.confirm([rounds[i], rounds[j]])
             founds = [confirm_mod.defect_key(d)[2] for d in c]
-            fp = [f for f in founds if f != real]
-            hit = real in founds
+            fp = [f for f in founds if f not in real]
+            hit = real[0] in founds
             worst_fp = max(worst_fp, len(fp))
             miss += 0 if hit else 1
             rows.append({"pair": [i, j], "confirmed": len(c),
@@ -360,7 +363,7 @@ def layer_confirm(data_dir: str, real: str = "24%"):
     # bias ที่เสถียร: โผล่ทุกรอบแต่ไม่ใช่ของจริง ⇒ intersection ลบไม่ได้
     keys = [set(confirm_mod.defect_key(d) for d in ds) for ds in rounds.values()]
     stable = set.intersection(*keys)
-    bias = sorted(k[2] for k in stable if k[2] != real)
+    bias = sorted(k[2] for k in stable if k[2] not in real)
     print("\n   bias ที่เสถียร (โผล่ครบทุกรอบ แต่ไม่ใช่ของจริง): %s"
           % (", ".join(repr(b) for b in bias) if bias else "ไม่มี"))
     if bias:

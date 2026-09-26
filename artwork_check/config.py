@@ -413,6 +413,16 @@ PIXEL_TRUST_MAX_DIFF = float(os.getenv("ARTWORK_PIXEL_TRUST_MAX_DIFF", "0.002"))
 PIXEL_TRUST_MIN_ECC = float(os.getenv("ARTWORK_PIXEL_TRUST_MIN_ECC", "0.90"))
 # ปิด = กลับพฤติกรรมเดิม (ชั้นภาพแทนที่เสมอเมื่อพบบริเวณ)
 PIXEL_TRUST_GATE = os.getenv("ARTWORK_PIXEL_TRUST_GATE", "1") not in ("0", "false", "False")
+# ไม่น่าเชื่อถือ ⇒ **ไม่ต้องอ่านข้อความทีละบริเวณ** (ผลถูกทิ้งอยู่แล้ว) —
+# คู่ vector↔raster บนสถานี 26 ก.ย. ใช้ 150 วิแทน 20 วิ + เผาโควตาไปฟรี ๆ
+# ผลตรวจเท่าเดิมทุกไบต์ · ``0`` = อ่านครบก่อนทิ้งเหมือนเดิม
+# บอกว่าไฟล์ไหนเป็นภาพ raster ทั้งหน้า (อ่าน metadata ฟรี) + คำแนะนำตามสาเหตุ
+# เมื่อชั้นภาพต่างสูงผิดปกติ — เดิมบอกอย่างเดียวว่า "ลากครอบนอกแผง" ซึ่ง
+# ผิดกับคู่ vector↔raster (ลากใหม่ไม่ช่วย) · ``0`` = ข้อความเดิม
+PIXEL_RASTER_HINT = os.getenv(
+    "ARTWORK_PIXEL_RASTER_HINT", "1").strip().lower() not in ("0", "false", "")
+PIXEL_SKIP_OCR_WHEN_UNTRUSTED = os.getenv(
+    "ARTWORK_PIXEL_SKIP_OCR_WHEN_UNTRUSTED", "1").strip().lower() not in ("0", "false", "")
 
 # ─────────────────────────────────────────────────────────────────────
 # จับคู่บรรทัดสองฝั่งด้วย "ช่วงคำที่ติดกันยาวที่สุด" แทนระยะแก้ไขทั้งบรรทัด
@@ -433,6 +443,27 @@ PIXEL_TRUST_GATE = os.getenv("ARTWORK_PIXEL_TRUST_GATE", "1") not in ("0", "fals
 #    เคสจริงบนสถานี (520/510) ได้ 0.542 ⇒ เผื่อจากเกณฑ์ 35%
 TEXT_PAIR_MIN_RUN = float(os.getenv("ARTWORK_TEXT_PAIR_MIN_RUN", "0.40"))
 TEXT_PAIR_BY_RUN = os.getenv("ARTWORK_TEXT_PAIR_BY_RUN", "1") not in ("0", "false", "False")
+# ถอยไปวัดช่วง **อักขระ** ติดกันเมื่อระดับคำไม่ผ่าน (26 ก.ย.) — OCR สองฝั่ง
+# เว้นวรรคต่างกัน (``56g``/``56 g``) ⇒ ความต่างเดียวแตกเป็น 2 การ์ด.
+# ต้องยาว ≥ 8 ตัว (ท่อนอาหรับสั้น ๆ ``١ جم`` เคยไปจับกับ ``ملجم٤٧٥``)
+# และ ≥ 0.60 ของบรรทัดที่สั้นกว่า · ``0`` = จับคู่ระดับคำอย่างเดียวเหมือนเดิม
+TEXT_PAIR_CHAR_FALLBACK = os.getenv(
+    "ARTWORK_TEXT_PAIR_CHAR_FALLBACK", "1").strip().lower() not in ("0", "false", "")
+TEXT_PAIR_CHAR_MIN_RUN = float(os.getenv("ARTWORK_TEXT_PAIR_CHAR_MIN_RUN", "0.60"))
+TEXT_PAIR_CHAR_MIN_LEN = int(os.getenv("ARTWORK_TEXT_PAIR_CHAR_MIN_LEN", "8"))
+# ชั้นเทียบหลักยกโทษบรรทัดที่ "มีอยู่ที่ไหนสักแห่งในอีกแผง" — กับ **ตัวเลข**
+# นั่นซ่อนของจริงได้ (26 ก.ย.: เปลี่ยนเลขทีละตัวบนแผงจริง พลาด 14/2,021):
+# ``1,0``→``10,0`` ไปเจอรอยต่อข้ามบรรทัด · ``59,8``→``599`` เท่ากับ ``59,9``
+# เพราะคีย์ตัดจุดทศนิยม. เปิด = ยกโทษได้เฉพาะเมื่อตำแหน่งที่ตรงไม่หั่น
+# ตัวเลขกลางตัว **และ** ค่าตัวเลข (คงจุดทศนิยม) เท่ากัน · เฉพาะกลุ่ม 2 panel
+# ``0`` = ยกโทษแบบเดิมเป๊ะ
+# จับคู่การ์ด "พบเฉพาะ" สองฝั่งที่ **ต่างกันแค่ตัวเลข** (``20%`` ↔ ``24%``) เป็น
+# ใบเดียว — เฉพาะเมื่อรูปแบบนั้นเหลือฝั่งละหนึ่งบรรทัดพอดี (ไม่กำกวม)
+# ``0`` = สองการ์ดแยกกันเหมือนเดิม
+TEXT_PAIR_NUMERIC = os.getenv(
+    "ARTWORK_TEXT_PAIR_NUMERIC", "1").strip().lower() not in ("0", "false", "")
+TEXT_NUMBER_STRICT = os.getenv(
+    "ARTWORK_TEXT_NUMBER_STRICT", "1").strip().lower() not in ("0", "false", "")
 
 PIXEL_MAX_OCR_REGIONS = int(os.getenv("ARTWORK_PIXEL_MAX_OCR_REGIONS", "12"))
 
@@ -677,6 +708,24 @@ TEXT_WITNESS_SEVERITY = os.getenv(
     "ARTWORK_TEXT_WITNESS_SEVERITY", "warning").strip().lower()
 if TEXT_WITNESS_SEVERITY not in ("critical", "warning", "info"):
     TEXT_WITNESS_SEVERITY = "warning"
+#   ``ARTWORK_TEXT_WITNESS_STRICT`` (26 ก.ย., ค่าเริ่มต้นเปิด) — กติกาเข้ม:
+#   คงตัวพิมพ์ใหญ่-เล็ก · หัว/ท้ายต่างได้เฉพาะส่วนที่อยู่ **ติดกัน** ในแผงของ
+#   อีกฝั่งและตัดที่ขอบคำ (ไม่ใช่ "มีอยู่ที่ไหนสักแห่ง") · บรรทัดพยานที่
+#   คะแนนเสมอกันหลายบรรทัด (ฉลากหลายรส) = กำกวม ⇒ ไม่ตัดสิน. วัดแล้ว:
+#   OCR ผิดทั้งสองฝั่ง ชี้ผิด 65/11,794 → 0 · ผลบนสถานีเท่าเดิมทุกรอบ
+#   ตั้ง ``0`` = กติกาของ 25 ก.ย. เป๊ะ
+TEXT_WITNESS_STRICT = os.getenv(
+    "ARTWORK_TEXT_WITNESS_STRICT", "1").strip().lower() not in ("0", "false", "")
+#
+# P6 (26 ก.ย.) — **โหมดทดลอง ปิดเป็นค่าเริ่มต้น**: การ์ด MISMATCH คู่ที่ยัง
+#   critical และฝั่งหนึ่ง **ไม่มีพยาน** (ภาพ raster / OCR ผิดทั้งสองฝั่ง) ⇒
+#   ครอปเฉพาะบรรทัดนั้นจาก ``blocks`` ของ OCR แล้วอ่านซ้ำ → แนบผลบนการ์ด
+#   **ไม่แตะระดับ ไม่ลบการ์ด** (แหล่งเดียว = ยังไม่ใช่หลักฐานอิสระ) ·
+#   ใช้โควตา OCR เพิ่มสูงสุด ``LINE_REREAD_MAX`` ครั้งต่อการตรวจ
+#   ⚠️ ยังไม่เคยวิ่งกับ Gemini จริง — ต้องทดสอบบนสถานีก่อนเปิดใช้งานประจำ
+LINE_REREAD = os.getenv(
+    "ARTWORK_LINE_REREAD", "0").strip().lower() not in ("0", "false", "")
+LINE_REREAD_MAX = int(os.getenv("ARTWORK_LINE_REREAD_MAX", "6"))
 #
 # F3 — ผล OCR ที่มี "คำเดียว" ปนอักษรไทยกับฮันกึล/จีน/คานะ/อาหรับ (เช่น
 #   ``ผลิตภัณฑ์에``) = ลายเซ็นของ OCR ที่ "แปล" คำแทนการอ่าน ⇒ โน้ตเตือน

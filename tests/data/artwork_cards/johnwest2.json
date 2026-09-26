@@ -1,0 +1,43 @@
+{
+ "note": "John West แผงโภชนาการอาหรับ รอบ 2 (ของจริง: Sodium 20% vs 24%)",
+ "zones": [
+  {
+   "id": "z1",
+   "type": "panel",
+   "group": "A",
+   "doc": "a",
+   "bbox": [
+    0,
+    0,
+    1,
+    1
+   ],
+   "label": "z1"
+  },
+  {
+   "id": "b2",
+   "type": "panel",
+   "group": "A",
+   "doc": "b",
+   "bbox": [
+    0,
+    0,
+    1,
+    1
+   ],
+   "label": "b2"
+  }
+ ],
+ "ocr": [
+  {
+   "zone_id": "z1",
+   "text": "Nutritional information معلومات غذائية\n1.2 Serving per container\nتحتوي العبوة على ١,٢ حصة\nServing size ½ cup (100g.)\nحجم الحصة ½ كوب ( ١٠٠ غ)\nAmount per serving\nمحتوى الحصة الواحدة\nCalories\n170\nالسعرات الحرارية\nالحصة.\nاليومية\nالحصة اليومية %\nDaily\nvalue\nTotal fat\n7 g\n10%\nجم V\nدهون كلية\nSaturated fat\n1 g\n5%\nاجم\nدهون مشبعة\nTrans fat\n0 g\n. جم\nدهون مهدرجة\nCholesterol\n50 mg\n17%\n٥٠ ملجم\nكوليسترول\nSodium\n475 mg\n20%\nملجم٤٧٥\nصوديوم\nTotal carbohydrate\n0 g\n0%\nجم\nكربوهيدات كلية\nDietary fibre\n0 g\n0%\nجم\nألياف غذائية\nTotal sugar\n0 g\n0%\nجم\nسكريات\nAdded sugars\n0 g\n0%\nجم\nسكر مضاف\nProtein\n26 g\n52%\n٢٦ جم\nبروتين\n*The % daily values are based on a 2000 calorie diet.\n* تستند النسبة المئوية للقيم اليومية على أساس نظام غذائي ٢٠٠٠ سعرة حرارية.\n",
+   "engine": "n8n"
+  },
+  {
+   "zone_id": "b2",
+   "text": "Nutritional information معلومات غذائية\n1.2 Serving per container\nServing size ½ cup (100g.)\nتحتوي العبوة على ١,٢ حصة\nحجم الحصة 1/2 كوب ( ١٠٠ غ)\nAmount per serving\nمحتوى الحصة الواحدة\nCalories\n170\nالسعرات الحرارية\nالحصة.\nاليومية\nالحصة اليومية %\n% Daily\nvalue\nTotal fat\n7 g\n10%\nجم V\nدهون كلية\nSaturated fat\n1 g\n5%\nاجم\nدهون مشبعة\nTrans fat\n0 g\n. جم\nدهون مهدرجة\nCholesterol\n50 mg\n17%\n٥٠ ملجم\nكوليسترول\nSodium\n475 mg\n24%\nملجم٤٧٥\nصوديوم\nTotal carbohydrate\n0 g\n0%\nجم\nكربوهيدات كلية\nDietary fibre\n0 g\n0%\nجم\nألياف غذائية\nTotal sugar\n0 g\n0%\nجم\nسكريات\nAdded sugars\n0 g\n0%\nجم\nسكر مضاف\nProtein\n26 g\n52%\n٢٦ جم\nبروتين\n*The % daily values are based on a 2000 calorie diet.\n* تستند النسبة المئوية للقيم اليومية على أساس نظام غذائي ٢٠٠٠ سعرة حرارية.\n",
+   "engine": "n8n"
+  }
+ ]
+}

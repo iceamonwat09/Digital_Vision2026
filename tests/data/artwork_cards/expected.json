@@ -1,0 +1,705 @@
+{
+ "avoderm": {
+  "current": [
+   {
+    "class": "MISMATCH_PANELS",
+    "zone_id": "z1",
+    "severity": "critical",
+    "found": "Potassium Iodide), Choline Chloride, Magnesium Sulfate, Copper Sulfate.",
+    "reference": "Potassium Iodide), Choline Chloride, Magnesium Sulfate, Copper Sulphate Pentahydrate.",
+    "witness": false
+   },
+   {
+    "class": "MISMATCH_CASE",
+    "zone_id": "z1",
+    "severity": "critical",
+    "found": "D-Calcium Pantothenate, Thiamine Mononitrate, Beta-carotene, Biotin, Riboflavin",
+    "reference": "D-calcium Pantothenate, Thiamine Mononitrate, Beta-carotene, Biotin, Riboflavin",
+    "witness": false
+   }
+  ],
+  "legacy": [
+   {
+    "class": "MISMATCH_PANELS",
+    "zone_id": "z1",
+    "severity": "critical",
+    "found": "Potassium Iodide), Choline Chloride, Magnesium Sulfate, Copper Sulfate.",
+    "reference": "Potassium Iodide), Choline Chloride, Magnesium Sulfate, Copper Sulphate Pentahydrate.",
+    "witness": false
+   },
+   {
+    "class": "MISMATCH_CASE",
+    "zone_id": "z1",
+    "severity": "critical",
+    "found": "D-Calcium Pantothenate, Thiamine Mononitrate, Beta-carotene, Biotin, Riboflavin",
+    "reference": "D-calcium Pantothenate, Thiamine Mononitrate, Beta-carotene, Biotin, Riboflavin",
+    "witness": false
+   }
+  ],
+  "truth": "ของจริง 2: Copper Sulfate. vs Copper Sulphate Pentahydrate. · D-Calcium vs D-calcium (ตัวพิมพ์)"
+ },
+ "friskies1": {
+  "current": [
+   {
+    "class": "MISMATCH_PANELS",
+    "zone_id": "z2",
+    "severity": "critical",
+    "found": "ผลิตภัณฑ์에 별도 표시(วันเดือนปี) น้ำหนักสุทธิ: 56 g (14g × 4개입) 대사에너지:",
+    "reference": "ผลิตภัณฑ์에 별도 표시 (일월년 순) 중량: 56 g (14g × 4개입) 대사에너지:",
+    "witness": false
+   },
+   {
+    "class": "MISMATCH_PANELS",
+    "zone_id": "z4",
+    "severity": "critical",
+    "found": "Reg No.: IM-610, D-13-291, IN-233; CFPR No. xxxxxx",
+    "reference": "IM-610, D-13-291, IN-233; CFPR No. SF-CFI2-26-172683205264",
+    "witness": false
+   },
+   {
+    "class": "NUMBER_FAIL",
+    "zone_id": "z4",
+    "severity": "info",
+    "found": "200201013615",
+    "reference": "",
+    "witness": false
+   },
+   {
+    "class": "NUMBER_FAIL",
+    "zone_id": "b9",
+    "severity": "info",
+    "found": "200201013615",
+    "reference": "",
+    "witness": false
+   },
+   {
+    "class": "NUMBER_FAIL",
+    "zone_id": "b9",
+    "severity": "info",
+    "found": "172683205264",
+    "reference": "",
+    "witness": false
+   }
+  ],
+  "legacy": [
+   {
+    "class": "MISMATCH_PANELS",
+    "zone_id": "z2",
+    "severity": "critical",
+    "found": "ผลิตภัณฑ์에 별도 표시(วันเดือนปี) น้ำหนักสุทธิ: 56 g (14g × 4개입) 대사에너지:",
+    "reference": "ผลิตภัณฑ์에 별도 표시 (일월년 순) 중량: 56 g (14g × 4개입) 대사에너지:",
+    "witness": false
+   },
+   {
+    "class": "MISMATCH_PANELS",
+    "zone_id": "z4",
+    "severity": "critical",
+    "found": "Reg No.: IM-610, D-13-291, IN-233; CFPR No. xxxxxx",
+    "reference": "IM-610, D-13-291, IN-233; CFPR No. SF-CFI2-26-172683205264",
+    "witness": false
+   },
+   {
+    "class": "NUMBER_FAIL",
+    "zone_id": "z4",
+    "severity": "info",
+    "found": "200201013615",
+    "reference": "",
+    "witness": false
+   },
+   {
+    "class": "NUMBER_FAIL",
+    "zone_id": "b9",
+    "severity": "info",
+    "found": "200201013615",
+    "reference": "",
+    "witness": false
+   },
+   {
+    "class": "NUMBER_FAIL",
+    "zone_id": "b9",
+    "severity": "info",
+    "found": "172683205264",
+    "reference": "",
+    "witness": false
+   }
+  ],
+  "truth": "ของจริง 1: CFPR placeholder (z4) · z2 = OCR ผิดทั้งสองฝั่ง (พยานพิสูจน์ได้แค่ฝั่งตัวเอง ⇒ คง critical ถูกต้อง) · NUMBER_FAIL 3 = เลขทะเบียน (info)"
+ },
+ "friskies2": {
+  "current": [
+   {
+    "class": "MISMATCH_PANELS",
+    "zone_id": "z1",
+    "severity": "warning",
+    "found": "제품명: 프리스키 리커블 흰살생선 성분등록번호: 서울-37006호 명칭 및",
+    "reference": "กรัม 제품명: 프리스키 리커버 흰살생선 성분등록번호: 서울-37006호 명칭 및",
+    "witness": true
+   },
+   {
+    "class": "MISMATCH_PANELS",
+    "zone_id": "z2",
+    "severity": "warning",
+    "found": "제품에 별도 표시 (일월년 순) 중량: 56g (14g × 4개입) 대사에너지:",
+    "reference": "ผลิตภัณฑ์에 별도 표시(일월년 순) 중량: 56 g (14g × 4개입) 대사에너지:",
+    "witness": true
+   },
+   {
+    "class": "MISMATCH_PANELS",
+    "zone_id": "z4",
+    "severity": "critical",
+    "found": "IM-610, D-13-291, IN-233; CFPR No. SF-CF12-26-172683205264",
+    "reference": "Reg No.: IM-610, D-13-291, IN-233; CFPR No. xxxxxx",
+    "witness": false
+   },
+   {
+    "class": "NUMBER_FAIL",
+    "zone_id": "z4",
+    "severity": "info",
+    "found": "200201013615",
+    "reference": "",
+    "witness": false
+   },
+   {
+    "class": "NUMBER_FAIL",
+    "zone_id": "z4",
+    "severity": "info",
+    "found": "172683205264",
+    "reference": "",
+    "witness": false
+   },
+   {
+    "class": "NUMBER_FAIL",
+    "zone_id": "b9",
+    "severity": "info",
+    "found": "200201013615",
+    "reference": "",
+    "witness": false
+   }
+  ],
+  "legacy": [
+   {
+    "class": "MISMATCH_PANELS",
+    "zone_id": "z1",
+    "severity": "warning",
+    "found": "제품명: 프리스키 리커블 흰살생선 성분등록번호: 서울-37006호 명칭 및",
+    "reference": "กรัม 제품명: 프리스키 리커버 흰살생선 성분등록번호: 서울-37006호 명칭 및",
+    "witness": true
+   },
+   {
+    "class": "MISMATCH_PANELS",
+    "zone_id": "z2",
+    "severity": "warning",
+    "found": "제품에 별도 표시 (일월년 순) 중량: 56g (14g × 4개입) 대사에너지:",
+    "reference": "",
+    "witness": true
+   },
+   {
+    "class": "MISMATCH_PANELS",
+    "zone_id": "b7",
+    "severity": "warning",
+    "found": "ผลิตภัณฑ์에 별도 표시(일월년 순) 중량: 56 g (14g × 4개입) 대사에너지:",
+    "reference": "",
+    "witness": true
+   },
+   {
+    "class": "MISMATCH_PANELS",
+    "zone_id": "z4",
+    "severity": "critical",
+    "found": "IM-610, D-13-291, IN-233; CFPR No. SF-CF12-26-172683205264",
+    "reference": "Reg No.: IM-610, D-13-291, IN-233; CFPR No. xxxxxx",
+    "witness": false
+   },
+   {
+    "class": "NUMBER_FAIL",
+    "zone_id": "z4",
+    "severity": "info",
+    "found": "200201013615",
+    "reference": "",
+    "witness": false
+   },
+   {
+    "class": "NUMBER_FAIL",
+    "zone_id": "z4",
+    "severity": "info",
+    "found": "172683205264",
+    "reference": "",
+    "witness": false
+   },
+   {
+    "class": "NUMBER_FAIL",
+    "zone_id": "b9",
+    "severity": "info",
+    "found": "200201013615",
+    "reference": "",
+    "witness": false
+   }
+  ],
+  "truth": "ของจริง 1: CFPR placeholder (z4) · z1/z2 = OCR อ่านเพี้ยน (warning + หลักฐาน) · NUMBER_FAIL = เลขทะเบียน (info)"
+ },
+ "friskies3": {
+  "current": [
+   {
+    "class": "MISMATCH_PANELS",
+    "zone_id": "z1",
+    "severity": "critical",
+    "found": "제품명: 프리스키 리커버블 흰살생선 성분등록번호: 서울-37006호 명칭 및",
+    "reference": "กรัม 제품명: 프리스키 리커블 흰살생선 성분등록번호: 서울-37006호 명칭 및",
+    "witness": false
+   },
+   {
+    "class": "MISMATCH_PANELS",
+    "zone_id": "z2",
+    "severity": "critical",
+    "found": "ผลิตภัณฑ์에 별도 표시 (일월년 순) 중량: 56g (14g × 4개입) 대사에너지:",
+    "reference": "ผลิตภัณฑ์ที่ระบุแยกต่างหาก (วันเดือนปี) น้ำหนัก: 56 g (14g × 4개입) 대사에너지:",
+    "witness": false
+   },
+   {
+    "class": "MISMATCH_PANELS",
+    "zone_id": "z4",
+    "severity": "critical",
+    "found": "IM-610, D-13-291, IN-233; CFPR No. SF-CF12-26-172683205264",
+    "reference": "Reg No.: IM-610, D-13-291, IN-233; CFPR No. xxxxxx",
+    "witness": false
+   },
+   {
+    "class": "NUMBER_FAIL",
+    "zone_id": "z4",
+    "severity": "info",
+    "found": "200201013615",
+    "reference": "",
+    "witness": false
+   },
+   {
+    "class": "NUMBER_FAIL",
+    "zone_id": "z4",
+    "severity": "info",
+    "found": "172683205264",
+    "reference": "",
+    "witness": false
+   },
+   {
+    "class": "NUMBER_FAIL",
+    "zone_id": "b9",
+    "severity": "info",
+    "found": "200201013615",
+    "reference": "",
+    "witness": false
+   }
+  ],
+  "legacy": [
+   {
+    "class": "MISMATCH_PANELS",
+    "zone_id": "z1",
+    "severity": "critical",
+    "found": "제품명: 프리스키 리커버블 흰살생선 성분등록번호: 서울-37006호 명칭 및",
+    "reference": "กรัม 제품명: 프리스키 리커블 흰살생선 성분등록번호: 서울-37006호 명칭 및",
+    "witness": false
+   },
+   {
+    "class": "MISMATCH_PANELS",
+    "zone_id": "z2",
+    "severity": "critical",
+    "found": "ผลิตภัณฑ์에 별도 표시 (일월년 순) 중량: 56g (14g × 4개입) 대사에너지:",
+    "reference": "ผลิตภัณฑ์ที่ระบุแยกต่างหาก (วันเดือนปี) น้ำหนัก: 56 g (14g × 4개입) 대사에너지:",
+    "witness": false
+   },
+   {
+    "class": "MISMATCH_PANELS",
+    "zone_id": "z4",
+    "severity": "critical",
+    "found": "IM-610, D-13-291, IN-233; CFPR No. SF-CF12-26-172683205264",
+    "reference": "Reg No.: IM-610, D-13-291, IN-233; CFPR No. xxxxxx",
+    "witness": false
+   },
+   {
+    "class": "NUMBER_FAIL",
+    "zone_id": "z4",
+    "severity": "info",
+    "found": "200201013615",
+    "reference": "",
+    "witness": false
+   },
+   {
+    "class": "NUMBER_FAIL",
+    "zone_id": "z4",
+    "severity": "info",
+    "found": "172683205264",
+    "reference": "",
+    "witness": false
+   },
+   {
+    "class": "NUMBER_FAIL",
+    "zone_id": "b9",
+    "severity": "info",
+    "found": "200201013615",
+    "reference": "",
+    "witness": false
+   }
+  ],
+  "truth": "ของจริง 1: CFPR · ฝั่งที่อ่านผิดคือปรู๊ฟ raster ซึ่งไม่มีพยาน ⇒ z1/z2 คง critical (ถูกต้องตามกติกา)"
+ },
+ "friskies4": {
+  "current": [
+   {
+    "class": "MISMATCH_PANELS",
+    "zone_id": "z1",
+    "severity": "warning",
+    "found": "제품명: 프리스키 리커블 흰살생선 성분등록번호: 서울-37006호 명칭 및",
+    "reference": "กรัม 제품명: 프리스키 리커버 흰살생선 성분등록번호: 서울-37006호 명칭 및",
+    "witness": true
+   },
+   {
+    "class": "MISMATCH_PANELS",
+    "zone_id": "z2",
+    "severity": "warning",
+    "found": "제품에 별도 표시 (일월년 순) 중량: 56g (14g × 4개입) 대사에너지:",
+    "reference": "ผลิตภัณฑ์에 별도 표시(일월년 순) 중량: 56 g (14g × 4개입) 대사에너지:",
+    "witness": true
+   },
+   {
+    "class": "MISMATCH_PANELS",
+    "zone_id": "z4",
+    "severity": "critical",
+    "found": "IM-610, D-13-291, IN-233; CFPR No. SF-CF12-26-172683205264",
+    "reference": "Reg No.: IM-610, D-13-291, IN-233; CFPR No. xxxxxx",
+    "witness": false
+   },
+   {
+    "class": "NUMBER_FAIL",
+    "zone_id": "z4",
+    "severity": "info",
+    "found": "200201013615",
+    "reference": "",
+    "witness": false
+   },
+   {
+    "class": "NUMBER_FAIL",
+    "zone_id": "z4",
+    "severity": "info",
+    "found": "172683205264",
+    "reference": "",
+    "witness": false
+   },
+   {
+    "class": "NUMBER_FAIL",
+    "zone_id": "b9",
+    "severity": "info",
+    "found": "200201013615",
+    "reference": "",
+    "witness": false
+   }
+  ],
+  "legacy": [
+   {
+    "class": "MISMATCH_PANELS",
+    "zone_id": "z1",
+    "severity": "warning",
+    "found": "제품명: 프리스키 리커블 흰살생선 성분등록번호: 서울-37006호 명칭 및",
+    "reference": "กรัม 제품명: 프리스키 리커버 흰살생선 성분등록번호: 서울-37006호 명칭 및",
+    "witness": true
+   },
+   {
+    "class": "MISMATCH_PANELS",
+    "zone_id": "z2",
+    "severity": "warning",
+    "found": "제품에 별도 표시 (일월년 순) 중량: 56g (14g × 4개입) 대사에너지:",
+    "reference": "",
+    "witness": true
+   },
+   {
+    "class": "MISMATCH_PANELS",
+    "zone_id": "b7",
+    "severity": "warning",
+    "found": "ผลิตภัณฑ์에 별도 표시(일월년 순) 중량: 56 g (14g × 4개입) 대사에너지:",
+    "reference": "",
+    "witness": true
+   },
+   {
+    "class": "MISMATCH_PANELS",
+    "zone_id": "z4",
+    "severity": "critical",
+    "found": "IM-610, D-13-291, IN-233; CFPR No. SF-CF12-26-172683205264",
+    "reference": "Reg No.: IM-610, D-13-291, IN-233; CFPR No. xxxxxx",
+    "witness": false
+   },
+   {
+    "class": "NUMBER_FAIL",
+    "zone_id": "z4",
+    "severity": "info",
+    "found": "200201013615",
+    "reference": "",
+    "witness": false
+   },
+   {
+    "class": "NUMBER_FAIL",
+    "zone_id": "z4",
+    "severity": "info",
+    "found": "172683205264",
+    "reference": "",
+    "witness": false
+   },
+   {
+    "class": "NUMBER_FAIL",
+    "zone_id": "b9",
+    "severity": "info",
+    "found": "200201013615",
+    "reference": "",
+    "witness": false
+   }
+  ],
+  "truth": "เหมือนรอบ 2 (prompt ใหม่รันซ้ำ)"
+ },
+ "johnwest1": {
+  "current": [
+   {
+    "class": "MISMATCH_PANELS",
+    "zone_id": "z1",
+    "severity": "critical",
+    "found": "اجم",
+    "reference": "",
+    "witness": false
+   },
+   {
+    "class": "MISMATCH_PANELS",
+    "zone_id": "z1",
+    "severity": "critical",
+    "found": "ملجم٤٧٥",
+    "reference": "",
+    "witness": false
+   },
+   {
+    "class": "MISMATCH_PANELS",
+    "zone_id": "b2",
+    "severity": "critical",
+    "found": "١ جم",
+    "reference": "",
+    "witness": false
+   },
+   {
+    "class": "MISMATCH_PANELS",
+    "zone_id": "b2",
+    "severity": "critical",
+    "found": "٤٧٥ ملجم",
+    "reference": "",
+    "witness": false
+   },
+   {
+    "class": "MISMATCH_PANELS",
+    "zone_id": "z1",
+    "severity": "critical",
+    "found": "جم V",
+    "reference": "٧ جم",
+    "witness": false
+   },
+   {
+    "class": "MISMATCH_PANELS",
+    "zone_id": "z1",
+    "severity": "critical",
+    "found": "20%",
+    "reference": "24%",
+    "witness": false
+   }
+  ],
+  "legacy": [
+   {
+    "class": "MISMATCH_PANELS",
+    "zone_id": "z1",
+    "severity": "critical",
+    "found": "اجم",
+    "reference": "",
+    "witness": false
+   },
+   {
+    "class": "MISMATCH_PANELS",
+    "zone_id": "z1",
+    "severity": "critical",
+    "found": "ملجم٤٧٥",
+    "reference": "",
+    "witness": false
+   },
+   {
+    "class": "MISMATCH_PANELS",
+    "zone_id": "b2",
+    "severity": "critical",
+    "found": "١ جم",
+    "reference": "",
+    "witness": false
+   },
+   {
+    "class": "MISMATCH_PANELS",
+    "zone_id": "b2",
+    "severity": "critical",
+    "found": "24%",
+    "reference": "",
+    "witness": false
+   },
+   {
+    "class": "MISMATCH_PANELS",
+    "zone_id": "b2",
+    "severity": "critical",
+    "found": "٤٧٥ ملجم",
+    "reference": "",
+    "witness": false
+   },
+   {
+    "class": "MISMATCH_PANELS",
+    "zone_id": "z1",
+    "severity": "critical",
+    "found": "جم V",
+    "reference": "٧ جم",
+    "witness": false
+   }
+  ],
+  "truth": "ของจริง 1: Sodium 20% → 24% · ที่เหลือ = Gemini อ่านโหมดเสียฝั่งเดียว (ปลอม)"
+ },
+ "johnwest2": {
+  "current": [
+   {
+    "class": "MISMATCH_PANELS",
+    "zone_id": "z1",
+    "severity": "critical",
+    "found": "20%",
+    "reference": "24%",
+    "witness": false
+   }
+  ],
+  "legacy": [
+   {
+    "class": "MISMATCH_PANELS",
+    "zone_id": "b2",
+    "severity": "critical",
+    "found": "24%",
+    "reference": "",
+    "witness": false
+   }
+  ],
+  "truth": "ของจริง 1: Sodium 20% → 24% (การ์ดเดียว)"
+ },
+ "johnwest3": {
+  "current": [
+   {
+    "class": "MISMATCH_PANELS",
+    "zone_id": "z1",
+    "severity": "critical",
+    "found": "20%",
+    "reference": "24%",
+    "witness": false
+   }
+  ],
+  "legacy": [
+   {
+    "class": "MISMATCH_PANELS",
+    "zone_id": "b2",
+    "severity": "critical",
+    "found": "24%",
+    "reference": "",
+    "witness": false
+   }
+  ],
+  "truth": "ของจริง 1: Sodium 20% → 24% (การ์ดเดียว)"
+ },
+ "johnwest4": {
+  "current": [
+   {
+    "class": "MISMATCH_PANELS",
+    "zone_id": "z1",
+    "severity": "critical",
+    "found": "٧ جم",
+    "reference": "",
+    "witness": false
+   },
+   {
+    "class": "MISMATCH_PANELS",
+    "zone_id": "z1",
+    "severity": "critical",
+    "found": "١ جم",
+    "reference": "",
+    "witness": false
+   },
+   {
+    "class": "MISMATCH_PANELS",
+    "zone_id": "z1",
+    "severity": "critical",
+    "found": "٤٧٥ ملجم",
+    "reference": "",
+    "witness": false
+   },
+   {
+    "class": "MISMATCH_PANELS",
+    "zone_id": "b2",
+    "severity": "critical",
+    "found": "اجم",
+    "reference": "",
+    "witness": false
+   },
+   {
+    "class": "MISMATCH_PANELS",
+    "zone_id": "b2",
+    "severity": "critical",
+    "found": "ملجم٤٧٥",
+    "reference": "",
+    "witness": false
+   },
+   {
+    "class": "MISMATCH_PANELS",
+    "zone_id": "z1",
+    "severity": "critical",
+    "found": "20%",
+    "reference": "24% |",
+    "witness": false
+   }
+  ],
+  "legacy": [
+   {
+    "class": "MISMATCH_PANELS",
+    "zone_id": "z1",
+    "severity": "critical",
+    "found": "٧ جم",
+    "reference": "",
+    "witness": false
+   },
+   {
+    "class": "MISMATCH_PANELS",
+    "zone_id": "z1",
+    "severity": "critical",
+    "found": "١ جم",
+    "reference": "",
+    "witness": false
+   },
+   {
+    "class": "MISMATCH_PANELS",
+    "zone_id": "z1",
+    "severity": "critical",
+    "found": "٤٧٥ ملجم",
+    "reference": "",
+    "witness": false
+   },
+   {
+    "class": "MISMATCH_PANELS",
+    "zone_id": "b2",
+    "severity": "critical",
+    "found": "اجم",
+    "reference": "",
+    "witness": false
+   },
+   {
+    "class": "MISMATCH_PANELS",
+    "zone_id": "b2",
+    "severity": "critical",
+    "found": "24% |",
+    "reference": "",
+    "witness": false
+   },
+   {
+    "class": "MISMATCH_PANELS",
+    "zone_id": "b2",
+    "severity": "critical",
+    "found": "ملجم٤٧٥",
+    "reference": "",
+    "witness": false
+   }
+  ],
+  "truth": "ของจริง 1: Sodium 20% → 24% · ที่เหลือ = อ่านโหมดเสียฝั่งเดียว (ปลอม)"
+ }
+}

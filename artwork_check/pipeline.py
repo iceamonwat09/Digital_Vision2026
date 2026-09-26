@@ -33,6 +33,7 @@ import cv2
 
 from . import bands as bands_mod
 from . import confirm as confirm_mod
+from . import reread as reread_mod
 from . import appearance
 from . import panelmatch as panelmatch_mod
 from . import progress as progress_mod
@@ -349,6 +350,15 @@ def _pixel_untrusted(res: dict) -> Optional[str]:
     return None
 
 
+def _raster_dpi(path: str) -> Optional[int]:
+    """ข้อมูลประกอบล้วน — อ่านไม่ได้ด้วยเหตุใดก็ตาม ⇒ ``None`` (ห้ามทำให้
+    ชั้นภาพพัง)"""
+    try:
+        return ArtworkDocument(path).raster_page()
+    except Exception:
+        return None
+
+
 def _pixel_compare(insp_dir: str, zone_list: List[dict],
                    defects: List[dict], progress=None, deadline=None):
     """โหมดทดลอง: เทียบ "แผงต่อแผง" ระดับพิกเซลแทนชั้นเทียบข้อความ.
@@ -425,6 +435,11 @@ def _pixel_compare(insp_dir: str, zone_list: List[dict],
                  "rotate_b": res.get("rotate_b"),
                  # ความหนาหมึกของทั้งแผง — อธิบายว่าทำไมบริเวณถึงเยอะ
                  "panel_ink": res.get("panel_ink")}
+        if config.PIXEL_RASTER_HINT:
+            # ไฟล์ไหนเป็นภาพ raster ทั้งหน้า (dpi) — อธิบายว่าทำไมต่างทั้งแผง
+            # (vector ↔ raster: ขอบตัวอักษร/พื้นหลังต่างโดยโครงสร้าง)
+            entry["raster_a"] = _raster_dpi(pa)
+            entry["raster_b"] = _raster_dpi(pb)
         pairs.append(entry)
         if res.get("status") != pixdiff.OK or img_a is None:
             continue                       # เทียบไม่ได้ ⇒ ใช้ผลชั้นข้อความเดิม
@@ -454,6 +469,19 @@ def _pixel_compare(insp_dir: str, zone_list: List[dict],
             return {"a": ta, "b": tb, "relation": rel, "look": look,
                     "box": box}
 
+        # ⚡ ตัดสินความน่าเชื่อถือ **ก่อน** อ่านข้อความทีละบริเวณ (26 ก.ย.) —
+        #    ผลที่ไม่น่าเชื่อถือถูกทิ้งอยู่แล้ว (ดูด่านข้างล่าง) แต่เดิมยังยิง
+        #    OCR ครบทุกบริเวณก่อนทิ้ง: คู่ vector↔raster บนสถานีใช้ 150 วิ
+        #    แทน 20 วิ + เผาโควตา. ผลลัพธ์เท่าเดิมทุกไบต์ ต่างแค่ไม่อ่านเปล่า ๆ
+        why = _pixel_untrusted(res)
+        if why and config.PIXEL_SKIP_OCR_WHEN_UNTRUSTED:
+            entry["kept_text_layer"] = True
+            entry["untrusted"] = why
+            entry["ocr_skipped"] = True
+            pg.note("pixel", "กลุ่ม %s · ผลชั้นภาพยังไม่น่าเชื่อถือ (%s) "
+                             "→ ไม่อ่านข้อความทีละบริเวณ · คงผลชั้นข้อความไว้"
+                    % (g, why))
+            continue
         found = panelmatch_mod.regions_to_defects(
             res, za, zb, inspect_region=_inspect,
             max_inspect=config.PIXEL_MAX_OCR_REGIONS)
@@ -476,7 +504,6 @@ def _pixel_compare(insp_dir: str, zone_list: List[dict],
         # มีโอเมกา-3/แคลเซียม/ฟอสฟอรัสเพิ่ม) ⇒ ข้อความไหลใหม่ทั้งครึ่งล่าง
         # ⇒ ชั้นภาพฟ้อง 35 บริเวณ (ecc 0.51 · ต่าง 19.73%) ไปลบผลชั้นข้อความ
         # 7 รายการที่ตรงกับความต่างจริงพอดี
-        why = _pixel_untrusted(res)
         if not found or why:
             entry["kept_text_layer"] = True
             if why:
@@ -659,6 +686,18 @@ def run_inspection(rec_id: str, zone_list: List[dict],
             pg.done("pixel", progress_mod.FAIL,
                     "เทียบพิกเซลไม่สำเร็จ — ใช้ผลชั้นข้อความ")
 
+    # P6 (โหมดทดลอง ปิดเป็นค่าเริ่มต้น): อ่านซ้ำเฉพาะบรรทัดที่ต่างของฝั่ง
+    # ที่ไม่มีพยาน — แนบผลให้คนดู **ไม่แตะระดับ ไม่ลบการ์ด**
+    if config.LINE_REREAD and not (bool(deadline) and time.time() > deadline):
+        try:
+            rdocs = {"a": ArtworkDocument(src)}
+            if zones_b:
+                rdocs["b"] = ArtworkDocument(_find_source(d, "source_b"))
+            defects = reread_mod.apply(defects, zone_list, ocr_results, rdocs,
+                                       deadline=deadline, progress=pg)
+        except Exception:
+            logger.exception("[artwork] อ่านซ้ำเฉพาะบรรทัดไม่สำเร็จ — ข้าม")
+
     pg.start("coverage")
     _tag_highlight_risk(d, zone_list)
     _tag_highlight_why(defects, zone_list, ocr_results)
@@ -787,6 +826,12 @@ def _report_pixel_progress(pg, info) -> None:
         if p.get("status") != "ok":
             pg.note("pixel", "กลุ่ม %s · เทียบไม่ได้ (%s) → ใช้ผลชั้นข้อความ"
                     % (p.get("group"), p.get("reason") or p.get("status")))
+        elif p.get("kept_text_layer") and p.get("untrusted"):
+            # ⚠️ แยกจาก "ไม่พบความต่าง" — เดิมยุบเป็นข้อความเดียว ⇒ ผลที่พบ
+            #    เป็นร้อยบริเวณแต่เชื่อไม่ได้ ถูกบอกว่า "ไม่พบความต่าง"
+            pg.note("pixel", "กลุ่ม %s · พบ %s บริเวณ แต่ผลจากภาพยังไม่น่าเชื่อถือ "
+                    "(%s) → ไม่ได้ใช้ · คงผลชั้นข้อความ"
+                    % (p.get("group"), p.get("regions"), p["untrusted"]))
         elif p.get("kept_text_layer"):
             pg.note("pixel", "กลุ่ม %s · เทียบแล้วไม่พบความต่าง → คงผลชั้นข้อความ"
                     % p.get("group"))

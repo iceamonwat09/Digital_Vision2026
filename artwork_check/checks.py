@@ -20,6 +20,7 @@ A defect dict:
 
 from __future__ import annotations
 
+import functools
 import re
 import unicodedata
 from collections import Counter
@@ -193,6 +194,117 @@ def _composable_from(key: str, piece_keys: List[str],
     return reach0[n] or reach1[n]
 
 
+_RE_NUM_CANON = re.compile(r"\d+(?:[.,]\d+)*")
+_RE_NUM_BEFORE = re.compile(r"\d[.,]?$")
+_RE_NUM_AFTER = re.compile(r"[.,]?\d")
+
+
+def _num_canon(s: str) -> List[str]:
+    """ตัวเลขในข้อความ **คงจุดทศนิยม** — ``59,9`` → ``59.9`` · ``599`` → ``599``
+    (``_norm_key`` ตัดวรรคตอน ⇒ สองค่านี้กลายเป็น ``599`` เท่ากัน) ·
+    ช่องว่างระหว่างเลขถูกเชื่อม (``1 000`` = ``1000``) · ``,`` เท่ากับ ``.``"""
+    s = re.sub(r"(?<=\d)\s+(?=\d)", "", _norm_core(s or ""))
+    return [m.group().replace(",", ".") for m in _RE_NUM_CANON.finditer(s)]
+
+
+@functools.lru_cache(maxsize=32)
+def _keyed(text: str):
+    """คีย์ทีละอักขระ + ตำแหน่งในข้อความดิบ (คีย์แบบเดียวกับ ``_norm_key``)
+
+    แคชไว้ — ข้อความทั้งแผงถูกถามซ้ำทุกบรรทัด (แผง 31k ตัวอักษร: ไม่แคช
+    32 วิ · แคช ≈ เท่าเดิม)"""
+    ks, pos = [], []
+    for i, c in enumerate(text or ""):
+        for k in _key_char(c):
+            ks.append(k)
+            pos.append(i)
+    return "".join(ks), tuple(pos)
+
+
+@functools.lru_cache(maxsize=4096)
+def _key_char(c: str) -> str:
+    return _norm_key(c)
+
+
+def _contained_soundly(line: str, other: str) -> Optional[bool]:
+    """บรรทัด ``line`` ที่ถูกยกโทษเพราะ "มีอยู่ในอีกแผง" — ตัวเลขตรงกันจริงไหม
+
+    ที่มา (26 ก.ย., เปลี่ยนตัวเลขทีละตัวบนแผงจริง 2,021 เคส): ชั้นเทียบหลัก
+    **พลาด 14 เคส** เพราะการยกโทษแบบ "คีย์ของบรรทัดอยู่ที่ไหนสักแห่งในแผง":
+
+    * ``bruta 1,0 %`` → ``10,0 %`` — ``BRUTA100`` ไปเจอรอยต่อข้ามบรรทัด
+      (``…BRUTA10`` + ``0,5…`` ของบรรทัดถัดไป) ⇒ ตัวเลขถูกหั่นกลางตัว
+    * ``(59,8 %)`` → ``(599 %)`` — ``_norm_key`` ตัดจุดทศนิยม ⇒ ``59,9`` =
+      ``599`` (ในแผงมี ``59,9`` อีกบรรทัด)
+
+    คืน ``True`` = มีตำแหน่งที่ตรงแล้ว **ตัวเลขไม่ถูกหั่น และค่าตัวเลขเท่ากัน**
+    · ``False`` = ตรงแค่แบบหั่นตัวเลข/ค่าต่าง ⇒ **ห้ามยกโทษ** ·
+    ``None`` = ไม่พบแบบติดกันเลย (ยกโทษมาจากการประกอบบรรทัด) ⇒ ไม่ตัดสิน
+
+    ⚠️ ไม่แตะตัวอักษร — เฉพาะ **ตัวเลข** (ขอบคำตัวอักษรชนกับการตัดคำ
+    ข้ามบรรทัด ``Pro-``/``tein`` ⇒ ไม่วัด = ไม่ทำ)
+    """
+    kl, _ = _keyed(line)
+    if not kl or not any(c.isdigit() for c in kl):
+        return None
+    n_all, n_ok = _occurrences(line, other)
+    if n_ok:
+        return True
+    return False if n_all else None
+
+
+def _occurrences(line: str, other: str) -> Tuple[int, int]:
+    """(ตำแหน่งที่คีย์ตรงทั้งหมด, ตำแหน่งที่ตัวเลขไม่ถูกหั่นและค่าเท่ากัน)
+    — นับแบบไม่ทับกัน"""
+    kl, _ = _keyed(line)
+    if not kl:
+        return 0, 0
+    ko, pos = _keyed(other)
+    want = _num_canon(line)
+    n_all = n_ok = 0
+    at = ko.find(kl)
+    while at >= 0:
+        n_all += 1
+        end = at + len(kl)
+        lo, hi = pos[at], pos[end - 1] + 1
+        # ตัวเลขถูกหั่น = ในข้อความดิบ ติดกับตัวเลขอีกตัว (คั่นด้วย ``.``/``,``
+        # ได้ไม่เกินหนึ่งตัว) — ขึ้นบรรทัด/ช่องว่างคั่น = คนละจำนวน ไม่ใช่การหั่น
+        cut = ((kl[0].isdigit() and _RE_NUM_BEFORE.search(other[:lo]))
+               or (kl[-1].isdigit() and _RE_NUM_AFTER.match(other[hi:])))
+        if not cut and _num_canon(other[lo:hi]) == want:
+            n_ok += 1
+            at = ko.find(kl, end)
+        else:
+            at = ko.find(kl, at + 1)
+    return n_all, n_ok
+
+
+def _surplus_copies(lines: List[str], own: str, other: str) -> Dict[str, tuple]:
+    """บรรทัด **มีตัวเลข** ที่ฝั่งนี้พิมพ์ซ้ำ **มากกว่า** ที่อีกฝั่งมี
+
+    ที่มา (26 ก.ย.): ฉลากหลายรสพิมพ์บรรทัดเกือบเหมือนกันซ้ำ — เปลี่ยนเลขของ
+    รสหนึ่งให้ไปตรงกับอีกรสพอดี (``1,0%`` → ``1,7%``) ⇒ บรรทัดใหม่ "มีอยู่"
+    ในอีกแผงทุกตัวอักษร ⇒ ยกโทษ ⇒ พลาด 8/1,008 เคส. สิ่งเดียวที่เปลี่ยนคือ
+    **จำนวนครั้ง** ที่บรรทัดนั้นปรากฏ · นับฝั่งตรงข้ามแบบทนการตัดบรรทัด
+    (``_occurrences``) · เฉพาะบรรทัดยาว ≥ 12 ตัว (บรรทัดสั้นอย่าง ``88,0%``
+    ไปโผล่ในบรรทัดอื่นได้ตามธรรมชาติ)"""
+    out: Dict[str, tuple] = {}
+    for l in lines:
+        if l in out:
+            continue
+        kl, _ = _keyed(l)
+        if len(kl) < 12 or not any(c.isdigit() for c in kl):
+            continue
+        # นับทั้งสองฝั่งด้วยวิธีเดียวกัน (รวมที่อยู่ในบรรทัดยาวของรสอื่น)
+        # · อีกฝั่งต้องมีอย่างน้อยหนึ่งที่ — ไม่มีเลย = ถูกยกโทษด้วยการ
+        # ประกอบบรรทัด ซึ่งไม่ใช่เรื่องของจำนวนสำเนา ⇒ ไม่แตะ
+        theirs = _occurrences(l, other)[1]
+        mine = _occurrences(l, own)[1] if theirs else 0
+        if theirs and mine > theirs:
+            out[l] = (mine, theirs)             # ลำดับเดิมของบรรทัด (dict)
+    return out
+
+
 def _lines(text: str) -> List[str]:
     return [_norm_line(l) for l in text.splitlines() if _norm_line(l)]
 
@@ -288,6 +400,10 @@ def _vote_panels(gname: str, panels: List[dict],
         pool = sorted(pool, key=lambda c: 0 if c.get("type") == "panel" else 1)
         return [c["id"] for c in pool]
 
+    # ชั้นเข้มเรื่องตัวเลข (26 ก.ย.) — เฉพาะกลุ่ม 2 panel (ดู
+    # ``_contained_soundly``) · ปิด = การยกโทษแบบเดิมเป๊ะ
+    num_strict = config.TEXT_NUMBER_STRICT and n == 2
+
     defects: List[dict] = []
     for z in panels:
         zid = z["id"]
@@ -314,11 +430,17 @@ def _vote_panels(gname: str, panels: List[dict],
                 continue
             lk = _norm_key(l)
             hits = sum(1 for oid in others
-                       if _norm_flat(l) in zone_flat[oid]
-                       or lk in zone_key[oid]
-                       or _composable_from(lk, zone_line_keys[oid]))
+                       if (_norm_flat(l) in zone_flat[oid]
+                           or lk in zone_key[oid]
+                           or _composable_from(lk, zone_line_keys[oid]))
+                       and not (num_strict
+                                and _contained_soundly(l, texts[oid]) is False))
             if hits + 1 < majority:
                 extra.append(l)
+
+        surplus = (_surplus_copies(zone_lines[zid], texts[zid],
+                                   texts[others[0]]) if num_strict else {})
+        extra += [l for l in surplus if l not in extra]
 
         used_missing = set()
         for line in extra:
@@ -337,6 +459,17 @@ def _vote_panels(gname: str, panels: List[dict],
                     f"ไม่ตรงกับ panel เสียงข้างมาก",
                     found=line, reference=best,
                     ref_zone_ids=_ref_ids_for(best, other_zones)))
+            elif line in surplus:
+                # อีกฝั่ง **มี** บรรทัดนี้ แต่น้อยครั้งกว่า — ห้ามบอกว่า "พบเฉพาะ"
+                mine, theirs = surplus[line]
+                defects.append(_defect(
+                    "MISMATCH_PANELS", z["id"],
+                    f"กลุ่ม {gname}: บรรทัดนี้ปรากฏใน "
+                    f"{z.get('label') or z['id']} {mine} ครั้ง แต่อีกฝั่ง "
+                    f"{theirs} ครั้ง — ค่าของรส/รายการหนึ่งอาจถูกเปลี่ยนให้"
+                    f"ตรงกับอีกรายการ",
+                    found=line,
+                    ref_zone_ids=others))
             else:
                 defects.append(_defect(
                     "MISMATCH_PANELS", z["id"],
@@ -406,6 +539,33 @@ def line_run_ratio(a: str, b: str) -> float:
         return 0.0
     m = SequenceMatcher(None, ka, kb).find_longest_match(0, len(ka), 0, len(kb))
     return m.size / float(min(len(ka), len(kb)))
+
+
+def _pair_score(a: str, b: str) -> float:
+    """คะแนนจับคู่บรรทัด "พบเฉพาะ" สองใบ = ``line_run_ratio`` ·
+    ถอยไปวัด **ช่วงอักขระติดกัน** เมื่อระดับคำไม่ผ่าน (26 ก.ย.)
+
+    ที่มา (Friskies รอบ 2 บนสถานี): ความต่างเดียวแตกเป็น 2 การ์ด เพราะ OCR
+    สองฝั่งเว้นวรรคต่างกัน (``56g``/``56 g`` · ``표시 (``/``표시(``) ⇒ คำถูก
+    หั่นคนละที่ ⇒ ช่วงคำติดกัน 0.36 < 0.40 ทั้งที่อักขระติดกัน 0.93
+
+    ถอยเฉพาะเมื่อระดับคำไม่ผ่าน ⇒ คู่ที่เดิมจับได้ได้คะแนนเดิมทุกตัว ·
+    คืน ``TEXT_PAIR_MIN_RUN`` พอดี (ไม่สูงกว่า) ⇒ คู่ระดับคำชนะเสมอ
+    วัดแล้ว: คู่ที่ควรจับ 56.7% → 90.1% · คู่ที่ไม่ควรจับเท่าเดิม 1.31%
+    """
+    w = line_run_ratio(a, b)
+    if w >= config.TEXT_PAIR_MIN_RUN or not config.TEXT_PAIR_CHAR_FALLBACK:
+        return w
+    fa, fb = _norm_key(a).replace(" ", ""), _norm_key(b).replace(" ", "")
+    if not fa or not fb:
+        return w
+    m = SequenceMatcher(None, fa, fb, autojunk=False).find_longest_match(
+        0, len(fa), 0, len(fb))
+    if (m.size >= config.TEXT_PAIR_CHAR_MIN_LEN
+            and m.size / float(min(len(fa), len(fb)))
+            >= config.TEXT_PAIR_CHAR_MIN_RUN):
+        return config.TEXT_PAIR_MIN_RUN
+    return w
 
 
 def diff_spans(a: str, b: str,
@@ -538,6 +698,34 @@ def _case_only_defects(gname: str, panels: List[dict],
     return defects
 
 
+def _num_skeleton(line: str) -> str:
+    """คีย์ของบรรทัดที่ตัวเลขทุกหลักถูกแทนด้วย ``#`` — ``20%`` = ``24%``"""
+    k = _norm_key(line)
+    return re.sub(r"\d", "#", k) if any(c.isdigit() for c in k) else ""
+
+
+def _pair_numeric_rows(a_rest: List[dict], b_rest: List[dict]) -> list:
+    """จับคู่บรรทัดที่ **ต่างกันแค่ตัวเลข** (``20%`` ↔ ``24%``) — ช่วงคำ/
+    อักขระติดกันใช้ไม่ได้กับบรรทัดสั้นขนาดนี้ (26 ก.ย., John West: ความ
+    ต่างจริงหนึ่งอย่างขึ้นเป็นสองการ์ดที่ไม่บอกว่าคู่กัน)
+
+    ⚠️ จับเฉพาะเมื่อ **ไม่กำกวม**: รูปแบบนั้นเหลือฝั่งละหนึ่งบรรทัดพอดี —
+    ตารางที่ต่างหลายแถวรูปแบบเดียวกัน ⇒ ไม่จับ (จับผิดแถว = ชี้ผิดแบบมั่นใจ)
+    """
+    sa: Dict[str, list] = {}
+    sb: Dict[str, list] = {}
+    for d in a_rest:
+        k = _num_skeleton(d["found"])
+        if k:
+            sa.setdefault(k, []).append(d)
+    for d in b_rest:
+        k = _num_skeleton(d["found"])
+        if k:
+            sb.setdefault(k, []).append(d)
+    return [(sa[k][0], sb[k][0]) for k in sa
+            if len(sa[k]) == 1 and len(sb.get(k, [])) == 1]
+
+
 def _pair_cross_doc_extras(gname: str, panels: List[dict],
                            defects: List[dict],
                            texts: Optional[Dict[str, str]] = None) -> List[dict]:
@@ -573,7 +761,7 @@ def _pair_cross_doc_extras(gname: str, panels: List[dict],
             if idx in used_b:
                 continue
             if by_run:
-                sc = line_run_ratio(da["found"], db["found"])
+                sc = _pair_score(da["found"], db["found"])
                 better = best_s is None or sc > best_s
             else:
                 sc = levenshtein(da["found"].upper(), db["found"].upper())
@@ -587,6 +775,10 @@ def _pair_cross_doc_extras(gname: str, panels: List[dict],
             if ok:
                 used_b.add(best)
                 pairs.append((da, db))
+    if config.TEXT_PAIR_NUMERIC:
+        pairs += _pair_numeric_rows(
+            [d for d in a_list if not any(d is p[0] for p in pairs)],
+            [d for i, d in enumerate(b_list) if i not in used_b])
     if not pairs:
         return defects
 

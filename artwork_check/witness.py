@@ -24,6 +24,18 @@
   Cosma ฟอนต์พังจริง **0/412**
 
 ⚠️ **ไม่ลบรายการใดทิ้ง** — ลดระดับ + แนบหลักฐานให้คนดูด้วยตาเท่านั้น
+
+🔒 กติกาเข้ม (26 ก.ย., ``ARTWORK_TEXT_WITNESS_STRICT`` ค่าเริ่มต้นเปิด) —
+รุ่น 25 ก.ย. ยังยกโทษหัว/ท้ายด้วย "ส่วนเกินมีอยู่ที่ไหนสักแห่งในแผง" ⇒
+เมื่อ OCR **ทั้งสองฝั่ง** ผิด ลดระดับผิด 65/11,794 เคส (ตัวอักษรเดียวอย่าง
+``c`` มีอยู่ทุกแผง ⇒ ``hicken`` = ``Chicken``). รุ่นเข้ม:
+* คงตัวพิมพ์ใหญ่-เล็ก (``_flatc``)
+* หัว/ท้ายต่างได้เฉพาะส่วนเกินที่อยู่ **ติดกัน** กับช่วงที่ตรงกันในแผงของ
+  อีกฝั่ง (บรรทัดเดียวกันหรือข้ามการขึ้นบรรทัดครั้งเดียว) และตัดที่ **ขอบคำ**
+  — จุดที่สคริปต์เปลี่ยน (``กรัม제품명``) นับเป็นขอบคำ
+* บรรทัดพยานคะแนนเสมอกันหลายบรรทัดที่เนื้อหาต่างกัน (ฉลากหลายรส) = กำกวม
+ผลวัด: S3 65 → **0** · S1 0/15,458 · จับ OCR เพี้ยนได้ ~87% (เดิม ~95%) ·
+Cosma 0/412 · บนสถานีเท่าเดิมทุกรอบ
 """
 import re
 import unicodedata
@@ -82,16 +94,176 @@ def _score(text: str, w: str) -> float:
         else 0.0
 
 
-def _best(text: str, lines: List[str]) -> Optional[str]:
+def _best_first(text: str, lines: List[str]) -> Optional[str]:
+    """รุ่น 25 ก.ย. — เลือกบรรทัดคะแนนสูงสุดตัวแรก (เสมอกันก็เลือก)"""
     if not lines or not text:
         return None
     b = max(lines, key=lambda w: _score(text, w))
     return b if _score(text, b) >= MIN_SAME_LINE else None
 
 
+def _best_unique(text: str, lines: List[str]) -> Optional[str]:
+    """บรรทัดพยานที่ใช่ — **เสมอกันหลายบรรทัดที่เนื้อหาต่างกัน = กำกวม ⇒ None**
+
+    ฉลากหลายรสชาติพิมพ์บรรทัดเกือบเหมือนกันซ้ำ (ต่างแค่ชื่อรส/ตัวเลข) ⇒
+    เลือกตัวแรกไปเทียบ = อาจเอาพยานของ "อีกรส" มายืนยัน (วัดได้ 1 เคสที่ชี้ผิด)
+    """
+    if not lines or not text:
+        return None
+    scored = sorted(((_score(text, w), w) for w in lines), key=lambda x: -x[0])
+    top = scored[0][0]
+    if top < MIN_SAME_LINE:
+        return None
+    ties = {_flatc(w) for s, w in scored if s >= top - 1e-9}
+    return scored[0][1] if len(ties) == 1 else None
+
+
+def _best(text: str, lines: List[str]) -> Optional[str]:
+    if config.TEXT_WITNESS_STRICT:
+        return _best_unique(text, lines)
+    return _best_first(text, lines)
+
+
+# ── เทียบแบบเข้ม (26 ก.ย.): คงตัวพิมพ์ · ขอบต้องเป็นขอบคำจริง ────────────
+
+def _flatc(s: str) -> str:
+    """เหมือน ``flatp`` แต่ **คงตัวพิมพ์ใหญ่-เล็ก** (ตัวพิมพ์ต่าง = ต่างจริง)"""
+    s = unicodedata.normalize("NFKC", s or "").replace(SEP, "")
+    return "".join(c for c in s if not c.isspace())
+
+
+def _cls(c: str) -> Optional[str]:
+    o = ord(c)
+    if 0x0E00 <= o <= 0x0E7F:
+        return "thai"
+    if 0xAC00 <= o <= 0xD7AF or 0x1100 <= o <= 0x11FF or 0x3130 <= o <= 0x318F:
+        return "kor"
+    if 0x0600 <= o <= 0x06FF or 0x0750 <= o <= 0x077F:
+        return "ara"
+    if 0x3040 <= o <= 0x30FF or 0x4E00 <= o <= 0x9FFF or 0x3400 <= o <= 0x4DBF:
+        return "cjk"
+    if c.isalpha():
+        return "lat"
+    return None
+
+
+def _bounds(s: str) -> set:
+    """ตำแหน่ง (ในสตริง ``_flatc``) ที่เป็น **ขอบคำ**: ช่องว่าง/ตัวคั่น ·
+    หัว/ท้าย · และจุดที่ **สคริปต์เปลี่ยน** (text layer ไม่มีช่องว่าง ⇒
+    ``กรัม제품명`` คือสองคำ)"""
+    s = unicodedata.normalize("NFKC", s or "").replace(SEP, " ")
+    out, n = {0}, 0
+    for tok in s.split():
+        f = "".join(c for c in tok if not c.isspace())
+        for k in range(1, len(f)):
+            x, y = _cls(f[k - 1]), _cls(f[k])
+            if x and y and x != y:
+                out.add(n + k)
+        n += len(f)
+        out.add(n)
+    return out
+
+
+def _lines(panel: str) -> list:
+    return [(_flatc(ln), _bounds(ln)) for ln in (panel or "").splitlines()
+            if _flatc(ln)]
+
+
+def _adjacent(ex: str, core: str, pool: list, lead: bool) -> bool:
+    """ส่วนเกิน ``ex`` อยู่ **ติดกับ** ช่วงที่ตรงกัน ในบรรทัดเดียวกันหรือข้าม
+    การขึ้นบรรทัดครั้งเดียว — และเริ่ม/จบที่ขอบคำ (ไม่ใช่ "มีอยู่ที่ไหนสักแห่ง")"""
+    k = min(len(core), 20)
+    key = core[:k] if lead else core[-k:]
+    cands = list(pool)
+    for i in range(1, len(pool)):
+        a, ba = pool[i - 1]
+        b, bb = pool[i]
+        cands.append((a + b, ba | {len(a) + x for x in bb}))
+    needle = ex + key if lead else key + ex
+    for text, bnd in cands:
+        at = text.find(needle)
+        while at >= 0:
+            if lead and at in bnd:
+                return True
+            if not lead and (at + len(needle)) in bnd:
+                return True
+            at = text.find(needle, at + 1)
+    return False
+
+
+def _agree_strict(w: str, o: str, w_panel: str, o_panel: str) -> bool:
+    a, b = _flatc(w), _flatc(o)
+    if not a or not b:
+        return False
+    ops = SequenceMatcher(None, a, b, autojunk=False).get_opcodes()
+    ba, bb = _bounds(w), _bounds(o)
+    la, lb = _lines(w_panel), _lines(o_panel)
+    core = "".join(a[i1:i2] for t, i1, i2, j1, j2 in ops if t == "equal")
+
+    def ok_edge(op, lead):
+        tag, i1, i2, j1, j2 = op
+        if tag == "delete":             # พยานมีเกิน → อีกฝั่งพิมพ์ไว้บรรทัดติดกัน
+            ex, cut, bnd, pool = a[i1:i2], (i2 if lead else i1), ba, lb
+        elif tag == "insert":
+            ex, cut, bnd, pool = b[j1:j2], (j2 if lead else j1), bb, la
+        else:
+            return False                # replace ที่ขอบ = ต่างจริง
+        if cut not in bnd:              # ตัดกลางคำ (hicken ↔ chicken) = ต่างจริง
+            return False
+        return _adjacent(ex, core, pool, lead)
+
+    while ops and ops[0][0] != "equal":
+        if not ok_edge(ops[0], True):
+            return False
+        ops.pop(0)
+    while ops and ops[-1][0] != "equal":
+        if not ok_edge(ops[-1], False):
+            return False
+        ops.pop()
+    if not ops or any(op[0] != "equal" for op in ops):
+        return False
+    return sum(op[2] - op[1] for op in ops) >= MIN_AGREE_COVER * min(len(a), len(b))
+
+
+def _contains(needle: str, hay: str) -> bool:
+    """``needle`` (ทั้งบรรทัด) มีอยู่ใน ``hay`` — โหมดเข้ม: ต้องเริ่มและจบที่
+    ขอบคำ ในบรรทัดเดียวกันหรือข้ามการขึ้นบรรทัดครั้งเดียว"""
+    if not config.TEXT_WITNESS_STRICT:
+        f = flatp(needle)
+        return bool(f) and f in flatp(hay)
+    f = _flatc(needle)
+    if not f:
+        return False
+    pool = _lines(hay)
+    cands = list(pool)
+    for i in range(1, len(pool)):
+        a, ba = pool[i - 1]
+        b, bb = pool[i]
+        cands.append((a + b, ba | {len(a) + x for x in bb}))
+    for text, bnd in cands:
+        at = text.find(f)
+        while at >= 0:
+            if at in bnd and (at + len(f)) in bnd:
+                return True
+            at = text.find(f, at + 1)
+    return False
+
+
 def agree(w: str, o: str, w_panel: str, o_panel: str) -> bool:
     """``o`` ตรงกับพยาน ``w`` ทุกตัวอักษรในช่วงที่ทับกัน — ต่างได้เฉพาะหัว/ท้าย
-    ที่เป็นการตัดบรรทัดจริง (ส่วนเกินของฝั่งหนึ่งมีอยู่ในแผงของอีกฝั่ง)"""
+    ที่เป็นการตัดบรรทัดจริง
+
+    โหมดเข้ม (``TEXT_WITNESS_STRICT``, ค่าเริ่มต้น): คงตัวพิมพ์ · ส่วนเกินต้อง
+    อยู่ **ติดกัน** ในแผงของอีกฝั่งและตัดที่ขอบคำ. ปิด = รุ่น 25 ก.ย. เป๊ะ
+    ("ส่วนเกินมีอยู่ที่ไหนสักแห่งในแผง" — วัดแล้วซ่อนของจริงได้เมื่อ OCR ของ
+    ทั้งสองฝั่งผิด 65/11,794 เคส)"""
+    if config.TEXT_WITNESS_STRICT:
+        return _agree_strict(w, o, w_panel, o_panel)
+    return _agree_loose(w, o, w_panel, o_panel)
+
+
+def _agree_loose(w: str, o: str, w_panel: str, o_panel: str) -> bool:
+    """รุ่น 25 ก.ย. (``ARTWORK_TEXT_WITNESS_STRICT=0``)"""
     a, b = flatp(w), flatp(o)
     if not a or not b:
         return False
@@ -158,12 +330,12 @@ def judge(d: dict, wit: Dict[str, List[str]], texts: Dict[str, str],
         if z in wit:
             w = _best(f, wit[z])
             if (w and not agree(w, f, "\n".join(wit[z]), texts.get(z, ""))
-                    and flatp(w) and flatp(w) in flatp(texts.get(partner, ""))):
+                    and _contains(w, texts.get(partner, ""))):
                 return {"zone": z, "kind": "extra_here", "file_says": _show(w),
                         "ocr_says": [f], "file_diff": []}
         if partner in wit and flatp(f):
             for w in wit[partner]:
-                if flatp(f) in flatp(w):
+                if _contains(f, w):
                     return {"zone": partner, "kind": "extra_there",
                             "file_says": _show(w), "ocr_says": [],
                             "file_diff": []}

@@ -1,0 +1,43 @@
+{
+ "note": "AvoDerm Master1/Master2 (ของจริง: Copper Sulfate + D-Calcium/D-calcium)",
+ "zones": [
+  {
+   "id": "z1",
+   "type": "panel",
+   "group": "A",
+   "doc": "a",
+   "bbox": [
+    0,
+    0,
+    1,
+    1
+   ],
+   "label": "z1"
+  },
+  {
+   "id": "b2",
+   "type": "panel",
+   "group": "A",
+   "doc": "b",
+   "bbox": [
+    0,
+    0,
+    1,
+    1
+   ],
+   "label": "b2"
+  }
+ ],
+ "ocr": [
+  {
+   "zone_id": "z1",
+   "text": "AvoDerm® Dog Stews are crafted in small batches and formulated for\nhealthy skin and coat. Our Chicken & Veggies Recipe in Gravy features\nboneless chicken, fresh carrots, green beans, pumpkin and other\nvegetables to support healthy digestion. Our special stew recipe has\na delicious gravy that will satisfy even the pickiest dogs.\nGUARANTEED ANALYSIS\nCrude Protein (min)....................................7.0%\nCrude Fat (min)..........................................2.0%\nCrude Fiber (max).....................................2.0%\nMoisture (max)..........................................84.0%\nAsh (max)...................................................4.0%\n*Not recognized as an essential nutrient by the AAFCO Dog Food Nutrient Profiles.\nCALORIE CONTENT\nMetabolizable Energy (calculated).................................................................................797 kcal/kg\nMetabolizable Energy (calculated).................................................................................294 kcal/can\nINGREDIENTS Chicken Broth, Chicken, Carrots, Green Beans, Pumpkin, Tapioca Starch,\nPotato Protein, Tuna, Sunflower Oil, Seaweed, Spinach, Flaxseed Oil, Tricalcium Phosphate,\nSalmon Oil, Salt, Guar Gum, Avocado Oil, Sodium Tripolyphosphate, Potassium Chloride,\nInulin, Vitamins (Vitamin E Supplement, Vitamin A Supplement, Niacin Supplement,\nD-Calcium Pantothenate, Thiamine Mononitrate, Beta-carotene, Biotin, Riboflavin\nSupplement, Vitamin B12 Supplement, Pyridoxine Hydrochloride, Folic Acid), Minerals (Zinc\nOxide, Reduced Iron, Copper Amino Acid Complex, Manganese Sulfate, Sodium Selenite,\nPotassium Iodide), Choline Chloride, Magnesium Sulfate, Copper Sulfate.\nAvoDerm® Dog Food Stew Chicken & Veggies Recipe in Gravy is formulated to meet the\nnutritional levels established by the AAFCO Dog Food Nutrient Profiles for All Life Stages\nincluding growth of large size dogs (70 lbs or more as an adult).\nCalcium (min).................................................0.20%\nPhosphorus (min)..........................................0.16%\nOmega-6 Fatty Acid* (min)........................0.40%\nOmega-3 Fatty Acid* (min)........................0.10%\n",
+   "engine": "n8n"
+  },
+  {
+   "zone_id": "b2",
+   "text": "AvoDerm® Dog Stews are crafted in small batches and formulated for\nhealthy skin and coat. Our Chicken & Veggies Recipe in Gravy features\nboneless chicken, fresh carrots, green beans, pumpkin and other\nvegetables to support healthy digestion. Our special stew recipe has\na delicious gravy that will satisfy even the pickiest dogs.\nGUARANTEED ANALYSIS\nCrude Protein (min)........................7.0%\nCrude Fat (min)............................2.0%\nCrude Fiber (max)........................2.0%\nMoisture (max)............................84.0%\nAsh (max)....................................4.0%\nCalcium (min)..............................0.20%\nPhosphorus (min)..........................0.16%\nOmega-6 Fatty Acid* (min)......0.40%\nOmega-3 Fatty Acid* (min)......0.10%\n*Not recognized as an essential nutrient by the AAFCO Dog Food Nutrient Profiles.\nCALORIE CONTENT\nMetabolizable Energy (calculated)....................................797 kcal/kg\nMetabolizable Energy (calculated)....................................294 kcal/can\nINGREDIENTS Chicken Broth, Chicken, Carrots, Green Beans, Pumpkin, Tapioca Starch,\nPotato Protein, Tuna, Sunflower Oil, Seaweed, Spinach, Flaxseed Oil, Tricalcium Phosphate,\nSalmon Oil, Salt, Guar Gum, Avocado Oil, Sodium Tripolyphosphate, Potassium Chloride,\nInulin, Vitamins (Vitamin E Supplement, Vitamin A Supplement, Niacin Supplement,\nD-calcium Pantothenate, Thiamine Mononitrate, Beta-carotene, Biotin, Riboflavin\nSupplement, Vitamin B12 Supplement, Pyridoxine Hydrochloride, Folic Acid), Minerals (Zinc\nOxide, Reduced Iron, Copper Amino Acid Complex, Manganese Sulfate, Sodium Selenite,\nPotassium Iodide), Choline Chloride, Magnesium Sulfate, Copper Sulphate Pentahydrate.\nAvoDerm® Dog Food Stew Chicken & Veggies Recipe in Gravy is formulated to meet the\nnutritional levels established by the AAFCO Dog Food Nutrient Profiles for All Life Stages\nincluding growth of large size dogs (70 lbs or more as an adult).\n",
+   "engine": "n8n"
+  }
+ ]
+}

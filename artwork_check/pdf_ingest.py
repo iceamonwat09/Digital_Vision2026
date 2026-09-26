@@ -99,6 +99,32 @@ class ArtworkDocument:
         return crop
 
     # ── Embedded text layer ──────────────────────────────────────────
+    def raster_page(self, min_cover: float = 0.90) -> Optional[int]:
+        """หน้านี้เป็น **ภาพ raster ภาพเดียว** ครอบเกือบทั้งหน้าไหม (ปรู๊ฟที่
+        สแกน/ส่งออกเป็นภาพ) — คืน dpi ของภาพนั้น · ไม่ใช่ ⇒ ``None``
+
+        อ่านจาก metadata ล้วน (ไม่เรนเดอร์) ⇒ ฟรี. ใช้บอกผู้ใช้ว่าทำไมชั้นภาพ
+        ถึงต่างทั้งแผง (vector ↔ raster ⇒ ขอบตัวอักษร/พื้นหลังต่างโดยโครงสร้าง
+        — ลากโซนใหม่ไม่ช่วย) · อ่านไม่ได้ ⇒ ``None`` (ไม่เดา)
+        """
+        if not self.is_pdf:
+            return None
+        try:
+            with fitz.open(self.path) as doc:
+                page = doc[self.page_index]
+                area = abs(page.rect.width * page.rect.height)
+                if area <= 0:
+                    return None
+                for info in page.get_image_info():
+                    x0, y0, x1, y1 = info.get("bbox") or (0, 0, 0, 0)
+                    w_pt = abs(x1 - x0)
+                    if w_pt <= 0 or abs(w_pt * (y1 - y0)) < min_cover * area:
+                        continue
+                    return int(round(info.get("width", 0) / (w_pt / 72.0)))
+        except Exception:
+            return None
+        return None
+
     def embedded_text(self, bbox_norm: Optional[List[float]] = None) -> str:
         """Text from the PDF text layer inside ``bbox_norm`` (or the whole
         page). Returns '' for images and for outlined PDFs."""
