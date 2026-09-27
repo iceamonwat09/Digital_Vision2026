@@ -798,6 +798,43 @@ def _pair_numeric_rows(a_rest: List[dict], b_rest: List[dict]) -> list:
             if len(sa[k]) == 1 and len(sb.get(k, [])) == 1]
 
 
+def _near_copy(a: str, b: str) -> bool:
+    """สองบรรทัดเป็น **สำเนาเกือบตรงกันทั้งบรรทัด** ไหม — OCR อ่านเพี้ยน
+    ไม่กี่ตัวอักษรกระจายหลายจุด (ดู ``config.TEXT_PAIR_BY_RATIO``)
+
+    เทียบบนคีย์ที่ตัดวรรคตอน/ช่องว่างแล้ว (``_norm_key``) ⇒ ``،``↔``.`` ไม่นับ.
+    ต้องผ่านทั้งสามด่าน: ยาวพอ · สัดส่วนเหมือน · **จำนวนตัวที่แก้** — ด่าน
+    สุดท้ายคือด่านที่กันคำแปลภาษาใกล้กัน (อิตาลี↔สเปน) ที่สัดส่วนสูงได้
+    """
+    fa = _norm_key(a).replace(" ", "")
+    fb = _norm_key(b).replace(" ", "")
+    edits = config.TEXT_PAIR_RATIO_MAX_EDITS
+    if (min(len(fa), len(fb)) < config.TEXT_PAIR_RATIO_MIN_LEN
+            or abs(len(fa) - len(fb)) > edits or fa == fb):
+        return False
+    th = config.TEXT_PAIR_RATIO_MIN
+    sm = SequenceMatcher(None, fa, fb, autojunk=False)
+    if sm.real_quick_ratio() < th or sm.quick_ratio() < th or sm.ratio() < th:
+        return False
+    return levenshtein(fa, fb) <= edits
+
+
+def _pair_near_copies(a_rest: List[dict], b_rest: List[dict]) -> list:
+    """จับคู่การ์ด "พบเฉพาะ" ที่เหลือ ซึ่งเป็นสำเนาเกือบตรงกันทั้งบรรทัด
+
+    ⚠️ รับเฉพาะการ์ดที่ **ยังไม่ถูกจับคู่** ⇒ คู่เดิมทุกคู่ไม่ถูกแตะ ·
+    จับเฉพาะเมื่อ **ไม่กำกวมทั้งสองฝั่ง** (ใบนั้นเข้าเกณฑ์กับอีกฝั่งได้ใบเดียว
+    และใบฝั่งโน้นก็เข้าเกณฑ์กับใบนี้ใบเดียว) — จับผิดบรรทัด = ชี้ผิดแบบมั่นใจ
+    """
+    hits = [(i, j) for i, da in enumerate(a_rest)
+            for j, db in enumerate(b_rest)
+            if _near_copy(da["found"], db["found"])]
+    na = Counter(i for i, _ in hits)
+    nb = Counter(j for _, j in hits)
+    return [(a_rest[i], b_rest[j]) for i, j in hits
+            if na[i] == 1 and nb[j] == 1]
+
+
 def _pair_cross_doc_extras(gname: str, panels: List[dict],
                            defects: List[dict],
                            texts: Optional[Dict[str, str]] = None) -> List[dict]:
@@ -851,6 +888,11 @@ def _pair_cross_doc_extras(gname: str, panels: List[dict],
         pairs += _pair_numeric_rows(
             [d for d in a_list if not any(d is p[0] for p in pairs)],
             [d for i, d in enumerate(b_list) if i not in used_b])
+    if by_run and config.TEXT_PAIR_BY_RATIO:
+        # รอบสุดท้าย — เฉพาะใบที่รอบก่อน ๆ จับคู่ไม่ได้ (27 ก.ย., Dolphin)
+        pairs += _pair_near_copies(
+            [d for d in a_list if not any(d is p[0] for p in pairs)],
+            [d for d in b_list if not any(d is p[1] for p in pairs)])
     if not pairs:
         return defects
 

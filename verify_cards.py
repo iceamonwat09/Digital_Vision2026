@@ -29,7 +29,8 @@ EXPECTED = os.path.join(BANK, "expected.json")
 
 # ธงของงาน 26 ก.ย. — ปิดทั้งหมด = พฤติกรรมของ commit ก่อนหน้าเป๊ะ
 NEW_FLAGS = ("TEXT_WITNESS_STRICT", "TEXT_PAIR_CHAR_FALLBACK",
-             "TEXT_PAIR_NUMERIC", "TEXT_NUMBER_STRICT")
+             "TEXT_PAIR_NUMERIC", "TEXT_NUMBER_STRICT",
+             "TEXT_PAIR_BY_RATIO")                   # 27 ก.ย.
 
 
 def cases():

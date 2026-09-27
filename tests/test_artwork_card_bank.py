@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 """ธนาคารเคสจริง (P3, 26 ก.ย. 2026) — การ์ดบนรายงานต้องไม่เปลี่ยนเงียบ ๆ
 
-ข้อความ OCR จริงของสถานี 10 ชุด (Friskies 4 รอบ · John West 4 รอบ · AvoDerm 2 ชุด)
+ข้อความ OCR จริงของสถานี 11 ชุด (Friskies 4 รอบ · John West 4 รอบ · AvoDerm 2 ชุด ·
+Dolphin 1 ชุด)
 เล่นซ้ำด้วย ``run_all_checks`` ตัวจริง. ล็อก 2 ชั้น:
 
 1. **การ์ดทุกใบ** (คลาส · โซน · ระดับ · ข้อความ) ตรงกับ ``expected.json``
@@ -28,14 +29,14 @@ def _defaults(monkeypatch):
     for k in ("NUMBER_CONTEXT", "TEXT_WITNESS", "FUSED_SCRIPT_NOTE",
               "TEXT_WITNESS_STRICT", "TEXT_PAIR_CHAR_FALLBACK",
               "TEXT_PAIR_NUMERIC", "TEXT_NUMBER_STRICT", "TEXT_PAIR_BY_RUN",
-              "TEXT_CASE_SENSITIVE"):
+              "TEXT_CASE_SENSITIVE", "TEXT_PAIR_BY_RATIO"):
         monkeypatch.setattr(config, k, True)
     monkeypatch.setattr(config, "TEXT_WITNESS_SEVERITY", "warning")
 
 
 def test_bank_has_every_case_and_nothing_extra():
     assert sorted(EXP) == VC.cases()
-    assert len(VC.cases()) == 10
+    assert len(VC.cases()) == 11
 
 
 @pytest.mark.parametrize("name", VC.cases())
@@ -121,3 +122,18 @@ def test_avoderm_three_groups_has_only_the_three_real_cards():
                 or "00241" in d["found"] + d["reference"]]
     assert any("Irwindale Park" in d["reference"] for d in c)
     assert len(c) == 3 and all(d["severity"] == "critical" for d in c)
+
+
+def test_dolphin_arabic_address_is_one_card_pointing_at_the_letters():
+    """สถานี 26 ก.ย.: ที่อยู่ภาษาอาหรับ ``2/30 طريق سيثاكيت 1 ، موينج`` ที่ OCR
+    ฝั่ง 🅱 อ่านจุดเพี้ยนกระจาย 3 จุด ⇒ เคยแตกเป็น "พบเฉพาะ" 2 ใบที่ไม่ชี้
+    ว่าต่างตรงไหน (ผู้ใช้เลยสงสัยว่าผิดที่ ``/``) · ต้องเป็นใบเดียว ยัง
+    critical และข้อความทั้งสองฝั่งยังอยู่บนการ์ดครบ"""
+    c = VC.cards("dolphin")
+    assert len(c) == 1
+    d = c[0]
+    assert (d["class"], d["zone_id"], d["severity"]) == (
+        "MISMATCH_PANELS", "z2", "critical")
+    assert "سيثاكيت" in d["found"] and "موينج" in d["found"]
+    assert "سيتاكيت" in d["reference"] and "مويني" in d["reference"]
+    assert d["found"].startswith("2/30") and d["reference"].startswith("2/30")

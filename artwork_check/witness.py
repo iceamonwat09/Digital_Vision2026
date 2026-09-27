@@ -295,11 +295,36 @@ def _show(w: str) -> str:
     return w.replace(" %s " % SEP, "▯").replace(SEP, "▯").strip()
 
 
+def _near_line(text: str, lines: List[str]) -> Optional[str]:
+    """บรรทัดพยานที่เป็น **สำเนาเกือบตรงกัน** ของ ``text`` (``checks._near_copy``)
+    — มีได้บรรทัดเดียวเท่านั้น (เนื้อหาต่างกันหลายบรรทัด = กำกวม ⇒ ``None``)"""
+    hits = {_flatc(w): w for w in lines if K._near_copy(text, w)}
+    return next(iter(hits.values())) if len(hits) == 1 else None
+
+
 def _side_misread(mine: str, other: str, lines: List[str],
                   mine_panel: str, other_panel: str) -> Optional[dict]:
     """ไฟล์ของฝั่ง ``mine`` พิมพ์ **เหมือนอีกฝั่งทุกตัวอักษร** แต่ OCR ของฝั่งนี้
     อ่านได้ต่างไป ⇒ คืนหลักฐาน · ไม่แน่ใจ ⇒ ``None``"""
-    w = _best(mine, lines)
+    ev = _side_misread_with(_best(mine, lines), mine, other, lines,
+                            mine_panel, other_panel)
+    if ev is None and config.TEXT_PAIR_BY_RATIO:
+        # ถอยครั้งเดียว (27 ก.ย.) — การ์ดคู่ที่เพิ่งถูกรวมด้วย "สำเนาเกือบตรง
+        # กัน" (OCR เพี้ยนกระจาย) หาบรรทัดพยานด้วยช่วงติดกันไม่เจอ หรือเจอ
+        # บรรทัดขยะที่เสมอกัน (บรรทัด 1 ตัวอักษรชนะช่วงอักขระได้ทุกบรรทัด) ⇒
+        # หลักฐาน "ไฟล์พิมพ์เหมือนอีกฝั่ง" ที่การ์ดแยกเคยได้จะหายไป.
+        # หาบรรทัดด้วยเกณฑ์เดียวกับที่ใช้รวมการ์ด · **การตัดสินยังเป็น
+        # ``agree`` (ตรงทุกตัวอักษร) เท่าเดิม** ⇒ เพิ่มได้เฉพาะเคสที่พิสูจน์ได้
+        w = _near_line(mine, lines)
+        if w and w != _best(mine, lines):
+            ev = _side_misread_with(w, mine, other, lines,
+                                    mine_panel, other_panel)
+    return ev
+
+
+def _side_misread_with(w: Optional[str], mine: str, other: str,
+                       lines: List[str], mine_panel: str,
+                       other_panel: str) -> Optional[dict]:
     if not w:
         return None
     wp = "\n".join(lines)
