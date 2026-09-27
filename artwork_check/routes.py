@@ -111,7 +111,10 @@ def _hl_flags() -> dict:
     ``renderReport()`` เป็นตัวเดียวกันทั้งหน้าตรวจและหน้าประวัติ. ปิดแล้ว
     ได้พฤติกรรมก่อน 9 ก.ย. เป๊ะ (ยิงทั้งบรรทัด · ฝั่งอ้างอิงไม่มีกรอบ)"""
     return {"hl_by_spans": config.HIGHLIGHT_BY_SPANS,
-            "hl_ref_side": config.HIGHLIGHT_REF_SIDE}
+            "hl_ref_side": config.HIGHLIGHT_REF_SIDE,
+            # ทิศข้อความบนการ์ด (แสดงผลล้วน) — ใช้ renderReport ตัวเดียวกัน
+            # ทั้งสองหน้า จึงต้องส่งให้ทั้งสองหน้าเหมือนธงกรอบแดง
+            "card_dir_auto": config.CARD_TEXT_DIR_AUTO}
 
 
 @artwork_bp.route("/artwork_check")

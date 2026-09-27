@@ -531,6 +531,17 @@
   }
   window.awMarkDiff = markDiff;
 
+  // ── ทิศของข้อความบนการ์ด (27 ก.ย. 2026) ────────────────────────────
+  // ข้อความ "พบ/เทียบกับ" ของอาหรับ/ฮีบรูต้องวาดขวาไปซ้าย ไม่งั้นตัวเลขหัว
+  // บรรทัด (``2/30 طريق…``) ถูกวางซ้ายสุดแยกจากที่อยู่ = ดูเหมือนผิดตรง "/"
+  // ``dir="auto"`` = เลือกทิศจากตัวอักษรแท้ตัวแรก + แยกช่องจากป้ายรอบข้าง
+  // ⇒ บรรทัดละติน/ไทยเหมือนเดิมทุกประการ · แสดงผลล้วน ไม่แตะข้อมูลใด
+  // ⚠️ ปิดธง (``AW_CARD_DIR_AUTO === false``) = ไม่ใส่ attribute เลย = HTML เดิม
+  function textDir() {
+    return (window.AW_CARD_DIR_AUTO === false) ? "" : ' dir="auto"';
+  }
+  window.awTextDir = textDir;
+
   // ── คำค้นที่ส่งให้เซิร์ฟเวอร์วาดกรอบแดงบนภาพ crop ────────────────────
   // ยิงที่ **ช่วงที่ต่าง** ก่อนเสมอ ไม่ใช่ทั้งบรรทัด: ตัวจับคู่วลีฝั่ง
   // เซิร์ฟเวอร์ต้องหาคำติดกันในแถวเดียวกันให้ครบทุกคำ ซึ่งบรรทัดจริงยาว
@@ -686,8 +697,8 @@
           '<span class="aw-defect-class">' + esc(d.class) + "</span>" +
           "<b>" + esc(d.zone_id) + (z && z.label ? " · " + esc(z.label) : "") + "</b><br>" +
           esc(d.message);
-        if (d.found)     html += '<br>พบ: <span class="found">' + markDiff(d.found, d.found_spans) + "</span>";
-        if (d.reference) html += ' &nbsp;เทียบกับ: <span class="ref">' + markDiff(d.reference, d.ref_spans) + "</span>";
+        if (d.found)     html += '<br>พบ: <span class="found"' + textDir() + '>' + markDiff(d.found, d.found_spans) + "</span>";
+        if (d.reference) html += ' &nbsp;เทียบกับ: <span class="ref"' + textDir() + '>' + markDiff(d.reference, d.ref_spans) + "</span>";
         // ── เหตุผล/หลักฐานของชั้นหลังการตรวจ (25 ก.ย. 2026) ───────────────
         // ไม่มีรายการใดถูกลบ — แค่ลดระดับแล้วบอกว่าทำไม ให้คนตัดสินด้วยตา
         const qq = (arr) => (arr || []).filter(Boolean)
@@ -701,7 +712,7 @@
           // F2 — text layer ของไฟล์เองเป็นพยานว่า OCR อ่านเพี้ยน
           const w = d.witness, wz = esc(w.zone || "");
           let t = "📄 <b>หลักฐานจากไฟล์</b> (text layer ของ " + wz + "): ไฟล์พิมพ์ว่า " +
-            '<span class="aw-evid-file">' + esc(w.file_says) + "</span><br>";
+            '<span class="aw-evid-file"' + textDir() + '>' + esc(w.file_says) + "</span><br>";
           if (w.kind === "pair" && (w.ocr_says || []).length) {
             t += "OCR ของ " + wz + " อ่านเป็น " + qq(w.ocr_says) +
               ((w.file_diff || []).length ? " แต่ไฟล์พิมพ์ " + qq(w.file_diff) : "");
