@@ -1156,6 +1156,9 @@
           url: "/api/artwork/" + s.id + "/preview_b.png?t=" + Date.now() })
       : null;
     refAttached = !!s.refAttached && !!docMeta.b;
+    // ⚠️ ตั้ง .checked อย่างเดียวไม่ยิง event "change" ⇒ ตัวแปร autoRotate
+    //    (ที่ถูกส่งไปตอนตรวจจริง) ค้างค่าเก่า ทั้งที่ช่องติ๊กบนจอบอกอีกอย่าง
+    autoRotate = !!s.autoRotate;
     if ($("awAutoRotate")) $("awAutoRotate").checked = !!s.autoRotate;
     if ($("awForceOcr")) $("awForceOcr").checked = !!s.forceOcr;
     if ($("awSplitBands")) $("awSplitBands").checked = !!s.splitBands;
@@ -1196,6 +1199,100 @@
     $("awRestoreNo").addEventListener("click", () => {
       bar.style.display = "none";
       clearSession();
+    });
+  }
+
+  // ── เปิดจากงานที่เคยตรวจ (ใช้เป็นต้นแบบตรวจ Lot ใหม่) ────────────────
+  // server สร้าง "งานใหม่" ที่มีไฟล์ 🅰 + กรอบ 🅰 + ค่าตั้งเดิม (งานต้นแบบ
+  // ไม่ถูกแตะ) ⇒ ฝั่งนี้แค่โหลดงานใหม่นั้นขึ้นจอ ด้วยตัวกู้คืนตัวเดียวกับ
+  // autosave. กรอบ 🅱 ไม่ถูกคัดลอกโดยตั้งใจ — ชิ้นงาน Lot ใหม่วางไม่ตรงที่เดิม
+  function loadFromClone(res) {
+    const st = res.settings || {};
+    restoreSession({
+      id: res.id, zones: res.zones || [],
+      docMeta: { a: { w: res.preview_size[0], h: res.preview_size[1],
+                      pdf: !!res.is_pdf }, b: null },
+      refAttached: false, autoRotate: !!st.auto_rotate,
+      forceOcr: !!st.force_ocr, splitBands: !!st.split_bands,
+      confirmReads: !!st.confirm_reads, pixelCheck: !!st.pixel_check,
+      brand: st.brand || "",
+    });
+    pageRot = [90, 180, 270].indexOf(st.page_rot) >= 0 ? st.page_rot : 0;
+    applyPageRot();
+    renderZones();
+    const src = res.cloned_from || {};
+    resultBox.innerHTML = '<div class="aw-empty" style="text-align:left;">' +
+      "📋 เปิดจากต้นแบบ <b>" + esc(src.filename || "") + "</b>" +
+      (src.created_at ? " (" + esc(src.created_at) + ")" : "") +
+      " — ได้ " + (res.zones || []).length + " กรอบของไฟล์หลัก 🅰 · เป็น <b>งานใหม่</b> " +
+      "งานต้นแบบไม่ถูกแตะ<br>ขั้นต่อไป: กด <b>“+ แนบไฟล์อ้างอิงเพื่อเทียบ (ชิ้นงาน)”</b> " +
+      "เลือกชิ้นงาน Lot ใหม่ → วาดกรอบ 🅱 เอง หรือกด <b>หากรอบคู่อัตโนมัติ</b> → ตรวจทาน → ส่งตรวจสอบ" +
+      (res.approx_rotate
+        ? '<br>⚠️ งานต้นแบบนี้บันทึกก่อนมีระบบเก็บกรอบ — มุมหมุนของแต่ละกรอบอาจ' +
+          "ไม่ตรงกับที่ตั้งไว้เดิม โปรดตรวจทานก่อนส่ง"
+        : "") + "</div>";
+    const box = $("awCloneBox");
+    if (box) box.open = false;
+    saveSession();
+  }
+
+  async function cloneFrom(srcId) {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const res = await api("/api/artwork/clone", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ source: srcId }),
+      });
+      setBusy(false);
+      loadFromClone(res);
+      scrollToResults();
+    } catch (e) {
+      setBusy(false);
+      alert("เปิดจากต้นแบบไม่สำเร็จ: " + e.message);
+    }
+  }
+
+  async function searchSources() {
+    const list = $("awCloneList");
+    if (!list) return;
+    list.innerHTML = '<div class="aw-clone-msg"><span class="aw-spin"></span>กำลังค้นหา…</div>';
+    try {
+      const q = ($("awCloneQ").value || "").trim();
+      const res = await api("/api/artwork/sources?limit=30" +
+                            (q ? "&q=" + encodeURIComponent(q) : ""));
+      const src = res.sources || [];
+      if (!src.length) {
+        list.innerHTML = '<div class="aw-clone-msg">ไม่พบงานที่มีกรอบให้ใช้เป็นต้นแบบ' +
+          (q ? " สำหรับ “" + esc(q) + "”" : "") +
+          " (งานที่อัปโหลดก่อน 28 ก.ย. 2026 ชื่อไฟล์เป็น source.pdf)</div>";
+        return;
+      }
+      list.innerHTML = src.map((s) =>
+        '<div class="aw-clone-item"><div class="grow">' +
+        '<div class="nm">' + esc(s.filename || "(ไม่ทราบชื่อไฟล์)") +
+        (s.brand ? ' <span class="sub">· ' + esc(s.brand) + "</span>" : "") + "</div>" +
+        '<div class="sub">' + esc(s.created_at) + " · " + s.zones_a + " กรอบ 🅰" +
+        (s.owner ? " · " + esc(s.owner) : "") +
+        (s.verdict ? " · ผลล่าสุด " + esc(s.verdict) : " · ยังไม่ได้ส่งตรวจ") +
+        (s.cloned_from ? " · 📋 ตรวจจากต้นแบบ" : "") +
+        (s.approx_rotate ? " · ⚠️ บันทึกแบบเก่า" : "") + "</div></div>" +
+        '<button type="button" class="aw-btn aw-btn-sm aw-btn-primary" data-src="' +
+        esc(s.id) + '">ใช้เป็นต้นแบบ</button></div>').join("");
+      list.querySelectorAll("[data-src]").forEach((b) =>
+        b.addEventListener("click", () => cloneFrom(b.dataset.src)));
+    } catch (e) {
+      list.innerHTML = '<div class="aw-clone-msg">ค้นหาไม่สำเร็จ: ' + esc(e.message) + "</div>";
+    }
+  }
+  if ($("awCloneSearch")) {
+    $("awCloneSearch").addEventListener("click", searchSources);
+    $("awCloneQ").addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter") { ev.preventDefault(); searchSources(); }
+    });
+    // เปิดกล่องครั้งแรก = โหลดรายการล่าสุดให้เลย ไม่ต้องพิมพ์
+    $("awCloneBox").addEventListener("toggle", () => {
+      if ($("awCloneBox").open && !$("awCloneList").innerHTML) searchSources();
     });
   }
 
@@ -2430,7 +2527,7 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ zones: zones, brand: brandInput.value.trim(),
                                auto_rotate: autoRotate, force_ocr: forceOcrOn(),
-                               split_bands: splitBandsOn() }),
+                               split_bands: splitBandsOn(), page_rot: pageRot }),
       });
       renderTextTable(textResult, textTableWrap, onlyIssuesCb.checked);
       setResultsWide(true);   // table now has data → widen the results panel
@@ -2512,6 +2609,15 @@
   // ── init ───────────────────────────────────────────────────────────
   refreshTemplates();
   refreshBrands();
-  // เสนอกู้คืนงานที่ค้าง (ถ้ามี) — ไม่กู้เอง ต้องกดยืนยัน
-  offerRestore();
+  // มาจากปุ่ม "ใช้เป็นต้นแบบ" ของหน้าประวัติ (?clone=<id>) ⇒ สร้างงานใหม่
+  // จากต้นแบบนั้นทันที แล้ว **ลบพารามิเตอร์ออกจาก URL** ไม่งั้นกดรีเฟรช =
+  // ได้งานใหม่ซ้ำอีกชุดทุกครั้ง
+  const cloneParam = new URLSearchParams(location.search).get("clone");
+  if (cloneParam && $("awCloneBox")) {
+    try { history.replaceState(null, "", location.pathname); } catch (e) { /* noop */ }
+    cloneFrom(cloneParam);
+  } else {
+    // เสนอกู้คืนงานที่ค้าง (ถ้ามี) — ไม่กู้เอง ต้องกดยืนยัน
+    offerRestore();
+  }
 })();

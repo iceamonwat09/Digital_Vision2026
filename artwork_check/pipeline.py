@@ -91,6 +91,85 @@ def start_inspection(file_bytes: bytes, filename: str,
     }
 
 
+def clone_inspection(src_id: str, owner: Optional[dict] = None) -> dict:
+    """ใช้งานที่เคยตรวจเป็นต้นแบบ ⇒ สร้าง **งานใหม่** (ผู้ใช้เลือก 28 ก.ย.).
+
+    คัดลอกเฉพาะ: ไฟล์ 🅰 · ``preview.png`` · กรอบฝั่ง 🅰 · ค่าตั้ง
+    **ไม่คัดลอก**: ไฟล์ชิ้นงาน (🅱) · กรอบ 🅱 · ผลตรวจ · ประวัติการแปล —
+    ของเหล่านั้นเป็นของ Lot เก่า. กรอบ 🅱 ของ Lot ใหม่ให้ผู้ใช้วาดเองหรือกด
+    "หากรอบคู่อัตโนมัติ" (ไม่คัดลอกพิกัดเก่า: ชิ้นงาน Lot ใหม่วางไม่ตรงที่เดิม
+    ⇒ กรอบเลื่อนแบบเงียบ = ตรวจผิดที่แบบมั่นใจ)
+    **งานต้นแบบไม่ถูกแตะแม้แต่ไฟล์เดียว** (อ่านอย่างเดียว)
+    """
+    import shutil
+    src_dir = report.inspection_dir(src_id)          # ValueError = id ผิดรูป
+    if not os.path.isdir(src_dir):
+        raise FileNotFoundError("ไม่พบงานต้นแบบ")
+    setup = report.load_setup(src_id)
+    zones_a = [dict(z) for z in (setup or {}).get("zones") or []
+               if str(z.get("doc", "a") or "a") == "a"]
+    if not zones_a:
+        raise ValueError("งานนี้ไม่มีกรอบของไฟล์หลักให้ใช้เป็นต้นแบบ")
+    src_file = _find_source(src_dir)
+    for z in zones_a:
+        z["doc"] = "a"
+    zones_a = zones_mod.sanitize_zones(zones_a)
+
+    src_meta = report.load_meta(src_id)
+    try:
+        src_rep = report.load_report(src_id) or {}
+    except (ValueError, json.JSONDecodeError):
+        src_rep = {}
+    filename = src_meta.get("filename") or src_rep.get("filename") or \
+        os.path.basename(src_file)
+
+    rec_id = report.new_inspection_id()
+    d = report.inspection_dir(rec_id, create=True)
+    try:
+        shutil.copy2(src_file, os.path.join(d, os.path.basename(src_file)))
+        pv = os.path.join(src_dir, "preview.png")
+        if os.path.exists(pv):
+            shutil.copy2(pv, os.path.join(d, "preview.png"))
+        doc = ArtworkDocument(os.path.join(d, os.path.basename(src_file)))
+        preview = cv2.imread(os.path.join(d, "preview.png"))
+        if preview is None:
+            preview = doc.render(config.PREVIEW_DPI)
+            cv2.imwrite(os.path.join(d, "preview.png"), preview)
+    except Exception:
+        shutil.rmtree(d, ignore_errors=True)   # ไม่ทิ้งงานครึ่ง ๆ กลาง ๆ
+        raise
+    report.save_owner(rec_id, owner)
+    report.save_meta(rec_id, filename, extra={
+        "cloned_from": src_id,
+        "cloned_from_filename": filename,
+        "cloned_from_at": (src_meta.get("created_at")
+                           or src_rep.get("created_at") or ""),
+    })
+    settings = {k: setup[k] for k in report._SETUP_KEYS if k in setup}
+    # เก็บ setup ของงานใหม่ทันที ⇒ งานนี้ใช้เป็นต้นแบบต่อได้แม้ยังไม่กดตรวจ
+    report.save_setup(rec_id, zones_a, settings,
+                      by=(owner or {}).get("username", ""))
+    embedded_chars = len(doc.embedded_text())
+    logger.info("[artwork] clone %s -> %s file=%s zones=%d",
+                src_id, rec_id, filename, len(zones_a))
+    return {
+        "id": rec_id,
+        "filename": filename,
+        "page_count": doc.page_count,
+        "preview_size": [preview.shape[1], preview.shape[0]],
+        "is_pdf": bool(doc.is_pdf),
+        "zones": zones_a,
+        "settings": settings,
+        "approx_rotate": bool(setup.get("approx_rotate")),
+        "cloned_from": {"id": src_id, "filename": filename,
+                        "created_at": src_meta.get("created_at")
+                        or src_rep.get("created_at") or ""},
+        "has_text_layer": embedded_chars >= config.EMBEDDED_TEXT_MIN_CHARS,
+        "ocr_available": ocr.is_ocr_available(),
+        "spell_layer_available": checks.spell_layer_available(),
+    }
+
+
 def start_ref(rec_id: str, file_bytes: bytes, filename: str) -> dict:
     """
     Attach the optional REFERENCE file (ฉบับเก่า) to an existing

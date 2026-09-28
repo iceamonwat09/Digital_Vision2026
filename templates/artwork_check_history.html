@@ -257,6 +257,9 @@
   .aw-trlog th { color:#78909c; font-weight:600; font-size:11px; }
   .aw-trlog td.err { color:#c62828; }
   .aw-tbl-scroll { overflow-x:auto; }
+  .aw-clone-bar-h { display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+                    margin-bottom:12px; font-size:12.5px; }
+  .aw-from { display:block; font-size:11px; color:#6a1b9a; }
 </style>
 {% endblock %}
 
@@ -327,6 +330,14 @@
   </div>
 
   <div class="aw-panel" id="awDetailPanel" style="display:none;">
+    {% if clone_ui %}
+    <!-- ใช้งานนี้เป็นต้นแบบตรวจ Lot ใหม่: ไปหน้าตรวจแล้วสร้าง "งานใหม่" ที่มี
+         ไฟล์ 🅰 + กรอบ 🅰 เดิม · งานนี้ไม่ถูกแตะ -->
+    <div class="aw-clone-bar-h">
+      <button type="button" id="awCloneBtn" class="aw-fbtn">📋 ใช้เป็นต้นแบบตรวจ Lot ใหม่</button>
+      <span class="aw-owner">เปิดไฟล์ 🅰 + กรอบเดิมเป็นงานใหม่ แล้วแนบชิ้นงาน Lot ใหม่ — งานนี้ไม่ถูกแตะ</span>
+    </div>
+    {% endif %}
     <div class="aw-tabs" id="awDetailTabs" style="display:none;">
       <button type="button" class="aw-tab aw-tab-active" data-awtab="result">🔍 ผลตรวจ</button>
       <button type="button" class="aw-tab" data-awtab="text">📖 ข้อความ + คำแปล</button>

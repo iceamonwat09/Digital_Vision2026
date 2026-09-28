@@ -97,7 +97,10 @@
     let h = '<tr class="clickable" data-id="' + esc(r.id) + '" data-kind="' +
       esc(r.kind || "inspect") + '">' +
       "<td>" + esc(r.created_at) + "</td>" +
-      "<td>" + esc(r.filename || "—") + "</td>" +
+      "<td>" + esc(r.filename || "—") +
+      (r.cloned_from ? '<span class="aw-from">📋 จากต้นแบบ ' +
+        esc(r.cloned_from.created_at || r.cloned_from.id) + "</span>" : "") +
+      "</td>" +
       "<td>" + esc(r.brand || "—") + "</td>";
     if (TR) h += "<td>" + kindBadge(r.kind) + "</td>";
     h += "<td>" + badge(r.verdict) + "</td>" +
@@ -212,7 +215,16 @@
     if (trResult) window.awRenderTextTable(trResult, trTable, trOnlyIssues.checked);
   });
 
+  let openId = null;
+  const cloneBtn = $("awCloneBtn");
+  if (cloneBtn) cloneBtn.addEventListener("click", () => {
+    if (!openId) return;
+    // หน้าตรวจเป็นคนสร้างงานใหม่จากต้นแบบ (แล้วลบ ?clone= ออกจาก URL เอง)
+    location.href = "/artwork_check?clone=" + encodeURIComponent(openId);
+  });
+
   async function openDetail(id, kind) {
+    openId = id;
     const hasReport = kind !== "translate";
     const hasTr = TR && kind !== "inspect";
     try {

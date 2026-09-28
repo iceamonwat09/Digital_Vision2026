@@ -234,13 +234,16 @@ def delete_inspection(rec_id: str) -> bool:
 _META_FILE = "meta.json"
 
 
-def save_meta(rec_id: str, filename: str) -> None:
+def save_meta(rec_id: str, filename: str,
+              extra: Optional[dict] = None) -> None:
     try:
+        data = {"filename": filename or "",
+                "created_at": time.strftime("%Y-%m-%d %H:%M:%S")}
+        if extra:
+            data.update(extra)
         with open(os.path.join(inspection_dir(rec_id), _META_FILE),
                   "w", encoding="utf-8") as f:
-            json.dump({"filename": filename or "",
-                       "created_at": time.strftime("%Y-%m-%d %H:%M:%S")},
-                      f, ensure_ascii=False, indent=1)
+            json.dump(data, f, ensure_ascii=False, indent=1)
     except OSError as e:
         logger.warning("[artwork] save_meta failed for %s: %s", rec_id, e)
 
@@ -506,6 +509,10 @@ def _list_extended(limit: int, can_view, include_translate: bool,
             "defect_count": len(rep.get("defects", [])) if rep else None,
             "owner": (owner or {}).get("username", ""),
         }
+        if meta.get("cloned_from"):
+            row["cloned_from"] = {"id": meta.get("cloned_from"),
+                                  "filename": meta.get("cloned_from_filename", ""),
+                                  "created_at": meta.get("cloned_from_at", "")}
         days = [row["created_at"][:10]]
         if include_translate:
             row["kind"] = ("both" if rep and tr
@@ -537,3 +544,145 @@ def list_owners(can_view=None) -> List[str]:
         if n:
             names.add(n)
     return sorted(names, key=str.casefold)
+
+
+# ── กรอบตามที่ผู้ใช้วาด (ใช้เป็นต้นแบบตรวจ Lot ใหม่) ───────────────────
+# ⚠️ ห้ามดึงกรอบจาก report.json ตรง ๆ เป็นทางหลัก: ``zones[].rotate`` ในนั้น
+# ถูกเขียนทับเป็น "มุมที่ OCR หมุนจริง" (เป็น 0 เสมอในเส้นทาง pdf-text) และ
+# ``view_rot`` แยกไม่ออกว่าผู้ใช้ "ปักหมุด 270" หรือ "ตั้ง auto แล้ว OCR เลือก
+# 270" ⇒ ไฟล์นี้เก็บกรอบ **ก่อน** ส่งเข้า pipeline = สิ่งที่ผู้ใช้เห็นจริง
+_SETUP_FILE = "setup.json"
+_SETUP_KEYS = ("brand", "page_rot", "auto_rotate", "force_ocr",
+               "split_bands", "confirm_reads", "pixel_check")
+
+
+def save_setup(rec_id: str, zones: List[dict], settings: Optional[dict] = None,
+               by: str = "") -> None:
+    """best-effort — เขียนไม่ได้ต้องไม่ทำให้การตรวจ/แปลล้ม."""
+    try:
+        d = inspection_dir(rec_id)
+        # ค่าตั้งที่ครั้งนี้ไม่ได้ส่งมา (เช่นแท็บแปลไม่รู้จักช่องติ๊ก pixel)
+        # ต้องคงค่าเดิมไว้ ไม่ใช่หายไปเงียบ ๆ
+        prev = {}
+        try:
+            with open(os.path.join(d, _SETUP_FILE), encoding="utf-8") as f:
+                prev = json.load(f) or {}
+        except (OSError, json.JSONDecodeError):
+            prev = {}
+        data = {"zones": zones, "saved_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "by": by or ""}
+        for k in _SETUP_KEYS:
+            if settings and k in settings:
+                data[k] = settings[k]
+            elif isinstance(prev, dict) and k in prev:
+                data[k] = prev[k]
+        tmp = os.path.join(d, _SETUP_FILE + ".tmp")
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=1)
+        os.replace(tmp, os.path.join(d, _SETUP_FILE))
+    except (OSError, ValueError, TypeError) as e:
+        logger.warning("[artwork] save_setup failed for %s: %s", rec_id, e)
+
+
+def _legacy_setup(rep: dict) -> Optional[dict]:
+    """งานก่อนมี setup.json — ประกอบกลับจาก report.json เท่าที่ทำได้.
+
+    มุมหมุน: ``view_rot`` (มุมที่ผู้ใช้เห็นตอนลาก) ถ้ามี ไม่งั้น ``default``.
+    **ไม่ใช้ ``rotate``** เพราะเป็นมุมที่ OCR หมุนจริง (0 ในเส้นทาง pdf-text
+    แม้ผู้ใช้ปักหมุดไว้) · ติดธง ``approx_rotate`` ให้ UI บอกผู้ใช้ตรวจทาน
+    """
+    zones = []
+    for z in rep.get("zones") or []:
+        if not isinstance(z, dict):
+            continue
+        zz = {k: v for k, v in z.items()
+              if k in ("id", "type", "group", "bbox", "label", "doc")}
+        vr = z.get("view_rot")
+        zz["rotate"] = vr if vr in (90, 180, 270) else "default"
+        zones.append(zz)
+    if not zones:
+        return None
+    out = {"zones": zones, "approx_rotate": True,
+           "saved_at": rep.get("created_at", "")}
+    for k in _SETUP_KEYS:
+        if k in rep:
+            out[k] = rep[k]
+    return out
+
+
+def load_setup(rec_id: str) -> Optional[dict]:
+    """กรอบ + ค่าตั้งของงานนี้ หรือ ``None`` ถ้าไม่มีอะไรให้ใช้เป็นต้นแบบ."""
+    d = inspection_dir(rec_id)
+    try:
+        with open(os.path.join(d, _SETUP_FILE), encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict) and isinstance(data.get("zones"), list):
+            return data
+    except (OSError, json.JSONDecodeError):
+        pass
+    try:
+        rep = load_report(rec_id)
+    except (ValueError, json.JSONDecodeError):
+        rep = None
+    return _legacy_setup(rep) if rep else None
+
+
+def _zones_a(zones: List[dict]) -> List[dict]:
+    return [z for z in zones or []
+            if isinstance(z, dict) and str(z.get("doc", "a") or "a") == "a"]
+
+
+def list_sources(q: str = "", can_view=None, limit: int = 30) -> List[dict]:
+    """งานที่ใช้เป็นต้นแบบได้ (มีกรอบฝั่ง 🅰 อย่างน้อย 1 กรอบ) ใหม่สุดก่อน.
+
+    คืนเฉพาะข้อมูลสรุป — **ไม่มีผลตรวจ/ภาพ** เพราะอาจเป็นงานของคนอื่น
+    (CLONE_SHARE_ALL) และด่านเจ้าของยังคุมทุก endpoint ที่เปิดงานนั้นอยู่
+    """
+    try:
+        ids = sorted(os.listdir(config.INSPECTIONS_DIR), reverse=True)
+    except FileNotFoundError:
+        return []
+    qf = (q or "").strip().casefold()[:100]
+    out: List[dict] = []
+    for rec_id in ids[:_MAX_SCAN]:
+        if len(out) >= max(1, limit):
+            break
+        try:
+            owner = load_owner(rec_id)
+        except ValueError:
+            continue
+        if can_view is not None and not can_view(owner):
+            continue
+        setup = load_setup(rec_id)
+        if not setup:
+            continue
+        za = _zones_a(setup.get("zones"))
+        if not za:
+            continue
+        meta = load_meta(rec_id)
+        try:
+            rep = load_report(rec_id) or {}
+        except (ValueError, json.JSONDecodeError):
+            rep = {}
+        # งานที่เปิดจากต้นแบบแล้วยังไม่เคยตรวจ/แปล = สำเนาของต้นแบบเป๊ะ ๆ
+        # ⇒ ไม่แสดงซ้ำ (ไม่งั้นทุกครั้งที่กดเปิดแล้วเปลี่ยนใจ รายการจะยาวขึ้น)
+        if meta.get("cloned_from") and not rep and not _read_log(rec_id):
+            continue
+        filename = meta.get("filename") or rep.get("filename") or ""
+        brand = setup.get("brand") or rep.get("brand") or ""
+        if qf and qf not in (filename + " " + brand).casefold():
+            continue
+        out.append({
+            "id": rec_id,
+            "filename": filename,
+            "brand": brand,
+            "created_at": (meta.get("created_at") or rep.get("created_at")
+                           or _time_from_id(rec_id)),
+            "saved_at": setup.get("saved_at", ""),
+            "owner": (owner or {}).get("username", ""),
+            "zones_a": len(za),
+            "verdict": rep.get("verdict", ""),
+            "approx_rotate": bool(setup.get("approx_rotate")),
+            "cloned_from": meta.get("cloned_from", ""),
+        })
+    return out

@@ -120,6 +120,7 @@ def artwork_page():
     # ปุ่มยังอยู่ใน DOM เสมอ แค่ถูกซ่อนด้วย CSS — ดูเหตุผลที่ config.PIXDIFF_UI
     return render_template("artwork_check.html",
                            pixdiff_ui=config.PIXDIFF_UI,
+                           clone_ui=config.CLONE_FROM_HISTORY,
                            **_hl_flags())
 
 
@@ -127,6 +128,7 @@ def artwork_page():
 def artwork_history_page():
     return render_template("artwork_check_history.html",
                            history_translate=config.HISTORY_TRANSLATE,
+                           clone_ui=config.CLONE_FROM_HISTORY,
                            **_hl_flags())
 
 
@@ -215,6 +217,13 @@ def api_inspect(rec_id):
         page_rot = int(body.get("page_rot") or 0)
     except (TypeError, ValueError):
         page_rot = 0
+    if config.CLONE_FROM_HISTORY:
+        # กรอบตามที่ผู้ใช้วาด **ก่อน** เข้า pipeline (ซึ่งเขียนทับ rotate)
+        # — ใช้เป็นต้นแบบตรวจ Lot ใหม่ · best-effort ไม่แตะผลตรวจ
+        _save_setup(rec_id, zone_list, {
+            "brand": brand, "page_rot": page_rot, "auto_rotate": auto_rotate,
+            "force_ocr": force_ocr, "split_bands": split_bands,
+            "confirm_reads": confirm_reads, "pixel_check": pixel_check})
     # จุดเช็คพอยต์ให้หน้าเว็บ poll ระหว่างตรวจ (advisory ล้วน ไม่แตะผลตรวจ)
     pg = progress.begin(rec_id, {"force_ocr": force_ocr,
                                  "split_bands": split_bands,
@@ -490,6 +499,11 @@ def api_autopair(rec_id):
     return jsonify({"results": results})
 
 
+def _save_setup(rec_id: str, zone_list, settings: dict) -> None:
+    by = (_owner_of_request() or {}).get("username", "")
+    report.save_setup(rec_id, [dict(z) for z in zone_list], settings, by=by)
+
+
 def _record_tr_error(rec_id: str, msg: str, brand: str, ocr_only: bool):
     """ครั้งที่กดแปลแล้วล้มทั้งครั้ง ก็ต้องอยู่ในประวัติ ("กดทุกครั้ง")."""
     if not config.HISTORY_TRANSLATE:
@@ -541,6 +555,15 @@ def api_translate(rec_id):
         auto_rotate = bool(body.get("auto_rotate"))
         force_ocr = bool(body.get("force_ocr"))
         split_bands = bool(body.get("split_bands"))
+        if config.CLONE_FROM_HISTORY:
+            try:
+                tr_page_rot = int(body.get("page_rot") or 0)
+            except (TypeError, ValueError):
+                tr_page_rot = 0
+            _save_setup(rec_id, zone_list, {
+                "brand": brand, "auto_rotate": auto_rotate,
+                "force_ocr": force_ocr, "split_bands": split_bands,
+                "page_rot": tr_page_rot if tr_page_rot in (90, 180, 270) else 0})
         try:
             zone_list, ocr_results = pipeline.run_ocr_only(
                 rec_id, zone_list, auto_rotate=auto_rotate,
@@ -659,6 +682,53 @@ def api_history():
         # ตัวเลือก "ผู้ตรวจ" มีความหมายเฉพาะคนที่เห็นงานของหลายคน
         out["owners"] = report.list_owners(can_view)
     return jsonify(out)
+
+
+# ── ใช้งานเก่าเป็นต้นแบบตรวจ Lot ใหม่ ─────────────────────────────────
+# ⚠️ สอง endpoint นี้ **ไม่มี <rec_id> ใน URL โดยตั้งใจ** ⇒ ไม่ผ่านด่านเจ้าของ
+# ของ blueprint (ผู้ใช้เลือกให้ทุกคนใช้ต้นแบบของทุกคนได้). จึงต้องคุมเอง:
+#  • รายการคืนแค่ข้อมูลสรุป (ชื่อไฟล์/แบรนด์/วันที่/ผู้ตรวจ/จำนวนกรอบ)
+#  • clone สร้างงานใหม่ที่ **ผู้กดเป็นเจ้าของ** · งานต้นแบบอ่านอย่างเดียว
+#  • CLONE_SHARE_ALL=0 ⇒ ใช้กติกาเดียวกับหน้าประวัติ (ownership)
+def _source_filter():
+    if config.CLONE_SHARE_ALL:
+        return None
+    return ownership.make_filter(_viewer())
+
+
+@artwork_bp.route("/api/artwork/sources")
+def api_sources():
+    if not config.CLONE_FROM_HISTORY:
+        return jsonify({"error": "ปิดฟีเจอร์นี้อยู่"}), 404
+    q = request.args.get("q", "", type=str)
+    limit = max(1, min(request.args.get("limit", 30, type=int), 100))
+    return jsonify({"sources": report.list_sources(q, _source_filter(), limit),
+                    "share_all": config.CLONE_SHARE_ALL})
+
+
+@artwork_bp.route("/api/artwork/clone", methods=["POST"])
+def api_clone():
+    if not config.CLONE_FROM_HISTORY:
+        return jsonify({"error": "ปิดฟีเจอร์นี้อยู่"}), 404
+    body = request.get_json(silent=True) or {}
+    src_id = str(body.get("source", "")).strip()
+    try:
+        report.inspection_dir(src_id)
+    except ValueError:
+        return jsonify({"error": "bad id"}), 400
+    can = _source_filter()
+    if can is not None and not can(report.load_owner(src_id)):
+        return jsonify({"error": "งานต้นแบบนี้เป็นของผู้ใช้อื่น"}), 403
+    try:
+        res = pipeline.clone_inspection(src_id, owner=_owner_of_request())
+    except FileNotFoundError as e:
+        return jsonify({"error": str(e)}), 404
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        logger.exception("[artwork] clone failed for %s", src_id)
+        return jsonify({"error": f"เปิดจากต้นแบบไม่สำเร็จ: {e}"}), 500
+    return jsonify(res)
 
 
 @artwork_bp.route("/api/artwork/<rec_id>", methods=["DELETE"])

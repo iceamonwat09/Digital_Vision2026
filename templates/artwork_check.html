@@ -379,6 +379,19 @@
 
   /* text + translation table */
   /* แถบกู้คืนงานที่ค้าง (autosave) */
+  /* เปิดจากงานที่เคยตรวจ (ใช้เป็นต้นแบบตรวจ Lot ใหม่) */
+  .aw-clone { width:100%; border:1px solid #d6e4f5; border-radius:6px; background:#f5f9ff;
+              padding:6px 10px; font-size:13px; }
+  .aw-clone summary { cursor:pointer; color:#0d47a1; font-weight:600; }
+  .aw-clone-bar { display:flex; gap:6px; margin:8px 0 6px; flex-wrap:wrap; }
+  .aw-clone-bar input { flex:1; min-width:160px; }
+  .aw-clone-list { max-height:260px; overflow-y:auto; }
+  .aw-clone-item { display:flex; align-items:center; gap:10px; padding:6px 8px;
+                   border-top:1px solid #e3e7ec; background:#fff; flex-wrap:wrap; }
+  .aw-clone-item .nm { font-weight:600; color:#263238; overflow-wrap:anywhere; }
+  .aw-clone-item .sub { color:#78909c; font-size:12px; }
+  .aw-clone-item .grow { flex:1; min-width:180px; }
+  .aw-clone-msg { font-size:12px; color:#78909c; padding:4px 0; }
   .aw-restore { background:#e8f5e9; border-left:4px solid #2e7d32; color:#1b5e20;
                 padding:8px 12px; border-radius:4px; font-size:13px;
                 margin-bottom:10px; display:flex; align-items:center;
@@ -461,6 +474,21 @@
           <datalist id="awBrandList"></datalist>
         </div>
       </div>
+
+      {% if clone_ui %}
+      <!-- ใช้งานที่เคยตรวจเป็นต้นแบบ: สร้าง "งานใหม่" ที่มีไฟล์ 🅰 + กรอบ 🅰 เดิม
+           (งานต้นแบบไม่ถูกแตะ) แล้วแนบชิ้นงาน Lot ใหม่เป็น 🅱 -->
+      <div class="aw-row">
+        <details id="awCloneBox" class="aw-clone">
+          <summary>📂 หรือเปิดจากงานที่เคยตรวจ — ใช้ไฟล์ 🅰 + กรอบเดิม ตรวจชิ้นงาน Lot ใหม่</summary>
+          <div class="aw-clone-bar">
+            <input id="awCloneQ" type="text" class="aw-input" placeholder="ค้นหาจากชื่อไฟล์ / แบรนด์">
+            <button id="awCloneSearch" type="button" class="aw-btn">ค้นหา</button>
+          </div>
+          <div id="awCloneList" class="aw-clone-list"></div>
+        </details>
+      </div>
+      {% endif %}
 
       <!-- cross-file compare: ปุ่ม opt-in → ช่องแนบไฟล์อ้างอิง (ฉบับเก่า) -->
       <div class="aw-row" id="awRefToggleRow">
