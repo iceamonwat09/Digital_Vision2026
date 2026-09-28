@@ -175,6 +175,88 @@
   .aw-flow-note { font-size:11px; color:#78909c; padding-left:10px;
                   font-family:ui-monospace,Menlo,Consolas,monospace; }
   .aw-confirm-num { font-size:11px; color:#8d6e63; padding-left:10px; font-family:ui-monospace,Menlo,Consolas,monospace; }
+
+  /* ── ประวัติการแปล (28 ก.ย. 2026) ─────────────────────────────────
+     กฎของแท็บ + ตารางคำแปลด้านล่างคัดลอก **ตรงตัว** จาก artwork_check.html
+     เพราะหน้านี้เรียก window.awRenderTextTable ตัวเดียวกัน — แก้ข้างเดียว
+     ตารางจะโผล่แบบไม่มีกรอบ (มีเทสต์ test_artwork_report_css ล็อกไว้) */
+  /* result tabs */
+  .aw-tabs   { display:flex; gap:4px; border-bottom:2px solid #e3e7ec; margin-bottom:12px; }
+  .aw-tab    { padding:8px 16px; border:none; background:none; cursor:pointer; font-size:14px;
+               font-weight:600; color:#78909c; border-bottom:3px solid transparent; margin-bottom:-2px; }
+  .aw-tab:hover { color:#1976d2; }
+  .aw-tab-active { color:#0d47a1; border-bottom-color:#1976d2; }
+
+  /* แท็บแปล = ตัวช่วย ไม่ใช่ผลตรวจ QC — ต้องบอกก่อนตาราง เพราะคอลัมน์
+     "สถานะ"/🤖 หน้าตาเหมือนผลตรวจจนเข้าใจผิดได้ */
+  .aw-textnote { background:#e3f2fd; border-left:4px solid #1976d2; color:#0d47a1;
+                 padding:8px 12px; border-radius:4px; font-size:12.5px;
+                 line-height:1.6; margin-bottom:10px; }
+  .aw-textbar { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; }
+  .aw-textfilter { font-size:13px; color:#555; cursor:pointer; }
+  .aw-textmsg { font-size:12px; color:#78909c; margin:8px 0; min-height:16px; }
+  /* fixed layout: 5 คอลัมน์แบ่งความกว้าง panel กันเอง + ตัดคำยาว/URL ให้ wrap
+     ในเซลล์ ไม่ให้ล้นออกนอกกรอบ; .aw-ttable-scroll เป็นตาข่ายกันจอแคบมาก */
+  .aw-ttable-scroll { overflow-x:auto; }
+  .aw-ttable { width:100%; border-collapse:collapse; font-size:13px; table-layout:fixed; }
+  .aw-ttable th, .aw-ttable td { overflow-wrap:anywhere; word-break:break-word; }
+  .aw-ttable th { text-align:left; background:#f8fafc; color:#37474f; font-size:11px; letter-spacing:.4px;
+                  text-transform:uppercase; padding:7px 9px; border-bottom:2px solid #e3e7ec; position:sticky; top:0; }
+  .aw-ttable td { padding:7px 9px; border-bottom:1px solid #eceff1; vertical-align:top; }
+  .aw-ttable tr.has-issue td { background:#fff8f2; }
+  .aw-ttable tr.has-ai-issue td { background:#f3f0ff; }
+  .aw-ttable tr.has-unsup td { background:#f5f9ff; }
+  .aw-ttable mark.unsup { background:#e3f2fd; color:#0d47a1; }
+  .aw-ttable .zone-cell { color:#90a4ae; font-size:11px; white-space:nowrap; }
+  .aw-ttable .src-cell  { direction:auto; unicode-bidi:plaintext; }
+  .aw-ttable .en-cell   { color:#37474f; }
+  .aw-ttable .en-cell.empty { color:#b0bec5; }
+  .aw-ttable mark { background:#ffcdd2; color:#b71c1c; border-radius:2px; padding:0 2px; font-weight:600; }
+  .aw-status-ok   { color:#2e7d32; }
+  .aw-status-warn { color:#ef6c00; font-weight:600; }
+  .aw-status-bad  { color:#c62828; font-weight:700; }
+  .aw-status-info { color:#1565c0; font-weight:600; }
+  .aw-status-unavail { color:#b0bec5; font-style:italic; }
+  .aw-suggest { display:block; margin-top:3px; font-size:12px; color:#1b5e20; }
+  .aw-ai-reason { display:block; margin-top:3px; font-size:11.5px; color:#78909c; }
+  .aw-tlegend { margin-top:10px; padding:9px 12px; background:#f8fafc; border:1px solid #e3e7ec;
+                border-radius:6px; font-size:12px; color:#546e7a; line-height:1.55; }
+  .aw-tlegend ul { margin:4px 0 0 18px; padding:0; }
+  .aw-tlegend li { margin-top:3px; }
+  .aw-suggest code { background:#e8f5e9; padding:0 4px; border-radius:3px; font-family:var(--font-mono,ui-monospace,monospace); }
+
+  /* แถบตัวกรอง */
+  .aw-filter { display:flex; flex-wrap:wrap; gap:8px 14px; align-items:flex-end;
+               padding:10px 12px; background:#f8fafc; border:1px solid #e3e7ec;
+               border-radius:6px; margin-bottom:12px; font-size:12.5px; }
+  .aw-filter label { display:flex; flex-direction:column; gap:3px; color:#546e7a; }
+  .aw-filter label.aw-fcheck { flex-direction:row; align-items:center; gap:5px; }
+  .aw-filter input[type=date], .aw-filter input[type=text], .aw-filter select {
+               padding:5px 7px; border:1px solid #cfd8dc; border-radius:5px;
+               font-size:13px; background:#fff; min-width:0; }
+  .aw-filter input[type=text] { width:200px; max-width:100%; }
+  .aw-fbtns { display:flex; gap:6px; margin-left:auto; }
+  .aw-fbtn { padding:6px 14px; border-radius:6px; border:1px solid #1976d2; background:#1976d2;
+             color:#fff; cursor:pointer; font-size:13px; }
+  .aw-fbtn.ghost { background:#fff; color:#1976d2; }
+  .aw-fcount { font-size:12px; color:#78909c; margin:-4px 0 8px; }
+  /* ป้ายประเภทงาน */
+  .aw-kind { display:inline-block; padding:1px 8px; border-radius:10px; font-size:11px;
+             font-weight:600; white-space:nowrap; }
+  .aw-k-inspect   { background:#e3f2fd; color:#0d47a1; }
+  .aw-k-translate { background:#f3e5f5; color:#6a1b9a; }
+  .aw-k-both      { background:#e8f5e9; color:#1b5e20; }
+  .aw-trcell { font-size:12px; color:#455a64; line-height:1.45; }
+  .aw-trcell .bad { color:#ef6c00; font-weight:600; }
+  .aw-trcell .err { color:#c62828; font-weight:600; }
+  /* ตารางทุกครั้งที่กดแปล */
+  .aw-trlog-head { margin:16px 0 6px; font-size:13px; font-weight:600; color:#37474f; }
+  .aw-trlog { width:100%; border-collapse:collapse; font-size:12px; }
+  .aw-trlog th, .aw-trlog td { padding:5px 8px; border-bottom:1px solid #eceff1; text-align:left;
+                               vertical-align:top; }
+  .aw-trlog th { color:#78909c; font-weight:600; font-size:11px; }
+  .aw-trlog td.err { color:#c62828; }
+  .aw-tbl-scroll { overflow-x:auto; }
 </style>
 {% endblock %}
 
@@ -189,19 +271,80 @@
     <!-- ป้ายบอกว่ากำลังดูชุดไหน — เติมจาก field scope ของ /api/artwork/history
          (ว่างไว้ก่อน; JS เป็นคนใส่ข้อความ ไม่งั้นจะกระพริบตอนโหลด) -->
     <div id="awScopeNote" class="aw-scope" style="display:none;"></div>
+
+    <!-- ตัวกรอง — กรองฝั่ง server (/api/artwork/history?…) เพราะรายการถูก
+         ตัดที่ limit ⇒ กรองฝั่ง JS จะหาไม่เจองานที่อยู่นอก 100 แถวแรก -->
+    <form id="awFilter" class="aw-filter" autocomplete="off">
+      <label>ตั้งแต่วันที่<input type="date" name="date_from"></label>
+      <label>ถึงวันที่<input type="date" name="date_to"></label>
+      <label>ค้นหาไฟล์ / แบรนด์<input type="text" name="q" placeholder="พิมพ์บางส่วนของชื่อ"></label>
+      {% if history_translate %}
+      <label>ประเภท
+        <select name="kind">
+          <option value="">ทั้งหมด</option>
+          <option value="inspect">ตรวจอย่างเดียว</option>
+          <option value="translate">แปลอย่างเดียว</option>
+          <option value="both">ตรวจ + แปล</option>
+        </select>
+      </label>
+      {% endif %}
+      <label>ผลตรวจ
+        <select name="verdict">
+          <option value="">ทั้งหมด</option>
+          <option value="PASS">PASS</option>
+          <option value="REVIEW">REVIEW</option>
+          <option value="FAIL">FAIL</option>
+        </select>
+      </label>
+      <label id="awOwnerWrap" style="display:none;">ผู้ตรวจ
+        <select name="owner"><option value="">ทุกคน</option></select>
+      </label>
+      {% if history_translate %}
+      <label class="aw-fcheck"><input type="checkbox" name="tr_issues" value="1">
+        คำแปลมีบรรทัดน่าสงสัย</label>
+      {% endif %}
+      <div class="aw-fbtns">
+        <button type="submit" class="aw-fbtn">กรอง</button>
+        <button type="button" class="aw-fbtn ghost" id="awFilterReset">ล้าง</button>
+      </div>
+    </form>
+    <div id="awFilterCount" class="aw-fcount"></div>
+
+    <div class="aw-tbl-scroll">
     <table class="aw-tbl">
       <thead>
-        <tr><th>วันเวลา</th><th>ไฟล์</th><th>แบรนด์</th><th>ผล</th>
-            <th>จำนวนประเด็น</th><th>ผู้ตรวจ</th><th></th></tr>
+        <tr><th>วันเวลา</th><th>ไฟล์</th><th>แบรนด์</th>
+            {% if history_translate %}<th>ประเภท</th>{% endif %}
+            <th>ผล</th><th>จำนวนประเด็น</th>
+            {% if history_translate %}<th>คำแปล</th>{% endif %}
+            <th>ผู้ตรวจ</th><th></th></tr>
       </thead>
       <tbody id="awHistBody">
-        <tr><td colspan="7" class="aw-empty">กำลังโหลด…</td></tr>
+        <tr><td colspan="{{ 9 if history_translate else 7 }}" class="aw-empty">กำลังโหลด…</td></tr>
       </tbody>
     </table>
+    </div>
   </div>
 
   <div class="aw-panel" id="awDetailPanel" style="display:none;">
+    <div class="aw-tabs" id="awDetailTabs" style="display:none;">
+      <button type="button" class="aw-tab aw-tab-active" data-awtab="result">🔍 ผลตรวจ</button>
+      <button type="button" class="aw-tab" data-awtab="text">📖 ข้อความ + คำแปล</button>
+    </div>
     <div id="awDetail"></div>
+    <div id="awTrDetail" style="display:none;">
+      <div class="aw-textnote">
+        ℹ️ ตารางนี้คือผลของ <b>การกดแปลครั้งล่าสุด</b> ที่บันทึกไว้ — เป็น
+        <b>ตัวช่วยอ่าน/แปล</b> ไม่ใช่ผลตรวจ QC · คอลัมน์ 🤖 เป็นความเห็นของ AI
+      </div>
+      <div class="aw-textbar">
+        <div id="awTrSummary" class="aw-textmsg"></div>
+        <label class="aw-textfilter"><input type="checkbox" id="awTrOnlyIssues"> เฉพาะบรรทัดที่น่าสงสัย</label>
+      </div>
+      <div id="awTrTable"></div>
+      <div class="aw-trlog-head">ประวัติการกดแปลทุกครั้ง</div>
+      <div id="awTrLog" class="aw-tbl-scroll"></div>
+    </div>
   </div>
 </div>
 {% endblock %}
@@ -212,6 +355,7 @@
   // โหลดสคริปต์ เพราะ hlTargets() อ่านตอนสร้าง URL ของภาพ crop
   window.AW_HL_BY_SPANS = {{ 'true' if hl_by_spans else 'false' }};
   window.AW_HL_REF_SIDE = {{ 'true' if hl_ref_side else 'false' }};
+  window.AW_HISTORY_TRANSLATE = {{ 'true' if history_translate else 'false' }};
 </script>
 <script src="{{ url_for('static', filename='js/artwork_check.js') }}?v={{ config_version }}"></script>
 <script src="{{ url_for('static', filename='js/artwork_check_history.js') }}?v={{ config_version }}"></script>

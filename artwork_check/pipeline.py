@@ -64,6 +64,7 @@ def start_inspection(file_bytes: bytes, filename: str,
     rec_id = report.new_inspection_id()
     d = report.inspection_dir(rec_id, create=True)
     report.save_owner(rec_id, owner)
+    report.save_meta(rec_id, filename)
     src_path = os.path.join(d, f"source{ext}")
     with open(src_path, "wb") as f:
         f.write(file_bytes)

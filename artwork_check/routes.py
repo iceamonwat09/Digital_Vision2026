@@ -125,7 +125,9 @@ def artwork_page():
 
 @artwork_bp.route("/artwork_check/history")
 def artwork_history_page():
-    return render_template("artwork_check_history.html", **_hl_flags())
+    return render_template("artwork_check_history.html",
+                           history_translate=config.HISTORY_TRANSLATE,
+                           **_hl_flags())
 
 
 # ── Inspection flow ───────────────────────────────────────────────────
@@ -488,6 +490,15 @@ def api_autopair(rec_id):
     return jsonify({"results": results})
 
 
+def _record_tr_error(rec_id: str, msg: str, brand: str, ocr_only: bool):
+    """ครั้งที่กดแปลแล้วล้มทั้งครั้ง ก็ต้องอยู่ในประวัติ ("กดทุกครั้ง")."""
+    if not config.HISTORY_TRANSLATE:
+        return
+    by = (_owner_of_request() or {}).get("username", "")
+    report.record_translation(rec_id, {"rows": [], "ocr_only": ocr_only},
+                              by=by, brand=brand, error=msg)
+
+
 @artwork_bp.route("/api/artwork/<rec_id>/translate", methods=["POST"])
 def api_translate(rec_id):
     """Build the per-line text table and (when a translate webhook is
@@ -538,6 +549,7 @@ def api_translate(rec_id):
             return jsonify({"error": str(e)}), 404
         except Exception as e:
             logger.exception("[artwork] ocr-only failed for %s", rec_id)
+            _record_tr_error(rec_id, f"OCR ไม่สำเร็จ: {e}", brand, True)
             return jsonify({"error": f"OCR ไม่สำเร็จ: {e}"}), 500
         defects = None   # advisory: no verdict/mismatch without a full inspection
 
@@ -555,6 +567,7 @@ def api_translate(rec_id):
         result = translate.translate_table(d, rows)
     except Exception as e:
         logger.exception("[artwork] translate failed for %s", rec_id)
+        _record_tr_error(rec_id, f"แปลไม่สำเร็จ: {e}", brand, ocr_only)
         return jsonify({"error": f"แปลไม่สำเร็จ: {e}"}), 500
 
     # translate_table may return rows from an older cache that predates the
@@ -574,7 +587,24 @@ def api_translate(rec_id):
     # Tells the UI this table came from the on-the-fly OCR path (no full
     # inspection yet) so it can note that cross-panel mismatch isn't checked.
     result["ocr_only"] = ocr_only
+    if config.HISTORY_TRANSLATE:
+        # ประวัติการแปล — best-effort ไม่ทำให้การแปลล้ม และไม่แตะ result
+        by = (_owner_of_request() or {}).get("username", "")
+        report.record_translation(rec_id, result, by=by, brand=brand)
     return jsonify(result)
+
+
+@artwork_bp.route("/api/artwork/<rec_id>/translations")
+def api_translations(rec_id):
+    """ประวัติการแปลของงานนี้: ตารางเต็มของครั้งล่าสุด + ทุกครั้งที่กด.
+    อยู่หลังด่านเจ้าของเหมือน route อื่นที่มี ``<rec_id>``."""
+    try:
+        data = report.load_translations(rec_id)
+    except ValueError:
+        return jsonify({"error": "bad id"}), 400
+    if not data["log"] and not data["last"]:
+        return jsonify({"error": "ยังไม่มีประวัติการแปล"}), 404
+    return jsonify(data)
 
 
 @artwork_bp.route("/api/artwork/<rec_id>/report")
@@ -589,6 +619,12 @@ def api_report(rec_id):
     # ไม่เขียนลง report.json เพื่อให้ชั้นนี้แยกขาดจากผลตรวจ QC จริง ๆ
     pd = pipeline.load_pixdiff(rec_id)
     out = _with_owner(rec_id, rep)
+    # ชื่อไฟล์ที่ผู้ใช้อัปโหลดจริง (meta.json — งานที่อัปโหลดหลัง 28 ก.ย. 2026)
+    # แทน "source.pdf" ที่ report.json เก็บไว้ · แนบตอนตอบ ไม่เขียนทับไฟล์
+    real_name = report.load_meta(rec_id).get("filename")
+    if real_name:
+        out = dict(out)
+        out["filename"] = real_name
     if pd:
         out = dict(out)
         out["pixdiff"] = pd
@@ -605,13 +641,24 @@ def api_history():
     """
     limit = request.args.get("limit", 50, type=int)
     viewer = _viewer()
-    records = report.list_inspections(limit=limit,
-                                      can_view=ownership.make_filter(viewer))
-    return jsonify({
+    can_view = ownership.make_filter(viewer)
+    filters = report.normalize_filters(request.args)
+    scope = ownership.scope_of(viewer)
+    records = report.list_inspections(
+        limit=limit, can_view=can_view,
+        include_translate=config.HISTORY_TRANSLATE,
+        filters=filters or None)
+    out = {
         "records": records,
-        "scope": ownership.scope_of(viewer),
+        "scope": scope,
         "username": (viewer or {}).get("username", ""),
-    })
+        "translate_history": config.HISTORY_TRANSLATE,
+        "filters": filters,
+    }
+    if scope == "all":
+        # ตัวเลือก "ผู้ตรวจ" มีความหมายเฉพาะคนที่เห็นงานของหลายคน
+        out["owners"] = report.list_owners(can_view)
+    return jsonify(out)
 
 
 @artwork_bp.route("/api/artwork/<rec_id>", methods=["DELETE"])

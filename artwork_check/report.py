@@ -17,6 +17,7 @@ import logging
 import os
 import re
 import shutil
+import threading
 import time
 import uuid
 from typing import Dict, List, Optional
@@ -158,12 +159,22 @@ def load_owner(rec_id: str) -> Optional[dict]:
     return data if isinstance(data, dict) else None
 
 
-def list_inspections(limit: int = 50, can_view=None) -> List[dict]:
+def list_inspections(limit: int = 50, can_view=None,
+                     include_translate: bool = False,
+                     filters: Optional[dict] = None) -> List[dict]:
     """รายการตรวจล่าสุด (ใหม่สุดก่อน).
 
     ``can_view`` = callable ``(owner_dict|None) -> bool`` สำหรับกรองตามเจ้าของ.
     ``None`` (ค่าเริ่มต้น) = ไม่กรอง → เดินเส้นทางเดิมทุกประการ.
+
+    ``include_translate`` = รวมงานที่ "แปลอย่างเดียว" (ยังไม่มี report.json)
+    และแนบคีย์ ``kind`` / ``translate`` ให้ทุกแถว. ``filters`` = ตัวกรองจาก
+    หน้าประวัติ (ดู ``normalize_filters``). ไม่ส่งทั้งสองอย่าง = เส้นทางเดิม
+    ทุกบรรทัด (คีย์ของแถวเท่าเดิมเป๊ะ).
     """
+    if include_translate or filters:
+        return _list_extended(limit, can_view, include_translate,
+                              normalize_filters(filters))
     out = []
     try:
         ids = sorted(os.listdir(config.INSPECTIONS_DIR), reverse=True)
@@ -214,3 +225,315 @@ def delete_inspection(rec_id: str) -> bool:
         shutil.rmtree(d)
         return True
     return False
+
+
+# ── ข้อมูลไฟล์ตอนอัปโหลด ────────────────────────────────────────────
+# ชื่อไฟล์เดิมถูกบันทึกลง report.json เท่านั้น (เกิดตอนกด "ส่งตรวจสอบ")
+# ⇒ งานที่กดแปลอย่างเดียวไม่มีชื่อไฟล์ให้แสดงในประวัติ. ไฟล์นี้เขียนตั้งแต่
+# ตอนอัปโหลด (best-effort — เขียนไม่สำเร็จแค่ทำให้หน้าประวัติไม่มีชื่อไฟล์)
+_META_FILE = "meta.json"
+
+
+def save_meta(rec_id: str, filename: str) -> None:
+    try:
+        with open(os.path.join(inspection_dir(rec_id), _META_FILE),
+                  "w", encoding="utf-8") as f:
+            json.dump({"filename": filename or "",
+                       "created_at": time.strftime("%Y-%m-%d %H:%M:%S")},
+                      f, ensure_ascii=False, indent=1)
+    except OSError as e:
+        logger.warning("[artwork] save_meta failed for %s: %s", rec_id, e)
+
+
+def load_meta(rec_id: str) -> dict:
+    try:
+        with open(os.path.join(inspection_dir(rec_id), _META_FILE),
+                  encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _time_from_id(rec_id: str) -> str:
+    """``20260811-090207-xxxxxx`` → ``2026-08-11 09:02:07`` (เวลาอัปโหลด)."""
+    m = re.match(r"(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})", rec_id)
+    if not m:
+        return ""
+    y, mo, d, h, mi, se = m.groups()
+    return f"{y}-{mo}-{d} {h}:{mi}:{se}"
+
+
+# ── ประวัติการแปล ────────────────────────────────────────────────────
+# แยกขาดจาก translation.json (แคช) โดยตั้งใจ: แคชเขียนเฉพาะผลที่ "ครบ"
+# (ผลไม่ครบต้องไม่ถูกแช่ ไม่งั้นกดแปลซ้ำแล้วได้ช่องว่างเดิมตลอดไป) ส่วน
+# ประวัติต้องเก็บ "ทุกครั้งที่กด" รวมครั้งที่ไม่สำเร็จ — เอาสองหน้าที่นี้
+# ไปรวมไฟล์เดียวกันจะต้องแก้เงื่อนไขของแคช = เปลี่ยนพฤติกรรมเดิม
+_TR_LOG = "translate_log.jsonl"     # 1 บรรทัด = 1 ครั้งที่กด (สรุปตัวเลข)
+_TR_LAST = "translate_last.json"    # ตารางเต็มของครั้งล่าสุด
+_TR_LOCK = threading.Lock()         # Flask threaded=True — กันเขียนชนกัน
+
+
+def _is_issue(row: dict) -> bool:
+    """นิยามเดียวกับตัวกรอง "เฉพาะบรรทัดน่าสงสัย" ของ renderTextTable."""
+    return (row.get("status") in ("spell", "mismatch")
+            or bool((row.get("ai_spell") or {}).get("flagged")))
+
+
+def translate_entry(result: dict, by: str = "", brand: str = "") -> dict:
+    """สรุปตัวเลขของผลแปล 1 ครั้ง (ไม่มีตารางเต็ม)."""
+    rows = result.get("rows") or []
+    return {
+        "at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "by": by or "",
+        "brand": brand or "",
+        "rows": len(rows),
+        "issues": sum(1 for r in rows if _is_issue(r)),
+        "spell": sum(1 for r in rows if r.get("status") == "spell"),
+        "mismatch": sum(1 for r in rows if r.get("status") == "mismatch"),
+        "ai_flagged": sum(1 for r in rows
+                          if (r.get("ai_spell") or {}).get("flagged")),
+        "unsupported": sum(1 for r in rows
+                           if r.get("status") == "unsupported"),
+        "translated": bool(result.get("translated")),
+        "cached": bool(result.get("cached")),
+        "ocr_only": bool(result.get("ocr_only")),
+        "note": result.get("note") or "",
+    }
+
+
+def record_translation(rec_id: str, result: dict, by: str = "",
+                       brand: str = "",
+                       error: Optional[str] = None) -> Optional[dict]:
+    """บันทึกการกดแปล 1 ครั้ง (best-effort — ไม่ raise).
+
+    ต้องไม่ทำให้การแปลล้ม: เขียนไฟล์ไม่ได้ = ประวัติขาดครั้งนั้นไป ผู้ใช้
+    ยังได้ตารางคำแปลตามปกติ.
+
+    ``error`` = ครั้งที่ทำงานไม่สำเร็จเลย (OCR/แปลโยน exception) — บันทึก
+    ลง log อย่างเดียว **ไม่ทับตารางของครั้งล่าสุดที่สำเร็จ** (ไม่งั้นกดพลาด
+    ครั้งเดียว ตารางที่เคยได้ก็หายจากหน้าประวัติ)
+    """
+    try:
+        d = inspection_dir(rec_id)
+        entry = translate_entry(result, by=by, brand=brand)
+        if error:
+            entry["error"] = str(error)[:300]
+            with _TR_LOCK:
+                with open(os.path.join(d, _TR_LOG), "a",
+                          encoding="utf-8") as f:
+                    f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+            return entry
+        last = dict(entry)
+        last["table"] = {
+            "rows": result.get("rows") or [],
+            "translated": bool(result.get("translated")),
+            "cached": bool(result.get("cached")),
+            "ai_spell_available": bool(result.get("ai_spell_available")),
+            "ocr_only": bool(result.get("ocr_only")),
+            "enabled": bool(result.get("enabled")),
+            "note": result.get("note"),
+        }
+        with _TR_LOCK:
+            with open(os.path.join(d, _TR_LOG), "a", encoding="utf-8") as f:
+                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+            tmp = os.path.join(d, _TR_LAST + ".tmp")
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(last, f, ensure_ascii=False)
+            os.replace(tmp, os.path.join(d, _TR_LAST))
+        return entry
+    except (OSError, ValueError, TypeError) as e:
+        logger.warning("[artwork] record_translation failed for %s: %s",
+                       rec_id, e)
+        return None
+
+
+def _read_log(rec_id: str) -> List[dict]:
+    """ทุกบรรทัดของ log (เก่าสุดก่อน). บรรทัดที่เสีย (เขียนค้างครึ่ง) ข้าม."""
+    p = os.path.join(inspection_dir(rec_id), _TR_LOG)
+    try:
+        with open(p, encoding="utf-8") as f:
+            lines = f.read().splitlines()
+    except OSError:
+        return []
+    out = []
+    for ln in lines:
+        try:
+            e = json.loads(ln)
+        except ValueError:
+            continue
+        if isinstance(e, dict):
+            out.append(e)
+    return out
+
+
+def translate_summary(rec_id: str) -> Optional[dict]:
+    """สรุปสำหรับแถวในตารางประวัติ หรือ ``None`` ถ้ายังไม่เคยกดแปล."""
+    log = _read_log(rec_id)
+    if not log:
+        return None
+    last = log[-1]
+    return {
+        "count": len(log),
+        "first_at": log[0].get("at", ""),
+        "last_at": last.get("at", ""),
+        "last_by": last.get("by", ""),
+        "rows": last.get("rows", 0),
+        "issues": last.get("issues", 0),
+        "translated": bool(last.get("translated")),
+        "ocr_only": bool(last.get("ocr_only")),
+        "error": last.get("error", ""),
+        "brand": last.get("brand", ""),
+        # ใช้กรองตามวันที่เท่านั้น — ถูกถอดออกก่อนตอบ JSON
+        "_days": sorted({(e.get("at") or "")[:10] for e in log
+                         if e.get("at")}),
+    }
+
+
+def load_translations(rec_id: str) -> dict:
+    """ตารางเต็มของครั้งล่าสุด + รายการทุกครั้ง (ใหม่สุดก่อน)."""
+    last = None
+    try:
+        with open(os.path.join(inspection_dir(rec_id), _TR_LAST),
+                  encoding="utf-8") as f:
+            last = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        last = None
+    log = _read_log(rec_id)
+    total = len(log)
+    cap = max(1, config.TRANSLATE_LOG_MAX)
+    return {"last": last if isinstance(last, dict) else None,
+            "log": list(reversed(log[-cap:])),
+            "count": total}
+
+
+# ── ตัวกรองของหน้าประวัติ ─────────────────────────────────────────────
+_KINDS = ("inspect", "translate", "both")
+_VERDICTS = ("PASS", "REVIEW", "FAIL")
+_DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
+
+
+def normalize_filters(raw: Optional[dict]) -> dict:
+    """ตรวจ/ทำความสะอาดตัวกรองจาก query string. ค่าที่ไม่รู้จัก = ไม่กรอง
+    (ไม่ใช่ error — ลิงก์เก่า/พิมพ์ผิดต้องยังเปิดหน้าได้)."""
+    raw = raw or {}
+    f: dict = {}
+    for k in ("date_from", "date_to"):
+        v = str(raw.get(k) or "").strip()
+        if _DATE_RE.fullmatch(v):
+            f[k] = v
+    q = str(raw.get("q") or "").strip()[:100]
+    if q:
+        f["q"] = q.casefold()
+    kind = str(raw.get("kind") or "").strip().lower()
+    if kind in _KINDS:
+        f["kind"] = kind
+    verdict = str(raw.get("verdict") or "").strip().upper()
+    if verdict in _VERDICTS:
+        f["verdict"] = verdict
+    if str(raw.get("tr_issues") or "").strip().lower() in ("1", "true", "yes"):
+        f["tr_issues"] = True
+    owner = str(raw.get("owner") or "").strip()[:64]
+    if owner:
+        f["owner"] = owner.casefold()
+    return f
+
+
+def _match(row: dict, days: List[str], f: dict) -> bool:
+    if "date_from" in f or "date_to" in f:
+        lo, hi = f.get("date_from", ""), f.get("date_to", "9999-99-99")
+        # วันที่ของงาน = วันที่อัปโหลด/ตรวจ + ทุกวันที่มีการกดแปล ⇒ งานเก่า
+        # ที่เพิ่งถูกแปลวันนี้ยังหาเจอเมื่อกรอง "วันนี้"
+        if not any(lo <= d <= hi for d in days if d):
+            return False
+    if "q" in f:
+        hay = (str(row.get("filename") or "") + " " +
+               str(row.get("brand") or "")).casefold()
+        if f["q"] not in hay:
+            return False
+    if "kind" in f and row.get("kind") != f["kind"]:
+        return False
+    if "verdict" in f and row.get("verdict") != f["verdict"]:
+        return False
+    if f.get("tr_issues"):
+        tr = row.get("translate") or {}
+        if not tr.get("issues"):
+            return False
+    if "owner" in f and str(row.get("owner") or "").casefold() != f["owner"]:
+        return False
+    return True
+
+
+def _list_extended(limit: int, can_view, include_translate: bool,
+                   f: dict) -> List[dict]:
+    try:
+        ids = sorted(os.listdir(config.INSPECTIONS_DIR), reverse=True)
+    except FileNotFoundError:
+        return []
+    limit = max(1, limit)
+    if not include_translate:
+        # ปิดประวัติการแปล = แถวไม่มี kind/translate ⇒ ตัวกรองสองตัวนี้
+        # ไม่มีความหมาย (ถ้าคงไว้จะตัดทุกแถวทิ้งเงียบ ๆ)
+        f = {k: v for k, v in f.items() if k not in ("kind", "tr_issues")}
+    out: List[dict] = []
+    for rec_id in ids[:_MAX_SCAN]:
+        if len(out) >= limit:
+            break
+        try:
+            owner = load_owner(rec_id)
+        except ValueError:          # ชื่อโฟลเดอร์ไม่ใช่ id ที่ถูกต้อง
+            continue
+        if can_view is not None and not can_view(owner):
+            continue
+        try:
+            rep = load_report(rec_id)
+        except (ValueError, json.JSONDecodeError):
+            rep = None
+        tr = translate_summary(rec_id) if include_translate else None
+        if not rep and not tr:
+            continue
+        meta = load_meta(rec_id)
+        rep = rep or {}
+        row = {
+            "id": rec_id,
+            "created_at": (rep.get("created_at") or meta.get("created_at")
+                           or _time_from_id(rec_id)),
+            # meta ก่อน: report.json เก็บชื่อไฟล์ที่ถูกบันทึกบนดิสก์ (``source.pdf``
+            # เสมอ) ไม่ใช่ชื่อที่ผู้ใช้อัปโหลด — ค้นหาด้วยชื่อไฟล์จึงใช้ไม่ได้
+            "filename": meta.get("filename") or rep.get("filename") or "",
+            "brand": rep.get("brand") or (tr or {}).get("brand", ""),
+            "verdict": rep.get("verdict", "") if rep else "",
+            "defect_count": len(rep.get("defects", [])) if rep else None,
+            "owner": (owner or {}).get("username", ""),
+        }
+        days = [row["created_at"][:10]]
+        if include_translate:
+            row["kind"] = ("both" if rep and tr
+                           else "translate" if tr else "inspect")
+            if tr:
+                days += tr.pop("_days", [])
+            row["translate"] = tr
+        if f and not _match(row, days, f):
+            continue
+        out.append(row)
+    return out
+
+
+def list_owners(can_view=None) -> List[str]:
+    """ชื่อผู้ตรวจทั้งหมดที่ผู้ดูคนนี้มีสิทธิ์เห็น (ใช้ทำตัวเลือกกรอง)."""
+    try:
+        ids = sorted(os.listdir(config.INSPECTIONS_DIR), reverse=True)
+    except FileNotFoundError:
+        return []
+    names = set()
+    for rec_id in ids[:_MAX_SCAN]:
+        try:
+            owner = load_owner(rec_id)
+        except ValueError:
+            continue
+        if can_view is not None and not can_view(owner):
+            continue
+        n = (owner or {}).get("username")
+        if n:
+            names.add(n)
+    return sorted(names, key=str.casefold)

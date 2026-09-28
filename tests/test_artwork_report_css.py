@@ -40,14 +40,19 @@ _HELPERS = [
     ("  function confirmHtml(cf) {", "  window.awConfirmHtml = confirmHtml;"),
     ("  function flowHtml(pr, done) {", "  window.awFlowHtml = flowHtml;"),
     ("  function markDiff(text, spans) {", "  window.awMarkDiff = markDiff;"),
+    # หน้าประวัติเรียก awRenderTextTable ด้วยแล้ว (ประวัติการแปล 28 ก.ย. 2026)
+    # ⇒ คลาสของตารางคำแปลต้องมีครบทั้งสองหน้าเหมือนกัน
+    ("  function highlightFlagged(src, flagged, unsupported) {",
+     "  function renderTextTable(result, box, onlyIssues) {"),
+    ("  function renderTextTable(result, box, onlyIssues) {",
+     "  window.awRenderTextTable = renderTextTable;"),
 ]
 
 
 def _renderer_source():
     """body ของ ``renderReport()`` **บวกฟังก์ชันช่วยที่มันเรียกต่อ** — ทั้งหมด
     คือสิ่งที่หน้าประวัติเรนเดอร์จริง (``artwork_check_history.js`` เรียก
-    ``window.awRenderReport`` อย่างเดียว ไม่ได้เรียก ``awRenderTextTable``)
-    จึงไม่รวมคลาสของตารางแปล."""
+    ทั้ง ``window.awRenderReport`` และ ``window.awRenderTextTable``)."""
     js = _read(JS)
     a = js.index("  function renderReport(rep, box) {")
     b = js.index("  window.awRenderReport = renderReport;")
@@ -88,7 +93,11 @@ def test_every_rendered_class_is_styled_on_both_pages(cls):
 def test_shared_class_rules_are_identical():
     """กฎของคลาสที่ใช้ร่วมกันต้องเหมือนกันเป๊ะ ไม่งั้นหน้าประวัติจะหน้าตา
     ต่างออกไปโดยไม่ได้ตั้งใจ. ยกเว้นรายการที่ตั้งใจให้ต่าง (ดู ALLOW)."""
-    ALLOW = {"aw-defect", "aw-defect-class"}   # history ย่อรูป/ระยะโดยตั้งใจ
+    ALLOW = {"aw-defect", "aw-defect-class",   # history ย่อรูป/ระยะโดยตั้งใจ
+             # .aw-empty ถูกใช้เป็นแถวว่างของตารางประวัติมาก่อนแล้ว (padding
+             # เล็กกว่าโดยตั้งใจ) — พอหน้าประวัติเรียก renderTextTable ด้วย
+             # คลาสนี้จึงเพิ่งเข้าข่ายการเทียบ ไม่ใช่กฎที่เพิ่งแยกทางกัน
+             "aw-empty"}
 
     def rules(path, cls):
         css = re.sub(r"/\*.*?\*/", "", _read(path), flags=re.S)
