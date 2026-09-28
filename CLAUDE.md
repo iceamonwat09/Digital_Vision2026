@@ -24,7 +24,7 @@
 ## 🚦 อ่านตรงนี้ก่อน — สถานะล่าสุด 28 ก.ย. 2026 (สำหรับแชทใหม่)
 
 **Branch: `claude/elegant-hawking-tik6na`** · `CONFIG_VERSION` =
-**`2026.09.28-clone`** · pytest **1675 ผ่าน / 6 fail** (ข้าม
+**`2026.09.28-layout`** · pytest **1689 ผ่าน / 6 fail** (ข้าม
 `test_auth_registration.py`) · fail = `test_inspection_golden` 5 ตัวเดิม +
 `test_auto_never_asks_for_a_language_that_is_not_installed` (container ไม่มี
 tesseract binary — fail บน baseline เหมือนกัน ยืนยันด้วย `git stash`)
