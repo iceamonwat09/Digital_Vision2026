@@ -1225,10 +1225,21 @@
     activeDoc = act.doc;
     natW = docMeta[act.doc].w;
     natH = docMeta[act.doc].h;
+    dropForeignSelection();
     setZoomUi(act.zoom);
     updateDocTabs();
     applyZoom();
     renderZones();
+  }
+
+  // โซนที่เลือกค้างเป็นของอีกไฟล์ (เลย์เอาต์ปกติสลับแท็บแล้วยังคงการเลือก —
+  // ของเดิม) ⇒ พอเข้าซ้าย-ขวา/ภาพ OCR ด้านขวา ต้องเลิกเลือก ไม่งั้น Delete/
+  // แผง properties/ภาพ OCR ทำงานกับโซนที่ไม่ได้อยู่บนกล่องที่ทำงาน
+  function dropForeignSelection() {
+    const sz = selectedZone();
+    if (!sz || docOfZone(sz) === activeDoc) return false;
+    selectedId = null;
+    return true;
   }
 
   // force = ไฟล์เปลี่ยน (แนบ 🅱 ใหม่ / กู้คืน) ⇒ ถ้าอยู่ในซ้าย-ขวาแล้วต้องตั้งใหม่
@@ -1237,7 +1248,8 @@
     if (grp) {
       grp.style.display = (refAttached && docMeta.b) ? "" : "none";
       grp.querySelectorAll(".aw-lay-btn").forEach((b) => {
-        b.classList.toggle("active", b.dataset.layout === layoutPref);
+        b.classList.toggle("active", b.dataset.layout ===
+          (layoutPref === "split" && !hasPaneB ? "normal" : layoutPref));
         if (b.dataset.layout === "split" && !hasPaneB) b.style.display = "none";
       });
     }
@@ -1284,6 +1296,7 @@
     }
     // normal ⇄ side: ย้ายแค่ตำแหน่งภาพ OCR — ความกว้างกล่องภาพเปลี่ยน
     updatePannable();
+    if (want === "side" && dropForeignSelection()) renderZones();
     updateRotPreview();
   }
 

@@ -280,7 +280,8 @@
   .aw-stage-area.lay-split .aw-stage-box { border-radius:0 0 8px 8px; }
   .aw-stage-area.lay-split .aw-pane.is-active .aw-stage-box { border-color:#90caf9; }
   /* โหมด 2: ภาพที่ OCR จะเห็น ย้ายมาด้านขวา
-     (ไม่ใช้ sticky — .main-content เป็นตัวเลื่อนเอง (overflow-y:auto) จึงตรึงไม่ติด
+     (ไม่ใช้ sticky — บรรพบุรุษ .main-content มี overflow-y:auto แต่ไม่ได้เลื่อนเอง
+      (ทั้งหน้าเลื่อน) ⇒ sticky ติดกับกล่องที่ไม่เลื่อน = ตรึงไม่ติด
       และ navbar สูง ~56px จะบังส่วนบนของคอลัมน์) */
   .aw-stage-area.lay-side { display:grid; grid-template-columns:minmax(0,1fr) 340px;
                             gap:12px; align-items:start; }

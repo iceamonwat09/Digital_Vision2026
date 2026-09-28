@@ -186,3 +186,16 @@ def test_history_page_is_as_wide_as_the_inspect_page():
     hjs = open(os.path.join(ROOT, "static", "js", "artwork_check_history.js"),
                encoding="utf-8").read()
     assert '<td class="aw-owner">' in hjs       # ชื่อผู้ตรวจยาวตัดบรรทัดได้
+
+
+def test_entering_split_or_side_drops_selection_of_the_other_file():
+    """เลย์เอาต์ปกติสลับแท็บแล้วยังคงการเลือกไว้ (ของเดิม) ⇒ พอกด
+    ซ้าย-ขวา / ภาพ OCR ด้านขวา ต้องเลิกเลือกโซนของไฟล์ที่ไม่ได้ทำงาน
+    ไม่งั้น Delete ลบโซนที่ไม่อยู่บนจอ (รีวิวรอบ 2 เจอจริงบน Chromium)"""
+    dfs = _fn("dropForeignSelection")
+    assert "docOfZone(sz) === activeDoc" in dfs and "selectedId = null;" in dfs
+    ss = _fn("setupSplit")
+    assert ss.index("activeDoc = act.doc;") < ss.index("dropForeignSelection();") \
+        < ss.index("renderZones();")
+    al = _fn("applyLayout")
+    assert 'if (want === "side" && dropForeignSelection()) renderZones();' in al
