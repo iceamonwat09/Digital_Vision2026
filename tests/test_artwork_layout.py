@@ -53,16 +53,41 @@ def test_new_css_is_scoped_to_layout_classes():
     """ไม่มีคลาส lay-* = ตัวห่อไม่มีสไตล์ = หน้าตาเดิม. กฎใหม่ที่แตะของเดิม
     (.aw-stage-box / .aw-pane / .aw-rot-*) ต้องอยู่ใต้ .lay-split/.lay-side."""
     css = HTML[HTML.index("<style>"):HTML.index("</style>")]
-    block = css[css.index("เลย์เอาต์พื้นที่ภาพ"):css.index("@media (max-width:900px)")]
-    for line in block.splitlines():
-        sel = line.split("{")[0]
-        if "{" not in line or not re.search(r"\.aw-(stage-box|pane(?![-\w])|rot-)", sel):
-            continue
-        if sel.strip() in (".aw-pane-head", ".aw-rot-empty"):
-            continue                       # กฎ "ซ่อน" ของ element ใหม่ — ไม่แตะของเดิม
-        assert "lay-split" in sel or "lay-side" in sel, line
+    block = css[css.index("/* ── เลย์เอาต์พื้นที่ภาพ"):css.index("/* เตือนว่าโซนนี้จะชี้ตำแหน่งคำ")]
+    block = re.sub(r"/\*.*?\*/", "", block, flags=re.S)
+    # กฎทุกข้อในบล็อกนี้ต้องผูกกับคลาสของฟีเจอร์ใหม่ — ไม่มีข้อไหนแตะของเดิมลอย ๆ
+    allowed = (".aw-layout", ".aw-lay-btn", ".aw-lay-btn.active", ".aw-pane-head",
+               ".aw-rot-empty", ".aw-toolbar.lay-bar",
+               ".aw-toolbar.has-layout .aw-pan-hint")
+    sels = re.findall(r"([^{}]+)\{[^{}]*\}", block)
+    assert len(sels) > 10
+    for raw in sels:
+        for sel in raw.split(","):
+            sel = sel.strip()
+            if not sel:
+                continue
+            assert (sel in allowed or "lay-split" in sel or "lay-side" in sel), sel
     assert ".aw-pane-head { display:none; }" in css
     assert ".aw-rot-empty { display:none; }" in css
+
+
+def test_shared_stylesheet_is_not_touched():
+    # ความกว้างหน้าอื่น ๆ ทั้งหมดมาจาก style.css — ต้องปลดเพดานใน template เท่านั้น
+    css = open(os.path.join(ROOT, "static", "css", "style.css"), encoding="utf-8").read()
+    assert re.search(r"\.main-content\s*\{[^}]*max-width:\s*1400px", css)
+
+
+def test_side_column_is_not_sticky():
+    # .main-content เลื่อนเอง (overflow-y:auto) ⇒ sticky ตรึงไม่ติด + navbar บัง
+    css = HTML[HTML.index("<style>"):HTML.index("</style>")]
+    rule = re.search(r"\.lay-side \.aw-rot-col \{([^}]*)\}", css).group(1)
+    assert "sticky" not in rule
+
+
+def test_layout_buttons_do_not_wrap_the_toolbar():
+    assert ".aw-lay-btn { white-space:nowrap; }" in HTML
+    assert ".aw-toolbar.has-layout .aw-pan-hint { display:none; }" in HTML
+    assert 'classList.toggle("has-layout", !!(refAttached && docMeta.b))' in JS
 
 
 # ── JS ───────────────────────────────────────────────────────────────
@@ -84,8 +109,12 @@ def test_layout_pref_storage_is_guarded():
 def test_layout_reapplied_whenever_second_file_changes():
     # แนบ 🅱 · เอา 🅱 ออก · อัปโหลด 🅰 ใหม่ · กู้คืนงาน — ทุกทางต้องเรียก
     # applyLayout() ไม่งั้นค้างอยู่ในโหมดซ้าย-ขวาทั้งที่เหลือไฟล์เดียว
-    assert "applyLayout();" in _fn("uploadRef")
-    assert "applyLayout();" in _fn("restoreSession")
+    # force=true: ไฟล์ 🅱 เปลี่ยนขณะอยู่ในซ้าย-ขวา ⇒ ต้องตั้งกล่องใหม่
+    # (ไม่งั้นกล่อง B ค้างภาพเก่า และ natW เป็นขนาดของไฟล์เก่า)
+    assert "applyLayout(true);" in _fn("uploadRef")
+    assert "applyLayout(true);" in _fn("restoreSession")
+    al = _fn("applyLayout")
+    assert 'if (force && want === "split") setupSplit(' in al
     rm = JS[JS.index('$("awRefRemove").addEventListener'):]
     assert rm.index("applyLayout();") < rm.index("showDoc(\"a\")")
     up = JS[JS.index('fileInput.addEventListener("change"'):]
@@ -99,6 +128,29 @@ def test_pane_activation_runs_in_capture_phase():
     act = _fn("activatePane")
     assert "renderZones" not in act
     assert "bindPane(p)" in act
+    # ห้ามสลับกล่องกลางท่าทาง (วาด/ลาก/เลื่อน) — จุดเริ่มกับพิกัดคนละไฟล์
+    assert act.index("if (draw || drag || pan) return;") < act.index("bindPane(p)")
+    # โซนที่เลือกค้างเป็นของอีกไฟล์ ⇒ เลิกเลือก (Delete จะไปลบฝั่งที่ไม่ได้ทำงาน)
+    assert "selectedId = null;" in act
+
+
+def test_wheel_activates_pane_only_over_the_image_box():
+    # ล้อบนหัวกล่อง (ไม่ใช่ภาพ) ต้องไม่ซูม/สลับกล่อง
+    assert 'p.box.addEventListener("wheel", act, { capture: true' in JS
+    assert 'p.wrap.addEventListener("wheel"' not in JS
+
+
+def test_inactive_pane_image_load_does_not_rerender_mid_gesture():
+    ld = _fn("onPaneImgLoad")
+    assert "if (drag || draw) { zonesStale = true; return; }" in ld
+    assert "if (zonesStale && !drag && !draw) { zonesStale = false; renderZones(); }" in JS
+
+
+def test_redetect_uses_the_file_captured_before_await():
+    i = JS.index("const doc = activeDoc;")
+    seg = JS[i:JS.index("renderZones();", i)]
+    assert seg.index("const doc = activeDoc;") < seg.index("await api(")
+    assert "docOfZone(z) !== doc" in seg and "activeDoc" not in seg[len("const doc = activeDoc;"):]
 
 
 def test_draw_and_pan_bound_on_both_panes():
@@ -118,7 +170,8 @@ def test_split_renders_zones_of_each_file_on_its_own_pane():
 def test_zone_quality_uses_the_zones_own_file_size():
     # กล่องที่ไม่ได้ทำงานต้องคิดคุณภาพจากขนาดไฟล์ของตัวเอง ไม่ใช่ natW ของอีกไฟล์
     assert "zoneQuality(z.bbox, doc)" in _fn("renderPaneZones")
-    assert "zoneQuality(z.bbox, docOfZone(z))" in JS
+    # แผง properties: ซ้าย-ขวาใช้ไฟล์ของโซน · เลย์เอาต์อื่นคงของเดิมเป๊ะ
+    assert 'zoneQuality(z.bbox, layout === "split" ? docOfZone(z) : undefined)' in JS
 
 
 def test_screen_rotation_applies_to_every_visible_pane():
@@ -130,3 +183,6 @@ def test_history_page_is_as_wide_as_the_inspect_page():
     assert ".main-content { max-width: none; }" in HIST
     assert re.search(r"\.aw-wrap \{ max-width: 1600px;", HIST)
     assert ".aw-tbl-scroll { overflow-x:auto; }" in HIST   # จอแคบเลื่อนในตาราง
+    hjs = open(os.path.join(ROOT, "static", "js", "artwork_check_history.js"),
+               encoding="utf-8").read()
+    assert '<td class="aw-owner">' in hjs       # ชื่อผู้ตรวจยาวตัดบรรทัดได้

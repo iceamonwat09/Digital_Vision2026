@@ -107,7 +107,7 @@
       '<td class="c-num">' + (r.defect_count == null ? '<span class="aw-owner">—</span>'
                                         : esc(r.defect_count)) + "</td>";
     if (TR) h += "<td>" + trCell(r.translate) + "</td>";
-    h += '<td class="aw-owner c-nw">' + esc(r.owner || "—") + "</td>" +
+    h += '<td class="aw-owner">' + esc(r.owner || "—") + "</td>" +
       '<td><button class="aw-btn-danger" data-del="' + esc(r.id) + '">ลบ</button></td>' +
       "</tr>";
     return h;

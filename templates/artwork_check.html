@@ -252,7 +252,11 @@
      ไม่มีคลาส lay-* = ตัวห่อทุกชั้นไม่มีสไตล์ = หน้าตาเดิมทุกพิกเซล.
      แสดงผลล้วน: พิกัดโซนเป็นสัดส่วนของภาพ ไม่ขึ้นกับความกว้างกล่อง */
   .aw-layout { padding-left:12px; border-left:1px solid #d4dde8; }
+  .aw-lay-btn { white-space:nowrap; }
   .aw-lay-btn.active { background:#0d47a1; border-color:#0d47a1; color:#fff; }
+  /* มีปุ่ม Layout เพิ่มมา ⇒ ซ่อนคำแนะนำการลากบนจอไม่กว้าง
+     ไม่งั้นแถบเครื่องมือตกเป็น 2 บรรทัด (ไฟล์เดียว = ไม่มีคลาสนี้ = เดิม) */
+  @media (max-width:1600px) { .aw-toolbar.has-layout .aw-pan-hint { display:none; } }
   .aw-pane-head { display:none; }
   .aw-rot-empty { display:none; }
   /* โหมด 1: 🅰 | 🅱 ซ้าย-ขวา */
@@ -263,7 +267,7 @@
   .aw-stage-area.lay-split .aw-pane > .aw-stage-box { flex:1 1 auto; }
   .aw-stage-area.lay-split .aw-pane-head { display:flex; align-items:center; gap:6px;
                   padding:5px 10px; font-size:12.5px; font-weight:700; border:1px solid #e1e8f0;
-                  border-bottom:none; background:#f4f7fb; }
+                  border-bottom:none; background:#f4f7fb; border-radius:8px 8px 0 0; }
   .aw-stage-area.lay-split .aw-pane-head.doc-a { color:#0d47a1; }
   .aw-stage-area.lay-split .aw-pane-head.doc-b { color:#00695c; }
   .aw-stage-area.lay-split .aw-pane-head::after { content:"คลิกเพื่อทำงานกับฝั่งนี้";
@@ -272,14 +276,15 @@
   .aw-stage-area.lay-split .aw-pane.is-active .aw-pane-head.doc-a { background:#1976d2; color:#fff; border-color:#1976d2; }
   .aw-stage-area.lay-split .aw-pane.is-active .aw-pane-head.doc-b { background:#00897b; color:#fff; border-color:#00897b; }
   .aw-stage-area.lay-split .aw-pane.is-active .aw-pane-head::after { color:rgba(255,255,255,.9); }
-  .aw-stage-area.lay-split .aw-pane-head { border-radius:8px 8px 0 0; }
-  .aw-toolbar.lay-split-bar { border-bottom:1px solid #e1e8f0; border-radius:8px; margin-bottom:8px; }
+  .aw-toolbar.lay-bar { border-bottom:1px solid #e1e8f0; border-radius:8px; margin-bottom:8px; }
   .aw-stage-area.lay-split .aw-stage-box { border-radius:0 0 8px 8px; }
   .aw-stage-area.lay-split .aw-pane.is-active .aw-stage-box { border-color:#90caf9; }
-  /* โหมด 2: ภาพที่ OCR จะเห็น ย้ายมาด้านขวา (ตรึงไว้ขณะเลื่อนหน้า) */
+  /* โหมด 2: ภาพที่ OCR จะเห็น ย้ายมาด้านขวา
+     (ไม่ใช้ sticky — .main-content เป็นตัวเลื่อนเอง (overflow-y:auto) จึงตรึงไม่ติด
+      และ navbar สูง ~56px จะบังส่วนบนของคอลัมน์) */
   .aw-stage-area.lay-side { display:grid; grid-template-columns:minmax(0,1fr) 340px;
                             gap:12px; align-items:start; }
-  .aw-stage-area.lay-side .aw-rot-col { position:sticky; top:12px; border:1px solid #e1e8f0;
+  .aw-stage-area.lay-side .aw-rot-col { border:1px solid #e1e8f0;
                   border-radius:8px; background:#fff; padding:8px 10px; }
   .aw-stage-area.lay-side .aw-stage-box { border-radius:8px; }
   .aw-stage-area.lay-side .aw-rot-preview { margin-top:0; }
@@ -289,7 +294,6 @@
                   font-size:12.5px; text-align:center; padding:28px 8px; line-height:1.6; }
   @media (max-width:900px) {
     .aw-stage-area.lay-split .aw-panes, .aw-stage-area.lay-side { grid-template-columns:minmax(0,1fr); }
-    .aw-stage-area.lay-side .aw-rot-col { position:static; }
   }
 
   /* เตือนว่าโซนนี้จะชี้ตำแหน่งคำ (กรอบแดง) ไม่ได้ — ไม่กระทบผลตรวจ */
