@@ -1,0 +1,115 @@
+{
+ "note": "AvoDerm Master-2/Master-1 3 กลุ่ม (สถานี 26 ก.ย. 2026-09-26-rules)",
+ "zones": [
+  {
+   "id": "z1",
+   "type": "panel",
+   "group": "A",
+   "doc": "a",
+   "bbox": [
+    0,
+    0,
+    1,
+    1
+   ],
+   "label": "z1"
+  },
+  {
+   "id": "z2",
+   "type": "panel",
+   "group": "B",
+   "doc": "a",
+   "bbox": [
+    0,
+    0,
+    1,
+    1
+   ],
+   "label": "z2"
+  },
+  {
+   "id": "z3",
+   "type": "panel",
+   "group": "C",
+   "doc": "a",
+   "bbox": [
+    0,
+    0,
+    1,
+    1
+   ],
+   "label": "z3"
+  },
+  {
+   "id": "b4",
+   "type": "panel",
+   "group": "A",
+   "doc": "b",
+   "bbox": [
+    0,
+    0,
+    1,
+    1
+   ],
+   "label": "b4"
+  },
+  {
+   "id": "b5",
+   "type": "panel",
+   "group": "B",
+   "doc": "b",
+   "bbox": [
+    0,
+    0,
+    1,
+    1
+   ],
+   "label": "b5"
+  },
+  {
+   "id": "b6",
+   "type": "panel",
+   "group": "C",
+   "doc": "b",
+   "bbox": [
+    0,
+    0,
+    1,
+    1
+   ],
+   "label": "b6"
+  }
+ ],
+ "ocr": [
+  {
+   "zone_id": "z1",
+   "text": "AvoDerm® Dog Stews are crafted in small batches and formulated for\nhealthy skin and coat. Our Chicken & Veggies Recipe in Gravy features\nboneless chicken, fresh carrots, green beans, pumpkin and other\nvegetables to support healthy digestion. Our special stew recipe has\na delicious gravy that will satisfy even the pickiest dogs.\nGUARANTEED ANALYSIS\nCrude Protein (min)........................7.0%\nCrude Fat (min)..............................2.0%\nCrude Fiber (max)..........................2.0%\nMoisture (max)..............................84.0%\nAsh (max)......................................4.0%\nCalcium (min)................................0.20%\nPhosphorus (min)..........................0.16%\nOmega-6 Fatty Acid* (min).......0.40%\nOmega-3 Fatty Acid* (min).......0.10%\n*Not recognized as an essential nutrient by the AAFCO Dog Food Nutrient Profiles.\nCALORIE CONTENT\nMetabolizable Energy (calculated).................................................797 kcal/kg\nMetabolizable Energy (calculated).................................................294 kcal/can\nINGREDIENTS Chicken Broth, Chicken, Carrots, Green Beans, Pumpkin, Tapioca Starch,\nPotato Protein, Tuna, Sunflower Oil, Seaweed, Spinach, Flaxseed Oil, Tricalcium Phosphate,\nSalmon Oil, Salt, Guar Gum, Avocado Oil, Sodium Tripolyphosphate, Potassium Chloride,\nInulin, Vitamins (Vitamin E Supplement, Vitamin A Supplement, Niacin Supplement,\nD-Calcium Pantothenate, Thiamine Mononitrate, Beta-carotene, Biotin, Riboflavin\nSupplement, Vitamin B12 Supplement, Pyridoxine Hydrochloride, Folic Acid), Minerals (Zinc\nOxide, Reduced Iron, Copper Amino Acid Complex, Manganese Sulfate, Sodium Selenite,\nPotassium Iodide), Choline Chloride, Magnesium Sulfate, Copper Sulfate.\nAvoDerm® Dog Food Stew Chicken & Veggies Recipe in Gravy is formulated to meet the\nnutritional levels established by the AAFCO Dog Food Nutrient Profiles for All Life Stages\nincluding growth of large size dogs (70 lbs or more as an adult).",
+   "engine": "n8n"
+  },
+  {
+   "zone_id": "z2",
+   "text": "DAILY FEEDING INSTRUCTIONS\nAmount of food your dog requires will depend on activity, age,\nenvironment and breed. Feed at room temperature and refrigerate\nunused portion. Adjust feeding to maintain optimum weight. Always\nprovide access to clean, fresh water.\nFeed adult dogs 1/2 - 1 can per 5-10 lbs body weight per day.\nPuppies and Gestating/Lactating Dogs (consult your veterinarian):\nFeed up to twice as much per pound of body weight as an adult.\n100% Satisfaction\nGuaranteed!\nIf for any reason you are dissatisfied with this\nproduct, return the unused portion to your\nAvoDerm Natural® dog food retailer along with\nyour receipt for replacement or refund.\nProduct of Thailand\nManufactured for\nBreeder's Choice\nBreeder's Choice Pet Foods, LLC\n16321 Arrow Hwy Irwindale, CA 91706 USA\n(866) 500-6286 • AvoDerm.com\nREFRIGERATE AFTER OPENING\n0\n5290700241\n0\nAvoDerm® Chicken & Veggies Recipe in Gravy 13 oz",
+   "engine": "n8n"
+  },
+  {
+   "zone_id": "z3",
+   "text": "AvoDerm\n®\nDOG FOOD STEW",
+   "engine": "n8n"
+  },
+  {
+   "zone_id": "b4",
+   "text": "AvoDerm® Dog Stews are crafted in small batches and formulated for\nhealthy skin and coat. Our Chicken & Veggies Recipe in Gravy features\nboneless chicken, fresh carrots, green beans, pumpkin and other\nvegetables to support healthy digestion. Our special stew recipe has\na delicious gravy that will satisfy even the pickiest dogs.\nGUARANTEED ANALYSIS\nCrude Protein (min).\n.7.0%\nCrude Fat (min).\n.2.0%\nCrude Fiber (max).\n.2.0%\nMoisture (max).\n.84.0%\nAsh (max).\n.4.0%\nCalcium (min).\n..0.20%\nPhosphorus (min).\n.0.16%\nOmega-6 Fatty Acid\n* (min)......0.40%\nOmega-3 Fatty Acid* (min)......0.10%\n*Not recognized as an essential nutrient by the AAFCO Dog Food Nutrient Profiles.\nCALORIE CONTENT\nMetabolizable Energy (calculated).\n.797~kcal/kg\nMetabolizable Energy (calculated).\n.294~kcal/can\nINGREDIENTS Chicken Broth, Chicken, Carrots, Green Beans, Pumpkin, Tapioca Starch,\nPotato Protein, Tuna, Sunflower Oil, Seaweed, Spinach, Flaxseed Oil, Tricalcium Phosphate,\nSalmon Oil, Salt, Guar Gum, Avocado Oil, Sodium Tripolyphosphate, Potassium Chloride,\nInulin, Vitamins (Vitamin E Supplement, Vitamin A Supplement, Niacin Supplement,\nD-calcium Pantothenate, Thiamine Mononitrate, Beta-carotene, Biotin, Riboflavin\nSupplement, Vitamin B12 Supplement, Pyridoxine Hydrochloride, Folic Acid), Minerals (Zinc\nOxide, Reduced Iron, Copper Amino Acid Complex, Manganese Sulfate, Sodium Selenite,\nPotassium lodide), Choline Chloride, Magnesium Sulfate, Copper Sulphate Pentahydrate.\nAvoDerm® Dog Food Stew Chicken & Veggies Recipe in Gravy is formulated to meet the\nnutritional levels established by the AAFCO Dog Food Nutrient Profiles for All Life Stages\nincluding growth of large size dogs (70 lbs or more as an adult).",
+   "engine": "n8n"
+  },
+  {
+   "zone_id": "b5",
+   "text": "DAILY FEEDING INSTRUCTIONS\nAmount of food your dog requires will depend on activity, age,\nenvironment and breed. Feed at room temperature and refrigerate\nunused portion. Adjust feeding to maintain optimum weight. Always\nprovide access to clean, fresh water.\nFeed adult dogs ½ - 1 can per 5-10 lbs body weight per day.\nPuppies and Gestating/Lactating Dogs (consult your veterinarian):\nFeed up to twice as much per pound of body weight as an adult.\n100% Satisfaction\nGuaranteed!\nIf for any reason you are dissatisfied with this\nproduct, return the unused portion to your\nAvoDerm Natural® dog food retailer along with\nyour receipt for replacement or refund.\nProduct of Thailand\nManufactured for\nBreeder's Choice\nBreeder's Choice Pet Foods, LLC\n16321 Arrow Hwy, Irwindale Park, CA 91706\n(866) 500-6286 • AvoDerm.com\nREFRIGERATE AFTER OPENING\n0\n52907\n00241\n0\nAvoDerm® Chicken & Veggies Recipe in Gravy 13 oz",
+   "engine": "n8n"
+  },
+  {
+   "zone_id": "b6",
+   "text": "AvoDerm\n®\nDOG FOOD STEW",
+   "engine": "n8n"
+  }
+ ]
+}

@@ -33,6 +33,7 @@ import cv2
 
 from . import bands as bands_mod
 from . import confirm as confirm_mod
+from . import reread as reread_mod
 from . import appearance
 from . import panelmatch as panelmatch_mod
 from . import progress as progress_mod
@@ -349,6 +350,15 @@ def _pixel_untrusted(res: dict) -> Optional[str]:
     return None
 
 
+def _raster_dpi(path: str) -> Optional[int]:
+    """ข้อมูลประกอบล้วน — อ่านไม่ได้ด้วยเหตุใดก็ตาม ⇒ ``None`` (ห้ามทำให้
+    ชั้นภาพพัง)"""
+    try:
+        return ArtworkDocument(path).raster_page()
+    except Exception:
+        return None
+
+
 def _pixel_compare(insp_dir: str, zone_list: List[dict],
                    defects: List[dict], progress=None, deadline=None):
     """โหมดทดลอง: เทียบ "แผงต่อแผง" ระดับพิกเซลแทนชั้นเทียบข้อความ.
@@ -425,6 +435,11 @@ def _pixel_compare(insp_dir: str, zone_list: List[dict],
                  "rotate_b": res.get("rotate_b"),
                  # ความหนาหมึกของทั้งแผง — อธิบายว่าทำไมบริเวณถึงเยอะ
                  "panel_ink": res.get("panel_ink")}
+        if config.PIXEL_RASTER_HINT:
+            # ไฟล์ไหนเป็นภาพ raster ทั้งหน้า (dpi) — อธิบายว่าทำไมต่างทั้งแผง
+            # (vector ↔ raster: ขอบตัวอักษร/พื้นหลังต่างโดยโครงสร้าง)
+            entry["raster_a"] = _raster_dpi(pa)
+            entry["raster_b"] = _raster_dpi(pb)
         pairs.append(entry)
         if res.get("status") != pixdiff.OK or img_a is None:
             continue                       # เทียบไม่ได้ ⇒ ใช้ผลชั้นข้อความเดิม
@@ -454,6 +469,19 @@ def _pixel_compare(insp_dir: str, zone_list: List[dict],
             return {"a": ta, "b": tb, "relation": rel, "look": look,
                     "box": box}
 
+        # ⚡ ตัดสินความน่าเชื่อถือ **ก่อน** อ่านข้อความทีละบริเวณ (26 ก.ย.) —
+        #    ผลที่ไม่น่าเชื่อถือถูกทิ้งอยู่แล้ว (ดูด่านข้างล่าง) แต่เดิมยังยิง
+        #    OCR ครบทุกบริเวณก่อนทิ้ง: คู่ vector↔raster บนสถานีใช้ 150 วิ
+        #    แทน 20 วิ + เผาโควตา. ผลลัพธ์เท่าเดิมทุกไบต์ ต่างแค่ไม่อ่านเปล่า ๆ
+        why = _pixel_untrusted(res)
+        if why and config.PIXEL_SKIP_OCR_WHEN_UNTRUSTED:
+            entry["kept_text_layer"] = True
+            entry["untrusted"] = why
+            entry["ocr_skipped"] = True
+            pg.note("pixel", "กลุ่ม %s · ผลชั้นภาพยังไม่น่าเชื่อถือ (%s) "
+                             "→ ไม่อ่านข้อความทีละบริเวณ · คงผลชั้นข้อความไว้"
+                    % (g, why))
+            continue
         found = panelmatch_mod.regions_to_defects(
             res, za, zb, inspect_region=_inspect,
             max_inspect=config.PIXEL_MAX_OCR_REGIONS)
@@ -476,7 +504,6 @@ def _pixel_compare(insp_dir: str, zone_list: List[dict],
         # มีโอเมกา-3/แคลเซียม/ฟอสฟอรัสเพิ่ม) ⇒ ข้อความไหลใหม่ทั้งครึ่งล่าง
         # ⇒ ชั้นภาพฟ้อง 35 บริเวณ (ecc 0.51 · ต่าง 19.73%) ไปลบผลชั้นข้อความ
         # 7 รายการที่ตรงกับความต่างจริงพอดี
-        why = _pixel_untrusted(res)
         if not found or why:
             entry["kept_text_layer"] = True
             if why:
@@ -659,8 +686,21 @@ def run_inspection(rec_id: str, zone_list: List[dict],
             pg.done("pixel", progress_mod.FAIL,
                     "เทียบพิกเซลไม่สำเร็จ — ใช้ผลชั้นข้อความ")
 
+    # P6 (โหมดทดลอง ปิดเป็นค่าเริ่มต้น): อ่านซ้ำเฉพาะบรรทัดที่ต่างของฝั่ง
+    # ที่ไม่มีพยาน — แนบผลให้คนดู **ไม่แตะระดับ ไม่ลบการ์ด**
+    if config.LINE_REREAD and not (bool(deadline) and time.time() > deadline):
+        try:
+            rdocs = {"a": ArtworkDocument(src)}
+            if zones_b:
+                rdocs["b"] = ArtworkDocument(_find_source(d, "source_b"))
+            defects = reread_mod.apply(defects, zone_list, ocr_results, rdocs,
+                                       deadline=deadline, progress=pg)
+        except Exception:
+            logger.exception("[artwork] อ่านซ้ำเฉพาะบรรทัดไม่สำเร็จ — ข้าม")
+
     pg.start("coverage")
     _tag_highlight_risk(d, zone_list)
+    _tag_highlight_why(defects, zone_list, ocr_results)
 
     cov = checks.check_coverage(zone_list, ocr_results)
     _report_coverage_progress(pg, cov)
@@ -786,6 +826,12 @@ def _report_pixel_progress(pg, info) -> None:
         if p.get("status") != "ok":
             pg.note("pixel", "กลุ่ม %s · เทียบไม่ได้ (%s) → ใช้ผลชั้นข้อความ"
                     % (p.get("group"), p.get("reason") or p.get("status")))
+        elif p.get("kept_text_layer") and p.get("untrusted"):
+            # ⚠️ แยกจาก "ไม่พบความต่าง" — เดิมยุบเป็นข้อความเดียว ⇒ ผลที่พบ
+            #    เป็นร้อยบริเวณแต่เชื่อไม่ได้ ถูกบอกว่า "ไม่พบความต่าง"
+            pg.note("pixel", "กลุ่ม %s · พบ %s บริเวณ แต่ผลจากภาพยังไม่น่าเชื่อถือ "
+                    "(%s) → ไม่ได้ใช้ · คงผลชั้นข้อความ"
+                    % (p.get("group"), p.get("regions"), p["untrusted"]))
         elif p.get("kept_text_layer"):
             pg.note("pixel", "กลุ่ม %s · เทียบแล้วไม่พบความต่าง → คงผลชั้นข้อความ"
                     % p.get("group"))
@@ -1258,6 +1304,61 @@ def _tag_highlight_risk(insp_dir: str, zone_list: List[dict]) -> None:
                 z.pop("hl_risk", None)
     except Exception:
         logger.debug("[artwork] highlight-risk tagging skipped", exc_info=True)
+
+
+def _tag_highlight_why(defects: List[dict], zone_list: List[dict],
+                       ocr_results: List[dict]) -> None:
+    """ทำไมการ์ดใบนี้ถึงจะ **ไม่มีกรอบแดง** (``hl_why``) — advisory ล้วน.
+
+    ผู้ใช้เห็นว่า "บางครั้งมี บางครั้งไม่มี" แล้วไม่มีอะไรบอกเหตุผล. ที่นี่
+    ตอบเฉพาะเหตุผลที่ **รู้ได้โดยไม่ต้องอ่านภาพเลย** และ **ผู้ใช้แก้ได้เอง**:
+
+      ``no_tesseract``  เครื่องเซิร์ฟเวอร์ยังไม่ได้ติดตั้ง Tesseract
+      ``lang:<codes>``  ไม่มีชุดข้อมูล (traineddata) ของสคริปต์ของคำนี้
+
+    ⚠️ เหตุผลที่รู้ได้ **เฉพาะตอนอ่านภาพ** (เช่น "อ่านได้แต่หาคำไม่เจอ")
+    จงใจไม่เดาไว้ล่วงหน้า — เดาผิดคือคำตอบที่ผิดแบบมั่นใจ ซึ่งแย่กว่าเงียบ
+
+    ไม่แตะ ``found``/``reference``/verdict/การนับ — เพิ่มคีย์แสดงผลอย่างเดียว
+    เหมือน ``found_spans``/``pixel_bbox``
+    """
+    if not (config.HIGHLIGHT_WHY and config.HIGHLIGHT_DEFECT_WORD
+            and config.HIGHLIGHT_USE_TESSERACT):
+        for d in defects or []:
+            d.pop("hl_why", None)
+        return
+    try:
+        from . import highlight as hl
+        engine_of = {r.get("zone_id"): r.get("engine")
+                     for r in (ocr_results or [])}
+        have_tess = hl._tesseract_available()
+        for d in defects or []:
+            d.pop("hl_why", None)
+            found = (d.get("found") or "").strip()
+            if not found:
+                continue            # ไม่มีคำให้ค้น — ไม่ใช่ความผิดของเครื่อง
+            if d.get("pixel_bbox"):
+                continue            # มีกรอบที่ "วัดมา" อยู่แล้ว
+            # โซนที่อ่านจาก text layer ใช้กรอบคำของ PDF ตรง ๆ ได้ทุกสคริปต์
+            # โดยไม่ต้องพึ่ง Tesseract เลย ⇒ ไม่มีอะไรต้องเตือน
+            if (config.HIGHLIGHT_USE_PDF_TEXT
+                    and engine_of.get(d.get("zone_id")) == "pdf-text"):
+                continue
+            if not have_tess:
+                d["hl_why"] = "no_tesseract"
+                continue
+            miss = hl.missing_langs(found)
+            if miss:
+                d["hl_why"] = "lang:" + "+".join(miss)
+                continue
+            # ติดตั้งครบ แต่ค่าตั้ง ARTWORK_HIGHLIGHT_TESS_LANG ตรึงภาษาไว้
+            # จนสคริปต์ของคำนี้ไม่เคยถูกส่งให้ Tesseract — คนละทางแก้กับ
+            # "ยังไม่ได้ติดตั้ง" จึงต้องเป็นคนละเหตุผล
+            unused = hl.unused_langs(found, config.HIGHLIGHT_TESSERACT_LANG)
+            if unused:
+                d["hl_why"] = "langcfg:" + "+".join(unused)
+    except Exception:
+        logger.debug("[artwork] highlight-why tagging skipped", exc_info=True)
 
 
 def _pdf_text_boxes(rec_id: str, rep: dict, zone_id: str, found: str,

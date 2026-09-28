@@ -1,0 +1,191 @@
+{
+ "note": "Friskies รอบ 4 (prompt ใหม่ รันซ้ำ) z=ปรู๊ฟ raster b=masterfile",
+ "zones": [
+  {
+   "id": "z1",
+   "type": "panel",
+   "group": "A",
+   "doc": "a",
+   "bbox": [
+    0,
+    0,
+    1,
+    1
+   ],
+   "label": "z1"
+  },
+  {
+   "id": "z2",
+   "type": "panel",
+   "group": "B",
+   "doc": "a",
+   "bbox": [
+    0,
+    0,
+    1,
+    1
+   ],
+   "label": "z2"
+  },
+  {
+   "id": "z3",
+   "type": "panel",
+   "group": "C",
+   "doc": "a",
+   "bbox": [
+    0,
+    0,
+    1,
+    1
+   ],
+   "label": "z3"
+  },
+  {
+   "id": "z4",
+   "type": "panel",
+   "group": "D",
+   "doc": "a",
+   "bbox": [
+    0,
+    0,
+    1,
+    1
+   ],
+   "label": "z4"
+  },
+  {
+   "id": "z5",
+   "type": "panel",
+   "group": "E",
+   "doc": "a",
+   "bbox": [
+    0,
+    0,
+    1,
+    1
+   ],
+   "label": "z5"
+  },
+  {
+   "id": "b6",
+   "type": "panel",
+   "group": "A",
+   "doc": "b",
+   "bbox": [
+    0,
+    0,
+    1,
+    1
+   ],
+   "label": "b6"
+  },
+  {
+   "id": "b7",
+   "type": "panel",
+   "group": "B",
+   "doc": "b",
+   "bbox": [
+    0,
+    0,
+    1,
+    1
+   ],
+   "label": "b7"
+  },
+  {
+   "id": "b8",
+   "type": "panel",
+   "group": "C",
+   "doc": "b",
+   "bbox": [
+    0,
+    0,
+    1,
+    1
+   ],
+   "label": "b8"
+  },
+  {
+   "id": "b9",
+   "type": "panel",
+   "group": "D",
+   "doc": "b",
+   "bbox": [
+    0,
+    0,
+    1,
+    1
+   ],
+   "label": "b9"
+  },
+  {
+   "id": "b10",
+   "type": "panel",
+   "group": "E",
+   "doc": "b",
+   "bbox": [
+    0,
+    0,
+    1,
+    1
+   ],
+   "label": "b10"
+  }
+ ],
+ "ocr": [
+  {
+   "zone_id": "z1",
+   "text": "GUARANTEED ANALYSIS คุณภาพอาหารสัตว์ทางเคมี: Crude\nProtein โปรตีน ไม่น้อยกว่า 5.5% (Min), Crude Fat ไขมัน\nไม่น้อยกว่า 0.05% (Min), Mineral(calcium) 0.001%\n(Min), Moisture ความชื้น ไม่มากกว่า 90% (Max), Crude\nAsh 2% (Max), Crude Fibre กาก ไม่มากกว่า1% (Max),\nMetabolizable Energy (ME): 420 kcal/kg, 42 kcal/100g,\n6 kcal /sachet ค่าพลังงานที่สัตว์สามารถนำไปใช้ 42 กิโลแคลอรีต่อ 100 กรัม\n제품명: 프리스키 리커블 흰살생선 성분등록번호: 서울-37006호 명칭 및\n형태: 애완큰고양이사료105, 액상고형(레토르트 멸균사료) 용도: 애완동물용(생후\n1세 이후) 등록성분량: 조단백질 5.5% 이상, 조지방 0.05% 이상, 조섬유 1.0%\n이하, 조회분 2.0% 이하, 칼슘 0.001% 이상, 인 0.02% 이상, 수분 90.0% 이하",
+   "engine": "n8n"
+  },
+  {
+   "zone_id": "z2",
+   "text": "INGREDIENTS/ ส่วนประกอบอาหารสัตว์/ KOMPOSISI/ 원료의 명칭:\nWater; Tuna; Thickeners (Modified Tapioca Starch INS1442, Guar Gum\nINS412); Seabass; Hydrolysed Poultry Protein; Seasoning; Fish Extract.\nน้ำ ปลาทูน่า สารให้ความคงตัว ปลากระพง ไฮโดรไลซ์โปรตีนจากสัตว์ปีก\nสารปรุงแต่งรส น้ำโปรตีนสกัดจากปลาเข้มข้น Air; Tuna; Pengental (Tepung\nTapioka Modifikasi INS1442, Guaran INS412); Kakap Putih; Protein\nUnggas Terhidrolisa; Perisa; Ekstrak Ikan. 정제수, 참치, 결착제 합제(변성전분,\n구아검), 농어, 가수분해단백질(닭, 칠면조, 오리), 아미노산제 합제(L-로이신,\nL-알라닌), 가다랑어추출물 제조일자: 제품에 별도 표시(일월년 순) 유통기한:\n제품에 별도 표시 (일월년 순) 중량: 56g (14g × 4개입) 대사에너지:\n0.42 kcal/g 원산지: 태국 제조업체명: i-Tail Corporation Public\nCompany Limited",
+   "engine": "n8n"
+  },
+  {
+   "zone_id": "z3",
+   "text": "RECOMMENDED DAILY FEEDING AMOUNTS:\nFor an average adult cat (approximately 4kg), please feed\n1 sachet per day. This product is a treat and is intended for\noccasional feeding. Please monitor your cat's weight to\nmaintain a lean body condition. clean, fresh drinking water\nshould be available at all times ปริมาณการให้อาหารที่แนะนำต่อวัน\nให้ 1 ซองต่อวันสำหรับแมวโต (น้ำหนักโดยประมาณ 4 กก.)\nCara Penggunaan: lihat tabel rekomendasi penyajian\nStorage Instructions: Store in a cool, dry place.",
+   "engine": "n8n"
+  },
+  {
+   "zone_id": "z4",
+   "text": "Diimport oleh / Imported By: Malaysia: Purina\nPetcare (Malaysia) Sdn. Bhd. (200201013615), Level\n22, 1 Powerhouse, No.1, Persiaran Bandar Utama,\nBandar Utama 47800 Petaling Jaya, Selangor Darul\nEhsan, Malaysia. Philippines: Nestle Philippines, Inc.,\nCabuyao, Laguna, Philippines BAI Company Reg No.:\nIM-610, D-13-291, IN-233; CFPR No. SF-CF12-26-172683205264\nIndonesia: Diimpor oleh: PT Nestlé Trading\nIndonesia, Jakarta, 12520, Indonesia - Didistribusikan\noleh: PT Nestlé Indonesia, Jakarta, 12520, Indonesia\nIndia: Nestlé India Limited 100/101, World Trade Centre,\nBarakhamba Lane, New Delhi-110001.CPCB Registration\nNo. IM-10-000-03-AAACN0757G-23\nConsumer Care, P.O. BAG NO. 2, NEW DELHI-110001,\n1800 103 1947,\nWECARE@IN.NESTLE.COM.",
+   "engine": "n8n"
+  },
+  {
+   "zone_id": "z5",
+   "text": "Singapore: Nestlé Singapore Pte Ltd, 15A Changi\nBusiness Park Central 1, #05-02/03 Eightrium@Changi\nBusiness Park, Singapore 486035 Brunei: Kingston\nBeverage & Creamery Sdn. Bhd. Plot 73 & Lot No.\n3-6, Beribi Industrial Complex, Jalan Gadong BE1118,\nBSBm NEGARA BRUNEI DARUSSALAM\nKorea: 수입업체명 및 주소: 네슬레코리아 유한책임회사,\n서울특별시 서대문구 충정로 70, 10, 12, 16층(미근동 ,\n웨스트게이트 타워). 구입 후 사용하시거나 포장이 훼손된\n경우에는 교환/환불이 불가합니다. 단, 제품 자체 불량인 경우\n공정거래위원회고시 소비자분쟁해결기준에 의거하여 교환,\n환불 또는 보상 받으실 수 있습니다. Thailand: จัดจำหน่ายโดย:\nบ.เนสท์เล่ (ไทย) จำกัด เลขที่ 999/9 ถนนพระราม 1 แขวง\nปทุมวัน เขตปทุมวัน กรุงเทพมหานคร 10330 (주의) 반추동물에게\n급여하지 마십시오. 직사광선이 닿는 장소 및 해충이 있는 장소를\n피하여 서늘하고 건조한 장소에 보관하여 주십시오. 개봉 후\n냉장 보관하거나 빨리 사용하시기 바랍니다.",
+   "engine": "n8n"
+  },
+  {
+   "zone_id": "b6",
+   "text": "GUARANTEED ANALYSIS คุณภาพอาหารสัตว์ทางเคมี: Crude\nProtein โปรตีน ไม่น้อยกว่า 5.5% (Min), Crude Fat ไขมัน\nไม่น้อยกว่า 0.05% (Min), Mineral (calcium) 0.001%\n(Min), Moisture ความชื้น ไม่มากกว่า 90% (Max), Crude\nAsh 2% (Max), Crude Fibre กาก ไม่มากกว่า1% (Max),\nMetabolizable Energy (ME): 420 kcal/kg, 42 kcal/100g,\n6 kcal /sachet ค่าพลังงานที่สัตว์สามารถนำไปใช้ 42 กิโลแคลอรีต่อ 100\nกรัม 제품명: 프리스키 리커버 흰살생선 성분등록번호: 서울-37006호 명칭 및\n형태: 애완큰고양이사료105, 액상고형(레토르트 멸균사료) 용도: 애완동물용(생후\n1세 이후) 등록성분량: 조단백질 5.5% 이상, 조지방 0.05% 이상, 조섬유 1.0%\n이하, 조회분 2.0% 이하, 칼슘 0.001% 이상, 인 0.02% 이상, 수분 90.0% 이하",
+   "engine": "n8n",
+   "witness": "Ash 2% (Max), Crude Fibre กากไมมากกวา1% (Max),\nMetabolizable Energy (ME): 420 kcal/kg, 42 kcal/100g,\n6 kcal /sachet คาพลังงานที่สัตวสามารถนำไปใช 42 กิโลแคลอรีตอ100\nกรัม제품명: 프리스키리커블흰살생선성분등록번호: 서울-37006호명칭\u0001 및\n형태: 애완큰고양이사료105, 액상고형(레토르트멸균사료) 용도: 애완동물용(생후\n1세이후) 등록성분량: 조단백질5.5% 이상, 조지방0.05% 이상, 조섬유1.0%\n이하, 조회분2.0% 이하, 칼슘0.001% 이상, 인0.02% 이상, 수분90.0% 이하"
+  },
+  {
+   "zone_id": "b7",
+   "text": "INGREDIENTS/ ส่วนประกอบอาหารสัตว์/ KOMPOSISI/ 원료의 명칭:\nWater; Tuna; Thickeners (Modified Tapioca Starch INS1442, Guar Gum\nINS412); Seabass; Hydrolysed Poultry Protein; Seasoning; Fish Extract.\nน้ำ ปลาทูน่า สารให้ความคงตัว ปลากระพง ไฮโดรไลซ์โปรตีนจากสัตว์ปีก\nสารปรุงแต่งรส น้ำโปรตีนสกัดจากปลาเข้มข้น Air; Tuna; Pengental (Tepung\nTapioka Modifikasi INS1442, Guaran INS412); Kakap Putih; Protein\nUnggas Terhidrolisa; Perisa; Ekstrak Ikan. 정제수, 참치, 결착제 합제(변성전분,\n구아검), 농어, 가수분해단백질(닭, 칠면조, 오리), 아미노산제 합제(L-로이신,\nL-알라닌), 가다랑어추출물 제조일자: 제품에 별도 표시(일월년 순) 유통기한:\nผลิตภัณฑ์에 별도 표시(일월년 순) 중량: 56 g (14g × 4개입) 대사에너지:\n0.42 kcal/g 원산지: 태국 제조업체명: i-Tail Corporation Public\nCompany Limited",
+   "engine": "n8n",
+   "witness": "o\nINGREDIENTS/ สวนประกอบอาหารสตว/ KOMPOSISI/ 원료의\u0001 명칭:\nWater; Tuna; Thickeners (Modiﬁed Tapioca Starch INS1442, Guar Gum\nINS412); Seabass; Hydrolysed Poultry Protein; Seasoning; Fish Extract.\nน้ำปลาทูนาสารใหความคงตัวปลากระพงไฮโดรไลซโปรตีนจากสัตวปก\nสารปรุงแตงรสน้ำโปรตีนสกัดจากปลาเขมขนAir; Tuna; Pengental (Tepung\nTapioka Modiﬁkasi INS1442, Guaran INS412); Kakap Putih; Protein\nUnggas Terhidrolisa; Perisa; Ekstrak Ikan. 정제수, 참치, 결착제합제(변성전분,\n구아검), 농어, 가수분해단백질(닭, 칠면조, 오리), 아미노산제합제(L-로이신,\nL-알라닌), 가다랑어추출물제조일자: 제품에별도표시(일월년순) 유통기한:\n제품에별도표시(일월년순) 중량: 56 g (14g × 4개입) 대사에너지:\n0.42 kcal/g 원산지:\u0001 태국제조업체명: i-Tail Corporation Public\nCompanyLimited\n\u000f้้"
+  },
+  {
+   "zone_id": "b8",
+   "text": "RECOMMENDED DAILY FEEDING AMOUNTS:\nFor an average adult cat (approximately 4kg), please feed\n1 sachet per day. This product is a treat and is intended for\noccasional feeding. Please monitor your cat's weight to\nmaintain a lean body condition. clean, fresh drinking water\nshould be available at all times ปริมาณการให้อาหารที่แนะนำต่อวัน\nให้ 1 ซองต่อวันสำหรับแมวโต (น้ำหนักโดยประมาณ 4 กก.)\nCara Penggunaan: lihat tabel rekomendasi penyajian\nStorage Instructions: Store in a cool, dry place.",
+   "engine": "n8n",
+   "witness": "RECOMMENDED DAILY FEEDINGAMOUNTS:\nFor an average adult cat (approximately 4kg),please feed\n1 sachet per day.This product is a treat and is intended for\noccasional feeding.Please monitor your cat's weight to\nmaintain aleanbodycondition. clean,freshdrinking water\nshould be available atalltimesปริมาณการใหอาหารที่แนะนำตอวัน\nให 1 ซองตอวันสำหรับแมวโต(น้ำหนักโดยประมาณ 4 กก.)\nCara Penggunaan: lihattabelrekomendasi penyajian\nStorageInstructions:Store in acool, dryplace."
+  },
+  {
+   "zone_id": "b9",
+   "text": "Diimport oleh / Imported By: Malaysia: Purina\nPetcare (Malaysia) Sdn. Bhd. (200201013615), Level\n22, 1 Powerhouse, No.1, Persiaran Bandar Utama,\nBandar Utama 47800 Petaling Jaya, Selangor Darul\nEhsan, Malaysia. Philippines: Nestle Philippines,\nInc., Cabuyao, Laguna, Philippines BAI Company\nReg No.: IM-610, D-13-291, IN-233; CFPR No. xxxxxx\nIndonesia: Diimpor oleh: PT Nestlé Trading\nIndonesia,Jakarta,12520,Indonesia–Didistribusikan\noleh: PT Nestlé Indonesia, Jakarta, 12520, Indonesia\nIndia: Nestlé India Limited 100/101, World Trade Centre,\nBarakhamba Lane, New Delhi-110001.CPCB Registration\nNo.IM-10-000-03-AAACN0757G-23\nConsumerCare,P.O.BAGNO.2,NEWDELHI-110001,\n1800 103 1947,\nWECARE@IN.NESTLE.COM.",
+   "engine": "pdf-text"
+  },
+  {
+   "zone_id": "b10",
+   "text": "Singapore: Nestlé Singapore Pte Ltd, 15A Changi\nBusiness Park Central 1, #05-02/03 Eightrium@Changi\nBusiness Park, Singapore 486035 Brunei: Kingston\nBeverage & Creamery Sdn. Bhd. Plot 73 & Lot No.\n3-6, Beribi Industrial Complex, Jalan Gadong BE1118,\nBSBm\nNEGARA BRUNEI DARUSSALAM\nKorea: 수입업체명 및 주소: 네슬레코리아 유한책임회사,\n서울특별시 서대문구 충정로 70, 10, 12, 16층(미근동,\n웨스트게이트 타워). 구입 후 사용하시거나 포장이 훼손된\n경우에는 교환/환불이 불가합니다. 단, 제품 자체 불량인 경우\n공정거래위원회고시 소비자분쟁해결기준에 의거하여 교환,\n환불 또는 보상 받으실 수 있습니다. Thailand: จัดจำหน่ายโดย:\nบ.เนสท์เล่ (ไทย) จำกัด เลขที่ 999/9 ถนนพระราม 1 แขวง\nปทุมวัน เขตปทุมวัน กรุงเทพมหานคร 10330 (주의) 반추동물에게\n급여하지 마십시오. 직사광선이 닿는 장소 및 해충이 있는 장소를\n피하여 서늘하고 건조한 장소에 보관하여 주십시오. 개봉 후\n냉장 보관하거나 빨리 사용하시기 바랍니다.",
+   "engine": "n8n",
+   "witness": "No.IM-10-000-03-AAACN0757G-23\nSingapore: Nestlé Singapore Pte Ltd, 15A Changi\nBusinessParkCentral1,#05-02/03Eightrium@Changi\nBusiness Park, Singapore 486035 Brunei: Kingston\nBeverage & Creamery Sdn. Bhd. Plot 73 & Lot No.\n3-6, Beribi Industrial Complex, Jalan Gadong BE1118,\nBSBm\nNEGARA\nBRUNEI\nDARUSSALAM\nKorea: 수입업체명\u0001 및주소: 네슬레코리아유한책임회사,\n서울특별시서대문구충정로\u0001 70,\u0001 10,\u0001 12, 16층(미근동,\n웨스트게이트타워).\u0001 구입\u0001 후사용하시거나\u0001 포장이훼손된\n경우에는교환/환불이불가합니다.\u0001 단,\u0001 제품\u0001 자체\u0001 불량인\u0001 경우\n공정거래위원회고시소비자분쟁해결기준에의거하여교환,\n환불\u0001또는\u0001보상\u0001받으실\u0001수있습니다. Thailand: จัดจำหนายโดย:\nบ.เนสทเล(ไทย) จำกัดเลขที่999/9 ถนนพระราม 1 แขวง\nปทุมวันเขตปทุมวันกรุงเทพมหานคร10330 (주의) 반추동물에게\n급여하지마십시오직사광선이닿는장소및해충이있는장소를\nConsumerCare,P.O.BAGNO.2,NEWDELHI-110001,\n1800 103 1947,\nWECARE@IN.NESTLE.COM."
+  }
+ ]
+}
