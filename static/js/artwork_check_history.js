@@ -96,18 +96,18 @@
   function row(r) {
     let h = '<tr class="clickable" data-id="' + esc(r.id) + '" data-kind="' +
       esc(r.kind || "inspect") + '">' +
-      "<td>" + esc(r.created_at) + "</td>" +
-      "<td>" + esc(r.filename || "—") +
+      '<td class="c-date">' + esc(r.created_at) + "</td>" +
+      '<td class="c-file">' + esc(r.filename || "—") +
       (r.cloned_from ? '<span class="aw-from">📋 จากต้นแบบ ' +
         esc(r.cloned_from.created_at || r.cloned_from.id) + "</span>" : "") +
       "</td>" +
       "<td>" + esc(r.brand || "—") + "</td>";
-    if (TR) h += "<td>" + kindBadge(r.kind) + "</td>";
-    h += "<td>" + badge(r.verdict) + "</td>" +
-      "<td>" + (r.defect_count == null ? '<span class="aw-owner">—</span>'
+    if (TR) h += '<td class="c-nw">' + kindBadge(r.kind) + "</td>";
+    h += '<td class="c-nw">' + badge(r.verdict) + "</td>" +
+      '<td class="c-num">' + (r.defect_count == null ? '<span class="aw-owner">—</span>'
                                         : esc(r.defect_count)) + "</td>";
     if (TR) h += "<td>" + trCell(r.translate) + "</td>";
-    h += '<td class="aw-owner">' + esc(r.owner || "—") + "</td>" +
+    h += '<td class="aw-owner c-nw">' + esc(r.owner || "—") + "</td>" +
       '<td><button class="aw-btn-danger" data-del="' + esc(r.id) + '">ลบ</button></td>' +
       "</tr>";
     return h;

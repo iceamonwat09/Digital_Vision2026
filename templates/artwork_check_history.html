@@ -3,7 +3,12 @@
 
 {% block extra_css %}
 <style>
-  .aw-wrap { max-width: 1180px; margin: 24px auto; padding: 0 16px; }
+  /* กว้างเท่าหน้าตรวจ (1600px กึ่งกลาง) — เดิม 1180px ใต้เพดาน .main-content
+     1400px ของ style.css ทำให้จอกว้างเหลือขอบว่างข้างละ ~350px ขณะที่ชื่อไฟล์
+     ยาว ๆ ต้องขึ้นบรรทัดใหม่. ปลดเพดานเฉพาะหน้านี้ (block นี้ render เฉพาะที่นี่
+     และมาหลัง style.css) — ห้ามแก้ style.css ซึ่งเป็นของกลางทุกหน้า */
+  .main-content { max-width: none; }
+  .aw-wrap { max-width: 1600px; margin: 24px auto; padding: 0 20px; }
   .aw-head { display:flex; align-items:baseline; justify-content:space-between; flex-wrap:wrap; gap:12px; margin-bottom:14px; }
   .aw-head h2 { margin:0; }
   .aw-panel { background:#fff; border:1px solid #e3e7ec; border-radius:8px; padding:16px 18px; margin-bottom:18px; }
@@ -13,6 +18,12 @@
   .aw-tbl th { color:#546e7a; font-weight:600; font-size:12px; }
   .aw-tbl tr.clickable { cursor:pointer; }
   .aw-tbl tr.clickable:hover { background:#f5f9ff; }
+  /* คอลัมน์: วันเวลา/ผล/ผู้ตรวจไม่ตัดบรรทัด · ชื่อไฟล์กินที่ว่างที่เหลือ
+     และตัดคำได้ทุกตำแหน่ง (ชื่อไฟล์งานพิมพ์มักไม่มีช่องว่างเลย) */
+  .aw-tbl td { vertical-align:top; }
+  .aw-tbl .c-date, .aw-tbl .c-nw { white-space:nowrap; }
+  .aw-tbl .c-file { overflow-wrap:anywhere; word-break:break-word; min-width:220px; width:34%; }
+  .aw-tbl .c-num  { white-space:nowrap; }
 
   .aw-badge { display:inline-block; padding:2px 10px; border-radius:10px; font-size:11px; font-weight:700; }
   .aw-b-pass   { background:#c8e6c9; color:#1b5e20; }

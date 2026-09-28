@@ -312,9 +312,11 @@ def test_rot_preview_still_hides_itself_when_no_zone_is_selected():
     """ย้ายออกนอก ``#awProps`` ได้ก็เพราะมันคุมการแสดงผลของตัวเองอยู่แล้ว."""
     js = _js()
     i = js.index("function updateRotPreview()")
-    frag = js[i:i + 400]
-    assert 'if (!z || !inspectionId) { box.style.display = "none"; return; }' \
-        in frag
+    frag = js[i:i + 700]
+    # 28 ก.ย.: ซ่อนผ่าน hide() ซึ่งแสดงข้อความแทนของคอลัมน์ขวาไปพร้อมกัน
+    # (เลย์เอาต์ "ภาพ OCR ด้านขวา") — คุณสมบัติเดิม "ไม่เลือกโซน = ซ่อน" ต้องคงอยู่
+    assert 'const hide = () => { box.style.display = "none";' in frag
+    assert 'if (!z || !inspectionId) { hide(); return; }' in frag
 
 
 def test_the_thumbnail_and_its_caption_moved_together():

@@ -993,9 +993,36 @@
   // ── dom ────────────────────────────────────────────────────────────
   const fileInput = $("awFile"), brandInput = $("awBrand");
   const fileInputB = $("awFileB");
-  const stage = $("awStage"), stageEmpty = $("awStageEmpty");
-  const stageRot = $("awStageRot");
-  const previewImg = $("awPreviewImg");
+  const stageEmpty = $("awStageEmpty");
+  // ── กล่องภาพ (pane) ────────────────────────────────────────────────
+  // เลย์เอาต์ปกติใช้ paneA กล่องเดียวเหมือนเดิมทุกประการ (สลับไฟล์ด้วยการ
+  // เปลี่ยน src). โหมด 🅰 | 🅱 ซ้าย-ขวา ใช้ทั้งสองกล่องพร้อมกัน
+  // ⇒ stage/stageRot/previewImg/stageBox คือ "กล่องที่กำลังทำงาน" เสมอ
+  //    (bindPane) โค้ดวาด/ย้าย/ซูม/pan เดิมจึงใช้ได้กับทั้งสองฝั่งโดยไม่ต้องแก้
+  // ⚠️ พิกัดโซนยังเป็นสัดส่วนของภาพ 0..1 — กล่องไหนก็สูตรเดียวกัน
+  const paneA = { doc: "a", wrap: $("awPaneA"), box: $("awStageBox"),
+                  rot: $("awStageRot"), stage: $("awStage"),
+                  img: $("awPreviewImg"), zoom: 100 };
+  const paneB = { doc: "b", wrap: $("awPaneB"), box: $("awStageBoxB"),
+                  rot: $("awStageRotB"), stage: $("awStageB"),
+                  img: $("awPreviewImgB"), zoom: 100 };
+  const hasPaneB = !!(paneB.wrap && paneB.box && paneB.rot && paneB.stage && paneB.img);
+  let pane = paneA;
+  let stage = paneA.stage, stageRot = paneA.rot, previewImg = paneA.img;
+  let stageBox = paneA.box;
+  // เลย์เอาต์ที่ใช้จริงตอนนี้ ("normal" | "split" | "side") — ดู applyLayout()
+  let layout = "normal";
+  function bindPane(p) {
+    pane = p;
+    stage = p.stage; stageRot = p.rot; previewImg = p.img; stageBox = p.box;
+    [paneA, paneB].forEach((q) => {
+      if (q.wrap) q.wrap.classList.toggle("is-active", q === p);
+    });
+  }
+  // กล่องที่ต้องวาด/หมุน/อัปเดตเคอร์เซอร์ (ซ้าย-ขวา = ทั้งสอง · อื่น ๆ = กล่องเดียว)
+  function livePanes() {
+    return layout === "split" ? [paneA, paneB] : [pane];
+  }
   const propsBox = $("awProps");
   const resultBox = $("awResult");
   const docTabs = $("awDocTabs");
@@ -1049,6 +1076,15 @@
   function showDoc(doc) {
     const m = docMeta[doc];
     if (!m) return;
+    if (layout === "split") {
+      // ซ้าย-ขวา: ทั้งสองไฟล์อยู่บนจอแล้ว — "สลับไฟล์" = ย้ายกล่องที่ทำงาน
+      // (ไม่ยกเลิกโหมดวาด เพื่อให้กดแท็บแล้ววาดต่ออีกฝั่งได้ทันที)
+      const p = doc === "b" ? paneB : paneA;
+      activatePane(p);
+      if (p.img.getAttribute("src") !== m.url) p.img.src = m.url;
+      else { applyZoom(); renderZones(); }
+      return;
+    }
     activeDoc = doc;
     natW = m.w;
     natH = m.h;
@@ -1057,7 +1093,143 @@
     previewImg.src = m.url;   // onload → applyZoom + renderZones
     if (previewImg.complete) { applyZoom(); renderZones(); }
   }
-  previewImg.onload = () => { applyZoom(); renderZones(); };
+  // ภาพของกล่องที่ "ไม่ได้ทำงาน" โหลดเสร็จ (เกิดได้เฉพาะโหมดซ้าย-ขวา) —
+  // ห้ามเรียก applyZoom() ตรง ๆ เพราะมันกำหนดขนาดภาพของกล่องที่ทำงานอยู่
+  function sizePane(p) {
+    const m = docMeta[p.doc];
+    if (m && m.w) p.img.style.width = Math.round(m.w * p.zoom / 100) + "px";
+  }
+  function onPaneImgLoad(p) {
+    if (layout === "split" && p !== pane) {
+      sizePane(p); applyPageRot(); renderZones();
+      return;
+    }
+    applyZoom(); renderZones();
+  }
+  paneA.img.onload = () => onPaneImgLoad(paneA);
+  if (hasPaneB) paneB.img.onload = () => onPaneImgLoad(paneB);
+
+  // โหมดซ้าย-ขวา: ย้าย "กล่องที่ทำงาน" ไปอีกฝั่ง. ซูมจำแยกต่อกล่อง
+  // (สองไฟล์ขนาดต่างกันได้มาก เช่น A4 proof vs แผ่นพิมพ์จริง) · ไม่ render
+  // ใหม่ — ถูกเรียกจาก mousedown แบบ capture ถ้าลบ element ที่กำลังถูกคลิก
+  // ทิ้ง การลากโซนจะไปขยับ element ที่หลุดจาก DOM แล้วแบบเงียบ ๆ
+  function activatePane(p) {
+    if (layout !== "split" || !docMeta[p.doc]) return;
+    if (pane === p && activeDoc === p.doc) return;
+    pane.zoom = zoomPct;
+    bindPane(p);
+    activeDoc = p.doc;
+    natW = docMeta[p.doc].w;
+    natH = docMeta[p.doc].h;
+    zoomPct = p.zoom;
+    zoomRange.value = zoomPct;
+    zoomLabel.textContent = zoomPct + "%";
+    updateDocTabs();
+  }
+  // คลิก/หมุนล้อบนกล่องไหน = ทำงานกับกล่องนั้น (capture ⇒ มาก่อน handler
+  // ของโซน/การวาด/pan ทุกตัว ซึ่งจึงเห็นกล่องที่ถูกต้องแล้ว)
+  [paneA, paneB].forEach((p) => {
+    if (!p.wrap) return;
+    const act = () => { if (layout === "split" && pane !== p) activatePane(p); };
+    p.wrap.addEventListener("mousedown", act, true);
+    p.wrap.addEventListener("wheel", act, { capture: true, passive: true });
+  });
+
+  // ── เลย์เอาต์พื้นที่ภาพ (ปุ่ม ▦ Layout) ─────────────────────────────
+  // opt-in ต่อผู้ชม (จำใน localStorage) · ค่าเริ่มต้น "normal" = เดิมเป๊ะ
+  // ปุ่มโผล่ + มีผลเฉพาะตอนแนบครบ 2 ไฟล์ ⇒ ไฟล์เดียวเหมือนเดิม 100%
+  const LAYOUT_KEY = "aw.layout.v1";
+  const LAYOUTS = ["normal", "split", "side"];
+  let layoutPref = "normal";
+  try {
+    const v = localStorage.getItem(LAYOUT_KEY);
+    if (LAYOUTS.indexOf(v) >= 0) layoutPref = v;
+  } catch (e) { /* private window / storage ถูกปิด = ใช้ค่าเริ่มต้น */ }
+
+  function wantedLayout() {
+    if (!(refAttached && docMeta.a && docMeta.b)) return "normal";
+    if (layoutPref === "split" && !hasPaneB) return "normal";
+    return layoutPref;
+  }
+
+  // พอดีความกว้างของกล่อง (ปัดลง — เหตุผลเดียวกับปุ่ม ⤢)
+  function fitPaneZoom(p) {
+    const m = docMeta[p.doc];
+    const avail = p.box.clientWidth - 6;
+    if (!m || !m.w || avail <= 0) return p.zoom;
+    return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Math.floor(avail / m.w * 100)));
+  }
+
+  function applyLayout() {
+    const grp = $("awLayoutGroup");
+    if (grp) {
+      grp.style.display = (refAttached && docMeta.b) ? "" : "none";
+      grp.querySelectorAll(".aw-lay-btn").forEach((b) =>
+        b.classList.toggle("active", b.dataset.layout === layoutPref));
+    }
+    const want = wantedLayout();
+    if (want === layout) return;
+    const prev = layout;
+    const cur = docMeta[activeDoc] ? activeDoc : "a";
+    cancelDraw();
+    layout = want;
+    const area = $("awStageArea");
+    if (area) {
+      area.classList.toggle("lay-split", want === "split");
+      area.classList.toggle("lay-side", want === "side");
+    }
+    const bar = $("awZoomBar");
+    if (bar) bar.classList.toggle("lay-split-bar", want !== "normal");
+    if (hasPaneB) paneB.wrap.style.display = want === "split" ? "" : "none";
+
+    if (want === "split") {
+      bindPane(paneA);
+      activeDoc = "a"; natW = docMeta.a.w; natH = docMeta.a.h;
+      paneA.stage.style.display = "inline-block";
+      paneA.rot.style.display = "inline-block";
+      // เปิดมาให้เห็นทั้งแผ่นตามความกว้างของแต่ละกล่องเลย (กล่องแคบลงครึ่ง
+      // ถ้าใช้ซูมเดิมจะต้องเลื่อนหาภาพทั้งสองฝั่ง)
+      paneA.zoom = fitPaneZoom(paneA);
+      paneB.zoom = fitPaneZoom(paneB);
+      zoomPct = paneA.zoom;
+      zoomRange.value = zoomPct;
+      zoomLabel.textContent = zoomPct + "%";
+      sizePane(paneA);
+      sizePane(paneB);
+      paneA.img.src = docMeta.a.url;
+      paneB.img.src = docMeta.b.url;
+      if (cur === "b") activatePane(paneB);
+      updateDocTabs();
+      applyZoom();
+      renderZones();
+      return;
+    }
+    if (prev === "split") {
+      // กลับเป็นกล่องเดียว: กล่อง A แสดงไฟล์ที่ทำงานอยู่ล่าสุด
+      paneB.stage.querySelectorAll(".aw-zone").forEach((el) => el.remove());
+      bindPane(paneA);
+      activeDoc = "a";
+      if (docMeta.a) { natW = docMeta.a.w; natH = docMeta.a.h; }
+      if (docMeta[cur]) showDoc(cur);
+      return;
+    }
+    // normal ⇄ side: ย้ายแค่ตำแหน่งภาพ OCR — ความกว้างกล่องภาพเปลี่ยน
+    updatePannable();
+    updateRotPreview();
+  }
+
+  const layoutGroup = $("awLayoutGroup");
+  if (layoutGroup) {
+    layoutGroup.addEventListener("click", (ev) => {
+      const b = ev.target.closest && ev.target.closest(".aw-lay-btn");
+      if (!b || busy) return;
+      const v = b.dataset.layout;
+      if (LAYOUTS.indexOf(v) < 0) return;
+      layoutPref = v;
+      try { localStorage.setItem(LAYOUT_KEY, v); } catch (e) { /* ไม่จำก็ใช้ได้ */ }
+      applyLayout();
+    });
+  }
   // เดิมสลับสัดส่วน 2 คอลัมน์ให้ฝั่งผลตรวจกว้างขึ้นเมื่อมีผลตรวจ/ตารางแล้ว
   // (toggle true หลังส่งตรวจ/แปล, false ตอนอัปโหลดไฟล์ใหม่). เลย์เอาต์ปัจจุบันเป็น
   // คอลัมน์เดียว (② อยู่ใต้ ①) คลาสนี้จึงไม่มีผลทางสายตาแล้ว — คงไว้ทั้ง
@@ -1168,9 +1340,10 @@
     showTabs(true);
     switchTab("result");
     resetTextTab();
+    applyLayout();
     showDoc("a");
-    stage.style.display = "inline-block";
-    if (stageRot) stageRot.style.display = "inline-block";
+    paneA.stage.style.display = "inline-block";
+    if (paneA.rot) paneA.rot.style.display = "inline-block";
     stageEmpty.style.display = "none";
     $("awZoomBar").style.display = "";
     $("awStageBox").classList.remove("is-empty");
@@ -1324,9 +1497,10 @@
       showTabs(true);
       switchTab("result");
       resetTextTab();
+      applyLayout();          // ไฟล์ 🅱 หลุดแล้ว ⇒ กลับเลย์เอาต์ปกติ
       showDoc("a");
-      stage.style.display = "inline-block";
-      if (stageRot) stageRot.style.display = "inline-block";
+      paneA.stage.style.display = "inline-block";
+      if (paneA.rot) paneA.rot.style.display = "inline-block";
       stageEmpty.style.display = "none";
       // แถบเครื่องมือโผล่เหนือกล่อง → กล่องเลิกเป็น "กล่องเปล่ารอรับไฟล์"
       // (มุมบนตรง ต่อกับแถบ, เส้นทึบแทนเส้นประ)
@@ -1376,7 +1550,15 @@
       zones = zones.filter((z) => docOfZone(z) !== "b");
       selectedId = null;
       updateDocTabs();
+      applyLayout();
       warnRefCountMismatch();
+      // ซ้าย-ขวาอยู่แล้วแล้วแนบ 🅱 ใหม่ทับ ⇒ กล่อง 🅱 ต้องโหลดภาพใหม่เอง
+      // (applyLayout ไม่ทำอะไรเมื่อเลย์เอาต์ไม่เปลี่ยน)
+      if (layout === "split" && paneB.img.getAttribute("src") !== docMeta.b.url) {
+        paneB.zoom = fitPaneZoom(paneB);
+        sizePane(paneB);
+        paneB.img.src = docMeta.b.url;
+      }
       if (switchToB !== false) showDoc("b"); else renderZones();
     } catch (e) {
       alert("เปิดไฟล์อ้างอิงไม่สำเร็จ: " + e.message);
@@ -1427,6 +1609,7 @@
     selectedId = null;
     $("awRefUploadRow").style.display = "none";
     $("awRefToggleRow").style.display = "";
+    applyLayout();          // เหลือไฟล์เดียว ⇒ กลับเลย์เอาต์ปกติ
     if (docMeta.a) showDoc("a");
     else { activeDoc = "a"; updateDocTabs(); renderZones(); }
   });
@@ -1489,10 +1672,12 @@
 
   // กล่องภาพ (ช่องมองที่ scroll ได้). ⚠️ เดิมหาโดย zoomRange.closest(".aw-stage-box")
   // ซึ่งพังทันทีที่ย้ายแถบเครื่องมือออกไปนอกกล่อง — ตอนนี้อ้างด้วย id ตรง ๆ
-  const stageBox = $("awStageBox");
+  //   ตอนนี้ stageBox = "กล่องที่กำลังทำงาน" (ดู bindPane) — ผูก event ทุกกล่อง
+  //   แล้วให้ตัวดัก capture ของกล่องย้ายการทำงานมาก่อน handler เหล่านี้เสมอ
+  const allBoxes = [paneA.box].concat(hasPaneB ? [paneB.box] : []);
 
   // scroll wheel บน stage-box = zoom (Ctrl ไม่ต้องกด)
-  stageBox.addEventListener("wheel", (ev) => {
+  function onWheelZoom(ev) {
     if (!natW) return;
     ev.preventDefault();
     const delta = ev.deltaY > 0 ? -5 : 5;
@@ -1501,7 +1686,8 @@
     zoomLabel.textContent = zoomPct + "%";
     applyZoom();
     renderZones();
-  }, { passive: false });
+  }
+  allBoxes.forEach((b) => b.addEventListener("wheel", onWheelZoom, { passive: false }));
 
   // ปุ่ม "⤢ พอดีความกว้าง" — ใช้พื้นที่ของเลย์เอาต์เต็มความกว้างให้คุ้ม:
   // ตั้งซูมให้ภาพพอดีช่องมองพอดี. clientWidth ของ .aw-stage-box = ความกว้าง
@@ -1570,19 +1756,22 @@
     stageBox.classList.add("aw-panning");
   }
 
-  function canPan() {
-    return stageBox.scrollWidth > stageBox.clientWidth + 1 ||
-           stageBox.scrollHeight > stageBox.clientHeight + 1;
+  function canPan(box) {
+    const b = box || stageBox;
+    return b.scrollWidth > b.clientWidth + 1 ||
+           b.scrollHeight > b.clientHeight + 1;
   }
 
   // เปิด/ปิดเคอร์เซอร์มือเฉพาะตอนที่ "มีอะไรให้เลื่อนจริง" — ถ้าภาพเล็กกว่า
   // กล่องแล้วยังขึ้นมือ ผู้ใช้จะลากแล้วงงว่าทำไมไม่ขยับ
   function updatePannable() {
-    if (stageBox) stageBox.classList.toggle("aw-pannable", canPan());
+    livePanes().forEach((p) => {
+      if (p.box) p.box.classList.toggle("aw-pannable", canPan(p.box));
+    });
   }
 
   if (stageBox) {
-    stageBox.addEventListener("mousedown", panStart);
+    allBoxes.forEach((b) => b.addEventListener("mousedown", panStart));
     document.addEventListener("mousemove", (ev) => {
       if (!pan) return;
       ev.preventDefault();
@@ -1605,7 +1794,8 @@
     // "เลื่อนได้หรือไม่" เปลี่ยนตาม ต้องอัปเดตเคอร์เซอร์ให้ตรง
     window.addEventListener("resize", updatePannable);
     if (typeof ResizeObserver !== "undefined") {
-      new ResizeObserver(updatePannable).observe(stageBox);
+      const ro = new ResizeObserver(updatePannable);
+      allBoxes.forEach((b) => ro.observe(b));
     }
   }
 
@@ -1634,24 +1824,37 @@
     return { x: sx, y: sy };
   }
 
-  function applyPageRot() {
-    if (!stageRot) return;
-    const W = dispW(), H = dispH();
-    const st = stage.style;
+  // ขนาดภาพที่แสดงของกล่อง p — เลย์เอาต์ปกติ = dispW()/dispH() เดิมเป๊ะ
+  // (กล่อง A แสดงไฟล์ที่ทำงานอยู่ ซึ่งอาจเป็น 🅱) · ซ้าย-ขวา = ไฟล์ประจำกล่อง
+  function paneDims(p) {
+    const m = layout === "split" ? (docMeta[p.doc] || {}) : { w: natW, h: natH };
+    return [p.img.clientWidth || m.w || 0, p.img.clientHeight || m.h || 0];
+  }
+
+  function rotatePane(p) {
+    const d = paneDims(p), W = d[0], H = d[1];
+    const st = p.stage.style, sr = p.rot;
     if (!W || !H) return;
     if (pageRot === 90) {
       st.transform = "translate(" + H + "px, 0) rotate(90deg)";
-      stageRot.style.width = H + "px"; stageRot.style.height = W + "px";
+      sr.style.width = H + "px"; sr.style.height = W + "px";
     } else if (pageRot === 180) {
       st.transform = "translate(" + W + "px, " + H + "px) rotate(180deg)";
-      stageRot.style.width = W + "px"; stageRot.style.height = H + "px";
+      sr.style.width = W + "px"; sr.style.height = H + "px";
     } else if (pageRot === 270) {
       st.transform = "translate(0, " + W + "px) rotate(270deg)";
-      stageRot.style.width = H + "px"; stageRot.style.height = W + "px";
+      sr.style.width = H + "px"; sr.style.height = W + "px";
     } else {
       st.transform = "";
-      stageRot.style.width = W + "px"; stageRot.style.height = H + "px";
+      sr.style.width = W + "px"; sr.style.height = H + "px";
     }
+  }
+
+  function applyPageRot() {
+    if (!stageRot) return;
+    // มุมจอใช้ร่วมกันทั้งสองกล่อง — ซ้าย-ขวาต้องหมุนพร้อมกัน ไม่งั้นโซนใหม่
+    // (ที่ตั้ง rotate = มุมจอ) ของฝั่งที่ไม่ได้หมุนจะได้มุมผิด
+    livePanes().forEach((p) => { if (p.rot && p.stage) rotatePane(p); });
     const btn = $("awPageRot");
     if (btn) btn.textContent = pageRot + "\u00b0";
     updatePannable();
@@ -1683,14 +1886,30 @@
   }
 
   function renderZones() {
+    if (layout === "split") {
+      renderPaneZones(paneA, "a");
+      renderPaneZones(paneB, "b");
+    } else {
+      renderPaneZones(pane, activeDoc);
+    }
+    renderProps();
+    renderGroupHint();
+    // renderZones() ถูกเรียกทุกครั้งที่โซนเปลี่ยน (เพิ่ม/ลบ/ย้าย/ย่อขยาย/
+    // แก้กลุ่ม) จึงเป็นจุดเดียวที่ครอบคลุมทั้งหมด — debounce กันเขียนถี่
+    // ตอนลากเมาส์
+    saveSessionSoon();
+  }
+
+  function renderPaneZones(p, doc) {
+    const stage = p.stage;
     stage.querySelectorAll(".aw-zone").forEach((el) => el.remove());
-    const W = dispW(), H = dispH();
+    const d = paneDims(p), W = d[0], H = d[1];
     // แสดงเฉพาะโซนของไฟล์ที่ stage กำลังแสดง (โหมดไฟล์เดียว = doc a ทั้งหมด)
-    zones.filter((z) => docOfZone(z) === activeDoc).forEach((z) => {
+    zones.filter((z) => docOfZone(z) === doc).forEach((z) => {
       const el = document.createElement("div");
       // คุณภาพขนาดโซน = วงแหวนรอบนอก (box-shadow) ไม่ใช่สีขอบ — สีขอบถูก
       // ใช้บอกชนิดโซน/ไฟล์/ถูกเลือกอยู่ไปหมดแล้ว ทับแล้วอ่านไม่ออกทั้งคู่
-      const qz = z.type === "ignore" ? null : zoneQuality(z.bbox);
+      const qz = z.type === "ignore" ? null : zoneQuality(z.bbox, doc);
       el.className = "aw-zone t-" + z.type +
         (docOfZone(z) === "b" ? " doc-b" : "") +
         (z.id === selectedId ? " selected" : "") +
@@ -1734,12 +1953,6 @@
         startDrag(ev, z, el, ev.target === handle));
       el.addEventListener("dblclick", (ev) => { ev.preventDefault(); snapZone(z); });
     });
-    renderProps();
-    renderGroupHint();
-    // renderZones() ถูกเรียกทุกครั้งที่โซนเปลี่ยน (เพิ่ม/ลบ/ย้าย/ย่อขยาย/
-    // แก้กลุ่ม) จึงเป็นจุดเดียวที่ครอบคลุมทั้งหมด — debounce กันเขียนถี่
-    // ตอนลากเมาส์
-    saveSessionSoon();
   }
 
   // เตือน "ก่อน" กดส่งตรวจ ว่าชั้นเทียบข้ามแผงจะไม่ทำงาน — เงื่อนไขต้อง
@@ -1799,8 +2012,9 @@
     ev.preventDefault();
     ev.stopPropagation();
     selectedId = zone.id;
-    stage.querySelectorAll(".aw-zone").forEach((d) =>
-      d.classList.toggle("selected", d.dataset.zid === zone.id));
+    // ทุกกล่องที่แสดงอยู่ — ซ้าย-ขวาเลือกโซนฝั่งหนึ่งแล้วอีกฝั่งต้องหลุดการเลือก
+    livePanes().forEach((p) => p.stage.querySelectorAll(".aw-zone").forEach((d) =>
+      d.classList.toggle("selected", d.dataset.zid === zone.id)));
     renderProps();
     drag = {
       zone, el, isResize,
@@ -1851,8 +2065,12 @@
   let rotPreviewSeq = 0;
   function updateRotPreview() {
     const box = $("awRotPreview");
+    // ข้อความแทนที่ของคอลัมน์ขวา (แสดงเฉพาะเลย์เอาต์ "ภาพ OCR ด้านขวา" — CSS)
+    const ph = $("awRotEmpty");
+    const hide = () => { box.style.display = "none"; if (ph) ph.hidden = false; };
     const z = selectedZone();
-    if (!z || !inspectionId) { box.style.display = "none"; return; }
+    if (!z || !inspectionId) { hide(); return; }
+    if (ph) ph.hidden = true;
     const r = rotOfZone(z);
     const param = cropRotateParam(z);
     const stateTxt = (r === "default")
@@ -1868,7 +2086,7 @@
     // กันภาพเก่ามาทับภาพใหม่เมื่อคลิกวนเร็วๆ
     const probe = new Image();
     probe.onload = () => { if (seq === rotPreviewSeq) img.src = url; };
-    probe.onerror = () => { if (seq === rotPreviewSeq) box.style.display = "none"; };
+    probe.onerror = () => { if (seq === rotPreviewSeq) hide(); };
     probe.src = url;
   }
   function renderProps() {
@@ -1931,10 +2149,20 @@
   //    ตอนนี้คิดจากขนาด preview จริง ซึ่งเรนเดอร์ที่ PREVIEW_DPI = เป๊ะ
   // ⚠️ ไฟล์ raster ไม่มี dpi — พิกเซลของ preview คือพิกเซลของไฟล์ต้นทาง
   //    ตรง ๆ (pdf_ingest.render ไม่สนใจ dpi เมื่อไม่ใช่ PDF)
-  function cropBasePx(bbox, dpi) {
-    const m = docMeta[activeDoc];
-    const w = natW || (previewImg && previewImg.naturalWidth);
-    const h = natH || (previewImg && previewImg.naturalHeight);
+  // doc (ไม่บังคับ) = ไฟล์ของโซน — โหมดซ้าย-ขวาวาดโซนของกล่องที่ "ไม่ได้
+  // ทำงาน" ด้วย ต้องคิดจากขนาดไฟล์นั้น ไม่ใช่ natW ของไฟล์ที่ทำงานอยู่
+  function docSize(doc) {
+    const d = doc || activeDoc;
+    if (d === activeDoc) {
+      return [natW || (previewImg && previewImg.naturalWidth),
+              natH || (previewImg && previewImg.naturalHeight)];
+    }
+    const m = docMeta[d];
+    return m ? [m.w, m.h] : [0, 0];
+  }
+  function cropBasePx(bbox, dpi, doc) {
+    const m = docMeta[doc || activeDoc];
+    const sz = docSize(doc), w = sz[0], h = sz[1];
     if (!m || !w || !h || m.pdf === undefined) return null;  // ไม่รู้ = ไม่เดา
     const k = m.pdf ? (dpi / PREVIEW_DPI) : 1;
     return [Math.max(1, bbox[2] * w) * k, Math.max(1, bbox[3] * h) * k];
@@ -1969,11 +2197,11 @@
 
   // โซนนี้จะถูกส่งให้ OCR ด้วยความละเอียดที่โมเดล "เห็น" เท่าไร
   // advisory 100% — ไม่ห้ามวาด ไม่แตะผลตรวจ/verdict/การนับ
-  function zoneQuality(bbox) {
+  function zoneQuality(bbox, doc) {
     if (!bbox || !(bbox[2] > 0) || !(bbox[3] > 0)) return null;
-    const base = cropBasePx(bbox, OCR_DPI);
+    const base = cropBasePx(bbox, OCR_DPI, doc);
     if (!base) return null;
-    const m = docMeta[activeDoc];
+    const m = docMeta[doc || activeDoc];
     const r = capBoost(base[0], base[1], OCR_CROP_MAX_SIDE,
                        m.pdf ? OCR_CROP_MIN_SIDE : 0);
     const pw = r[0], ph = r[1], scale = r[2];
@@ -1981,8 +2209,7 @@
     const down = scale < 0.999;
     let mm = null;
     if (m.pdf) {
-      const w = natW || previewImg.naturalWidth;
-      const h = natH || previewImg.naturalHeight;
+      const sz = docSize(doc), w = sz[0], h = sz[1];
       mm = [bbox[2] * w / PREVIEW_DPI * 25.4, bbox[3] * h / PREVIEW_DPI * 25.4];
     }
     // ความละเอียดที่โมเดลเห็นจริง — รวมชั้นเพิ่ม DPI + ย่อเพราะชนเพดาน +
@@ -2023,7 +2250,7 @@
   function renderHlHint(z) {
     const el = $("awHlHint");
     if (!el) return;
-    const base = z ? cropBasePx(z.bbox, OCR_DPI) : null;
+    const base = z ? cropBasePx(z.bbox, OCR_DPI, docOfZone(z)) : null;
     if (!base) { el.style.display = "none"; return; }
     const r = capBoost(base[0], base[1], HL_MAX_SIDE, HL_MIN_SIDE);
     const pw = r[0], ph = r[1];
@@ -2040,7 +2267,7 @@
   function renderSizeHint(z) {
     const el = $("awSizeHint");
     if (!el) return;
-    const q = z ? zoneQuality(z.bbox) : null;
+    const q = z ? zoneQuality(z.bbox, docOfZone(z)) : null;
     if (!q) { el.style.display = "none"; return; }
     el.style.display = "";
     el.className = "aw-size-hint q-" + q.level;
@@ -2103,7 +2330,8 @@
       ? (keepDrawing() ? "✏️ ลากกรอบได้เรื่อย ๆ… (Esc ออก)"
                        : "✏️ ลากกรอบบนภาพ… (Esc ยกเลิก)")
       : "+ เพิ่มโซน (ลากวาดบนภาพ)";
-    stage.style.cursor = drawMode ? "crosshair" : "";
+    // ซ้าย-ขวา: วาดได้ทั้งสองกล่อง (คลิกฝั่งไหน โซนใหม่เป็นของไฟล์นั้น)
+    livePanes().forEach((p) => { p.stage.style.cursor = drawMode ? "crosshair" : ""; });
   }
 
   function cancelDraw() {
@@ -2138,7 +2366,7 @@
     };
   }
 
-  stage.addEventListener("mousedown", (ev) => {
+  function onStageDrawStart(ev) {
     if (ev.button !== 0) return;   // ปุ่มกลาง/ขวา = ไม่เริ่มวาดโซน (ปล่อยให้ pan)
     if (!drawMode || busy || draw) return;
     ev.preventDefault();
@@ -2150,7 +2378,10 @@
     draw.tag.style.display = "none";
     draw.el.appendChild(draw.tag);
     stage.appendChild(draw.el);
-  });
+  }
+  // ผูกทุกกล่อง — ตัวดัก capture ของกล่องย้าย stage มาที่กล่องที่ถูกคลิกก่อนแล้ว
+  paneA.stage.addEventListener("mousedown", onStageDrawStart);
+  if (hasPaneB) paneB.stage.addEventListener("mousedown", onStageDrawStart);
 
   document.addEventListener("mousemove", (ev) => {
     if (!draw) return;

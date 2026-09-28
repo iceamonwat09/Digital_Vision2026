@@ -248,6 +248,50 @@
                  border-radius:4px; background:#fafafa; display:block; }
   .aw-rot-preview .aw-rot-cap { font-size:11px; color:#78909c; margin:4px 0 2px; }
 
+  /* ── เลย์เอาต์พื้นที่ภาพ (ปุ่ม ▦ Layout — โผล่เมื่อแนบครบ 2 ไฟล์) ──────
+     ไม่มีคลาส lay-* = ตัวห่อทุกชั้นไม่มีสไตล์ = หน้าตาเดิมทุกพิกเซล.
+     แสดงผลล้วน: พิกัดโซนเป็นสัดส่วนของภาพ ไม่ขึ้นกับความกว้างกล่อง */
+  .aw-layout { padding-left:12px; border-left:1px solid #d4dde8; }
+  .aw-lay-btn.active { background:#0d47a1; border-color:#0d47a1; color:#fff; }
+  .aw-pane-head { display:none; }
+  .aw-rot-empty { display:none; }
+  /* โหมด 1: 🅰 | 🅱 ซ้าย-ขวา */
+  .aw-stage-area.lay-split .aw-panes { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr);
+                                       gap:10px; }
+  /* สองกล่องสูงเท่ากันเสมอ (กล่องที่ภาพเตี้ยกว่าไม่หดจนดูเบี้ยว) */
+  .aw-stage-area.lay-split .aw-pane { min-width:0; display:flex; flex-direction:column; }
+  .aw-stage-area.lay-split .aw-pane > .aw-stage-box { flex:1 1 auto; }
+  .aw-stage-area.lay-split .aw-pane-head { display:flex; align-items:center; gap:6px;
+                  padding:5px 10px; font-size:12.5px; font-weight:700; border:1px solid #e1e8f0;
+                  border-bottom:none; background:#f4f7fb; }
+  .aw-stage-area.lay-split .aw-pane-head.doc-a { color:#0d47a1; }
+  .aw-stage-area.lay-split .aw-pane-head.doc-b { color:#00695c; }
+  .aw-stage-area.lay-split .aw-pane-head::after { content:"คลิกเพื่อทำงานกับฝั่งนี้";
+                  margin-left:auto; font-weight:400; font-size:11px; color:#90a4ae; }
+  .aw-stage-area.lay-split .aw-pane.is-active .aw-pane-head::after { content:"● กำลังทำงานฝั่งนี้"; }
+  .aw-stage-area.lay-split .aw-pane.is-active .aw-pane-head.doc-a { background:#1976d2; color:#fff; border-color:#1976d2; }
+  .aw-stage-area.lay-split .aw-pane.is-active .aw-pane-head.doc-b { background:#00897b; color:#fff; border-color:#00897b; }
+  .aw-stage-area.lay-split .aw-pane.is-active .aw-pane-head::after { color:rgba(255,255,255,.9); }
+  .aw-stage-area.lay-split .aw-pane-head { border-radius:8px 8px 0 0; }
+  .aw-toolbar.lay-split-bar { border-bottom:1px solid #e1e8f0; border-radius:8px; margin-bottom:8px; }
+  .aw-stage-area.lay-split .aw-stage-box { border-radius:0 0 8px 8px; }
+  .aw-stage-area.lay-split .aw-pane.is-active .aw-stage-box { border-color:#90caf9; }
+  /* โหมด 2: ภาพที่ OCR จะเห็น ย้ายมาด้านขวา (ตรึงไว้ขณะเลื่อนหน้า) */
+  .aw-stage-area.lay-side { display:grid; grid-template-columns:minmax(0,1fr) 340px;
+                            gap:12px; align-items:start; }
+  .aw-stage-area.lay-side .aw-rot-col { position:sticky; top:12px; border:1px solid #e1e8f0;
+                  border-radius:8px; background:#fff; padding:8px 10px; }
+  .aw-stage-area.lay-side .aw-stage-box { border-radius:8px; }
+  .aw-stage-area.lay-side .aw-rot-preview { margin-top:0; }
+  .aw-stage-area.lay-side .aw-rot-thumb { max-height:calc(100vh - 320px); width:auto;
+                  max-width:100%; margin:0 auto; }
+  .aw-stage-area.lay-side .aw-rot-empty:not([hidden]) { display:block; color:#90a4ae;
+                  font-size:12.5px; text-align:center; padding:28px 8px; line-height:1.6; }
+  @media (max-width:900px) {
+    .aw-stage-area.lay-split .aw-panes, .aw-stage-area.lay-side { grid-template-columns:minmax(0,1fr); }
+    .aw-stage-area.lay-side .aw-rot-col { position:static; }
+  }
+
   /* เตือนว่าโซนนี้จะชี้ตำแหน่งคำ (กรอบแดง) ไม่ได้ — ไม่กระทบผลตรวจ */
   .aw-hl-hint { margin-top:8px; padding:6px 8px; font-size:11.5px; line-height:1.5;
                 background:#fff8e1; border:1px solid #ffe0a3; border-radius:4px; color:#7a5200; }
@@ -537,9 +581,26 @@
           <button id="awPageRot" class="aw-btn aw-btn-sm"
                   title="หมุนเฉพาะภาพที่แสดง เพื่อให้อ่านตัวหนังสือที่ตั้งได้ — พิกัดโซนที่เก็บไม่เปลี่ยน และโซนใหม่จะตั้งมุมให้ OCR อ่านแนวนอนให้อัตโนมัติ">0°</button>
         </span>
+        <!-- เลือกเลย์เอาต์ (โผล่เฉพาะตอนแนบไฟล์ครบ 2 ไฟล์) — แสดงผลล้วน
+             ไม่แตะพิกัดโซน · ค่าเริ่มต้น "ปกติ" = หน้าตาเดิมทุกประการ -->
+        <span id="awLayoutGroup" class="aw-tb-group aw-layout" style="display:none;">
+          <span class="aw-tb-label">▦ Layout</span>
+          <button type="button" class="aw-btn aw-btn-sm aw-lay-btn" data-layout="normal"
+                  title="เหมือนเดิม: ภาพทีละไฟล์ สลับด้วยปุ่ม 🅰/🅱 · ภาพที่ OCR จะเห็นอยู่ด้านล่าง">▭ ปกติ</button>
+          <button type="button" class="aw-btn aw-btn-sm aw-lay-btn" data-layout="split"
+                  title="โหมด 1: 🅰 ไฟล์หลัก (ซ้าย) และ 🅱 ชิ้นงาน (ขวา) พร้อมกัน — วาด/ย้าย/ย่อขยาย/ซูมได้ทั้งสองฝั่ง คลิกฝั่งไหนก็ทำงานกับฝั่งนั้น">◫ 🅰 | 🅱 ซ้าย-ขวา</button>
+          <button type="button" class="aw-btn aw-btn-sm aw-lay-btn" data-layout="side"
+                  title="โหมด 2: ภาพทีละไฟล์เหมือนเดิม แต่ย้าย “ภาพที่ OCR จะเห็น” มาไว้ด้านขวา">▭▯ ภาพ OCR ด้านขวา</button>
+        </span>
         <span class="aw-pan-hint">✋ ลากบนพื้นที่ว่างเพื่อเลื่อนภาพ (หรือกดล้อเมาส์ลาก)</span>
       </div>
 
+      <!-- พื้นที่ภาพ: เลย์เอาต์ปกติ = กล่องภาพเดียว + ภาพ OCR ด้านล่าง (เดิม)
+           · .lay-split = กล่อง 🅰 | 🅱 ซ้าย-ขวา · .lay-side = ภาพ OCR ด้านขวา -->
+      <div id="awStageArea" class="aw-stage-area">
+      <div class="aw-panes">
+      <div class="aw-pane" id="awPaneA">
+        <div class="aw-pane-head doc-a">🅰 ไฟล์หลัก</div>
       <div id="awStageBox" class="aw-stage-box is-empty">
         <div id="awStageEmpty" class="aw-empty">
           ยังไม่ได้เลือกไฟล์ — กรุณาเลือกไฟล์ Artwork ที่ด้านบน<br>
@@ -553,14 +614,31 @@
           </div>
         </div>
       </div>
+      </div>
+      <!-- กล่องที่สอง ใช้เฉพาะโหมด 🅰 | 🅱 ซ้าย-ขวา (ซ่อนในโหมดอื่น) -->
+      <div class="aw-pane" id="awPaneB" style="display:none;">
+        <div class="aw-pane-head doc-b">🅱 ชิ้นงาน</div>
+        <div id="awStageBoxB" class="aw-stage-box">
+          <div id="awStageRotB" class="aw-stage-rot">
+            <div id="awStageB" class="aw-stage">
+              <img id="awPreviewImgB" alt="artwork preview (ชิ้นงาน)">
+            </div>
+          </div>
+        </div>
+      </div>
+      </div>
 
       <!-- ภาพตัวอย่าง "ที่ OCR จะเห็น" ของโซนที่เลือก — อยู่ใต้กล่องภาพ
            (ไม่ใช่ในแผง properties ที่ต้องเลื่อนจอลงไปดู) เพื่อให้เทียบกับ
            ภาพบนจอได้ในสายตาเดียว. ตัวมันซ่อน/แสดงเองตามการเลือกโซน
            (updateRotPreview) จึงย้ายออกมานอก #awProps ได้ตรง ๆ -->
+      <div class="aw-rot-col">
       <div id="awRotPreview" class="aw-rot-preview" style="display:none;">
         <div class="aw-rot-cap">🔎 ภาพที่ OCR จะเห็น (<span id="awRotState"></span>) — คลิก ↻ ที่มุมโซนเพื่อหมุน</div>
         <img id="awRotThumb" class="aw-rot-thumb" alt="ตัวอย่างที่หมุนแล้ว">
+      </div>
+      <div id="awRotEmpty" class="aw-rot-empty">🔎 ภาพที่ OCR จะเห็น<br>— เลือกโซนบนภาพเพื่อดูตัวอย่าง</div>
+      </div>
       </div>
 
       <div class="aw-row">

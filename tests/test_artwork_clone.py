@@ -371,6 +371,7 @@ def test_unused_clone_is_not_listed_as_a_template(store):
     res = pipeline.clone_inspection(src, owner=BOB_O)
     assert [r["id"] for r in report.list_sources()] == [src]
     report.record_translation(res["id"], {"rows": [], "translated": False})
-    got = [r["id"] for r in report.list_sources()]
-    assert got == [res["id"], src]
-    assert report.list_sources()[0]["cloned_from"] == src
+    # สองงานเกิดในวินาทีเดียวกัน ⇒ ลำดับขึ้นกับ hex สุ่มท้าย id — เทียบเป็นชุด
+    got = {r["id"]: r for r in report.list_sources()}
+    assert set(got) == {res["id"], src}
+    assert got[res["id"]]["cloned_from"] == src
