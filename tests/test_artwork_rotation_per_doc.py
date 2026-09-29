@@ -532,3 +532,10 @@ def test_tabs_show_each_files_angle_without_widening_the_toolbar():
 
 def test_pan_hint_hides_below_the_width_where_the_toolbar_wraps():
     assert "@media (max-width:1680px) { .aw-toolbar.has-layout .aw-pan-hint" in HTML
+
+
+def test_sideways_stage_does_not_leave_blank_scroll():
+    """QA 29 ก.ย.: หมุน 90° แล้วกดพอดีความกว้าง ยังเลื่อนขวาได้อีก 897 px"""
+    body = _fn("rotatePane")
+    assert 'st.position = side ? "absolute" : ""' in body
+    assert "rot === 90 || rot === 270" in body

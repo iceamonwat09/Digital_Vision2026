@@ -2022,6 +2022,14 @@
     if (!W || !H) return;
     // มุมของไฟล์ที่กล่องนี้แสดง (ซ้าย-ขวา = คนละไฟล์ ⇒ หมุนคนละมุมได้)
     const rot = pageRotOf(paneDoc(p));
+    // 90/270: ตัวภาพ (inline-block) ยังกินที่เท่าความกว้าง "ก่อนหมุน" ⇒ กล่อง
+    // เลื่อนได้เกินภาพเป็นพื้นที่ว่าง (วัด 29 ก.ย.: พอดีความกว้างแล้วยังเลื่อน
+    // ขวาได้อีก 897 px) ⇒ เอาออกจาก flow — กล่อง .aw-stage-rot มีขนาดหลังหมุน
+    // ให้แล้ว · 0/180 ขนาดไม่สลับ ⇒ คงเดิม
+    const side = rot === 90 || rot === 270;
+    st.position = side ? "absolute" : "";
+    st.left = side ? "0" : "";
+    st.top = side ? "0" : "";
     if (rot === 90) {
       st.transform = "translate(" + H + "px, 0) rotate(90deg)";
       sr.style.width = H + "px"; sr.style.height = W + "px";
@@ -2809,6 +2817,11 @@
       if (failed.length)
         msg += "\n\nหาไม่เจอ " + failed.length + " กลุ่ม (conf ต่ำ) — วาดเอง:\n" +
                failed.join(", ");
+      // มุมจอสองไฟล์ถูกใช้ "ตอนกดปุ่ม" — ฝั่งใดยังตะแคง/กลับหัวอยู่ = หาไม่เจอ
+      if (failed.length && perDocRot())
+        msg += "\n\nตรวจว่าจอของ 🅰 และ 🅱 หมุนจนอ่านตัวหนังสือตั้งตรงทั้งคู่ " +
+               "(ตอนนี้ 🅰 " + pageRotOf("a") + "\u00b0 · 🅱 " + pageRotOf("b") +
+               "\u00b0) แล้วกดใหม่";
       alert(msg);
     } catch (e) {
       alert("หากรอบคู่ไม่สำเร็จ: " + e.message);
