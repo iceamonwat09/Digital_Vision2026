@@ -145,7 +145,10 @@ def clone_inspection(src_id: str, owner: Optional[dict] = None) -> dict:
         "cloned_from_at": (src_meta.get("created_at")
                            or src_rep.get("created_at") or ""),
     })
-    settings = {k: setup[k] for k in report._SETUP_KEYS if k in setup}
+    # ``page_rot_b`` = มุมจอของไฟล์ 🅱 Lot เก่า — ไฟล์/กรอบ 🅱 ไม่ถูกคัดลอก
+    # ⇒ มุมของมันก็ไม่ถูกคัดลอก (ชิ้นงาน Lot ใหม่อาจวางคนละแนว)
+    settings = {k: setup[k] for k in report._SETUP_KEYS
+                if k in setup and k != "page_rot_b"}
     # เก็บ setup ของงานใหม่ทันที ⇒ งานนี้ใช้เป็นต้นแบบต่อได้แม้ยังไม่กดตรวจ
     report.save_setup(rec_id, zones_a, settings,
                       by=(owner or {}).get("username", ""))
@@ -590,6 +593,7 @@ def run_inspection(rec_id: str, zone_list: List[dict],
                    confirm_reads: bool = False,
                    pixel_check: bool = False,
                    page_rot: int = 0,
+                   page_rot_b: Optional[int] = None,
                    progress=None) -> dict:
     # ``progress`` = ตัวบันทึกจุดเช็คพอยต์ให้หน้าเว็บวาดเส้นความคืบหน้า
     # (advisory ล้วน — ไม่แตะผลตรวจ · ไม่ส่งมา = ไม่บันทึกอะไรเลย)
@@ -597,6 +601,10 @@ def run_inspection(rec_id: str, zone_list: List[dict],
     # มุมที่ "จอหมุนอยู่" ตอนผู้ใช้ลากโซน — เก็บไว้เพื่อให้รายงานแสดงภาพ
     # ทั้งหน้าในแนวเดียวกับที่คนเพิ่งจัดมา (แสดงผลล้วน ไม่แตะพิกัด/ผลตรวจ)
     page_rot = page_rot if page_rot in (90, 180, 270) else 0
+    # 🅱 หมุนจอแยกได้ (29 ก.ย.) — ``None`` = ไม่ได้ส่งมา ⇒ ไม่เขียนคีย์
+    # ⇒ รายงานใช้ ``page_rot`` กับภาพ 🅱 เหมือนเดิมเป๊ะ (แสดงผลล้วน)
+    if page_rot_b is not None:
+        page_rot_b = page_rot_b if page_rot_b in (90, 180, 270) else 0
     pg.start("prepare")
     d = report.inspection_dir(rec_id)
     src = _find_source(d)
@@ -801,6 +809,10 @@ def run_inspection(rec_id: str, zone_list: List[dict],
         # Cross-file compare was used — the report page shows both docs.
         rep["has_ref"] = True
         rep["filename_b"] = os.path.basename(_find_source(d, "source_b"))
+    if page_rot_b is not None:
+        # มุมจอของ 🅱 (หมุนแยกจาก 🅰) — ภาพทั้งหน้าฝั่ง 🅱 ในรายงานหมุนตามค่านี้
+        # **ตอนแสดงผลเท่านั้น** · ไม่มีคีย์ = ใช้ ``page_rot`` เหมือนเดิม
+        rep["page_rot_b"] = page_rot_b
     pg.done("report", progress_mod.OK,
             "%s · %d รายการ · %.1f วินาที"
             % (rep["verdict"], len(defects), rep["elapsed_s"]))

@@ -121,6 +121,9 @@ def artwork_page():
     return render_template("artwork_check.html",
                            pixdiff_ui=config.PIXDIFF_UI,
                            clone_ui=config.CLONE_FROM_HISTORY,
+                           experiment_ocr_ui=config.EXPERIMENT_OCR_UI,
+                           zone_rotate_inherit=config.ZONE_ROTATE_INHERIT,
+                           page_rot_per_doc=config.PAGE_ROT_PER_DOC,
                            **_hl_flags())
 
 
@@ -217,13 +220,18 @@ def api_inspect(rec_id):
         page_rot = int(body.get("page_rot") or 0)
     except (TypeError, ValueError):
         page_rot = 0
+    # 🅱 หมุนจอแยกจาก 🅰 (29 ก.ย.) — ไม่ส่งมา / ธงปิด ⇒ None = ไม่มีคีย์
+    # ``page_rot_b`` ในรายงาน ⇒ ภาพ 🅱 ใช้มุมร่วมเหมือนเดิมเป๊ะ
+    page_rot_b = _page_rot_b_arg(body)
     if config.CLONE_FROM_HISTORY:
         # กรอบตามที่ผู้ใช้วาด **ก่อน** เข้า pipeline (ซึ่งเขียนทับ rotate)
         # — ใช้เป็นต้นแบบตรวจ Lot ใหม่ · best-effort ไม่แตะผลตรวจ
-        _save_setup(rec_id, zone_list, {
-            "brand": brand, "page_rot": page_rot, "auto_rotate": auto_rotate,
-            "force_ocr": force_ocr, "split_bands": split_bands,
-            "confirm_reads": confirm_reads, "pixel_check": pixel_check})
+        st = {"brand": brand, "page_rot": page_rot, "auto_rotate": auto_rotate,
+              "force_ocr": force_ocr, "split_bands": split_bands,
+              "confirm_reads": confirm_reads, "pixel_check": pixel_check}
+        if page_rot_b is not None:
+            st["page_rot_b"] = page_rot_b
+        _save_setup(rec_id, zone_list, st)
     # จุดเช็คพอยต์ให้หน้าเว็บ poll ระหว่างตรวจ (advisory ล้วน ไม่แตะผลตรวจ)
     pg = progress.begin(rec_id, {"force_ocr": force_ocr,
                                  "split_bands": split_bands,
@@ -237,6 +245,7 @@ def api_inspect(rec_id):
                                       confirm_reads=confirm_reads,
                                       pixel_check=pixel_check,
                                       page_rot=page_rot,
+                                      page_rot_b=page_rot_b,
                                       progress=pg)
     except (ValueError, FileNotFoundError) as e:
         pg.finish(progress.FAIL, str(e))
@@ -488,7 +497,17 @@ def api_autopair(rec_id):
             results.append({"group": group, "bbox": None, "conf": 0.0,
                             "matched": False})
             continue
-        bbox_b, conf = zones_mod.autopair_bbox(img_a, img_b, bbox)
+        # ``rot`` = หมุนบล็อกของ 🅰 ก่อนค้นบน 🅱 (ผู้ใช้หมุนจอสองไฟล์ต่างกัน)
+        # ไม่ส่ง/ปิดธง ⇒ 0 = ค้นแบบไม่หมุนเหมือนเดิมเป๊ะ
+        rot = 0
+        if config.ZONE_ROTATE_INHERIT:
+            try:
+                rot = int((it or {}).get("rot") or 0)
+            except (TypeError, ValueError):
+                rot = 0
+            if rot not in (90, 180, 270):
+                rot = 0
+        bbox_b, conf = zones_mod.autopair_bbox(img_a, img_b, bbox, rot=rot)
         results.append({
             "group": group,
             "bbox": bbox_b,
@@ -497,6 +516,19 @@ def api_autopair(rec_id):
                             and conf >= config.AUTOPAIR_MIN_CONF),
         })
     return jsonify({"results": results})
+
+
+def _page_rot_b_arg(body: dict):
+    """มุมจอของ 🅱 (``page_rot_b``) — คืน ``None`` เมื่อไม่ได้ส่งมาหรือปิดธง
+    ``PAGE_ROT_PER_DOC`` (= ไม่เขียนคีย์ ⇒ ภาพ 🅱 ใช้มุมร่วมเหมือนเดิมเป๊ะ)
+    · ค่าที่ไม่ใช่ 90/180/270 = 0"""
+    if not config.PAGE_ROT_PER_DOC or "page_rot_b" not in (body or {}):
+        return None
+    try:
+        r = int(body.get("page_rot_b") or 0)
+    except (TypeError, ValueError):
+        return 0
+    return r if r in (90, 180, 270) else 0
 
 
 def _save_setup(rec_id: str, zone_list, settings: dict) -> None:
@@ -560,10 +592,13 @@ def api_translate(rec_id):
                 tr_page_rot = int(body.get("page_rot") or 0)
             except (TypeError, ValueError):
                 tr_page_rot = 0
-            _save_setup(rec_id, zone_list, {
-                "brand": brand, "auto_rotate": auto_rotate,
-                "force_ocr": force_ocr, "split_bands": split_bands,
-                "page_rot": tr_page_rot if tr_page_rot in (90, 180, 270) else 0})
+            tr_st = {"brand": brand, "auto_rotate": auto_rotate,
+                     "force_ocr": force_ocr, "split_bands": split_bands,
+                     "page_rot": tr_page_rot if tr_page_rot in (90, 180, 270) else 0}
+            tr_rot_b = _page_rot_b_arg(body)
+            if tr_rot_b is not None:
+                tr_st["page_rot_b"] = tr_rot_b
+            _save_setup(rec_id, zone_list, tr_st)
         try:
             zone_list, ocr_results = pipeline.run_ocr_only(
                 rec_id, zone_list, auto_rotate=auto_rotate,

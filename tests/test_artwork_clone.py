@@ -331,7 +331,8 @@ def test_clone_param_is_removed_before_cloning():
 def test_translate_request_carries_page_rot():
     js = _read("static/js/artwork_check.js")
     a = js.index('"/translate", {')
-    assert "page_rot: pageRot" in js[a:a + 500]
+    # 29 ก.ย.: มุมจอแยกต่อไฟล์ ⇒ ส่งผ่าน pageRotBody() (page_rot = 🅰)
+    assert "pageRotBody()" in js[a:a + 500]
 
 
 def test_ui_elements_exist_and_are_flagged():

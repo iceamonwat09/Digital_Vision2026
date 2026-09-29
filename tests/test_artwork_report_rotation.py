@@ -262,7 +262,13 @@ def _js() -> str:
 
 
 def test_the_browser_sends_the_screen_angle_when_inspecting():
-    assert "page_rot: pageRot" in _js()
+    # 29 ก.ย.: มุมจอแยกต่อไฟล์ ⇒ ``page_rot`` (🅰) มาจาก pageRotBody()
+    js = _js()
+    a = js.index('"/inspect", {')
+    assert "pageRotBody()" in js[a:a + 900]
+    body = js[js.index("function pageRotBody()"):]
+    body = body[:body.index("\n  }\n")]
+    assert 'page_rot: pageRotOf("a")' in body
 
 
 def test_the_report_asks_for_rotated_page_images():

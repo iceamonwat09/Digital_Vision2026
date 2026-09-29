@@ -401,7 +401,7 @@ def snap_bbox(preview_bgr: np.ndarray, bbox: List[float],
 
 def autopair_bbox(preview_a: np.ndarray, preview_b: np.ndarray,
                   bbox: List[float], scales: List[float] = None,
-                  ) -> tuple:
+                  rot: int = 0) -> tuple:
     """
     Locate the content block of a doc-A zone on doc-B (cross-file pairing).
 
@@ -417,6 +417,12 @@ def autopair_bbox(preview_a: np.ndarray, preview_b: np.ndarray,
     scales (``scales``, default ``config.AUTOPAIR_SCALES``) to tolerate A/B
     rendered at slightly different scales; the highest-scoring scale wins.
     Returns ``(None, 0.0)`` when the patch can't be placed at any scale.
+
+    ``rot`` (0/90/180/270, clockwise) turns the A patch before searching B —
+    used when the user rotated the two files' screens differently (🅰 upright,
+    🅱 upside down …). ``bbox_b`` is still in B's own (unrotated) page
+    coordinates, sized to the turned patch. ``0``/any other value = the
+    original search, byte for byte.
     """
     if scales is None:
         scales = config.AUTOPAIR_SCALES or [1.0]
@@ -428,6 +434,12 @@ def autopair_bbox(preview_a: np.ndarray, preview_b: np.ndarray,
     ax1 = max(ax0 + 1, min(Wa, int(round((x + w) * Wa))))
     ay1 = max(ay0 + 1, min(Ha, int(round((y + h) * Ha))))
     patch = cv2.cvtColor(preview_a[ay0:ay1, ax0:ax1], cv2.COLOR_BGR2GRAY)
+    if rot == 90:
+        patch = cv2.rotate(patch, cv2.ROTATE_90_CLOCKWISE)
+    elif rot == 180:
+        patch = cv2.rotate(patch, cv2.ROTATE_180)
+    elif rot == 270:
+        patch = cv2.rotate(patch, cv2.ROTATE_90_COUNTERCLOCKWISE)
     bg = cv2.cvtColor(preview_b, cv2.COLOR_BGR2GRAY)
     ph, pw = patch.shape[:2]
     if ph < 4 or pw < 4:
