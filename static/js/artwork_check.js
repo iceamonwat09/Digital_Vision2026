@@ -1433,6 +1433,7 @@
           url: "/api/artwork/" + s.id + "/preview_b.png?t=" + Date.now() })
       : null;
     refAttached = !!s.refAttached && !!docMeta.b;
+    resetRefRot();
     // ⚠️ ตั้ง .checked อย่างเดียวไม่ยิง event "change" ⇒ ตัวแปร autoRotate
     //    (ที่ถูกส่งไปตอนตรวจจริง) ค้างค่าเก่า ทั้งที่ช่องติ๊กบนจอบอกอีกอย่าง
     autoRotate = !!s.autoRotate;
@@ -1601,6 +1602,7 @@
                     url: "/api/artwork/" + inspectionId + "/preview.png?t=" + Date.now() };
       docMeta.b = null;
       refAttached = false;
+      resetRefRot();
       // Show the result tabs right after upload so the "ข้อความ + คำแปล" tab
       // can be used WITHOUT first pressing "ส่งตรวจสอบ" (OCR-only advisory).
       showTabs(true);
@@ -1654,6 +1656,7 @@
       docMeta.b = { w: res.preview_size[0], h: res.preview_size[1], pdf: !!res.is_pdf,
                     url: "/api/artwork/" + inspectionId + "/preview_b.png?t=" + Date.now() };
       refAttached = true;
+      resetRefRot();
       // โซนฝั่ง b ของไฟล์ก่อนหน้า (ถ้ามี) ทิ้ง — ไฟล์เปลี่ยนแล้ว. เริ่มจาก
       // หน้าว่างเช่นเดียวกับไฟล์หลัก: เสนอโซนเฉพาะเมื่อกด "เสนอโซนใหม่"
       zones = zones.filter((z) => docOfZone(z) !== "b");
@@ -1709,6 +1712,7 @@
     zones = zones.filter((z) => docOfZone(z) !== "b");
     refAttached = false;
     docMeta.b = null;
+    resetRefRot();
     selectedId = null;
     $("awRefUploadRow").style.display = "none";
     $("awRefToggleRow").style.display = "";
@@ -1933,6 +1937,10 @@
   }
   // ไฟล์ที่กล่อง p กำลังแสดง — ซ้าย-ขวา = ไฟล์ประจำกล่อง · อื่น ๆ = ไฟล์ที่ทำงานอยู่
   function paneDoc(p) { return layout === "split" ? p.doc : activeDoc; }
+  // ไฟล์ 🅱 ที่เพิ่งแนบ/ถูกเอาออก/ไฟล์หลักเปลี่ยน ⇒ เริ่มที่มุมเดียวกับ 🅰
+  // (= พฤติกรรมเดิมที่สองไฟล์หมุนพร้อมกัน จนกว่าผู้ใช้จะหมุน 🅱 เอง) —
+  // ไม่งั้นมุมของ 🅱 ใบก่อนค้างมาใบใหม่ และ "หากรอบคู่" หมุนแผ่นผิดมุม
+  function resetRefRot() { rotByDoc.b = rotByDoc.a; }
 
   // มุมนี้ทำให้ภาพบนจอเป็นแนวนอน ⇒ โซนใหม่ควรตั้ง rotate เท่านี้เพื่อให้
   // OCR เห็นภาพแบบเดียวกับที่คนเห็น (ชั้น pixel ก็ใช้ค่าเดียวกันนี้)
@@ -1962,9 +1970,13 @@
     if (r === "auto") return "auto";
     // "ตามหน้า" ขณะเปิด auto ทั้งหน้า = ให้ OCR เลือกเองอยู่แล้ว ⇒ คงไว้
     if (r === "default" && autoRotate) return "default";
-    const base = PAGE_ROT.indexOf(r) >= 0 ? r : 0;
+    const n = typeof r === "string" && /^\d+$/.test(r) ? Number(r) : r;
+    const base = PAGE_ROT.indexOf(n) >= 0 ? n : 0;
     const out = ((base - d) % 360 + 360) % 360;
-    return out || "default";
+    // 0 ขณะเปิด auto ทั้งหน้า ต้องปักหมุด 0 จริง — "default" ตอนนั้นแปลว่า
+    // "ให้ OCR เลือกเอง" ซึ่งไม่ใช่มุมที่คำนวณได้
+    if (out === 0) return autoRotate ? 0 : "default";
+    return out;
   }
   // โซนที่เสนอขณะหมุนจอ ⇒ ได้มุมจอของไฟล์นั้น เหมือนโซนที่ลากเอง
   // (มุมที่ปักหมุดไว้แล้วไม่ถูกทับ)
@@ -2029,7 +2041,7 @@
   // ``page_rot_b`` = 🅱 เฉพาะเมื่อแยกมุมต่อไฟล์ (ธงปิด ⇒ ไม่มีคีย์นี้ = เดิมเป๊ะ)
   function pageRotBody() {
     const o = { page_rot: pageRotOf("a") };
-    if (perDocRot()) o.page_rot_b = pageRotOf("b");
+    if (perDocRot() && refAttached && docMeta.b) o.page_rot_b = pageRotOf("b");
     return o;
   }
 
@@ -2044,7 +2056,7 @@
     }
     document.querySelectorAll(".aw-pane-rot").forEach((el) => {
       const r = pageRotOf(el.dataset.doc);
-      el.textContent = r ? "↻ " + r + "\u00b0" : "";
+      el.textContent = perDocRot() && r ? "↻ " + r + "\u00b0" : "";
     });
   }
 

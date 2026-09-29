@@ -140,7 +140,7 @@ def test_restoring_a_session_or_template_cannot_tick_a_hidden_box(el_id, key):
 _FNS = ("perDocRot", "docKey", "pageRotOf", "setPageRot", "paneDoc",
         "rotForNewZone", "inheritRot", "pairRotDelta", "rotForPairOf",
         "rotForProposed", "unrotPoint", "unrotDelta", "shownDims",
-        "pageRotBody")
+        "pageRotBody", "resetRefRot")
 
 
 def _run_js(script, per_doc=True, inherit=True):
@@ -152,6 +152,7 @@ def _run_js(script, per_doc=True, inherit=True):
         "var PAGE_ROT = [0, 90, 180, 270];\n"
         "var rotByDoc = {a: 0, b: 0};\n"
         "var activeDoc = 'a'; var layout = 'normal'; var autoRotate = false;\n"
+        "var refAttached = true; var docMeta = {a: {}, b: {}};\n"
         "%s\n%s\n" % ("true" if per_doc else "false",
                       "true" if inherit else "false", src, script))
     out = subprocess.run([NODE, "-e", prog], capture_output=True, text=True,
@@ -181,6 +182,47 @@ def test_the_request_carries_both_angles():
       rotByDoc.a = 90; rotByDoc.b = 270;
       console.log(JSON.stringify(pageRotBody()));""")
     assert r == {"page_rot": 90, "page_rot_b": 270}
+
+
+def test_no_ref_file_means_no_b_angle_in_the_request():
+    """รีวิว 29 ก.ย.: ตรวจไฟล์เดียวแต่ส่งมุม 🅱 ค้าง ⇒ report/setup จดค่าขยะ"""
+    r = _run_js("""
+      rotByDoc.a = 90; rotByDoc.b = 270; refAttached = false; docMeta.b = null;
+      console.log(JSON.stringify(pageRotBody()));""")
+    assert r == {"page_rot": 90}
+
+
+def test_a_new_ref_file_starts_at_the_main_files_angle():
+    """รีวิว 29 ก.ย.: หมุน 🅰 90° แล้วแนบ 🅱 ⇒ 🅱 ต้องเริ่มที่ 90° (= เดิมที่หมุน
+    พร้อมกัน) ไม่ใช่ 0° / มุมของไฟล์ 🅱 ใบก่อน — ไม่งั้น "หากรอบคู่" หมุนแผ่น
+    🅰 ผิดมุมทั้งที่สองไฟล์วางแนวเดียวกัน แล้วหาไม่เจอ"""
+    r = _run_js("""
+      rotByDoc.a = 90; rotByDoc.b = 180; resetRefRot();
+      console.log(JSON.stringify([pageRotOf('b'), pairRotDelta()]));""")
+    assert r == [90, 0]
+
+
+@pytest.mark.parametrize("fn", ["uploadRef", "restoreSession"])
+def test_every_way_a_ref_file_changes_resets_its_angle(fn):
+    assert "resetRefRot();" in _fn(fn)
+
+
+def test_ref_remove_and_new_main_file_reset_the_b_angle():
+    i = JS.index('$("awRefRemove").addEventListener("click"')
+    assert "resetRefRot();" in JS[i:i + 900]
+    i = JS.index('docMeta.b = null;\n      refAttached = false;')
+    assert "resetRefRot();" in JS[i:i + 120]
+
+
+def test_a_computed_zero_is_pinned_when_page_auto_rotate_is_on():
+    """รีวิว 29 ก.ย.: 180 − 180 = 0 แต่ "default" ขณะเปิด auto ทั้งหน้าแปลว่า
+    "ให้ OCR เลือกเอง" ⇒ ต้องปักหมุด 0 จริง"""
+    r = _run_js("""
+      var off = rotForPairOf({rotate: 180}, 180);
+      autoRotate = true; var on = rotForPairOf({rotate: 180}, 180);
+      var s = rotForPairOf({rotate: "270"}, 90);
+      console.log(JSON.stringify([off, on, s]));""")
+    assert r == ["default", 0, 180]
 
 
 def test_a_new_zone_gets_the_angle_of_the_file_it_is_drawn_on():
