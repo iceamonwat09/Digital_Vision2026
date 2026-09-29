@@ -517,3 +517,18 @@ def test_autopair_route_ignores_rot_when_the_flag_is_off():
     body = src[i:src.index("\ndef ", i + 10)]
     assert "if config.ZONE_ROTATE_INHERIT:" in body
     assert "autopair_bbox(img_a, img_b, bbox, rot=rot)" in body
+
+
+def test_tabs_show_each_files_angle_without_widening_the_toolbar():
+    """รีวิว UI 29 ก.ย.: เลย์เอาต์ปกติอยู่แท็บ 🅰 แล้วมองไม่เห็นว่า 🅱 หมุนอยู่ ·
+    ใส่เป็นข้อความในแท็บแล้วแถบเครื่องมือตก 2 บรรทัดที่ 1366 ⇒ ใช้ tooltip"""
+    for tab in ("awDocTabA", "awDocTabB"):
+        i = HTML.index('id="%s"' % tab)
+        assert "aw-pane-rot" not in HTML[i:HTML.index("</button>", i)]
+    body = _fn("updateRotLabels")
+    assert 'tab.title = "มุมจอของไฟล์นี้ "' in body
+    assert 'tab.removeAttribute("title")' in body
+
+
+def test_pan_hint_hides_below_the_width_where_the_toolbar_wraps():
+    assert "@media (max-width:1680px) { .aw-toolbar.has-layout .aw-pan-hint" in HTML

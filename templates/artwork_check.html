@@ -256,7 +256,10 @@
   .aw-lay-btn.active { background:#0d47a1; border-color:#0d47a1; color:#fff; }
   /* มีปุ่ม Layout เพิ่มมา ⇒ ซ่อนคำแนะนำการลากบนจอไม่กว้าง
      ไม่งั้นแถบเครื่องมือตกเป็น 2 บรรทัด (ไฟล์เดียว = ไม่มีคลาสนี้ = เดิม) */
-  @media (max-width:1600px) { .aw-toolbar.has-layout .aw-pan-hint { display:none; } }
+  /* 1680 ไม่ใช่ 1600 — ป้ายปุ่มหมุน "🅱 180°" ยาวขึ้น ⇒ ที่ 1601-1620 px แถบตก 2 บรรทัด (วัด 29 ก.ย.) */
+  @media (max-width:1680px) { .aw-toolbar.has-layout .aw-pan-hint { display:none; } }
+  /* มุมจอของแต่ละไฟล์ (หัวกล่องซ้าย-ขวา) — ว่างเมื่อ 0° หรือปิดธงมุมแยกไฟล์ */
+  .aw-pane-rot { font-weight:500; opacity:.85; }
   .aw-pane-head { display:none; }
   .aw-rot-empty { display:none; }
   /* โหมด 1: 🅰 | 🅱 ซ้าย-ขวา */

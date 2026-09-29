@@ -58,7 +58,7 @@ def test_new_css_is_scoped_to_layout_classes():
     # กฎทุกข้อในบล็อกนี้ต้องผูกกับคลาสของฟีเจอร์ใหม่ — ไม่มีข้อไหนแตะของเดิมลอย ๆ
     allowed = (".aw-layout", ".aw-lay-btn", ".aw-lay-btn.active", ".aw-pane-head",
                ".aw-rot-empty", ".aw-toolbar.lay-bar",
-               ".aw-toolbar.has-layout .aw-pan-hint")
+               ".aw-toolbar.has-layout .aw-pan-hint", ".aw-pane-rot")
     sels = re.findall(r"([^{}]+)\{[^{}]*\}", block)
     assert len(sels) > 10
     for raw in sels:

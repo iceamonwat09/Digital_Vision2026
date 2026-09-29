@@ -2054,6 +2054,14 @@
       btn.textContent = (tagged ? (activeDoc === "b" ? "🅱 " : "🅰 ") : "") +
         pageRotOf(activeDoc) + "\u00b0";
     }
+    // แท็บบอกมุมผ่าน tooltip — ใส่เป็นข้อความแล้วแถบเครื่องมือตก 2 บรรทัด
+    // ที่ 1366 px (วัด 29 ก.ย.) · ธงปิด = ไม่ตั้ง title เหมือนเดิม
+    ["a", "b"].forEach((d) => {
+      const tab = $(d === "a" ? "awDocTabA" : "awDocTabB");
+      if (!tab) return;
+      if (perDocRot()) tab.title = "มุมจอของไฟล์นี้ " + pageRotOf(d) + "\u00b0";
+      else tab.removeAttribute("title");
+    });
     document.querySelectorAll(".aw-pane-rot").forEach((el) => {
       const r = pageRotOf(el.dataset.doc);
       el.textContent = perDocRot() && r ? "↻ " + r + "\u00b0" : "";
