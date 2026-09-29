@@ -262,7 +262,13 @@ def _js() -> str:
 
 
 def test_the_browser_sends_the_screen_angle_when_inspecting():
-    assert "page_rot: pageRot" in _js()
+    # 29 ก.ย.: มุมจอแยกต่อไฟล์ ⇒ ``page_rot`` (🅰) มาจาก pageRotBody()
+    js = _js()
+    a = js.index('"/inspect", {')
+    assert "pageRotBody()" in js[a:a + 900]
+    body = js[js.index("function pageRotBody()"):]
+    body = body[:body.index("\n  }\n")]
+    assert 'page_rot: pageRotOf("a")' in body
 
 
 def test_the_report_asks_for_rotated_page_images():
@@ -312,9 +318,11 @@ def test_rot_preview_still_hides_itself_when_no_zone_is_selected():
     """ย้ายออกนอก ``#awProps`` ได้ก็เพราะมันคุมการแสดงผลของตัวเองอยู่แล้ว."""
     js = _js()
     i = js.index("function updateRotPreview()")
-    frag = js[i:i + 400]
-    assert 'if (!z || !inspectionId) { box.style.display = "none"; return; }' \
-        in frag
+    frag = js[i:i + 700]
+    # 28 ก.ย.: ซ่อนผ่าน hide() ซึ่งแสดงข้อความแทนของคอลัมน์ขวาไปพร้อมกัน
+    # (เลย์เอาต์ "ภาพ OCR ด้านขวา") — คุณสมบัติเดิม "ไม่เลือกโซน = ซ่อน" ต้องคงอยู่
+    assert 'const hide = () => { box.style.display = "none";' in frag
+    assert 'if (!z || !inspectionId) { hide(); return; }' in frag
 
 
 def test_the_thumbnail_and_its_caption_moved_together():

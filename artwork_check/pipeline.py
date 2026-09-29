@@ -64,6 +64,7 @@ def start_inspection(file_bytes: bytes, filename: str,
     rec_id = report.new_inspection_id()
     d = report.inspection_dir(rec_id, create=True)
     report.save_owner(rec_id, owner)
+    report.save_meta(rec_id, filename)
     src_path = os.path.join(d, f"source{ext}")
     with open(src_path, "wb") as f:
         f.write(file_bytes)
@@ -84,6 +85,88 @@ def start_inspection(file_bytes: bytes, filename: str,
         "preview_size": [preview.shape[1], preview.shape[0]],
         "is_pdf": bool(doc.is_pdf),
         "zones": proposed,
+        "has_text_layer": embedded_chars >= config.EMBEDDED_TEXT_MIN_CHARS,
+        "ocr_available": ocr.is_ocr_available(),
+        "spell_layer_available": checks.spell_layer_available(),
+    }
+
+
+def clone_inspection(src_id: str, owner: Optional[dict] = None) -> dict:
+    """ใช้งานที่เคยตรวจเป็นต้นแบบ ⇒ สร้าง **งานใหม่** (ผู้ใช้เลือก 28 ก.ย.).
+
+    คัดลอกเฉพาะ: ไฟล์ 🅰 · ``preview.png`` · กรอบฝั่ง 🅰 · ค่าตั้ง
+    **ไม่คัดลอก**: ไฟล์ชิ้นงาน (🅱) · กรอบ 🅱 · ผลตรวจ · ประวัติการแปล —
+    ของเหล่านั้นเป็นของ Lot เก่า. กรอบ 🅱 ของ Lot ใหม่ให้ผู้ใช้วาดเองหรือกด
+    "หากรอบคู่อัตโนมัติ" (ไม่คัดลอกพิกัดเก่า: ชิ้นงาน Lot ใหม่วางไม่ตรงที่เดิม
+    ⇒ กรอบเลื่อนแบบเงียบ = ตรวจผิดที่แบบมั่นใจ)
+    **งานต้นแบบไม่ถูกแตะแม้แต่ไฟล์เดียว** (อ่านอย่างเดียว)
+    """
+    import shutil
+    src_dir = report.inspection_dir(src_id)          # ValueError = id ผิดรูป
+    if not os.path.isdir(src_dir):
+        raise FileNotFoundError("ไม่พบงานต้นแบบ")
+    setup = report.load_setup(src_id)
+    zones_a = [dict(z) for z in (setup or {}).get("zones") or []
+               if str(z.get("doc", "a") or "a") == "a"]
+    if not zones_a:
+        raise ValueError("งานนี้ไม่มีกรอบของไฟล์หลักให้ใช้เป็นต้นแบบ")
+    src_file = _find_source(src_dir)
+    for z in zones_a:
+        z["doc"] = "a"
+    zones_a = zones_mod.sanitize_zones(zones_a)
+
+    src_meta = report.load_meta(src_id)
+    try:
+        src_rep = report.load_report(src_id) or {}
+    except (ValueError, json.JSONDecodeError):
+        src_rep = {}
+    filename = src_meta.get("filename") or src_rep.get("filename") or \
+        os.path.basename(src_file)
+
+    rec_id = report.new_inspection_id()
+    d = report.inspection_dir(rec_id, create=True)
+    try:
+        shutil.copy2(src_file, os.path.join(d, os.path.basename(src_file)))
+        pv = os.path.join(src_dir, "preview.png")
+        if os.path.exists(pv):
+            shutil.copy2(pv, os.path.join(d, "preview.png"))
+        doc = ArtworkDocument(os.path.join(d, os.path.basename(src_file)))
+        preview = cv2.imread(os.path.join(d, "preview.png"))
+        if preview is None:
+            preview = doc.render(config.PREVIEW_DPI)
+            cv2.imwrite(os.path.join(d, "preview.png"), preview)
+    except Exception:
+        shutil.rmtree(d, ignore_errors=True)   # ไม่ทิ้งงานครึ่ง ๆ กลาง ๆ
+        raise
+    report.save_owner(rec_id, owner)
+    report.save_meta(rec_id, filename, extra={
+        "cloned_from": src_id,
+        "cloned_from_filename": filename,
+        "cloned_from_at": (src_meta.get("created_at")
+                           or src_rep.get("created_at") or ""),
+    })
+    # ``page_rot_b`` = มุมจอของไฟล์ 🅱 Lot เก่า — ไฟล์/กรอบ 🅱 ไม่ถูกคัดลอก
+    # ⇒ มุมของมันก็ไม่ถูกคัดลอก (ชิ้นงาน Lot ใหม่อาจวางคนละแนว)
+    settings = {k: setup[k] for k in report._SETUP_KEYS
+                if k in setup and k != "page_rot_b"}
+    # เก็บ setup ของงานใหม่ทันที ⇒ งานนี้ใช้เป็นต้นแบบต่อได้แม้ยังไม่กดตรวจ
+    report.save_setup(rec_id, zones_a, settings,
+                      by=(owner or {}).get("username", ""))
+    embedded_chars = len(doc.embedded_text())
+    logger.info("[artwork] clone %s -> %s file=%s zones=%d",
+                src_id, rec_id, filename, len(zones_a))
+    return {
+        "id": rec_id,
+        "filename": filename,
+        "page_count": doc.page_count,
+        "preview_size": [preview.shape[1], preview.shape[0]],
+        "is_pdf": bool(doc.is_pdf),
+        "zones": zones_a,
+        "settings": settings,
+        "approx_rotate": bool(setup.get("approx_rotate")),
+        "cloned_from": {"id": src_id, "filename": filename,
+                        "created_at": src_meta.get("created_at")
+                        or src_rep.get("created_at") or ""},
         "has_text_layer": embedded_chars >= config.EMBEDDED_TEXT_MIN_CHARS,
         "ocr_available": ocr.is_ocr_available(),
         "spell_layer_available": checks.spell_layer_available(),
@@ -112,7 +195,7 @@ def start_ref(rec_id: str, file_bytes: bytes, filename: str) -> dict:
         old = os.path.join(d, f"source_b{e}")
         if os.path.exists(old):
             os.remove(old)
-    for stale in ("overlay_b.png", _OCR_ONLY_CACHE):
+    for stale in ("overlay_b.png", _OCR_ONLY_CACHE, "preview_b_hi.png"):
         p = os.path.join(d, stale)
         if os.path.exists(p):
             os.remove(p)
@@ -510,6 +593,7 @@ def run_inspection(rec_id: str, zone_list: List[dict],
                    confirm_reads: bool = False,
                    pixel_check: bool = False,
                    page_rot: int = 0,
+                   page_rot_b: Optional[int] = None,
                    progress=None) -> dict:
     # ``progress`` = ตัวบันทึกจุดเช็คพอยต์ให้หน้าเว็บวาดเส้นความคืบหน้า
     # (advisory ล้วน — ไม่แตะผลตรวจ · ไม่ส่งมา = ไม่บันทึกอะไรเลย)
@@ -517,6 +601,10 @@ def run_inspection(rec_id: str, zone_list: List[dict],
     # มุมที่ "จอหมุนอยู่" ตอนผู้ใช้ลากโซน — เก็บไว้เพื่อให้รายงานแสดงภาพ
     # ทั้งหน้าในแนวเดียวกับที่คนเพิ่งจัดมา (แสดงผลล้วน ไม่แตะพิกัด/ผลตรวจ)
     page_rot = page_rot if page_rot in (90, 180, 270) else 0
+    # 🅱 หมุนจอแยกได้ (29 ก.ย.) — ``None`` = ไม่ได้ส่งมา ⇒ ไม่เขียนคีย์
+    # ⇒ รายงานใช้ ``page_rot`` กับภาพ 🅱 เหมือนเดิมเป๊ะ (แสดงผลล้วน)
+    if page_rot_b is not None:
+        page_rot_b = page_rot_b if page_rot_b in (90, 180, 270) else 0
     pg.start("prepare")
     d = report.inspection_dir(rec_id)
     src = _find_source(d)
@@ -721,6 +809,10 @@ def run_inspection(rec_id: str, zone_list: List[dict],
         # Cross-file compare was used — the report page shows both docs.
         rep["has_ref"] = True
         rep["filename_b"] = os.path.basename(_find_source(d, "source_b"))
+    if page_rot_b is not None:
+        # มุมจอของ 🅱 (หมุนแยกจาก 🅰) — ภาพทั้งหน้าฝั่ง 🅱 ในรายงานหมุนตามค่านี้
+        # **ตอนแสดงผลเท่านั้น** · ไม่มีคีย์ = ใช้ ``page_rot`` เหมือนเดิม
+        rep["page_rot_b"] = page_rot_b
     pg.done("report", progress_mod.OK,
             "%s · %d รายการ · %.1f วินาที"
             % (rep["verdict"], len(defects), rep["elapsed_s"]))
@@ -1292,6 +1384,65 @@ def _pdf_text_boxes(rec_id: str, rep: dict, zone_id: str, found: str,
     if cap and cap > 0:
         out = out[:cap]
     return out
+
+
+# ── ภาพคมตอนวาดโซน (แสดงผลล้วน) ─────────────────────────────────────
+_HI_LOCKS: dict = {}
+_HI_LOCKS_GUARD = threading.Lock()
+
+
+def display_dpi(page_w_pt: float, page_h_pt: float) -> int:
+    """dpi ของภาพคม — ``PREVIEW_DISPLAY_DPI`` ลดลงตามเพดานพิกเซล.
+    คืน 0 = ไม่ควรสร้าง (ปิดธง หรือเพดานบังคับให้ต่ำกว่า/เท่า PREVIEW_DPI)"""
+    dpi = float(config.PREVIEW_DISPLAY_DPI)
+    if dpi <= config.PREVIEW_DPI or page_w_pt <= 0 or page_h_pt <= 0:
+        return 0
+    cap = config.PREVIEW_DISPLAY_MAX_MP * 1e6
+    px = (page_w_pt * dpi / 72.0) * (page_h_pt * dpi / 72.0)
+    if cap > 0 and px > cap:
+        dpi *= (cap / px) ** 0.5
+    dpi = int(dpi)
+    return dpi if dpi > config.PREVIEW_DPI else 0
+
+
+def display_preview_path(rec_id: str, doc: str = "a") -> Optional[str]:
+    """ภาพคมของไฟล์ 🅰/🅱 สำหรับกล่องวาดโซน — สร้างครั้งแรกที่ถูกขอ.
+
+    คืน ``None`` เมื่อไม่มีภาพคมให้ (ปิดธง · ไม่ใช่ PDF · ไม่มีไฟล์ ·
+    เพดานพิกเซลไม่เหลือความละเอียดเพิ่ม) ⇒ หน้าเว็บใช้ ``preview.png`` เดิม.
+    **ไม่แตะ ``preview.png``** ซึ่งตัวเสนอโซน/snap/autopair/overlay อ่านต่อ
+    """
+    if doc not in ("a", "b") or config.PREVIEW_DISPLAY_DPI <= config.PREVIEW_DPI:
+        return None
+    d = report.inspection_dir(rec_id)
+    try:
+        src = _find_source(d, "source_b" if doc == "b" else "source")
+    except FileNotFoundError:
+        return None
+    if not src.lower().endswith(".pdf"):
+        return None
+    out = os.path.join(d, "preview_b_hi.png" if doc == "b" else "preview_hi.png")
+    with _HI_LOCKS_GUARD:
+        lock = _HI_LOCKS.setdefault(out, threading.Lock())
+    with lock:              # สองคำขอพร้อมกัน = เรนเดอร์ครั้งเดียว
+        if (os.path.exists(out)
+                and os.path.getmtime(out) >= os.path.getmtime(src)):
+            return out
+        import fitz
+        with fitz.open(src) as pdf:
+            r = pdf[0].rect
+            dpi = display_dpi(r.width, r.height)
+        if not dpi:
+            return None
+        img = ArtworkDocument(src).render(dpi)
+        tmp = out + ".tmp.png"
+        # PNG (ไม่สูญเสีย) — ขอบตัวอักษรคมคือเหตุผลทั้งหมดของภาพนี้
+        if not cv2.imwrite(tmp, img, [cv2.IMWRITE_PNG_COMPRESSION, 1]):
+            return None
+        os.replace(tmp, out)
+        logger.info("[artwork] %s preview_hi doc=%s %dx%d @%d dpi",
+                    rec_id, doc, img.shape[1], img.shape[0], dpi)
+        return out
 
 
 def _find_source(insp_dir: str, base: str = "source") -> str:

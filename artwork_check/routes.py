@@ -120,12 +120,20 @@ def artwork_page():
     # ปุ่มยังอยู่ใน DOM เสมอ แค่ถูกซ่อนด้วย CSS — ดูเหตุผลที่ config.PIXDIFF_UI
     return render_template("artwork_check.html",
                            pixdiff_ui=config.PIXDIFF_UI,
+                           clone_ui=config.CLONE_FROM_HISTORY,
+                           experiment_ocr_ui=config.EXPERIMENT_OCR_UI,
+                           zone_rotate_inherit=config.ZONE_ROTATE_INHERIT,
+                           page_rot_per_doc=config.PAGE_ROT_PER_DOC,
+                           preview_hi=config.PREVIEW_DISPLAY_DPI > config.PREVIEW_DPI,
                            **_hl_flags())
 
 
 @artwork_bp.route("/artwork_check/history")
 def artwork_history_page():
-    return render_template("artwork_check_history.html", **_hl_flags())
+    return render_template("artwork_check_history.html",
+                           history_translate=config.HISTORY_TRANSLATE,
+                           clone_ui=config.CLONE_FROM_HISTORY,
+                           **_hl_flags())
 
 
 # ── Inspection flow ───────────────────────────────────────────────────
@@ -213,6 +221,18 @@ def api_inspect(rec_id):
         page_rot = int(body.get("page_rot") or 0)
     except (TypeError, ValueError):
         page_rot = 0
+    # 🅱 หมุนจอแยกจาก 🅰 (29 ก.ย.) — ไม่ส่งมา / ธงปิด ⇒ None = ไม่มีคีย์
+    # ``page_rot_b`` ในรายงาน ⇒ ภาพ 🅱 ใช้มุมร่วมเหมือนเดิมเป๊ะ
+    page_rot_b = _page_rot_b_arg(body)
+    if config.CLONE_FROM_HISTORY:
+        # กรอบตามที่ผู้ใช้วาด **ก่อน** เข้า pipeline (ซึ่งเขียนทับ rotate)
+        # — ใช้เป็นต้นแบบตรวจ Lot ใหม่ · best-effort ไม่แตะผลตรวจ
+        st = {"brand": brand, "page_rot": page_rot, "auto_rotate": auto_rotate,
+              "force_ocr": force_ocr, "split_bands": split_bands,
+              "confirm_reads": confirm_reads, "pixel_check": pixel_check}
+        if page_rot_b is not None:
+            st["page_rot_b"] = page_rot_b
+        _save_setup(rec_id, zone_list, st)
     # จุดเช็คพอยต์ให้หน้าเว็บ poll ระหว่างตรวจ (advisory ล้วน ไม่แตะผลตรวจ)
     pg = progress.begin(rec_id, {"force_ocr": force_ocr,
                                  "split_bands": split_bands,
@@ -226,6 +246,7 @@ def api_inspect(rec_id):
                                       confirm_reads=confirm_reads,
                                       pixel_check=pixel_check,
                                       page_rot=page_rot,
+                                      page_rot_b=page_rot_b,
                                       progress=pg)
     except (ValueError, FileNotFoundError) as e:
         pg.finish(progress.FAIL, str(e))
@@ -291,6 +312,21 @@ def api_pixdiff_png(rec_id):
 @artwork_bp.route("/api/artwork/<rec_id>/preview.png")
 def api_preview(rec_id):
     return _send_artifact(rec_id, "preview.png")
+
+
+@artwork_bp.route("/api/artwork/<rec_id>/preview_hi.png")
+def api_preview_hi(rec_id):
+    """ภาพคมสำหรับกล่องวาดโซน (PDF เท่านั้น · แสดงผลล้วน) — 404 = ไม่มีให้
+    ⇒ หน้าเว็บใช้ ``preview.png`` เดิมต่อไปเงียบ ๆ"""
+    doc = "b" if request.args.get("doc") == "b" else "a"
+    try:
+        path = pipeline.display_preview_path(rec_id, doc)
+    except Exception:
+        logger.exception("[artwork] preview_hi failed for %s", rec_id)
+        path = None
+    if not path:
+        return jsonify({"error": "ไม่มีภาพความละเอียดสูง"}), 404
+    return _send_artifact(rec_id, os.path.basename(path))
 
 
 @artwork_bp.route("/api/artwork/<rec_id>/overlay.png")
@@ -477,7 +513,17 @@ def api_autopair(rec_id):
             results.append({"group": group, "bbox": None, "conf": 0.0,
                             "matched": False})
             continue
-        bbox_b, conf = zones_mod.autopair_bbox(img_a, img_b, bbox)
+        # ``rot`` = หมุนบล็อกของ 🅰 ก่อนค้นบน 🅱 (ผู้ใช้หมุนจอสองไฟล์ต่างกัน)
+        # ไม่ส่ง/ปิดธง ⇒ 0 = ค้นแบบไม่หมุนเหมือนเดิมเป๊ะ
+        rot = 0
+        if config.ZONE_ROTATE_INHERIT:
+            try:
+                rot = int((it or {}).get("rot") or 0)
+            except (TypeError, ValueError):
+                rot = 0
+            if rot not in (90, 180, 270):
+                rot = 0
+        bbox_b, conf = zones_mod.autopair_bbox(img_a, img_b, bbox, rot=rot)
         results.append({
             "group": group,
             "bbox": bbox_b,
@@ -486,6 +532,33 @@ def api_autopair(rec_id):
                             and conf >= config.AUTOPAIR_MIN_CONF),
         })
     return jsonify({"results": results})
+
+
+def _page_rot_b_arg(body: dict):
+    """มุมจอของ 🅱 (``page_rot_b``) — คืน ``None`` เมื่อไม่ได้ส่งมาหรือปิดธง
+    ``PAGE_ROT_PER_DOC`` (= ไม่เขียนคีย์ ⇒ ภาพ 🅱 ใช้มุมร่วมเหมือนเดิมเป๊ะ)
+    · ค่าที่ไม่ใช่ 90/180/270 = 0"""
+    if not config.PAGE_ROT_PER_DOC or "page_rot_b" not in (body or {}):
+        return None
+    try:
+        r = int(body.get("page_rot_b") or 0)
+    except (TypeError, ValueError):
+        return 0
+    return r if r in (90, 180, 270) else 0
+
+
+def _save_setup(rec_id: str, zone_list, settings: dict) -> None:
+    by = (_owner_of_request() or {}).get("username", "")
+    report.save_setup(rec_id, [dict(z) for z in zone_list], settings, by=by)
+
+
+def _record_tr_error(rec_id: str, msg: str, brand: str, ocr_only: bool):
+    """ครั้งที่กดแปลแล้วล้มทั้งครั้ง ก็ต้องอยู่ในประวัติ ("กดทุกครั้ง")."""
+    if not config.HISTORY_TRANSLATE:
+        return
+    by = (_owner_of_request() or {}).get("username", "")
+    report.record_translation(rec_id, {"rows": [], "ocr_only": ocr_only},
+                              by=by, brand=brand, error=msg)
 
 
 @artwork_bp.route("/api/artwork/<rec_id>/translate", methods=["POST"])
@@ -530,6 +603,18 @@ def api_translate(rec_id):
         auto_rotate = bool(body.get("auto_rotate"))
         force_ocr = bool(body.get("force_ocr"))
         split_bands = bool(body.get("split_bands"))
+        if config.CLONE_FROM_HISTORY:
+            try:
+                tr_page_rot = int(body.get("page_rot") or 0)
+            except (TypeError, ValueError):
+                tr_page_rot = 0
+            tr_st = {"brand": brand, "auto_rotate": auto_rotate,
+                     "force_ocr": force_ocr, "split_bands": split_bands,
+                     "page_rot": tr_page_rot if tr_page_rot in (90, 180, 270) else 0}
+            tr_rot_b = _page_rot_b_arg(body)
+            if tr_rot_b is not None:
+                tr_st["page_rot_b"] = tr_rot_b
+            _save_setup(rec_id, zone_list, tr_st)
         try:
             zone_list, ocr_results = pipeline.run_ocr_only(
                 rec_id, zone_list, auto_rotate=auto_rotate,
@@ -538,6 +623,7 @@ def api_translate(rec_id):
             return jsonify({"error": str(e)}), 404
         except Exception as e:
             logger.exception("[artwork] ocr-only failed for %s", rec_id)
+            _record_tr_error(rec_id, f"OCR ไม่สำเร็จ: {e}", brand, True)
             return jsonify({"error": f"OCR ไม่สำเร็จ: {e}"}), 500
         defects = None   # advisory: no verdict/mismatch without a full inspection
 
@@ -555,6 +641,7 @@ def api_translate(rec_id):
         result = translate.translate_table(d, rows)
     except Exception as e:
         logger.exception("[artwork] translate failed for %s", rec_id)
+        _record_tr_error(rec_id, f"แปลไม่สำเร็จ: {e}", brand, ocr_only)
         return jsonify({"error": f"แปลไม่สำเร็จ: {e}"}), 500
 
     # translate_table may return rows from an older cache that predates the
@@ -574,7 +661,24 @@ def api_translate(rec_id):
     # Tells the UI this table came from the on-the-fly OCR path (no full
     # inspection yet) so it can note that cross-panel mismatch isn't checked.
     result["ocr_only"] = ocr_only
+    if config.HISTORY_TRANSLATE:
+        # ประวัติการแปล — best-effort ไม่ทำให้การแปลล้ม และไม่แตะ result
+        by = (_owner_of_request() or {}).get("username", "")
+        report.record_translation(rec_id, result, by=by, brand=brand)
     return jsonify(result)
+
+
+@artwork_bp.route("/api/artwork/<rec_id>/translations")
+def api_translations(rec_id):
+    """ประวัติการแปลของงานนี้: ตารางเต็มของครั้งล่าสุด + ทุกครั้งที่กด.
+    อยู่หลังด่านเจ้าของเหมือน route อื่นที่มี ``<rec_id>``."""
+    try:
+        data = report.load_translations(rec_id)
+    except ValueError:
+        return jsonify({"error": "bad id"}), 400
+    if not data["log"] and not data["last"]:
+        return jsonify({"error": "ยังไม่มีประวัติการแปล"}), 404
+    return jsonify(data)
 
 
 @artwork_bp.route("/api/artwork/<rec_id>/report")
@@ -589,6 +693,12 @@ def api_report(rec_id):
     # ไม่เขียนลง report.json เพื่อให้ชั้นนี้แยกขาดจากผลตรวจ QC จริง ๆ
     pd = pipeline.load_pixdiff(rec_id)
     out = _with_owner(rec_id, rep)
+    # ชื่อไฟล์ที่ผู้ใช้อัปโหลดจริง (meta.json — งานที่อัปโหลดหลัง 28 ก.ย. 2026)
+    # แทน "source.pdf" ที่ report.json เก็บไว้ · แนบตอนตอบ ไม่เขียนทับไฟล์
+    real_name = report.load_meta(rec_id).get("filename")
+    if real_name:
+        out = dict(out)
+        out["filename"] = real_name
     if pd:
         out = dict(out)
         out["pixdiff"] = pd
@@ -605,13 +715,71 @@ def api_history():
     """
     limit = request.args.get("limit", 50, type=int)
     viewer = _viewer()
-    records = report.list_inspections(limit=limit,
-                                      can_view=ownership.make_filter(viewer))
-    return jsonify({
+    can_view = ownership.make_filter(viewer)
+    filters = report.normalize_filters(request.args)
+    scope = ownership.scope_of(viewer)
+    records = report.list_inspections(
+        limit=limit, can_view=can_view,
+        include_translate=config.HISTORY_TRANSLATE,
+        filters=filters or None)
+    out = {
         "records": records,
-        "scope": ownership.scope_of(viewer),
+        "scope": scope,
         "username": (viewer or {}).get("username", ""),
-    })
+        "translate_history": config.HISTORY_TRANSLATE,
+        "filters": filters,
+    }
+    if scope == "all":
+        # ตัวเลือก "ผู้ตรวจ" มีความหมายเฉพาะคนที่เห็นงานของหลายคน
+        out["owners"] = report.list_owners(can_view)
+    return jsonify(out)
+
+
+# ── ใช้งานเก่าเป็นต้นแบบตรวจ Lot ใหม่ ─────────────────────────────────
+# ⚠️ สอง endpoint นี้ **ไม่มี <rec_id> ใน URL โดยตั้งใจ** ⇒ ไม่ผ่านด่านเจ้าของ
+# ของ blueprint (ผู้ใช้เลือกให้ทุกคนใช้ต้นแบบของทุกคนได้). จึงต้องคุมเอง:
+#  • รายการคืนแค่ข้อมูลสรุป (ชื่อไฟล์/แบรนด์/วันที่/ผู้ตรวจ/จำนวนกรอบ)
+#  • clone สร้างงานใหม่ที่ **ผู้กดเป็นเจ้าของ** · งานต้นแบบอ่านอย่างเดียว
+#  • CLONE_SHARE_ALL=0 ⇒ ใช้กติกาเดียวกับหน้าประวัติ (ownership)
+def _source_filter():
+    if config.CLONE_SHARE_ALL:
+        return None
+    return ownership.make_filter(_viewer())
+
+
+@artwork_bp.route("/api/artwork/sources")
+def api_sources():
+    if not config.CLONE_FROM_HISTORY:
+        return jsonify({"error": "ปิดฟีเจอร์นี้อยู่"}), 404
+    q = request.args.get("q", "", type=str)
+    limit = max(1, min(request.args.get("limit", 30, type=int), 100))
+    return jsonify({"sources": report.list_sources(q, _source_filter(), limit),
+                    "share_all": config.CLONE_SHARE_ALL})
+
+
+@artwork_bp.route("/api/artwork/clone", methods=["POST"])
+def api_clone():
+    if not config.CLONE_FROM_HISTORY:
+        return jsonify({"error": "ปิดฟีเจอร์นี้อยู่"}), 404
+    body = request.get_json(silent=True) or {}
+    src_id = str(body.get("source", "")).strip()
+    try:
+        report.inspection_dir(src_id)
+    except ValueError:
+        return jsonify({"error": "bad id"}), 400
+    can = _source_filter()
+    if can is not None and not can(report.load_owner(src_id)):
+        return jsonify({"error": "งานต้นแบบนี้เป็นของผู้ใช้อื่น"}), 403
+    try:
+        res = pipeline.clone_inspection(src_id, owner=_owner_of_request())
+    except FileNotFoundError as e:
+        return jsonify({"error": str(e)}), 404
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        logger.exception("[artwork] clone failed for %s", src_id)
+        return jsonify({"error": f"เปิดจากต้นแบบไม่สำเร็จ: {e}"}), 500
+    return jsonify(res)
 
 
 @artwork_bp.route("/api/artwork/<rec_id>", methods=["DELETE"])
