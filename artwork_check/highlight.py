@@ -446,6 +446,9 @@ def _tesseract_available() -> bool:
 
 
 _lang_cache: dict = {}
+# รายชื่อภาษาที่ติดตั้งจริง — ถามครั้งเดียวต่อโปรเซส (เป็นการเรียก
+# subprocess). ``None`` = ยังไม่เคยถาม · ``set()`` = ถามแล้วแต่ไม่ได้คำตอบ
+_avail_cache: Optional[set] = None
 
 # ── เลือกภาษา Tesseract จาก "สคริปต์ของคำที่กำลังหา" ────────────────
 #
@@ -473,17 +476,17 @@ _SCRIPT_RANGES = (
 )
 
 
-def script_langs(word: str) -> str:
-    """ภาษา tesseract ที่ควรใช้กับ ``word`` — จากสคริปต์ของตัวอักษรล้วน ๆ.
+def _script_groups(word) -> Tuple[List[str], bool]:
+    """(กลุ่มภาษาตามสคริปต์ของ ``word`` เรียงตามจำนวนตัวอักษร, มีละตินปนไหม).
 
-    ไม่ผูกกับภาษาใดภาษาหนึ่ง (ไม่มีรายการคำ/dictionary) ⇒ ใช้ได้กับเอกสาร
-    ภาษาอะไรก็ได้. คืนสตริง ``+``-joined เรียงตามจำนวนตัวอักษรที่พบมากสุด
+    ส่วนร่วมของ ``script_langs`` (เลือกภาษาให้ Tesseract) กับ
+    ``missing_langs`` (บอกว่าเครื่องนี้ขาดชุดข้อมูลภาษาไหน) — สองที่นี้ต้อง
+    ตอบจากสคริปต์ชุดเดียวกันเสมอ ไม่งั้นจะเตือนคนละเรื่องกับที่ระบบใช้จริง.
+    กลุ่มหนึ่งอาจเป็น **ทางเลือก** (``chi_tra+chi_sim`` = มีตัวใดตัวหนึ่งก็พอ)
     """
-    if not word:
-        return "eng"
     counts = {}
     ascii_alpha = False
-    for ch in str(word):
+    for ch in str(word or ""):
         o = ord(ch)
         if o < 128:
             if ch.isalpha():
@@ -494,15 +497,97 @@ def script_langs(word: str) -> str:
                 counts[name] = counts.get(name, 0) + 1
                 break
     if not counts:
-        return "eng"
+        return [], ascii_alpha
     order = sorted(counts, key=lambda k: -counts[k])
     # ฮั่นล้วน + มีคานะด้วย ⇒ ญี่ปุ่นชัดเจน ไม่ต้องลองจีน
     if "jpn" in counts and "chi_tra+chi_sim" in counts:
         order = [o for o in order if o != "chi_tra+chi_sim"]
+    return order, ascii_alpha
+
+
+def script_langs(word: str) -> str:
+    """ภาษา tesseract ที่ควรใช้กับ ``word`` — จากสคริปต์ของตัวอักษรล้วน ๆ.
+
+    ไม่ผูกกับภาษาใดภาษาหนึ่ง (ไม่มีรายการคำ/dictionary) ⇒ ใช้ได้กับเอกสาร
+    ภาษาอะไรก็ได้. คืนสตริง ``+``-joined เรียงตามจำนวนตัวอักษรที่พบมากสุด
+    """
+    if not word:
+        return "eng"
+    order, ascii_alpha = _script_groups(word)
+    if not order:
+        return "eng"
     langs = "+".join(order)
     # เติม eng เฉพาะเมื่อคำนั้น **มีตัวอักษรละตินปนจริง** — เติมพร่ำเพรื่อ
     # ทำให้แย่ลง (วัดแล้ว ara+eng ได้ 16 vs ara เดี่ยว 18)
     return langs + "+eng" if ascii_alpha else langs
+
+
+def installed_langs() -> set:
+    """ชุดข้อมูลภาษา (traineddata) ที่ติดตั้งจริงบนเครื่องนี้ — แคชไว้.
+
+    ⚠️ **set() ว่าง = "ถามไม่ได้" ไม่ใช่ "ไม่มีสักภาษา"** — ผู้เรียกต้องแยก
+    สองกรณีนี้ออกจากกัน ไม่งั้นเครื่องที่ยังไม่ได้ลง pytesseract จะถูก
+    รายงานว่า "ขาดทุกภาษา" ซึ่งเป็นคำตอบที่ผิดแบบมั่นใจ
+
+    ⚠️ **ความล้มเหลวห้ามถูกแคช** — เทสต์/โค้ดที่ stub ``pytesseract`` ชั่วคราว
+    จะทำให้ครั้งแรกตอบว่าง ถ้าเก็บไว้ ทุกการเรียกหลังจากนั้นจะเชื่อค่าที่ผิด
+    ตลอดอายุโปรเซส (เจอจริงตอนทำ: ``_resolve_langs`` เลิกกรองภาษาที่ไม่มีจริง)
+    """
+    global _avail_cache
+    if _avail_cache:
+        return _avail_cache
+    try:
+        import pytesseract
+        got = set(pytesseract.get_languages(config="") or [])
+    except Exception:
+        got = set()
+    if got:
+        _avail_cache = got
+    return got
+
+
+def missing_langs(word: str) -> List[str]:
+    """ชุดข้อมูลภาษาที่ ``word`` ต้องใช้ แต่เครื่องนี้ **ยังไม่มี**.
+
+    คืน ``[]`` เมื่อมีครบ **หรือเมื่อตอบไม่ได้** (ไม่เดา — ดู
+    ``installed_langs``). กลุ่มที่เป็นทางเลือก (``chi_tra+chi_sim``) ถือว่า
+    มีครบเมื่อมีตัวใดตัวหนึ่ง
+    """
+    if not word:
+        return []
+    avail = installed_langs()
+    if not avail:
+        return []
+    order, _ = _script_groups(word)
+    need = order or ["eng"]      # ละติน/ตัวเลขล้วน ⇒ ต้องมี eng
+    return [g for g in need
+            if not any(a in avail for a in g.split("+") if a)]
+
+
+def unused_langs(word: str, requested: str) -> List[str]:
+    """สคริปต์ของ ``word`` ที่ **ติดตั้งไว้แล้ว** แต่ค่าตั้ง ``requested``
+    ไม่ได้ส่งให้ Tesseract ⇒ คำนี้ก็ยังชี้ตำแหน่งไม่ได้อยู่ดี.
+
+    คนละปัญหากับ ``missing_langs`` และ **แก้คนละทาง**: อันนั้นต้องไปติดตั้ง
+    traineddata · อันนี้แค่แก้ค่าตั้ง. เกิดจริงได้ง่ายเพราะคู่มือของสถานี
+    แนะนำให้ตั้ง ``ARTWORK_HIGHLIGHT_TESS_LANG=eng+ara`` ⇒ พอเจอฉลากไทย/จีน
+    ในเครื่องเดียวกัน คำเหล่านั้นจะไม่มีกรอบเลยโดยไม่มีอะไรบอก.
+    ``requested`` เป็น ``auto`` (ค่าปริยาย) ⇒ เลือกตามสคริปต์อยู่แล้ว ⇒ ``[]``
+    """
+    if not word or (requested or "auto").strip().lower() == "auto":
+        return []
+    avail = installed_langs()
+    if not avail:
+        return []
+    use = set(_resolve_langs(requested, word).split("+"))
+    order, _ = _script_groups(word)
+    need = order or ["eng"]
+    out = []
+    for g in need:
+        alts = [a for a in g.split("+") if a]
+        if any(a in avail for a in alts) and not any(a in use for a in alts):
+            out.append(g)          # มีให้ใช้ แต่ไม่ได้ถูกส่งไป
+    return out
 
 
 def _resolve_langs(requested: str, word: str = "") -> str:
@@ -521,12 +606,7 @@ def _resolve_langs(requested: str, word: str = "") -> str:
         req = script_langs(word)
     if req in _lang_cache:
         return _lang_cache[req]
-    avail = set()
-    try:
-        import pytesseract
-        avail = set(pytesseract.get_languages(config="") or [])
-    except Exception:
-        avail = set()
+    avail = installed_langs()
     if avail:
         keep = [ln for ln in req.split("+") if ln and ln in avail]
         if not keep:
@@ -1080,6 +1160,89 @@ def _phrase_matches(words, ftokens: List[str]) -> list:
     return _dedupe_boxes([b for _, b in near])
 
 
+# ── บรรทัดที่ "ไหลข้ามแถว" — ยิงเป็นช่วงคำติดกันแทนทั้งวลี ────────────
+# ``_phrase_matches`` ต้องหาคำของวลีให้ครบ **ติดกันในแถวเดียวกัน**. แต่
+# backend อย่าง Gemini คืนย่อหน้าที่จัดหน้าใหม่แล้วมาเป็น "หนึ่งบรรทัด"
+# ขณะที่ Tesseract อ่านตาม **แถวจริงบนภาพ** ⇒ วลีเดียวกันถูกหั่นเป็น 3 แถว
+# ⇒ ไม่มีหน้าต่างไหนครบ ⇒ 0 กรอบเสมอ ไม่ว่าอ่านถูกแค่ไหน
+#
+# ชั้นนี้ทำงาน **หลังทางเดิมล้มเหลวแล้วเท่านั้น** ⇒ เคสที่วันนี้สำเร็จ
+# เข้ามาไม่ถึงเลยเชิงโครงสร้าง
+_RUN_MAX = 6
+
+
+def _wrap_cfg():
+    """(เปิดใช้ไหม, คำขั้นต่ำ, ตัวอักษรขั้นต่ำ) — จาก config ถ้าอยู่ในแอป.
+
+    ``highlight`` ตั้งใจไม่ผูกกับ Flask/numpy เพื่อให้เทสต์ได้ตรง ๆ จึงอ่าน
+    config แบบ lazy และมีค่าปริยายของตัวเองเมื่อ import ไม่ได้
+    """
+    try:
+        from . import config as _c
+        return (bool(_c.HIGHLIGHT_WRAP_RUNS),
+                int(_c.HIGHLIGHT_RUN_MIN_WORDS),
+                int(_c.HIGHLIGHT_RUN_MIN_CHARS))
+    except Exception:
+        return (True, 2, 8)
+
+
+def _run_matches(words, ftokens: List[str]) -> list:
+    """ช่วงคำ **ติดกันในแถวเดียวกัน** ที่ต่อกันแล้วเป็น *ท่อนติดกัน* ของวลี.
+
+    คืนกรอบหนึ่งใบต่อแถวที่วลีไหลไป — ชี้ไปที่ข้อความของวลีนั้นจริง ๆ
+    ไม่ใช่การเดา. ด่านกันชี้ผิด 3 ชั้น:
+
+      ① ท่อนที่ต่อได้ต้องเป็น **สตริงย่อยที่ติดกัน** ของวลี ⇒ คำที่บังเอิญ
+         เหมือนกันแต่เรียงคนละแบบต่อไม่ติดตั้งแต่คำที่สอง
+      ② ต้องยาว ≥ ``min_words`` คำ **และ** ≥ ``min_chars`` ตัวอักษร ⇒ คำเดียว
+         โดด ๆ ที่บังเอิญเป็นส่วนหนึ่งของวลี (เช่น "Calcium" ในตาราง
+         โภชนาการ ขณะที่วลีคือ "D-Calcium Pantothenate…") ไม่ผ่าน
+      ③ ท่อนเดียวกันที่โผล่ **คนละแถว** = ชี้ไม่ได้ว่าอันไหน ⇒ ตัดทิ้งทั้งคู่
+    """
+    on, min_words, min_chars = _wrap_cfg()
+    if not on:
+        return []
+    fkey = "".join(ftokens)
+    if len(fkey) < max(1, min_chars):
+        return []
+    words = [(k, b) for k, b in words if k]
+    runs = []                      # (joined_key, union_box)
+    n = len(words)
+    for i in range(n):
+        joined, boxes = "", []
+        for j in range(i, n):
+            k, b = words[j]
+            if boxes and not _same_line(boxes[0], b):
+                break
+            if (joined + k) not in fkey:
+                break
+            joined += k
+            boxes.append(b)
+        if len(boxes) >= max(1, min_words) and len(joined) >= max(1, min_chars):
+            runs.append((joined, _union(boxes)))
+    if not runs:
+        return []
+    # ⚠️ ห้ามใช้ชื่อ ``b`` ซ้ำกับกล่องในลูปข้างบน — กับดักเดิมของ repo นี้
+    # (ชื่อ ``mx`` ชนกันจนพิกัดกลายเป็น float แล้ว slice ภาพพัง)
+    ambiguous = set()
+    for p1 in range(len(runs)):
+        for p2 in range(p1 + 1, len(runs)):
+            if runs[p1][0] == runs[p2][0] and not _same_line(runs[p1][1],
+                                                             runs[p2][1]):
+                ambiguous.add(runs[p1][0])
+    runs = [r for r in runs if r[0] not in ambiguous]
+    # ท่อนที่ยาวที่สุดก่อน แล้วไล่จากบนลงล่าง ⇒ ``_dedupe_boxes`` จะทิ้งท่อน
+    # ที่ซ้อนอยู่ข้างใน (ส่วนท้ายของช่วงเดียวกัน) ให้เอง
+    runs.sort(key=lambda r: (-len(r[0]), r[1][1], r[1][0]))
+    boxes = _dedupe_boxes([box for _, box in runs])
+    # ④ วลีที่ไหลยาวเกินกว่าจะวาดได้ครบ = ย่อหน้า ไม่ใช่ "บรรทัดที่ไหล".
+    # วาดแค่บางแถวแล้วตัดที่เหลือทิ้ง **เท่ากับบอกว่าแถวที่เหลือไม่เกี่ยว**
+    # ซึ่งเป็นการชี้ที่ผิดแบบมั่นใจ ⇒ ไม่วาดเลยดีกว่า (เท่าพฤติกรรมเดิม)
+    if len(boxes) > _RUN_MAX:
+        return []
+    return boxes
+
+
 def _match_boxes(words, found: str) -> list:
     """Boxes for ``found`` among ``words`` = [(key, box)] in reading order.
     Single-word target → every occurrence of that word. Multi-word target
@@ -1095,8 +1258,12 @@ def _match_boxes(words, found: str) -> list:
         return hits
     # Last resort for a phrase: a SINGLE word/element that already contains
     # the whole phrase (some OCR backends return a full line as one block).
-    return _dedupe_boxes([b for k, b in words
-                          if k and "".join(ftokens) in k])
+    whole = _dedupe_boxes([b for k, b in words
+                           if k and "".join(ftokens) in k])
+    if whole:
+        return whole
+    # ทางถอยสุดท้าย: วลีถูก "ไหล" ข้ามแถว ⇒ ยิงเป็นช่วงคำติดกันรายแถว
+    return _run_matches(words, ftokens)
 
 
 # ── PDF text-layer word boxes (exact, any script, no OCR) ─────────────

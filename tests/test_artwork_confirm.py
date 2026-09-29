@@ -26,6 +26,11 @@ ZONES = [{"id": "z1", "type": "panel", "group": "A", "label": "z1"},
          {"id": "b2", "type": "panel", "group": "A", "label": "b2"}]
 ROUNDS = (1, 2, 3, 4)
 REAL = "24%"          # ความต่างจริงข้อเดียวบนแผ่น
+# 26 ก.ย. (P4): ความต่างจริงข้อเดียวกันนี้ถูกฟ้อง **ทั้งสองฝั่ง** แล้ว —
+# ``20%`` ของ z1 เคยถูกยกโทษเพราะแผง b2 มี ``2000 calorie`` (ตัวเลข ``20``
+# ถูกหั่นออกจาก ``2000``) ⇒ ของจริงเคยถูกรายงานแค่ครึ่งเดียว. เทสต์ชุดนี้
+# ล็อกจำนวนเดิมไว้ ⇒ ปรับตามความจริงใหม่ (ทุกการ์ดที่เพิ่มคือของจริง)
+REAL_BOTH = ["20%", REAL]
 
 
 def _read(name):
@@ -44,7 +49,7 @@ def founds(ds):
 
 # ── ข้อมูลจริงต้องยังเป็นอย่างที่วัดไว้ (กันไฟล์ fixture ถูกแก้เงียบ) ──
 
-@pytest.mark.parametrize("r,n", [(1, 7), (2, 1), (3, 1), (4, 6)])
+@pytest.mark.parametrize("r,n", [(1, 8), (2, 2), (3, 2), (4, 7)])
 def test_the_recorded_rounds_still_produce_what_was_measured(r, n):
     assert len(defects_of(r)) == n
 
@@ -55,7 +60,7 @@ def test_both_sides_wrong_the_same_way_gives_the_right_answer():
     รอบ 2 อ่านเพี้ยนทั้งสองฝั่ง แต่เพี้ยนแบบเดียวกัน ⇒ ความเพี้ยนหักล้าง
     และเหลือเฉพาะความต่างจริง — เท่ากับรอบ 3 ที่อ่านถูกทั้งสองฝั่ง.
     """
-    assert founds(defects_of(2)) == founds(defects_of(3)) == [REAL]
+    assert founds(defects_of(2)) == founds(defects_of(3)) == REAL_BOTH
 
 
 # ── ตัวกรอง ──────────────────────────────────────────────────────────
@@ -65,7 +70,7 @@ def test_both_sides_wrong_the_same_way_gives_the_right_answer():
 def test_every_pair_of_real_reads_leaves_only_the_real_difference(a, b):
     """วัดครบทุกคู่ที่เป็นไปได้ (6 คู่) — ต้องเหลือ 24% ตัวเดียวทุกคู่."""
     ok, un = confirm.confirm([defects_of(a), defects_of(b)])
-    assert founds(ok) == [REAL]
+    assert founds(ok) == REAL_BOTH
     assert len(ok) + len(un) >= len(defects_of(a))       # ไม่มีอะไรหายไปเฉย ๆ
 
 
@@ -88,7 +93,7 @@ def test_zone_must_be_part_of_the_key():
     by_text = {d.get("found", "") for d in d1} & {d.get("found", "") for d in d4}
     assert len(by_text) > 1                     # ถ้าดูแค่ข้อความ = กรองไม่ออก
     ok, _ = confirm.confirm([d1, d4])
-    assert founds(ok) == [REAL]                 # ดูโซนด้วย = เหลือของจริง
+    assert founds(ok) == REAL_BOTH              # ดูโซนด้วย = เหลือของจริง
 
 
 def test_trailing_punctuation_does_not_break_the_match():
@@ -203,8 +208,8 @@ def test_summary_reports_how_much_the_two_reads_agreed():
     s = confirm.summary(c, u, 2, [len(a), len(b)])
     assert s["per_round"] == [len(a), len(b)]
     assert s["agreement"] == round(len(c) / float(len(c) + len(u)), 3)
-    # รอบ 1 ฟ้อง 7 · รอบ 3 ฟ้อง 1 · ตรงกัน 1 ⇒ สอดคล้องกันต่ำมาก
-    assert s["agreement"] < 0.2
+    # รอบ 1 ฟ้อง 8 · รอบ 3 ฟ้อง 2 · ตรงกัน 2 ⇒ สอดคล้องกันต่ำมาก
+    assert s["agreement"] < 0.3
 
 
 def test_agreement_is_none_when_there_is_nothing_to_agree_about():

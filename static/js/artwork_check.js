@@ -44,6 +44,31 @@
   }
   window.awHlRiskText = hlRiskText;
 
+  // เหตุผลที่ "การ์ดนี้จะไม่มีกรอบแดง" ซึ่งเซิร์ฟเวอร์รู้ได้ตั้งแต่ตอนส่งตรวจ
+  // โดยไม่ต้องอ่านภาพเลย (ดู pipeline._tag_highlight_why). เป็นเรื่องของ
+  // **เครื่องเซิร์ฟเวอร์** ไม่ใช่เรื่องการลากโซน ⇒ แก้คนละทางกับ hl_risk
+  // จึงห้ามยุบรวมข้อความกัน. ค่าที่ไม่รู้จัก ⇒ คืนค่าว่าง (ไม่เดา)
+  function hlWhyText(why) {
+    const tail = " — การ์ดนี้จะไม่มีกรอบแดง (ผลตรวจ PASS/FAIL ไม่ได้รับผลกระทบ)";
+    if (why === "no_tesseract") {
+      return "⚠ เครื่องเซิร์ฟเวอร์ยังไม่ได้ติดตั้ง Tesseract จึงชี้ตำแหน่งคำในภาพไม่ได้" +
+             tail;
+    }
+    if (typeof why === "string" && why.indexOf("lang:") === 0) {
+      return "⚠ คำนี้อยู่ในสคริปต์ที่เครื่องเซิร์ฟเวอร์ยังไม่มีชุดข้อมูล Tesseract (" +
+             esc(why.slice(5)) + ") จึงชี้ตำแหน่งคำไม่ได้" + tail +
+             " · ติดตั้ง traineddata ของภาษานั้นบนเครื่องเซิร์ฟเวอร์";
+    }
+    if (typeof why === "string" && why.indexOf("langcfg:") === 0) {
+      return "⚠ เครื่องเซิร์ฟเวอร์มีชุดข้อมูลของสคริปต์นี้ (" + esc(why.slice(8)) +
+             ") แต่ค่าตั้ง ARTWORK_HIGHLIGHT_TESS_LANG ตรึงไว้ที่ภาษาอื่น " +
+             "จึงไม่ถูกส่งให้ Tesseract" + tail +
+             " · ตั้งเป็น auto หรือเพิ่มภาษานั้นเข้าไป";
+    }
+    return "";
+  }
+  window.awHlWhyText = hlWhyText;
+
   // ── "ตรวจอะไรไปบ้าง" — แถบความครอบคลุมใต้ผลสรุป ──────────────────
   // เหตุผล: ✅ PASS ไม่ได้แปลว่าตรวจครบ. ชั้นเทียบข้ามแผงจะทำงานก็ต่อเมื่อมี
   // โซน ≥2 โซนที่ "กลุ่ม" ตรงกันและอ่านข้อความออกทั้งคู่ — ผู้ใช้ที่ลากหลาย
@@ -88,15 +113,23 @@
     return !!(($("awForceOcr") || {}).checked);
   }
 
+  // ช่องติ๊กที่ถูกซ่อนจากหน้าจอ (``data-off`` มาจาก config.EXPERIMENT_OCR_UI)
+  // ต้องถือว่า "ไม่ติ๊ก" เสมอ — งานที่ค้างใน localStorage จำค่าติ๊กเดิมไว้ได้
+  // ⇒ ไม่บังคับตรงนี้ = โหมดทดลองทำงานอยู่ทั้งที่ผู้ใช้มองไม่เห็นช่องติ๊ก
+  function expChecked(id) {
+    const el = $(id);
+    return !!(el && el.checked && !(el.dataset && el.dataset.off));
+  }
+
   // โหมดทดลอง: หั่นโซนเป็นแถบก่อนส่ง OCR (ไม่ติ๊ก = ทางเดิมเป๊ะ)
   function splitBandsOn() {
-    return !!(($("awSplitBands") || {}).checked);
+    return expChecked("awSplitBands");
   }
 
   // โหมดทดลอง "อ่านซ้ำ 2 รอบ แล้วยืนยันผล" — ใช้กับปุ่มส่งตรวจสอบเท่านั้น
   // (แท็บแปลไม่เกี่ยว เพราะมันไม่ได้ตัดสิน defect)
   function confirmReadsOn() {
-    return !!(($("awConfirmReads") || {}).checked);
+    return expChecked("awConfirmReads");
   }
 
   // โหมดทดลอง "เทียบแผงระดับพิกเซล" — ใช้กับปุ่มส่งตรวจสอบเท่านั้น
@@ -259,7 +292,14 @@
                "ให้แคบลงทีละบล็อกแล้วส่งใหม่"
              : "เทียบไม่ได้ (" + esc(PD_WHY[p.reason] || p.reason || p.status) +
                ") — ใช้ผลชั้นข้อความของกลุ่มนี้แทน")
-        : (p.kept_text_layer
+        : (p.kept_text_layer && p.untrusted
+            // ⚠️ แยกจาก "ไม่พบความต่าง" — เดิมยุบรวมกัน ⇒ ผลที่พบเป็นร้อย
+            //    บริเวณแต่เชื่อไม่ได้ ถูกบอกว่าไม่พบความต่าง (26 ก.ย.)
+            ? "เทียบด้วยภาพแล้วพบ " + esc(p.regions) + " บริเวณ แต่" +
+              "<b>ผลจากภาพยังไม่น่าเชื่อถือ</b> (" + esc(p.untrusted) +
+              ") — ไม่ได้ใช้ ผลของกลุ่มนี้ยังมาจากชั้นข้อความ" +
+              (p.ocr_skipped ? " (จึงไม่ได้อ่านข้อความทีละบริเวณ)" : "")
+          : p.kept_text_layer
             ? "เทียบด้วยภาพแล้ว <b>ไม่พบความต่าง</b> — " +
               "ผลของกลุ่มนี้ยังมาจากชั้นข้อความ (ภาพไม่เห็น ≠ ไม่มี)"
             : "เทียบด้วยภาพ · พบ " + esc(p.regions) + " บริเวณ" +
@@ -269,11 +309,24 @@
         body;
       // วัดไว้บนไฟล์จริง: ความต่างของงานจริงอยู่ที่ 0.011-0.014% ส่วนเคสที่
       // โซนลากครอบเนื้อหานอกแผงได้ 0.37-6.85% ⇒ เกิน 0.2% = ควรเตือน
+      // ⚠️ สาเหตุมีสองทางที่แก้คนละแบบ — คู่ vector ↔ raster (ปรู๊ฟที่เป็น
+      //    ภาพทั้งหน้า) ต่างทั้งแผงโดยโครงสร้าง ลากใหม่ไม่ช่วย (26 ก.ย.
+      //    Friskies: 33% · 68% มาจากพื้นหลังที่ปรู๊ฟลงสีจำลองหมึกขาว)
+      const rA = p.raster_a, rB = p.raster_b;
+      const mixed = (rA != null || rB != null) && rA !== rB;
       if (p.diff_ratio != null && p.diff_ratio > 0.002)
         h += ' · <b>โซนนี้ต่างกัน ' + (p.diff_ratio * 100).toFixed(2) +
              "% ซึ่งสูงกว่าการแก้ไขฉลากปกติมาก</b>" +
-             " (งานจริงมักต่ำกว่า 0.02%) — น่าจะลากครอบเนื้อหานอกแผงเข้ามา" +
-             " ผลอาจไม่ครบ ลากให้กระชับแล้วลองใหม่";
+             " (งานจริงมักต่ำกว่า 0.02%) — " +
+             (mixed
+               ? "สองไฟล์ไม่ได้มาจากต้นฉบับชนิดเดียวกัน (" +
+                 (rA != null ? "a เป็นภาพ " + esc(rA) + " dpi" : "a เป็น vector") +
+                 " · " +
+                 (rB != null ? "b เป็นภาพ " + esc(rB) + " dpi" : "b เป็น vector") +
+                 ") ขอบตัวอักษรและพื้นหลังจึงต่างทั้งแผง — ลากโซนใหม่ไม่ช่วย" +
+                 " ให้ใช้ผลชั้นข้อความ"
+               : "น่าจะลากครอบเนื้อหานอกแผงเข้ามา" +
+                 " ผลอาจไม่ครบ ลากให้กระชับแล้วลองใหม่");
       if (Array.isArray(p.ocr_capped) && p.ocr_capped.length === 2)
         h += ' · <b>อ่านข้อความ ' + esc(p.ocr_capped[0]) + " จาก " +
              esc(p.ocr_capped[1]) + " บริเวณ</b> (ถึงเพดานที่ตั้งไว้ — " +
@@ -478,6 +531,17 @@
   }
   window.awMarkDiff = markDiff;
 
+  // ── ทิศของข้อความบนการ์ด (27 ก.ย. 2026) ────────────────────────────
+  // ข้อความ "พบ/เทียบกับ" ของอาหรับ/ฮีบรูต้องวาดขวาไปซ้าย ไม่งั้นตัวเลขหัว
+  // บรรทัด (``2/30 طريق…``) ถูกวางซ้ายสุดแยกจากที่อยู่ = ดูเหมือนผิดตรง "/"
+  // ``dir="auto"`` = เลือกทิศจากตัวอักษรแท้ตัวแรก + แยกช่องจากป้ายรอบข้าง
+  // ⇒ บรรทัดละติน/ไทยเหมือนเดิมทุกประการ · แสดงผลล้วน ไม่แตะข้อมูลใด
+  // ⚠️ ปิดธง (``AW_CARD_DIR_AUTO === false``) = ไม่ใส่ attribute เลย = HTML เดิม
+  function textDir() {
+    return (window.AW_CARD_DIR_AUTO === false) ? "" : ' dir="auto"';
+  }
+  window.awTextDir = textDir;
+
   // ── คำค้นที่ส่งให้เซิร์ฟเวอร์วาดกรอบแดงบนภาพ crop ────────────────────
   // ยิงที่ **ช่วงที่ต่าง** ก่อนเสมอ ไม่ใช่ทั้งบรรทัด: ตัวจับคู่วลีฝั่ง
   // เซิร์ฟเวอร์ต้องหาคำติดกันในแถวเดียวกันให้ครบทุกคำ ซึ่งบรรทัดจริงยาว
@@ -633,8 +697,52 @@
           '<span class="aw-defect-class">' + esc(d.class) + "</span>" +
           "<b>" + esc(d.zone_id) + (z && z.label ? " · " + esc(z.label) : "") + "</b><br>" +
           esc(d.message);
-        if (d.found)     html += '<br>พบ: <span class="found">' + markDiff(d.found, d.found_spans) + "</span>";
-        if (d.reference) html += ' &nbsp;เทียบกับ: <span class="ref">' + markDiff(d.reference, d.ref_spans) + "</span>";
+        if (d.found)     html += '<br>พบ: <span class="found"' + textDir() + '>' + markDiff(d.found, d.found_spans) + "</span>";
+        if (d.reference) html += ' &nbsp;เทียบกับ: <span class="ref"' + textDir() + '>' + markDiff(d.reference, d.ref_spans) + "</span>";
+        // ── เหตุผล/หลักฐานของชั้นหลังการตรวจ (25 ก.ย. 2026) ───────────────
+        // ไม่มีรายการใดถูกลบ — แค่ลดระดับแล้วบอกว่าทำไม ให้คนตัดสินด้วยตา
+        const qq = (arr) => (arr || []).filter(Boolean)
+          .map((t) => "“" + esc(t) + "”").join(", ");
+        if (d.why) {
+          // F1 — เลขที่เห็นชัดว่าไม่ใช่บาร์โค้ด (ลดเป็น info)
+          html += '<div class="aw-evid">ℹ️ ' + esc(d.why) +
+            " · ไม่นับเป็นข้อผิดพลาด แสดงไว้ให้ตรวจด้วยตา</div>";
+        }
+        if (d.witness && d.witness.file_says) {
+          // F2 — text layer ของไฟล์เองเป็นพยานว่า OCR อ่านเพี้ยน
+          const w = d.witness, wz = esc(w.zone || "");
+          let t = "📄 <b>หลักฐานจากไฟล์</b> (text layer ของ " + wz + "): ไฟล์พิมพ์ว่า " +
+            '<span class="aw-evid-file"' + textDir() + '>' + esc(w.file_says) + "</span><br>";
+          if (w.kind === "pair" && (w.ocr_says || []).length) {
+            t += "OCR ของ " + wz + " อ่านเป็น " + qq(w.ocr_says) +
+              ((w.file_diff || []).length ? " แต่ไฟล์พิมพ์ " + qq(w.file_diff) : "");
+          } else if (w.kind === "extra_here") {
+            t += "บรรทัดนี้อีกฝั่งมีอยู่แล้ว — ข้อความบนการ์ดคือสิ่งที่ OCR ของ " + wz + " อ่านเพี้ยน";
+          } else {
+            t += "ไฟล์ของ " + wz + " ก็พิมพ์บรรทัดนี้ — OCR ของ " + wz + " อ่านเพี้ยนหรืออ่านไม่ครบ";
+          }
+          t += " ⇒ <b>น่าจะเป็น OCR อ่านเพี้ยน ไม่ใช่สองไฟล์พิมพ์ต่างกัน</b> · โปรดยืนยันด้วยตา";
+          html += '<div class="aw-evid">' + t + "</div>";
+        }
+        if (d.fused && d.fused.length) {
+          // F3 — คำเดียวที่ปนอักษรไทยกับอักษรอื่น (ลายเซ็นของ OCR ที่แปลคำ)
+          html += '<div class="aw-evid aw-evid-warn">🈯 ผล OCR มีคำที่อักษรไทยติดกับอักษรภาษาอื่นในคำเดียว (' +
+            qq(d.fused.slice(0, 3)) + ") — มักเกิดจาก OCR แปลคำแทนการอ่าน โปรดดูภาพประกอบ</div>";
+        }
+        if (Array.isArray(d.reread) && d.reread.length) {
+          // P6 (โหมดทดลอง) — อ่านซ้ำเฉพาะบรรทัดที่ต่าง · ไม่แตะระดับ
+          const RR = {
+            matches_other: "ตรงกับอีกฝั่ง ⇒ ความต่างอาจมาจาก OCR อ่านเพี้ยนรอบแรก",
+            same: "ได้เหมือนเดิม ⇒ OCR อ่านบรรทัดนี้แบบเดิมซ้ำ",
+            unclear: "สรุปไม่ได้",
+          };
+          d.reread.forEach((r) => {
+            html += '<div class="aw-evid">🔍 อ่านซ้ำเฉพาะบรรทัดนี้ (' + esc(r.zone || "") +
+              "): " + '<span class="aw-evid-file">' + esc(r.text || "—") + "</span> — " +
+              esc(RR[r.verdict] || r.verdict || "") +
+              " · <b>ข้อมูลประกอบเท่านั้น ไม่ได้เปลี่ยนผลตรวจ</b> โปรดดูภาพ</div>";
+          });
+        }
 
         // ── 2-crop comparison (auto-load ทันที ไม่ต้องคลิก) ───────────
         // crop ต้องดึงจากไฟล์ของโซนนั้นเอง (doc a/b) — report เก่าไม่มี
@@ -710,9 +818,15 @@
           '</div>';
         }
 
-        // โซนที่กว้าง/เล็กเกินไปจะชี้ตำแหน่งคำไม่ได้ — บอกเหตุผลไว้ ผู้ตรวจ
-        // จะได้ไม่นั่งสงสัยว่าทำไมไม่มีกรอบแดง (ค่านี้คำนวณตอนส่งตรวจ)
-        if (z && z.hl_risk && d.found) {
+        // ทำไมถึงไม่มีกรอบแดง — บอกเหตุผลไว้ ผู้ตรวจจะได้ไม่นั่งสงสัย
+        // (ทั้งสองค่าคำนวณตอนส่งตรวจ). ``hl_why`` เป็นข้อจำกัดของเครื่อง
+        // เซิร์ฟเวอร์ ซึ่ง **ลากโซนใหม่ก็ไม่ช่วย** ⇒ เมื่อมีค่านี้ต้องไม่
+        // ขึ้นคำแนะนำ "ลากโซนให้กระชับ" ของ hl_risk ทับ ไม่งั้นจะส่งผู้ใช้
+        // ไปแก้ของที่ไม่ได้พัง
+        const hlWhy = d.hl_why ? hlWhyText(d.hl_why) : "";
+        if (hlWhy) {
+          html += '<div class="aw-hl-warn">' + hlWhy + '</div>';
+        } else if (z && z.hl_risk && d.found) {
           html += '<div class="aw-hl-warn">' + hlRiskText(z.hl_risk) + '</div>';
         }
 
@@ -1415,8 +1529,8 @@
     autoRotate = !!s.autoRotate;
     if ($("awAutoRotate")) $("awAutoRotate").checked = !!s.autoRotate;
     if ($("awForceOcr")) $("awForceOcr").checked = !!s.forceOcr;
-    if ($("awSplitBands")) $("awSplitBands").checked = !!s.splitBands;
-    if ($("awConfirmReads")) $("awConfirmReads").checked = !!s.confirmReads;
+    if ($("awSplitBands")) $("awSplitBands").checked = !!s.splitBands && !$("awSplitBands").dataset.off;
+    if ($("awConfirmReads")) $("awConfirmReads").checked = !!s.confirmReads && !$("awConfirmReads").dataset.off;
     if ($("awPixelCheck")) $("awPixelCheck").checked = !!s.pixelCheck;
     if ($("awBrand") && s.brand) $("awBrand").value = s.brand;
     showTabs(true);
@@ -1890,6 +2004,22 @@
   // มุมนี้ทำให้ภาพบนจอเป็นแนวนอน ⇒ โซนใหม่ควรตั้ง rotate เท่านี้เพื่อให้
   // OCR เห็นภาพแบบเดียวกับที่คนเห็น (ชั้น pixel ก็ใช้ค่าเดียวกันนี้)
   function rotForNewZone() { return pageRot; }
+
+  // โซนที่ "ระบบสร้างให้" (26 ก.ย.) — เดิมได้ "default" ตายตัว ⇒ ผู้ใช้หมุน
+  // จอ/ตั้งมุมโซน 🅰 แล้ว โซนคู่ฝั่ง 🅱 ถูกอ่านแบบตะแคง (OCR ตกทั้งท่อน ⇒
+  // การ์ดปลอม) · ธงปิด ⇒ "default" เหมือนเดิมเป๊ะ
+  const inheritRot = () => window.AW_ZONE_ROTATE_INHERIT !== false;
+  // คู่ของโซน src: autopair ค้นแบบไม่หมุน ⇒ จับคู่ติด = วางแนวเดียวกัน
+  function rotForPairOf(src) {
+    if (!inheritRot() || !src || src.rotate === undefined) return "default";
+    return src.rotate;
+  }
+  // โซนที่เสนอขณะหมุนจอ ⇒ ได้มุมของจอ เหมือนโซนที่ลากเอง
+  function rotForProposed(z) {
+    if (!inheritRot() || !pageRot) return z;
+    if (z.rotate !== undefined && z.rotate !== "default") return z;
+    return Object.assign({}, z, { rotate: pageRot });
+  }
 
   // จุดบนจอ (เทียบกับมุมซ้ายบนของกล่องที่หมุนแล้ว) → พิกัดในภาพที่ยังไม่หมุน
   // ที่มาของสูตร: ภาพถูก transform เป็น translate(...) rotate(deg) รอบจุด 0,0
@@ -2579,7 +2709,7 @@
         body: JSON.stringify({ doc: doc }),
       });
       zones = zones.filter((z) => docOfZone(z) !== doc)
-                   .concat(res.zones || []);
+                   .concat((res.zones || []).map(rotForProposed));
       selectedId = null;
       cancelDraw();
       renderZones();
@@ -2633,7 +2763,7 @@
           while (zones.some((z) => z.id === "b" + n)) n++;
           zones.push({
             id: "b" + n, type: src.type || "panel", group: src.group,
-            doc: "b", rotate: "default", bbox: r.bbox,
+            doc: "b", rotate: rotForPairOf(src), bbox: r.bbox,
             label: "อ้างอิง " + (src.label || src.group),
           });
           made++;

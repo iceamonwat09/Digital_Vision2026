@@ -1,0 +1,115 @@
+{
+ "note": "Dolphin 307x113 · กลุ่ม A/B/C ข้ามไฟล์ (สถานี 26 ก.ย. 2026-09-26-rotpair) · ที่อยู่ผู้ผลิตภาษาอาหรับ",
+ "zones": [
+  {
+   "id": "z1",
+   "type": "panel",
+   "group": "A",
+   "doc": "a",
+   "bbox": [
+    0,
+    0,
+    1,
+    1
+   ],
+   "label": "z1"
+  },
+  {
+   "id": "z2",
+   "type": "panel",
+   "group": "B",
+   "doc": "a",
+   "bbox": [
+    0,
+    0,
+    1,
+    1
+   ],
+   "label": "z2"
+  },
+  {
+   "id": "z3",
+   "type": "panel",
+   "group": "C",
+   "doc": "a",
+   "bbox": [
+    0,
+    0,
+    1,
+    1
+   ],
+   "label": "z3"
+  },
+  {
+   "id": "b4",
+   "type": "panel",
+   "group": "A",
+   "doc": "b",
+   "bbox": [
+    0,
+    0,
+    1,
+    1
+   ],
+   "label": "b4"
+  },
+  {
+   "id": "b5",
+   "type": "panel",
+   "group": "B",
+   "doc": "b",
+   "bbox": [
+    0,
+    0,
+    1,
+    1
+   ],
+   "label": "b5"
+  },
+  {
+   "id": "b6",
+   "type": "panel",
+   "group": "C",
+   "doc": "b",
+   "bbox": [
+    0,
+    0,
+    1,
+    1
+   ],
+   "label": "b6"
+  }
+ ],
+ "ocr": [
+  {
+   "zone_id": "z1",
+   "engine": "gemini-2.5-flash",
+   "text": "Ingredients: Light Meat Tuna in non GMO treated\nvegetable oil & brine\nType of fish: Katsuwonus pelamis\nالمحتويات: لحم التونة الخفيف فى زيت نباتى غير معالج بالهندسة الوراثية\nو محلول ملحي\nنوع السمك : كاتسوانوس بيلاميس"
+  },
+  {
+   "zone_id": "z2",
+   "engine": "gemini-2.5-flash",
+   "text": "المستورد : إيه إم جروب مصر للإستيراد والتصدير والتوكيلات التجارية\nالعبور - قطعة 5 ب - مربع -13026 - القليوبية ، مصر\nالخط الساخن : ١٦٧٨٥\nبلد المنشأ : تايلاند\nالمنتج : شركة تاي يونيون للتصنيع المحدودة\n2/30 طريق سيثاكيت 1 ، موينج ساموت ساخون ،\nساموت ساخون 74000 ، تايلاند"
+  },
+  {
+   "zone_id": "z3",
+   "engine": "gemini-2.5-flash",
+   "text": "MANUFACTURER:\nThai Union Manufacturing Co., Ltd.\n30/2 Sethakit 1 Road,\nMueang Samut Sakhon,\nSamut Sakhon 74000 THAILAND.\nIMPORTED BY:\nAM GROUP MISR FOR IMPORT,\nEXPORT AND COMMERCIAL AGENCIES\nEL- OBOUR – BLOCK 5 B- SQUARE\n13026- QALYUBIA, EGYPT\nHot line : 16785"
+  },
+  {
+   "zone_id": "b4",
+   "engine": "gemini-2.5-flash",
+   "text": "Ingredients: Light Meat Tuna in non GMO treated\nvegetable oil & brine\nType of fish: Katsuwonus pelamis\nالمحتويات : لحم التونة الخفيف فى زيت نباتي غير معالج بالهندسة الوراثية\nو محلول ملحي\nنوع السمك : كاتسوانوس بيلاميس"
+  },
+  {
+   "zone_id": "b5",
+   "engine": "gemini-2.5-flash",
+   "text": "المستورد : إيه إم جروب مصر للإستيراد والتصدير والتوكيلات التجارية\nالعبور - قطعة 5 ب - مربع -13026 - القليوبية ، مصر\nالخط الساخن : ١٦٧٨٥\nبلد المنشأ : تايلاند\nالمنتج : شركة تاي يونيون للتصنيع المحدودة\n2/30 طريق سيتاكيت 1 . مويني ساموت ساخون.\nساموت ساخون 74000 ، تايلاند"
+  },
+  {
+   "zone_id": "b6",
+   "engine": "gemini-2.5-flash",
+   "text": "MANUFACTURER:\nThai Union Manufacturing Co., Ltd.\n30/2 Sethakit 1 Road,\nMueang Samut Sakhon,\nSamut Sakhon 74000 THAILAND.\nIMPORTED BY:\nAM GROUP MISR FOR IMPORT,\nEXPORT AND COMMERCIAL AGENCIES\nEL-OBOUR - BLOCK 5 B-SQUARE\n13026-QALYUBIA, EGYPT\nHot line : 16785"
+  }
+ ]
+}
