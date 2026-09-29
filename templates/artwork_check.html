@@ -198,6 +198,10 @@
   /* ห้ามให้เบราว์เซอร์ "ลากรูป" (native image drag) แย่ง event ตอน pan
      ด้วยปุ่มซ้าย — preventDefault ใน JS กันได้แล้ว นี่คือชั้นกันซ้ำ */
   .aw-stage img { display:block; max-width:none; -webkit-user-drag:none; user-select:none; }
+  /* ภาพคมซ้อนทับ (29 ก.ย.) — ขนาดเท่าภาพเดิมเป๊ะ · คลิกทะลุ · ซ่อนจนโหลดเสร็จ */
+  .aw-stage img.aw-hi { position:absolute; left:0; top:0; width:100%; height:100%;
+                        pointer-events:none; visibility:hidden; }
+  .aw-stage img.aw-hi.ready { visibility:visible; }
   .aw-empty  { color:#90a4ae; padding:40px; text-align:center; font-size:14px; line-height:1.5; }
 
   .aw-zone   { position:absolute; border:2px solid rgba(25,118,210,.85); background:rgba(25,118,210,.07);
@@ -879,6 +883,7 @@
   window.AW_ZONE_ROTATE_INHERIT = {{ 'true' if zone_rotate_inherit else 'false' }};
   // หมุนจอแยกกันต่อไฟล์ 🅰/🅱 — ดู config.PAGE_ROT_PER_DOC
   window.AW_PAGE_ROT_PER_DOC = {{ 'true' if page_rot_per_doc else 'false' }};
+  window.AW_PREVIEW_HI = {{ 'true' if preview_hi else 'false' }};
 </script>
 <script src="{{ url_for('static', filename='js/artwork_check.js') }}?v={{ config_version }}"></script>
 {% endblock %}

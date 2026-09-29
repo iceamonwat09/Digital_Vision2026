@@ -124,6 +124,7 @@ def artwork_page():
                            experiment_ocr_ui=config.EXPERIMENT_OCR_UI,
                            zone_rotate_inherit=config.ZONE_ROTATE_INHERIT,
                            page_rot_per_doc=config.PAGE_ROT_PER_DOC,
+                           preview_hi=config.PREVIEW_DISPLAY_DPI > config.PREVIEW_DPI,
                            **_hl_flags())
 
 
@@ -311,6 +312,21 @@ def api_pixdiff_png(rec_id):
 @artwork_bp.route("/api/artwork/<rec_id>/preview.png")
 def api_preview(rec_id):
     return _send_artifact(rec_id, "preview.png")
+
+
+@artwork_bp.route("/api/artwork/<rec_id>/preview_hi.png")
+def api_preview_hi(rec_id):
+    """ภาพคมสำหรับกล่องวาดโซน (PDF เท่านั้น · แสดงผลล้วน) — 404 = ไม่มีให้
+    ⇒ หน้าเว็บใช้ ``preview.png`` เดิมต่อไปเงียบ ๆ"""
+    doc = "b" if request.args.get("doc") == "b" else "a"
+    try:
+        path = pipeline.display_preview_path(rec_id, doc)
+    except Exception:
+        logger.exception("[artwork] preview_hi failed for %s", rec_id)
+        path = None
+    if not path:
+        return jsonify({"error": "ไม่มีภาพความละเอียดสูง"}), 404
+    return _send_artifact(rec_id, os.path.basename(path))
 
 
 @artwork_bp.route("/api/artwork/<rec_id>/overlay.png")

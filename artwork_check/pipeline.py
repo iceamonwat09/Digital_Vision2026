@@ -195,7 +195,7 @@ def start_ref(rec_id: str, file_bytes: bytes, filename: str) -> dict:
         old = os.path.join(d, f"source_b{e}")
         if os.path.exists(old):
             os.remove(old)
-    for stale in ("overlay_b.png", _OCR_ONLY_CACHE):
+    for stale in ("overlay_b.png", _OCR_ONLY_CACHE, "preview_b_hi.png"):
         p = os.path.join(d, stale)
         if os.path.exists(p):
             os.remove(p)
@@ -1384,6 +1384,65 @@ def _pdf_text_boxes(rec_id: str, rep: dict, zone_id: str, found: str,
     if cap and cap > 0:
         out = out[:cap]
     return out
+
+
+# ── ภาพคมตอนวาดโซน (แสดงผลล้วน) ─────────────────────────────────────
+_HI_LOCKS: dict = {}
+_HI_LOCKS_GUARD = threading.Lock()
+
+
+def display_dpi(page_w_pt: float, page_h_pt: float) -> int:
+    """dpi ของภาพคม — ``PREVIEW_DISPLAY_DPI`` ลดลงตามเพดานพิกเซล.
+    คืน 0 = ไม่ควรสร้าง (ปิดธง หรือเพดานบังคับให้ต่ำกว่า/เท่า PREVIEW_DPI)"""
+    dpi = float(config.PREVIEW_DISPLAY_DPI)
+    if dpi <= config.PREVIEW_DPI or page_w_pt <= 0 or page_h_pt <= 0:
+        return 0
+    cap = config.PREVIEW_DISPLAY_MAX_MP * 1e6
+    px = (page_w_pt * dpi / 72.0) * (page_h_pt * dpi / 72.0)
+    if cap > 0 and px > cap:
+        dpi *= (cap / px) ** 0.5
+    dpi = int(dpi)
+    return dpi if dpi > config.PREVIEW_DPI else 0
+
+
+def display_preview_path(rec_id: str, doc: str = "a") -> Optional[str]:
+    """ภาพคมของไฟล์ 🅰/🅱 สำหรับกล่องวาดโซน — สร้างครั้งแรกที่ถูกขอ.
+
+    คืน ``None`` เมื่อไม่มีภาพคมให้ (ปิดธง · ไม่ใช่ PDF · ไม่มีไฟล์ ·
+    เพดานพิกเซลไม่เหลือความละเอียดเพิ่ม) ⇒ หน้าเว็บใช้ ``preview.png`` เดิม.
+    **ไม่แตะ ``preview.png``** ซึ่งตัวเสนอโซน/snap/autopair/overlay อ่านต่อ
+    """
+    if doc not in ("a", "b") or config.PREVIEW_DISPLAY_DPI <= config.PREVIEW_DPI:
+        return None
+    d = report.inspection_dir(rec_id)
+    try:
+        src = _find_source(d, "source_b" if doc == "b" else "source")
+    except FileNotFoundError:
+        return None
+    if not src.lower().endswith(".pdf"):
+        return None
+    out = os.path.join(d, "preview_b_hi.png" if doc == "b" else "preview_hi.png")
+    with _HI_LOCKS_GUARD:
+        lock = _HI_LOCKS.setdefault(out, threading.Lock())
+    with lock:              # สองคำขอพร้อมกัน = เรนเดอร์ครั้งเดียว
+        if (os.path.exists(out)
+                and os.path.getmtime(out) >= os.path.getmtime(src)):
+            return out
+        import fitz
+        with fitz.open(src) as pdf:
+            r = pdf[0].rect
+            dpi = display_dpi(r.width, r.height)
+        if not dpi:
+            return None
+        img = ArtworkDocument(src).render(dpi)
+        tmp = out + ".tmp.png"
+        # PNG (ไม่สูญเสีย) — ขอบตัวอักษรคมคือเหตุผลทั้งหมดของภาพนี้
+        if not cv2.imwrite(tmp, img, [cv2.IMWRITE_PNG_COMPRESSION, 1]):
+            return None
+        os.replace(tmp, out)
+        logger.info("[artwork] %s preview_hi doc=%s %dx%d @%d dpi",
+                    rec_id, doc, img.shape[1], img.shape[0], dpi)
+        return out
 
 
 def _find_source(insp_dir: str, base: str = "source") -> str:

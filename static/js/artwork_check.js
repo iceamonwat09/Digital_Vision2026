@@ -1026,6 +1026,55 @@
                   rot: $("awStageRotB"), stage: $("awStageB"),
                   img: $("awPreviewImgB"), zoom: 100 };
   const hasPaneB = !!(paneB.wrap && paneB.box && paneB.rot && paneB.stage && paneB.img);
+
+  // ── ภาพคมตอนวาดโซน (29 ก.ย. · แสดงผลล้วน) ─────────────────────────
+  // PDF ถูกเรนเดอร์ไว้ที่ 150 dpi (``preview.png``) ⇒ ซูมเกิน 100% แล้วเบลอ.
+  // วาง ``preview_hi.png`` (≈300 dpi) **ซ้อนทับ** ภาพเดิมขนาดเท่ากันเป๊ะ
+  // (width/height 100% ของ .aw-stage · pointer-events:none) ⇒
+  //   · พิกัด/ขนาด/ซูมทั้งหมดยังคิดจาก previewImg + docMeta.w/h เดิม
+  //   · การโหลดภาพคมไม่ยิง onload ของ previewImg ⇒ ไม่ renderZones กลางการลาก
+  //   · โหลดไม่สำเร็จ/ไม่มีให้ (404) ⇒ ซ่อนอยู่ = เห็นภาพเดิมเหมือนก่อน
+  function hiUrlFor(src) {
+    if (window.AW_PREVIEW_HI !== true || !src) return "";
+    const m = /^\/api\/artwork\/([^/]+)\/(preview|preview_b)\.png(\?.*)?$/.exec(src);
+    if (!m) return "";
+    const doc = m[2] === "preview_b" ? "b" : "a";
+    if (docMeta[doc] && docMeta[doc].pdf === false) return "";   // ภาพคมอยู่แล้ว
+    const t = /[?&]t=([^&]+)/.exec(m[3] || "");
+    return "/api/artwork/" + m[1] + "/preview_hi.png?doc=" + doc +
+           (t ? "&t=" + t[1] : "");
+  }
+  function syncHi(p) {
+    if (!p || !p.img || !p.stage) return;
+    const want = hiUrlFor(p.img.getAttribute("src") || "");
+    let hi = p.hi;
+    if (!want) {
+      if (hi) { hi.classList.remove("ready"); hi.removeAttribute("src"); hi.dataset.want = ""; }
+      return;
+    }
+    if (!hi) {
+      hi = document.createElement("img");
+      hi.className = "aw-hi";
+      hi.alt = "";
+      hi.setAttribute("aria-hidden", "true");
+      hi.draggable = false;
+      hi.addEventListener("load", () => {
+        if (hi.dataset.want && hi.getAttribute("src") === hi.dataset.want) hi.classList.add("ready");
+      });
+      hi.addEventListener("error", () => hi.classList.remove("ready"));
+      p.img.insertAdjacentElement("afterend", hi);   // ใต้โซนทุกกรอบ
+      p.hi = hi;
+    }
+    if (hi.dataset.want === want) return;
+    hi.classList.remove("ready");      // ภาพคมของไฟล์เก่าต้องไม่ค้างทับไฟล์ใหม่
+    hi.dataset.want = want;
+    hi.src = want;
+  }
+  // ทุกทางที่เปลี่ยน src (สลับแท็บ · แนบ 🅱 · กู้คืน · ซ้าย-ขวา) ผ่านที่นี่เสมอ
+  [paneA].concat(hasPaneB ? [paneB] : []).forEach((p) => {
+    if (!p.img || typeof MutationObserver === "undefined") return;
+    new MutationObserver(() => syncHi(p)).observe(p.img, { attributes: true, attributeFilter: ["src"] });
+  });
   let pane = paneA;
   let stage = paneA.stage, stageRot = paneA.rot, previewImg = paneA.img;
   let stageBox = paneA.box;

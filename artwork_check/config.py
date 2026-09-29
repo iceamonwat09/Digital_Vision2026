@@ -24,6 +24,18 @@ for _d in (INSPECTIONS_DIR, TEMPLATES_DIR, VOCAB_DIR):
 # Preview shown in the browser zone editor. Kept light so the page loads
 # fast even for A3 print masters.
 PREVIEW_DPI = int(os.getenv("ARTWORK_PREVIEW_DPI", "150"))
+# ภาพ "ที่ตาเห็น" ตอนวาดโซน (29 ก.ย.) — PDF ที่ 150 dpi เบลอเมื่อซูมเกิน 100%.
+# เรนเดอร์ภาพคมแยกเป็น ``preview_hi.png`` แล้ววาง **ซ้อนทับ** ภาพเดิม
+# (แสดงผลล้วน · คลิกทะลุ) ⇒ พิกัดโซนยังคิดจาก ``preview.png`` เดิมทุกอย่าง
+# และ ``preview.png`` ไม่ถูกแตะ (propose/snap/autopair/overlay อ่านไฟล์นั้น).
+# สร้างครั้งแรกตอนเบราว์เซอร์ขอ (ไม่ทำให้อัปโหลดช้าลง) แล้วเก็บไว้ใช้ซ้ำ.
+# ``0`` (หรือ ≤ PREVIEW_DPI) = ปิด = เหมือนก่อน 29 ก.ย. เป๊ะ · ไฟล์ภาพ
+# (PNG/JPG) คมเต็มความละเอียดอยู่แล้ว ⇒ ใช้กับ PDF เท่านั้น
+PREVIEW_DISPLAY_DPI = int(os.getenv("ARTWORK_PREVIEW_DISPLAY_DPI", "300"))
+# เพดานพิกเซล (ล้าน) ของภาพคม — แผ่นพิมพ์ใหญ่ (เช่น 757 mm) ที่ 300 dpi
+# = ~48 ล้านพิกเซล หนักเกินสำหรับเบราว์เซอร์ (สองกล่องซ้าย-ขวา = สองภาพ)
+# ⇒ ลด dpi ลงให้อยู่ในเพดาน · ลดแล้วไม่สูงกว่า PREVIEW_DPI = ไม่สร้าง
+PREVIEW_DISPLAY_MAX_MP = float(os.getenv("ARTWORK_PREVIEW_DISPLAY_MAX_MP", "24"))
 # Resolution used for the per-zone crops that are sent to OCR. Small
 # ingredient text and Arabic need this much.
 OCR_DPI = int(os.getenv("ARTWORK_OCR_DPI", "450"))
