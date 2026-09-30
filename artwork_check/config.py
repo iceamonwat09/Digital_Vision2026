@@ -475,6 +475,15 @@ PAIR_DOWNGRADE_UNAGREED = os.getenv(
 # (แสดงผลล้วน) · 0 = ปิด
 PAIR_PREWARM_HL = os.getenv(
     "ARTWORK_PAIR_PREWARM_HL", "1") not in ("0", "false", "False")
+# 🔠 ชั้นกันพลาดตัวพิมพ์ (30 ก.ย. — AvoDerm ``D-Calcium``/``D-calcium``):
+# Gemini ที่เห็นสองภาพในคำขอเดียว **ถอดภาพ 🅱 ตามภาพ 🅰** จนตัวพิมพ์ที่ต่าง
+# หายไป (ยืนยันด้วยตาแล้ว) ⇒ หลังรวมผลคู่ ตรวจตัวพิมพ์ซ้ำด้วยข้อความจาก
+# **การอ่านแยกทีละโซน** (ไม่เห็นอีกภาพ = ไม่มีทางลอกกัน) · โซนที่อ่านแยก
+# ไม่สำเร็จใช้ข้อความโหมดคู่แทน · เพิ่มเฉพาะ ``MISMATCH_CASE`` ที่โหมดคู่
+# ไม่มี (OCR อ่านตัวพิมพ์ผิด 0/1,243 คำ ⇒ ของปลอมจากภาพถ่ายไม่กลับมา)
+# · severity ตาม ``TEXT_CASE_SEVERITY`` · 0 = ปิด = พฤติกรรมก่อนหน้าเป๊ะ
+PAIR_CASE_GUARD = os.getenv(
+    "ARTWORK_PAIR_CASE_GUARD", "1") not in ("0", "false", "False")
 # แสดงช่องติ๊กบนหน้าตรวจ · 0 = ซ่อน (API ยังรับ ``pair_check`` ได้)
 PAIR_COMPARE_UI = os.getenv(
     "ARTWORK_PAIR_COMPARE_UI", "1").strip().lower() in ("1", "true", "yes", "on")

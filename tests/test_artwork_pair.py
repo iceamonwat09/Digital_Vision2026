@@ -340,6 +340,100 @@ def test_any_pair_failure_falls_back_to_the_old_result(tmp_path, monkeypatch,
     assert [o["text"] for o in rep["ocr"]] == [o["text"] for o in base["ocr"]]
 
 
+# ── 🔠 ชั้นกันพลาดตัวพิมพ์ (AvoDerm 30 ก.ย. — ยืนยันด้วยตาว่า 🅱 พิมพ์ c เล็ก) ──
+
+TRUE_A = "D-Calcium Pantothenate, Thiamine Mononitrate"
+TRUE_B = "D-calcium Pantothenate, Thiamine Mononitrate"
+
+
+def _case_run(tmp_path, monkeypatch, indiv_a, joint_b=TRUE_A, diffs=(),
+              **kw):
+    """Gemini คู่ถอด 🅱 ตาม 🅰 (``joint_b``) · การอ่านแยกของ 🅱 เห็นของจริง."""
+    monkeypatch.setitem(globals(), "INDIV", {"z1": indiv_a, "b1": TRUE_B})
+    monkeypatch.setitem(globals(), "JOINT", {"z1": TRUE_A, "b1": joint_b})
+    caller = (lambda a, b: {"ok": True, "a_text": TRUE_A, "b_text": joint_b,
+                            "differences": list(diffs),
+                            "engine": "gemini-2.5-flash"})
+    return _run(tmp_path, monkeypatch, caller=caller, **kw)[0]
+
+
+def _cases(rep):
+    return [d for d in rep["defects"] if d["class"] == "MISMATCH_CASE"]
+
+
+def test_case_difference_swallowed_by_the_pair_read_is_restored(tmp_path,
+                                                                  monkeypatch):
+    rep = _case_run(tmp_path, monkeypatch, indiv_a=TRUE_A, pair_check=True)
+    got = _cases(rep)
+    assert len(got) == 1, rep["defects"]
+    assert got[0]["source"] == "indiv_case" and got[0]["pair_agree"] is False
+    assert got[0]["severity"] == config.TEXT_CASE_SEVERITY
+    assert rep["verdict"] == "FAIL"
+    assert rep["pair"]["case_kept"] == 1
+    assert rep["pair"]["pairs"][0]["case_kept"] == 1
+    assert rep["pair"]["final_count"] == len(rep["defects"])
+
+
+def test_caught_even_when_the_main_file_zone_timed_out(tmp_path, monkeypatch):
+    """เคสจริง: z1 อ่านแยกหมดเวลา (ว่าง) ⇒ ใช้ข้อความคู่ของ z1 เทียบกับ
+    การอ่านแยกของ 🅱 ซึ่งไม่เห็นภาพ 🅰 จึงลอกไม่ได้."""
+    rep = _case_run(tmp_path, monkeypatch, indiv_a="", pair_check=True)
+    assert len(_cases(rep)) == 1, rep["defects"]
+    assert rep["verdict"] == "FAIL"
+
+
+def test_flag_off_keeps_the_previous_pair_result(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "PAIR_CASE_GUARD", False)
+    rep = _case_run(tmp_path, monkeypatch, indiv_a=TRUE_A, pair_check=True)
+    assert _cases(rep) == [] and rep["verdict"] == "PASS"
+    assert "case_kept" not in rep["pair"]
+
+
+def test_no_duplicate_when_the_pair_read_already_saw_it(tmp_path, monkeypatch):
+    rep = _case_run(tmp_path, monkeypatch, indiv_a=TRUE_A, joint_b=TRUE_B,
+                    diffs=[{"a": "D-Calcium", "b": "D-calcium",
+                            "kind": "text", "where": ""}], pair_check=True)
+    got = _cases(rep)
+    assert len(got) == 1 and got[0].get("source") != "indiv_case"
+    assert rep["pair"]["case_kept"] == 0
+
+
+def test_guard_only_adds_case_items_of_paired_zones():
+    res = [{"ok": True, "group": "A", "a_id": "z1", "b_id": "b1"}]
+    base = [{"class": "MISMATCH_PANELS", "zone_id": "z1", "found": "x",
+             "reference": "y"}]
+    indep = [
+        {"class": "MISMATCH_PANELS", "zone_id": "z1", "found": "0g",
+         "reference": "Og"},                                   # คลาสอื่น
+        {"class": "MISMATCH_CASE", "zone_id": "z9", "found": "Ab",
+         "reference": "ab"},                                   # นอกคู่
+        {"class": "MISMATCH_CASE", "zone_id": "z1", "found": "Ab",
+         "reference": "ab"},                                   # ✅
+    ]
+    info = {"pairs": [{"group": "A", "a_id": "z1", "b_id": "b1",
+                       "status": "ok"}]}
+    out, inf = pairdiff.case_guard(base, indep, res, info)
+    assert out[0] is base[0] and len(out) == 2
+    assert out[1]["zone_id"] == "z1" and out[1]["class"] == "MISMATCH_CASE"
+    assert inf["case_kept"] == 1 and inf["final_count"] == 2
+
+
+def test_independent_texts_skip_failed_individual_reads():
+    rows = [{"zone_id": "z1", "text": "pair", "engine": "pair:g",
+             "indiv_text": "", "indiv_engine": "n8n",
+             "indiv_error": "timeout"},
+            {"zone_id": "b1", "text": "pair", "engine": "pair:g",
+             "indiv_text": "solo", "indiv_engine": "gemini",
+             "indiv_error": ""},
+            {"zone_id": "z2", "text": "plain", "engine": "gemini"}]
+    got = {r["zone_id"]: r["text"] for r in pairdiff.independent_texts(rows)}
+    assert got == {"z1": "pair", "b1": "solo", "z2": "plain"}
+
+
+def test_js_shows_the_case_guard_count():
+    assert "p.case_kept" in JS
+
+
 def test_progress_step_explains_why_it_did_not_run():
     run = progress.begin("pair-x")
     keys = [s["key"] for s in progress.snapshot("pair-x")["steps"]]

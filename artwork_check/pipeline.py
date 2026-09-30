@@ -757,6 +757,10 @@ def run_inspection(rec_id: str, zone_list: List[dict],
             pair_ocr = pairdiff.apply_texts(ocr_results, results)
             defects, pair_info = pairdiff.merge(defects, _checks(pair_ocr),
                                                 results)
+            if config.PAIR_CASE_GUARD and pair_info["used"]:
+                defects, pair_info = pairdiff.case_guard(
+                    defects, _checks(pairdiff.independent_texts(pair_ocr)),
+                    results, pair_info)
             if pair_info["used"]:
                 # ข้อความที่ใช้ตัดสินกลุ่มเหล่านั้นตอนนี้มาจากการถอดคู่ ⇒
                 # รายงาน/แถบ coverage/กรอบแดงต้องเห็นข้อความชุดเดียวกัน
@@ -928,10 +932,13 @@ def _report_pair_progress(pg, info) -> None:
                     % (p.get("group"), p.get("error") or "ล้มเหลว"))
             continue
         pg.note("pair", "กลุ่ม %s · Gemini ระบุ %d จุด · ตรงกับชั้นข้อความ %d · "
-                "ลดเป็น REVIEW %d · เพิ่ม %d · ยืนยันไม่ได้ %d · %.1fs"
+                "ลดเป็น REVIEW %d · เพิ่ม %d · ยืนยันไม่ได้ %d%s · %.1fs"
                 % (p.get("group"), p.get("n_diff", 0), p.get("agreed", 0),
                    p.get("downgraded", 0), p.get("added", 0),
-                   len(p.get("unverified") or []), (p.get("ms") or 0) / 1000.0))
+                   len(p.get("unverified") or []),
+                   (" · 🔠 คงตัวพิมพ์จากการอ่านแยก %d" % p["case_kept"])
+                   if p.get("case_kept") else "",
+                   (p.get("ms") or 0) / 1000.0))
     pg.done("pair", progress_mod.WARN if bad else progress_mod.OK,
             "ใช้ผลเทียบคู่ %d/%d กลุ่ม · โหมดเดิมจะฟ้อง %d · โหมดคู่ %d รายการ"
             % (info.get("used", 0), len(pairs), info.get("baseline_count", 0),

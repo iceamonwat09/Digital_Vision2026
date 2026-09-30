@@ -324,6 +324,7 @@ def apply_texts(ocr_results: List[dict], results: List[dict]) -> List[dict]:
         n = dict(e)
         n["indiv_text"] = e.get("text", "")
         n["indiv_engine"] = e.get("engine", "")
+        n["indiv_error"] = e.get("error", "") or ""
         n["text"] = text
         n["engine"] = eng
         n["conf"] = None
@@ -477,6 +478,83 @@ def merge(base_defects: List[dict], pair_defects: List[dict],
     info = {"pairs": pairs_info, "used": len(ok),
             "baseline_count": len(base_defects or []),
             "final_count": len(out)}
+    return out, info
+
+
+# ── ชั้นกันพลาดตัวพิมพ์ (ลอกภาพ 🅰 ไปใส่ 🅱) ──────────────────────────────
+
+def independent_texts(pair_ocr: List[dict]) -> List[dict]:
+    """สำเนาที่โซนของคู่ใช้ข้อความจาก **การอ่านแยกทีละโซน** แทนการถอดคู่.
+
+    การอ่านแยกไม่เห็นอีกภาพเลย ⇒ ไม่มีทางลอกตัวอักษรจากอีกฝั่ง · โซนที่อ่าน
+    แยกไม่สำเร็จ (error/ว่าง) คงข้อความโหมดคู่ไว้ ⇒ ยังเทียบได้ครึ่งหนึ่ง
+    (เคสจริง: z1 หมดเวลา แต่ b4 อ่านแยกได้ ``D-calcium``)
+    """
+    out = []
+    for e in pair_ocr or []:
+        if "indiv_text" not in e:
+            out.append(e)
+            continue
+        txt = e.get("indiv_text") or ""
+        if txt.strip() and not e.get("indiv_error"):
+            n = dict(e)
+            n["text"] = txt
+            n["engine"] = e.get("indiv_engine") or e.get("engine")
+            out.append(n)
+        else:
+            out.append(e)
+    return out
+
+
+def case_guard(defects: List[dict], indep_defects: List[dict],
+               results: List[dict], info: dict):
+    """เพิ่ม ``MISMATCH_CASE`` ที่การอ่านแยกเห็น แต่ผลรวมโหมดคู่ไม่มี.
+
+    ไม่ลบ/ไม่แก้รายการเดิมใด ๆ · กันซ้ำด้วย (โซน, ข้อความที่ normalize แล้ว)
+    """
+    ok = [r for r in results or [] if r.get("ok")]
+    zone_pair = {}
+    for r in ok:
+        zone_pair[r["a_id"]] = r
+        zone_pair[r["b_id"]] = r
+    have = set()
+    for d in defects or []:
+        for side in ("found", "reference"):
+            if d.get(side):
+                have.add((d.get("zone_id"), _k(d[side])))
+    out = list(defects or [])
+    kept: Dict[str, int] = {}
+    for d in indep_defects or []:
+        if d.get("class") != "MISMATCH_CASE":
+            continue
+        r = zone_pair.get(d.get("zone_id"))
+        if r is None:
+            continue
+        keys = [(d.get("zone_id"), _k(d[s])) for s in ("found", "reference")
+                if d.get(s)]
+        if any(k in have for k in keys):
+            continue
+        n = dict(d)
+        n["pair_agree"] = False
+        n["source"] = "indiv_case"
+        n["message"] = (n.get("message", "") +
+                        " · 🔠 การอ่านแยกทีละโซนเห็นตัวพิมพ์ต่าง แต่โหมดเทียบคู่"
+                        "ไม่เห็น (Gemini มักถอดภาพ 🅱 ตามภาพ 🅰) — โปรดดูภาพยืนยัน")
+        out.append(n)
+        have.update(keys)
+        kept[r["group"]] = kept.get(r["group"], 0) + 1
+    info = dict(info or {})
+    pairs = []
+    for p in info.get("pairs") or []:
+        p = dict(p)
+        if p.get("status") == "ok":
+            p["case_kept"] = kept.get(p.get("group"), 0)
+            p["pair_count"] = sum(1 for d in out if d.get("zone_id") in
+                                  (p.get("a_id"), p.get("b_id")))
+        pairs.append(p)
+    info["pairs"] = pairs
+    info["case_kept"] = sum(kept.values())
+    info["final_count"] = len(out)
     return out, info
 
 

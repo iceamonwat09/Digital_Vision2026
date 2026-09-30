@@ -364,6 +364,10 @@
         esc(p.agreed) + " · ลดเป็น REVIEW " + esc(p.downgraded) +
         " · เพิ่มจาก Gemini " + esc(p.added) + " · กลุ่มนี้ โหมดเดิม " +
         esc(p.base_count) + " → โหมดคู่ " + esc(p.pair_count) + " รายการ";
+      if (p.case_kept)
+        h += '<div class="aw-confirm-num">🔠 คงความต่างของตัวพิมพ์ที่การอ่าน' +
+          "แยกทีละโซนเห็นแต่โหมดคู่ไม่เห็น " + esc(p.case_kept) +
+          " รายการ (Gemini มักถอดภาพ 🅱 ตามภาพ 🅰)</div>";
       (p.unverified || []).forEach((d) => {
         h += '<div class="aw-confirm-num">❔ Gemini อ้างว่าต่างแต่หาข้อความที่' +
           "ยกมาไม่เจอในที่ถอดมา (ไม่นับ ไม่วาดกรอบ): " + q(d) + "</div>";
