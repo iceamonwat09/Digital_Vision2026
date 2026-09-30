@@ -122,6 +122,7 @@ def artwork_page():
                            pixdiff_ui=config.PIXDIFF_UI,
                            clone_ui=config.CLONE_FROM_HISTORY,
                            experiment_ocr_ui=config.EXPERIMENT_OCR_UI,
+                           pair_ui=config.PAIR_COMPARE_UI,
                            zone_rotate_inherit=config.ZONE_ROTATE_INHERIT,
                            page_rot_per_doc=config.PAGE_ROT_PER_DOC,
                            preview_hi=config.PREVIEW_DISPLAY_DPI > config.PREVIEW_DPI,
@@ -215,6 +216,8 @@ def api_inspect(rec_id):
     confirm_reads = bool(body.get("confirm_reads"))
     # โหมดทดลอง: เทียบแผงต่อแผงระดับพิกเซลแทนชั้นเทียบข้อความ
     pixel_check = bool(body.get("pixel_check"))
+    # โหมดทดลอง: ส่งภาพโซน 🅰+🅱 ของกลุ่มเดียวกันให้ Gemini เทียบในคำขอเดียว
+    pair_check = bool(body.get("pair_check"))
     # มุมที่ปุ่ม "↻ หมุนจอ" ค้างอยู่ตอนลากโซน — บันทึกลงรายงานเพื่อให้ภาพ
     # ทั้งหน้าในรายงานอยู่แนวเดียวกับที่ผู้ใช้เพิ่งจัดมา (แสดงผลล้วน)
     try:
@@ -229,7 +232,8 @@ def api_inspect(rec_id):
         # — ใช้เป็นต้นแบบตรวจ Lot ใหม่ · best-effort ไม่แตะผลตรวจ
         st = {"brand": brand, "page_rot": page_rot, "auto_rotate": auto_rotate,
               "force_ocr": force_ocr, "split_bands": split_bands,
-              "confirm_reads": confirm_reads, "pixel_check": pixel_check}
+              "confirm_reads": confirm_reads, "pixel_check": pixel_check,
+              "pair_check": pair_check}
         if page_rot_b is not None:
             st["page_rot_b"] = page_rot_b
         _save_setup(rec_id, zone_list, st)
@@ -237,7 +241,8 @@ def api_inspect(rec_id):
     pg = progress.begin(rec_id, {"force_ocr": force_ocr,
                                  "split_bands": split_bands,
                                  "confirm_reads": confirm_reads,
-                                 "pixel_check": pixel_check})
+                                 "pixel_check": pixel_check,
+                                 "pair_check": pair_check})
     try:
         rep = pipeline.run_inspection(rec_id, zone_list, brand=brand,
                                       auto_rotate=auto_rotate,
@@ -245,6 +250,7 @@ def api_inspect(rec_id):
                                       split_bands=split_bands,
                                       confirm_reads=confirm_reads,
                                       pixel_check=pixel_check,
+                                      pair_check=pair_check,
                                       page_rot=page_rot,
                                       page_rot_b=page_rot_b,
                                       progress=pg)

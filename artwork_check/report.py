@@ -553,7 +553,7 @@ def list_owners(can_view=None) -> List[str]:
 # 270" ⇒ ไฟล์นี้เก็บกรอบ **ก่อน** ส่งเข้า pipeline = สิ่งที่ผู้ใช้เห็นจริง
 _SETUP_FILE = "setup.json"
 _SETUP_KEYS = ("brand", "page_rot", "auto_rotate", "force_ocr",
-               "split_bands", "confirm_reads", "pixel_check",
+               "split_bands", "confirm_reads", "pixel_check", "pair_check",
                # มุมจอของ 🅱 (หมุนแยกจาก 🅰 — 29 ก.ย.) · ไม่ถูกคัดลอกตอน clone
                # เพราะไฟล์/กรอบ 🅱 ไม่ถูกคัดลอกโดยตั้งใจ
                "page_rot_b")

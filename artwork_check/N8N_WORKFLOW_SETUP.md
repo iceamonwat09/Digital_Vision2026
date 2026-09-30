@@ -348,3 +348,64 @@ $res | ConvertTo-Json -Depth 10
   หรือเปิดรายการเดิมไม่เสียค่า Gemini ใหม่ถ้าข้อความไม่เปลี่ยน
 - ถ้าไม่ตั้งค่า `N8N_TRANSLATE_WEBHOOK_URL` หรือบริการแปลล่ม → ตารางยัง
   แสดงข้อความต้นฉบับ + ไฮไลต์คำสะกด + คำแนะนำได้ตามปกติ แค่คอลัมน์ EN ว่าง
+
+---
+
+# 3) Workflow เทียบคู่ — "Artwork Pair Compare (Gemini)" 🤝 (ทดลอง · 30 ก.ย. 2026)
+
+ไฟล์: **`artwork_check/n8n_artwork_pair.workflow.json`** · webhook path **`artwork-pair`**
+ใช้กับช่องติ๊ก **"🤝 เทียบคู่ด้วย Gemini (ทดลอง)"** บนหน้าตรวจ Artwork เท่านั้น
+(ไม่ติ๊ก = แอปไม่ยิง workflow นี้เลย)
+
+## ทำอะไร
+
+รับภาพโซน 🅰 (ไฟล์หลัก) + 🅱 (ไฟล์อ้างอิง/ภาพถ่าย) ของกลุ่มเดียวกัน **ในคำขอเดียว**
+ให้ Gemini ① ถอดความทั้งสองภาพตามตัวอักษร ② ระบุความต่างเป็น JSON:
+
+```json
+{"a_text": "...", "b_text": "...",
+ "differences": [{"a": "1g", "b": "7g", "kind": "number", "where": "Dietary Fiber row"}],
+ "engine": "gemini-2.5-flash"}
+```
+
+แอปเอา `a_text`/`b_text` ไปเข้าชั้นเทียบข้อความเดิม (deterministic) แล้วเทียบกับ
+`differences` — รายการที่ยกข้อความมาแล้ว **หาไม่เจอในที่ถอดมา** จะไม่ถูกนับ
+(รายละเอียดใน `artwork_check/pairdiff.py`)
+
+## ติดตั้ง (โครงเดียวกับ workflow OCR — ใช้ credential เดิมได้เลย)
+
+1. N8N → **Import from File** → `n8n_artwork_pair.workflow.json`
+2. node **HTTP Request**: แก้ URL/credential **เหมือนที่ตั้งใน workflow OCR** (ขั้นตอนที่ 2 ข้างบน)
+3. **Activate** (สวิตช์มุมขวาบน) — ใช้ **Production URL** `/webhook/artwork-pair`
+   ไม่ใช่ `/webhook-test/...`
+4. แอปใช้ค่าเริ่มต้น `http://127.0.0.1:5678/webhook/artwork-pair` อยู่แล้ว
+   (ย้ายเครื่องให้ตั้ง env `ARTWORK_PAIR_WEBHOOK_URL`) → รีสตาร์ต `py -3.9 app.py`
+   → footer ต้องขึ้น **`2026.09.30-pair-compare`**
+
+## ทดสอบเร็ว (Windows PowerShell)
+
+```powershell
+$a = [Convert]::ToBase64String([IO.File]::ReadAllBytes("C:\temp\zone_a.jpg"))
+$b = [Convert]::ToBase64String([IO.File]::ReadAllBytes("C:\temp\zone_b.jpg"))
+Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:5678/webhook/artwork-pair" `
+  -Body @{ image_a_b64 = $a; image_b_b64 = $b } | ConvertTo-Json -Depth 5
+```
+
+ต้องได้ `a_text` และ `b_text` ที่ **ไม่ว่าง** — ถ้าได้คำตอบว่าง แอปจะถือว่าล้มเหลว
+แล้วใช้ผลโหมดเดิมของกลุ่มนั้น (ดู Executions ใน N8N ว่า node ไหนพัง)
+
+## สิ่งที่ล็อกไว้ใน workflow
+
+| ค่า | ทำไม |
+|---|---|
+| `temperature: 0` | ต้องวัดซ้ำได้ — ห้ามแก้ |
+| `propertyOrdering: a_text, b_text, differences` | ให้โมเดล **ถอดความก่อนเทียบ** |
+| prompt ข้อ *"NEVER copy text from A into B"* | กันโมเดลอ่านภาพถ่ายตามต้นฉบับจน **กลืนความต่างจริง** — ความเสี่ยงหลักของวิธีนี้ |
+| `thinkingBudget: 1024` | งานเทียบต้องคิดมากกว่างานถอดความ · ตั้ง 0 = เร็วขึ้นแต่อาจพลาดความต่าง |
+| ไม่มีคำตอบสองฝั่ง ⇒ ตอบ `error` | แอปต้องใช้ข้อความทั้งสองฝั่งเสมอ (ตรวจย้อนได้) |
+
+## ⚠️ ก่อนเชื่อผล ต้องวัด "จับของจริงได้ไหม" ด้วย
+
+แก้ภาพถ่าย 🅱 ด้วยโปรแกรมให้ต่างจากต้นฉบับทีละจุด (เช่น `1g`→`7g` · ลบ `®` ·
+ลบคำในส่วนผสม 1 คำ · `1.5`→`15`) แล้วส่งตรวจแบบติ๊กช่องนี้ — ทุกจุดต้องขึ้นเป็น
+รายการ (FAIL หรือ REVIEW) · ถ้าหาย = โมเดลอ่านตามต้นฉบับ ⇒ **ยังใช้ไม่ได้**

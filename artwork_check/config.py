@@ -449,6 +449,36 @@ TEXT_PAIR_BY_RUN = os.getenv("ARTWORK_TEXT_PAIR_BY_RUN", "1") not in ("0", "fals
 
 PIXEL_MAX_OCR_REGIONS = int(os.getenv("ARTWORK_PIXEL_MAX_OCR_REGIONS", "12"))
 
+# ─────────────────────────────────────────────────────────────────────
+# 🤝 โหมดทดลอง "เทียบคู่ด้วย Gemini" (ช่องติ๊ก ``pair_check`` · default ปิด)
+#
+# ส่งภาพโซน 🅰 + 🅱 ของกลุ่มเดียวกันในคำขอเดียว ⇒ Gemini ถอดความทั้งคู่ +
+# ระบุความต่าง แล้วรวมผลกับชั้นเทียบข้อความเดิม (รายละเอียด: pairdiff.py)
+# ที่มา: งานจริง 30 ก.ย. (PDF เทียบภาพถ่าย) FAIL 9 รายการ ไม่มีของจริงเลย
+#
+# ไม่ติ๊ก = ไม่มีโค้ดของโหมดนี้ทำงานแม้แต่บรรทัดเดียว (ไม่ยิง ไม่อุ่นแคช)
+PAIR_WEBHOOK_URL = os.getenv(
+    "ARTWORK_PAIR_WEBHOOK_URL",
+    "http://127.0.0.1:5678/webhook/artwork-pair").strip()
+# งานเทียบใช้เวลาคิดมากกว่างานถอดความ (สองภาพ + รายการความต่าง)
+PAIR_TIMEOUT_S = float(os.getenv("ARTWORK_PAIR_TIMEOUT_S", "150"))
+# ลองซ้ำเฉพาะความล้มเหลวชั่วคราว (ต่อไม่ติด · timeout · 5xx · **คำตอบว่าง**)
+PAIR_RETRIES = int(os.getenv("ARTWORK_PAIR_RETRIES", "1"))
+PAIR_RETRY_WAIT_S = float(os.getenv("ARTWORK_PAIR_RETRY_WAIT_S", "2"))
+# ยิงพร้อมกันกี่คู่ — วิ่งคู่ขนานกับการอ่านทีละโซน (OCR_PARALLEL) อีกชุด
+PAIR_PARALLEL = int(os.getenv("ARTWORK_PAIR_PARALLEL", "3"))
+# defect ของชั้นข้อความที่ Gemini ไม่ได้ระบุว่าต่าง ⇒ ลดเป็น warning (REVIEW)
+# **ไม่ลบทิ้ง** · 0 = คง severity เดิม
+PAIR_DOWNGRADE_UNAGREED = os.getenv(
+    "ARTWORK_PAIR_DOWNGRADE_UNAGREED", "1") not in ("0", "false", "False")
+# อ่านภาพโซนด้วย Tesseract ระหว่างรอ Gemini ⇒ การ์ด defect เปิดเร็วขึ้น
+# (แสดงผลล้วน) · 0 = ปิด
+PAIR_PREWARM_HL = os.getenv(
+    "ARTWORK_PAIR_PREWARM_HL", "1") not in ("0", "false", "False")
+# แสดงช่องติ๊กบนหน้าตรวจ · 0 = ซ่อน (API ยังรับ ``pair_check`` ได้)
+PAIR_COMPARE_UI = os.getenv(
+    "ARTWORK_PAIR_COMPARE_UI", "1").strip().lower() in ("1", "true", "yes", "on")
+
 # เวลารวมสูงสุดของการตรวจหนึ่งใบ — เกินแล้ว **ข้ามเฉพาะชั้นเสริม**
 # (อ่านซ้ำ / เทียบพิกเซล / อ่านบริเวณที่ต่าง) แล้วออกรายงานเท่าที่มี
 # ⚠️ **ห้ามทิ้ง defect ที่คำนวณได้แล้ว** เพราะเราหมดเวลาเอง (กฎเหล็กข้อ 2)
