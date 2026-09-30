@@ -541,61 +541,52 @@ def test_workflow_contract():
     nodes = {n["name"]: n for n in w["nodes"]}
     assert nodes["Webhook"]["parameters"]["path"] == "artwork-pair"
     assert config.PAIR_WEBHOOK_URL.endswith("/webhook/artwork-pair")
-    build = nodes["Build"]["parameters"]["jsCode"]
+    build = nodes[BUILD]["parameters"]["jsCode"]
     for key in ("image_a_b64", "image_b_b64", "temperature: 0",
                 "DO NOT correct spelling, grammar, capitalization"):
         assert key in build, key
-    assert "temperature: 0" in nodes["Collect"]["parameters"]["jsCode"]
     body = nodes["Respond to Webhook"]["parameters"]["responseBody"]
     for key in ("a_text", "b_text", "differences"):
         assert key in body
     ids = [n["id"] for n in w["nodes"]]
     assert len(ids) == len(set(ids))
-    # ทุก node ที่ถูกอ้างใน connections ต้องมีจริง + โค้ดอ้างชื่อ node ที่มีจริง
     for src, conn in w["connections"].items():
         assert src in nodes
         for br in conn["main"]:
             for c in br:
                 assert c["node"] in nodes, c["node"]
-    for n in nodes.values():
-        for ref in re.findall(r"\$\('([^']+)'\)",
-                              n["parameters"].get("jsCode", "")):
-            assert ref in nodes, ref
 
+
+# ชื่อ node เดิมของ workflow ที่สถานีใช้อยู่ — ผู้ใช้วางโค้ดทับ node เดิม
+# ⇒ ห้ามเปลี่ยนชื่อ (ไม่งั้นคำแนะนำ "วางทับ node ชื่อ …" ใช้ไม่ได้)
+BUILD, PARSE = "Code in JavaScript2", "Code in JavaScript"
 
 # รัน Code node ของ workflow **ตัวจริง** แบบ n8n จำลองด้วย node
 HARNESS = r"""
-// รัน Code node ของ workflow จริงแบบ n8n จำลอง · stdin = {body, transcribe:{a,b}, compare}
+// stdin = {body, gemini}: gemini = คำตอบ JSON ที่โมเดลเขียน (object) หรือ {error}
 const fs = require('fs');
 const w = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
 const cfg = JSON.parse(fs.readFileSync(0, 'utf8'));
 const node = (n) => w.nodes.find((x) => x.name === n).parameters.jsCode;
-const outs = {};
 function run(name, items) {
   const $input = { first: () => items[0], all: () => items };
-  const $ = (n) => ({ first: () => outs[n][0] });
-  const r = new Function('$input', '$', node(name))($input, $);
-  outs[name] = r; return r;
+  return new Function('$input', node(name))($input);
 }
-const log = {};
-const built = run('Build', [{ json: { body: cfg.body } }]);
-log.valid = built[0].json.valid;
-if (!built[0].json.valid) { console.log(JSON.stringify({ log, error: built[0].json.error })); process.exit(0); }
-const split = run('Split', built);
-log.transcribe_images = split.map((i) => i.json.gemini_request.contents[0].parts.filter((p) => p.inlineData).map((p) => p.inlineData.data.slice(0, 8)));
-const resp = (t) => (t && t.error) ? { error: t.error } : { candidates: [{ content: { parts: [{ text: t }] }, finishReason: 'STOP' }] };
-const http1 = split.map((i) => ({ json: resp(cfg.transcribe[i.json.side]) }));
-const col = run('Collect', http1);
-log.ok = col[0].json.ok;
-let parseIn = col;
-if (col[0].json.ok) {
-  const parts = col[0].json.gemini_request.contents[0].parts;
-  log.compare_images = parts.filter((p) => p.inlineData).length;
-  log.compare_has_texts = parts.some((p) => p.text && p.text.startsWith('A_TEXT:')) && parts.some((p) => p.text && p.text.startsWith('B_TEXT:'));
-  parseIn = [{ json: cfg.compare && cfg.compare.error ? { error: cfg.compare.error } : resp(JSON.stringify({ differences: cfg.compare || [] })) }];
-}
-const out = run('Parse', parseIn)[0].json;
-console.log(JSON.stringify({ log, out }));
+const built = run(process.argv[3], [{ json: { body: cfg.body } }])[0].json;
+const log = { valid: built.valid, error: built.error };
+if (!built.valid) { console.log(JSON.stringify({ log })); process.exit(0); }
+const req = built.gemini_request;
+log.images = req.contents[0].parts.filter((p) => p.inlineData).length;
+log.gen = req.generationConfig;
+log.prompt = req.contents[0].parts[0].text;
+let resp;
+try {
+  const g = cfg.gemini;
+  resp = g && g.error ? { error: g.error }
+    : { candidates: [{ content: { parts: [{ text: JSON.stringify(g) }] }, finishReason: 'STOP' }] };
+  const out = run(process.argv[4], [{ json: resp }])[0].json;
+  console.log(JSON.stringify({ log, out }));
+} catch (e) { console.log(JSON.stringify({ log, thrown: String(e.message) })); }
 """
 
 
@@ -604,7 +595,7 @@ def _wf(cfg):
     import subprocess
     if not shutil.which("node"):
         pytest.skip("ไม่มี node")
-    r = subprocess.run(["node", "-e", HARNESS, "x", WF],
+    r = subprocess.run(["node", "-e", HARNESS, "x", WF, BUILD, PARSE],
                        input=json.dumps(cfg), capture_output=True, text=True,
                        timeout=30)
     assert r.returncode == 0, r.stderr
@@ -620,41 +611,62 @@ def _b64(ext, v):
 BODY = {"image_a_b64": _b64(".jpg", 255), "image_b_b64": _b64(".png", 0)}
 
 
-def test_workflow_transcribes_each_image_in_its_own_request():
-    """หัวใจของ v2: คำขอถอดความเห็นภาพเดียว ⇒ ลอกอีกฝั่งไม่ได้โดยโครงสร้าง
-    (v1 ส่งสองภาพพร้อมกัน แล้ว Gemini เขียนข้อความชุดเดียวให้ทั้งสองฝั่ง)."""
-    got = _wf({"body": BODY,
-               "transcribe": {"a": "D-Calcium", "b": "D-calcium"},
-               "compare": [{"a": "D-Calcium", "b": "D-calcium",
-                            "kind": "text"}]})
-    ta, tb = got["log"]["transcribe_images"]
-    assert len(ta) == 1 and len(tb) == 1
-    assert ta[0] == BODY["image_a_b64"][:8] and tb[0] == BODY["image_b_b64"][:8]
-    assert got["log"]["compare_images"] == 2 and got["log"]["compare_has_texts"]
+def test_workflow_is_one_request_with_both_images():
+    """ผู้ใช้เลือก: เทียบคู่ = 1 คำขอต่อ 1 คู่โซน (ไม่แยกถอดความ)."""
+    got = _wf({"body": BODY, "gemini": {"a_lines": ["x"], "b_lines": ["x"],
+                                        "differences": []}})
+    assert got["log"]["images"] == 2
+    assert got["log"]["gen"]["temperature"] == 0
+
+
+def test_workflow_lines_become_multiline_text():
+    """schema เป็นรายการบรรทัด ⇒ ได้ข้อความหลายบรรทัดคืน (v1 ได้ทั้งแผงเป็น
+    ก้อนเดียว คำติดกัน ``INSTRUCTIONSAmount``) · ช่องว่างหัว-ท้าย/บรรทัดว่างถูกตัด."""
+    got = _wf({"body": BODY, "gemini": {
+        "a_lines": ["FEEDING INSTRUCTIONS", " Amount per day ", ""],
+        "b_lines": ["FEEDING INSTRUCTIONS", "Amount per day"],
+        "differences": []}})
     out = got["out"]
-    assert (out["a_text"], out["b_text"]) == ("D-Calcium", "D-calcium")
-    assert out["differences"][0]["b"] == "D-calcium"
-    assert not out.get("error")
+    assert out["a_text"] == "FEEDING INSTRUCTIONS\nAmount per day"
+    assert out["b_text"] == out["a_text"] and not out.get("error")
 
 
-def test_workflow_compare_step_cannot_rewrite_the_transcripts():
-    got = _wf({"body": BODY, "transcribe": {"a": "Breeds", "b": "Breed"},
-               "compare": []})
-    assert (got["out"]["a_text"], got["out"]["b_text"]) == ("Breeds", "Breed")
+def test_workflow_schema_asks_for_lines_and_enough_thinking():
+    got = _wf({"body": BODY, "gemini": {"a_lines": ["x"], "b_lines": ["x"],
+                                        "differences": []}})
+    gen = got["log"]["gen"]
+    props = gen["responseSchema"]["properties"]
+    assert props["a_lines"]["type"] == "ARRAY" and props["b_lines"]["type"] == "ARRAY"
+    assert gen["responseSchema"]["propertyOrdering"][:2] == ["a_lines", "b_lines"]
+    # 1024 ถูกใช้หมดบนงานจริง (thoughtsTokenCount 1023)
+    assert gen["thinkingConfig"]["thinkingBudget"] > 1024
 
 
-def test_workflow_failed_transcription_is_an_error_not_empty_text():
-    got = _wf({"body": BODY,
-               "transcribe": {"a": "x", "b": {"error": {"code": 403}}}})
-    assert got["out"]["error"] and "B" in got["out"]["error"]
+def test_workflow_prompt_targets_the_misses_seen_on_the_station():
+    """ความต่างที่พลาดจริงบนสถานีต้องอยู่ใน prompt: ตัวพิมพ์ · ลงท้าย s · ห้ามลอก."""
+    p = _wf({"body": BODY, "gemini": {"a_lines": [], "b_lines": [],
+                                      "differences": []}})["log"]["prompt"]
+    for key in ("D-calcium", "Breed", "PIXELS OF IMAGE B ONLY",
+                "NEVER copy a line from a_lines", "INCLUDING LETTER CASE",
+                "Never glue two words together", "[?]"):
+        assert key in p, key
 
 
-def test_workflow_failed_compare_keeps_both_texts_with_a_warning():
-    got = _wf({"body": BODY, "transcribe": {"a": "x", "b": "y"},
-               "compare": {"error": {"code": 500}}})
-    out = got["out"]
-    assert (out["a_text"], out["b_text"], out["differences"]) == ("x", "y", [])
-    assert "compare step failed" in out["warning"] and not out.get("error")
+def test_workflow_still_accepts_the_old_string_schema():
+    got = _wf({"body": BODY, "gemini": {"a_text": "A\nB", "b_text": "A\nC",
+                                        "differences": []}})
+    assert (got["out"]["a_text"], got["out"]["b_text"]) == ("A\nB", "A\nC")
+
+
+def test_workflow_empty_side_is_an_error_not_a_pass():
+    got = _wf({"body": BODY, "gemini": {"a_lines": ["x"], "b_lines": [],
+                                        "differences": []}})
+    assert got["out"]["error"]
+
+
+def test_workflow_gemini_error_is_not_swallowed():
+    got = _wf({"body": BODY, "gemini": {"error": {"code": 403}}})
+    assert "Gemini API error" in got["thrown"]
 
 
 def test_workflow_rejects_a_missing_image():

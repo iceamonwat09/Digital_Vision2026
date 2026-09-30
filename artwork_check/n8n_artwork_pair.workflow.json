@@ -1,5 +1,5 @@
 {
-  "name": "Artwork Pair Compare v2 (แยกถอดความ)",
+  "name": "Artwork Pair Compare (Gemini)",
   "nodes": [
     {
       "parameters": {
@@ -20,10 +20,10 @@
     },
     {
       "parameters": {
-        "jsCode": "// ===== Build : ตรวจภาพ 2 ภาพ + ประกอบคำขอ \"ถอดความทีละภาพ\" (v2) =====\n// แอป (artwork_check/pairdiff.py) ส่ง POST form-urlencoded 2 ฟิลด์:\n//   image_a_b64 = ภาพโซนของไฟล์หลัก (🅰) · image_b_b64 = ภาพโซนของไฟล์อ้างอิง (🅱)\n//\n// 🔑 v2 (30 ก.ย.): ถอดความ **แยกคำขอ ภาพละ 1 คำขอ** — v1 ส่งสองภาพในคำขอเดียว\n// แล้ว Gemini เขียนข้อความชุดเดียวให้ทั้งสองฝั่ง (ทดสอบจริง AvoDerm โซนใหญ่:\n// กลืนความต่างจริง 4/4 จุด ทั้งที่ prompt สั่ง \"NEVER copy\") ⇒ คำขอถอดความ\n// **เห็นภาพเดียวเท่านั้น** จึงลอกอีกฝั่งไม่ได้โดยโครงสร้าง ไม่ใช่โดยคำสั่ง\n// ขั้นเทียบ (คำขอที่ 3) เห็นทั้งสองภาพ แต่ **ห้ามแก้ข้อความที่ถอดแล้ว**\n\nconst item = $input.first().json;\nconst body = item.body ?? item;\n\nfunction clean(v) {\n  let b64 = String(v ?? '').trim();\n  const m = b64.match(/^data:image\\/[a-z0-9.+-]+;base64,(.+)$/is);\n  if (m) b64 = m[1];\n  return b64.replace(/\\s+/g, '').replace(/ /g, '+');\n}\nfunction mimeOf(b64) {\n  const h = Buffer.from(b64.slice(0, 32), 'base64');\n  if (h[0] === 0x89 && h[1] === 0x50 && h[2] === 0x4e) return 'image/png';\n  if (h[0] === 0xff && h[1] === 0xd8) return 'image/jpeg';\n  if (h[0] === 0x52 && h[1] === 0x49 && h[2] === 0x46 && h[8] === 0x57 && h[9] === 0x45) return 'image/webp';\n  return null;\n}\n\nconst a = clean(body.image_a_b64);\nconst b = clean(body.image_b_b64);\nlet valid = true;\nlet error = '';\nconst re64 = /^[A-Za-z0-9+/]+={0,2}$/;\nfor (const [name, v] of [['image_a_b64', a], ['image_b_b64', b]]) {\n  if (!v) { valid = false; error = `missing form field '${name}'`; break; }\n  if (v.length % 4 !== 0 || !re64.test(v)) { valid = false; error = `'${name}' is not valid base64`; break; }\n}\nconst mimeA = valid ? mimeOf(a) : null;\nconst mimeB = valid ? mimeOf(b) : null;\nif (valid && (!mimeA || !mimeB)) { valid = false; error = 'unsupported image format (expected JPEG / PNG / WebP)'; }\nconst sizeBytes = Math.floor((a.length + b.length) * 3 / 4);\nif (valid && sizeBytes > 19 * 1024 * 1024) {\n  valid = false;\n  error = `images too large: ${(sizeBytes / 1048576).toFixed(1)} MB (limit ~19 MB)`;\n}\n\nconst TRANSCRIBE = \"Transcribe ALL text printed in this label image, VERBATIM.\\n\" +\n  \"- This is quality control: the text may contain real printing mistakes. Copy exactly what is printed.\\n\" +\n  \"  DO NOT correct spelling, grammar, capitalization, punctuation, digits or units.\\n\" +\n  \"- Preserve letter case exactly (e.g. \\\"D-calcium\\\" stays \\\"D-calcium\\\"), decimal points, minus signs,\\n\" +\n  \"  <, >, %, superscripts and symbols (e.g. \\\"0.5g\\\", \\\"<1g\\\", \\\"-18°C\\\", \\\"®\\\").\\n\" +\n  \"- One printed line per output line, reading order top-to-bottom, left-to-right.\\n\" +\n  \"- Write any run of leader dots (......) as exactly three dots \\\"...\\\".\\n\" +\n  \"- Text on curves/badges: transcribe it when legible. Skip what you cannot read; never guess.\\n\" +\n  \"- Output ONLY the transcription, no comments, no markdown.\";\n\nfunction transcribeRequest(mime, data) {\n  return {\n    contents: [{ role: 'user', parts: [\n      { text: TRANSCRIBE },\n      { inlineData: { mimeType: mime, data } },   // ⚠️ ภาพเดียวเท่านั้น\n    ] }],\n    generationConfig: {\n      temperature: 0,          // ห้ามแก้ — ต้องวัดซ้ำได้\n      topP: 1,\n      maxOutputTokens: 8192,   // เพดานกันวนพิมพ์ซ้ำไม่จบ (เคย 21,378 ตัวอักษร)\n      thinkingConfig: { thinkingBudget: 0 },\n    },\n  };\n}\n\nreturn [{ json: {\n  valid, error,\n  size_kb: Math.round(sizeBytes / 102.4) / 10,\n  img: valid ? { a, b, mimeA, mimeB } : null,\n  req_a: valid ? transcribeRequest(mimeA, a) : null,\n  req_b: valid ? transcribeRequest(mimeB, b) : null,\n} }];\n"
+        "jsCode": "// ===== Code in JavaScript2 : validate 2 images + build Gemini request =====\n// แอป (artwork_check/pairdiff.py) ส่ง POST form-urlencoded 2 ฟิลด์:\n//   image_a_b64 = ภาพโซนของไฟล์หลัก (🅰) · image_b_b64 = ภาพโซนของไฟล์อ้างอิง (🅱)\n// โหนดนี้ตรวจ base64/ชนิดภาพ แล้วประกอบ request ของ Gemini (temperature = 0)\n\nconst item = $input.first().json;\nconst body = item.body ?? item;\n\nfunction clean(v) {\n  let b64 = String(v ?? '').trim();\n  const m = b64.match(/^data:image\\/[a-z0-9.+-]+;base64,(.+)$/is);\n  if (m) b64 = m[1];\n  return b64.replace(/\\s+/g, '').replace(/ /g, '+');\n}\nfunction mimeOf(b64) {\n  const h = Buffer.from(b64.slice(0, 32), 'base64');\n  if (h[0] === 0x89 && h[1] === 0x50 && h[2] === 0x4e) return 'image/png';\n  if (h[0] === 0xff && h[1] === 0xd8) return 'image/jpeg';\n  if (h[0] === 0x52 && h[1] === 0x49 && h[2] === 0x46 && h[8] === 0x57 && h[9] === 0x45) return 'image/webp';\n  return null;\n}\n\nconst a = clean(body.image_a_b64);\nconst b = clean(body.image_b_b64);\nlet valid = true;\nlet error = '';\nconst re64 = /^[A-Za-z0-9+/]+={0,2}$/;\nfor (const [name, v] of [['image_a_b64', a], ['image_b_b64', b]]) {\n  if (!v) { valid = false; error = `missing form field '${name}'`; break; }\n  if (v.length % 4 !== 0 || !re64.test(v)) { valid = false; error = `'${name}' is not valid base64`; break; }\n}\nconst mimeA = valid ? mimeOf(a) : null;\nconst mimeB = valid ? mimeOf(b) : null;\nif (valid && (!mimeA || !mimeB)) { valid = false; error = 'unsupported image format (expected JPEG / PNG / WebP)'; }\nconst sizeBytes = Math.floor((a.length + b.length) * 3 / 4);\nif (valid && sizeBytes > 19 * 1024 * 1024) {\n  valid = false;\n  error = `images too large: ${(sizeBytes / 1048576).toFixed(1)} MB (limit ~19 MB)`;\n}\n\nconst PROMPT = \"You are a packaging quality-control inspector. You compare two images of the SAME printed label panel.\\nIMAGE A = the approved artwork (reference design, usually a clean PDF render).\\nIMAGE B = the version to check (a proof or a PHOTO of the printed pack; may have glare, perspective, texture).\\nYour job is to find every place where B prints something different from A. Missing a real difference is the worst possible failure. The two images usually look almost the same - that is exactly why small differences are easy to miss.\\n\\nSTEP 1 - Transcribe IMAGE A into a_lines.\\n- One array item per printed line, reading order top-to-bottom, left-to-right\\n  (finish a column before starting the next one). Never merge two printed lines into one item.\\n- Keep the spaces between words exactly as printed. Never glue two words together.\\n- Verbatim: DO NOT correct spelling, grammar, capitalization, punctuation, digits or units.\\n  Preserve decimal points, minus signs, <, >, %, superscripts and symbols (e.g. \\\"0.5g\\\", \\\"<1g\\\", \\\"-18°C\\\", \\\"®\\\").\\n- Dot leaders (\\\".........\\\") are written as \\\"...\\\".\\n- Text on curves/badges: transcribe it when legible.\\n\\nSTEP 2 - Transcribe IMAGE B into b_lines, from the PIXELS OF IMAGE B ONLY.\\n- Same rules as STEP 1.\\n- NEVER copy a line from a_lines. Before writing each line of B, look at that line in image B again.\\n- A line of B that looks like a line of A is NOT evidence that they are identical. Check every character of B,\\n  especially: letter case (C vs c), word endings (Breeds vs Breed), spelling variants (Sulfate vs Sulphate),\\n  digits (1/7, 0/8, 5/6), decimal points, hyphens, and extra or missing words.\\n- If some characters of B are not legible, write [?] in their place. Never fill them in from A.\\n\\nSTEP 3 - Compare line by line and list EVERY difference.\\n- For each line of b_lines find the matching line of a_lines and compare them character by character,\\n  INCLUDING LETTER CASE. Also report lines of A missing from B and lines of B missing from A.\\n- Examples of real differences: \\\"D-Calcium\\\" vs \\\"D-calcium\\\", \\\"Breeds\\\" vs \\\"Breed\\\",\\n  \\\"Copper Sulfate\\\" vs \\\"Copper Sulphate\\\", \\\"1g\\\" vs \\\"7g\\\", \\\"1.5g\\\" vs \\\"15g\\\".\\n- Report ALL differences. Do not stop after a few.\\n- \\\"a\\\" and \\\"b\\\": quote the differing text EXACTLY as it appears in your a_lines / b_lines\\n  (shortest span that shows the difference, e.g. a=\\\"1g\\\" b=\\\"7g\\\"). Use \\\"\\\" when absent on that side.\\n- kind: \\\"number\\\" if digits/units/decimals/signs are involved, \\\"text\\\" for words/letters/case/\\n  punctuation, \\\"visual\\\" for non-text differences (font weight, colour, logo, symbol, barcode\\n  bars, layout) - for visual use a=\\\"\\\" b=\\\"\\\" and describe it in \\\"where\\\".\\n- \\\"where\\\": short location hint (e.g. \\\"Total Fat row\\\", \\\"2nd paragraph\\\").\\n- DO NOT report differences caused only by line wrapping, image quality, glare, perspective,\\n  resolution, or the part of the image outside the label panel.\\n- If the two panels are identical, return an empty differences array.\\n\\nReturn ONLY JSON matching the schema.\";\n\nconst responseSchema = {\n  type: 'OBJECT',\n  properties: {\n    // รายการบรรทัด (ไม่ใช่สตริงเดียว) — v1 ได้ทั้งแผงเป็นก้อนเดียว ไม่มีขึ้นบรรทัด คำติดกัน\n    a_lines: { type: 'ARRAY', items: { type: 'STRING' } },\n    b_lines: { type: 'ARRAY', items: { type: 'STRING' } },\n    differences: {\n      type: 'ARRAY',\n      items: {\n        type: 'OBJECT',\n        properties: {\n          a: { type: 'STRING' },\n          b: { type: 'STRING' },\n          kind: { type: 'STRING', enum: ['text', 'number', 'visual'] },\n          where: { type: 'STRING' },\n        },\n        required: ['a', 'b', 'kind'],\n      },\n    },\n  },\n  // ถอดความ \"ก่อน\" เทียบ — โมเดลเขียนตามลำดับนี้\n  propertyOrdering: ['a_lines', 'b_lines', 'differences'],\n  required: ['a_lines', 'b_lines', 'differences'],\n};\n\nconst geminiRequest = !valid ? null : {\n  contents: [{\n    role: 'user',\n    parts: [\n      { text: PROMPT },\n      { text: 'IMAGE A (approved artwork):' },\n      { inlineData: { mimeType: mimeA, data: a } },\n      { text: 'IMAGE B (version to check):' },\n      { inlineData: { mimeType: mimeB, data: b } },\n    ],\n  }],\n  generationConfig: {\n    temperature: 0,          // ห้ามแก้ — ต้องวัดซ้ำได้\n    topP: 1,\n    maxOutputTokens: 24576,\n    responseMimeType: 'application/json',\n    responseSchema,\n    // งานเทียบต้อง \"คิด\" — 1024 ถูกใช้หมดเกลี้ยงบนงานจริง (thoughtsTokenCount 1023)\n    // (ลบบรรทัดนี้ถ้ารุ่นที่ใช้ไม่รองรับ)\n    thinkingConfig: { thinkingBudget: 4096 },\n  },\n};\n\nreturn [{ json: { valid, error, size_kb: Math.round(sizeBytes / 102.4) / 10, gemini_request: geminiRequest } }];\n"
       },
       "id": "b2c3d4e5-0002-4000-8000-000000000002",
-      "name": "Build",
+      "name": "Code in JavaScript2",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
@@ -67,19 +67,6 @@
     },
     {
       "parameters": {
-        "jsCode": "// ===== Split : แตกเป็น 2 item (ภาพ 🅰 · ภาพ 🅱) → HTTP ถอดความทีละภาพ =====\nconst j = $input.first().json;\nreturn [\n  { json: { side: 'a', gemini_request: j.req_a } },\n  { json: { side: 'b', gemini_request: j.req_b } },\n];\n"
-      },
-      "id": "b2c3d4e5-0008-4000-8000-000000000008",
-      "name": "Split",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        672,
-        128
-      ]
-    },
-    {
-      "parameters": {
         "method": "POST",
         "url": "https://asia-southeast1-aiplatform.googleapis.com/v1/projects/YOUR_GCP_PROJECT_ID/locations/asia-southeast1/publishers/google/models/gemini-2.5-flash:generateContent",
         "authentication": "predefinedCredentialType",
@@ -91,104 +78,29 @@
           "timeout": 120000
         }
       },
-      "id": "b2c3d4e5-0009-4000-8000-000000000009",
-      "name": "HTTP Transcribe",
+      "id": "b2c3d4e5-0004-4000-8000-000000000004",
+      "name": "HTTP Request",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        896,
+        688,
         128
       ],
       "retryOnFail": true,
       "maxTries": 2,
       "waitBetweenTries": 3000,
-      "onError": "continueRegularOutput",
-      "notes": "ตั้ง URL + credential ให้เหมือน workflow OCR ที่ใช้งานได้ (แทน YOUR_GCP_PROJECT_ID) — ต้องตั้งทั้ง HTTP Transcribe และ HTTP Compare · ถอดความทีละภาพ (1 ภาพต่อคำขอ)"
+      "notes": "แก้ URL: แทน YOUR_GCP_PROJECT_ID ด้วย project จริง แล้วผูก credential 'Google API' (service account) หรือสลับเป็น Gemini API key ตาม N8N_WORKFLOW_SETUP.md"
     },
     {
       "parameters": {
-        "jsCode": "// ===== Collect : รวมข้อความที่ถอด \"แยกกัน\" + ประกอบคำขอเทียบ (เห็นสองภาพ) =====\nfunction textOf(r) {\n  if (!r || r.error) return { text: '', why: `Gemini API error: ${JSON.stringify((r || {}).error || 'no response')}` };\n  const cand = (r.candidates ?? [])[0] ?? {};\n  const text = ((cand.content ?? {}).parts ?? []).filter((p) => !p.thought)\n    .map((p) => p.text ?? '').join('\\n').trim()\n    .replace(/^```[a-z]*\\s*/i, '').replace(/\\s*```$/, '').trim();\n  const fr = cand.finishReason ?? '';\n  return { text, why: fr && fr !== 'STOP' ? `finishReason=${fr}` : '' };\n}\nconst items = $input.all();\nconst ra = textOf(items[0] && items[0].json);\nconst rb = textOf(items[1] && items[1].json);\nconst img = $('Build').first().json.img;\n\nconst COMPARE = \"IMAGE A is the approved artwork. IMAGE B is the version to check.\\n\" +\n  \"Each image was transcribed SEPARATELY (A_TEXT, B_TEXT below). The transcriptions are final:\\n\" +\n  \"do NOT rewrite them. They may contain reading errors.\\n\\n\" +\n  \"List the differences in what is actually PRINTED on A versus B:\\n\" +\n  \"- Go through every place where A_TEXT and B_TEXT differ. Look at BOTH images at that spot.\\n\" +\n  \"  Report it only if the printed text really differs (a real difference can be a single letter,\\n\" +\n  \"  letter case, a digit, a decimal point, a sign, or a missing/extra word). If it is only a\\n\" +\n  \"  reading error of the transcription, do not report it.\\n\" +\n  \"- \\\"a\\\" and \\\"b\\\": copy the differing span EXACTLY from A_TEXT and B_TEXT (shortest span that\\n\" +\n  \"  shows the difference). Use \\\"\\\" when the text is absent on that side.\\n\" +\n  \"- Also report print differences the transcriptions missed: if you can quote them from A_TEXT /\\n\" +\n  \"  B_TEXT do so; otherwise use kind \\\"visual\\\" with a=\\\"\\\" b=\\\"\\\" and describe it in \\\"where\\\".\\n\" +\n  \"- kind: \\\"number\\\" (digits/units/decimals/signs), \\\"text\\\" (words/letters/case/punctuation),\\n\" +\n  \"  \\\"visual\\\" (font weight, colour, logo, symbol, barcode bars, layout).\\n\" +\n  \"- Ignore line wrapping, image quality, glare, perspective and anything outside the label panel.\\n\" +\n  \"- If nothing printed differs, return an empty array.\\n\\nReturn ONLY JSON matching the schema.\";\n\nconst responseSchema = {\n  type: 'OBJECT',\n  properties: {\n    differences: {\n      type: 'ARRAY',\n      items: {\n        type: 'OBJECT',\n        properties: {\n          a: { type: 'STRING' }, b: { type: 'STRING' },\n          kind: { type: 'STRING', enum: ['text', 'number', 'visual'] },\n          where: { type: 'STRING' },\n        },\n        required: ['a', 'b', 'kind'],\n      },\n    },\n  },\n  required: ['differences'],\n};\n\nconst ok = !!(ra.text && rb.text);\nreturn [{ json: {\n  a_text: ra.text, b_text: rb.text, ok,\n  error: ok ? '' : `transcription failed (A: ${ra.why || (ra.text ? 'ok' : 'empty')} · B: ${rb.why || (rb.text ? 'ok' : 'empty')})`,\n  warning: [ra.why && `A ${ra.why}`, rb.why && `B ${rb.why}`].filter(Boolean).join(' · '),\n  gemini_request: !ok ? null : {\n    contents: [{ role: 'user', parts: [\n      { text: COMPARE },\n      { text: 'IMAGE A (approved artwork):' }, { inlineData: { mimeType: img.mimeA, data: img.a } },\n      { text: 'IMAGE B (version to check):' }, { inlineData: { mimeType: img.mimeB, data: img.b } },\n      { text: 'A_TEXT:\\n' + ra.text }, { text: 'B_TEXT:\\n' + rb.text },\n    ] }],\n    generationConfig: {\n      temperature: 0, topP: 1, maxOutputTokens: 8192,\n      responseMimeType: 'application/json', responseSchema,\n      thinkingConfig: { thinkingBudget: 1024 },\n    },\n  },\n} }];\n"
+        "jsCode": "// ===== Code in JavaScript : parse Gemini response → app contract =====\n// แอปคาดหวัง: {\"a_text\": \"...\", \"b_text\": \"...\", \"differences\": [...], \"engine\": \"...\"}\n// ⚠️ ห้ามคืนคำตอบว่าง — แอปถือว่า \"ว่าง = ล้มเหลว\" แล้วยิงซ้ำ\nconst r = $input.first().json;\nif (r.error) {\n  throw new Error(`Gemini API error: ${JSON.stringify(r.error)}`);\n}\nconst cand = (r.candidates ?? [])[0] ?? {};\nconst finishReason = cand.finishReason ?? '';\nconst raw = ((cand.content ?? {}).parts ?? []).map((p) => p.text ?? '').join('\\n').trim();\nlet s = raw.replace(/^```(?:json)?\\s*/i, '').replace(/\\s*```$/, '').trim();\nlet parsed = null;\ntry { parsed = JSON.parse(s); } catch (e) {\n  const i = s.indexOf('{'); const j = s.lastIndexOf('}');\n  if (i >= 0 && j > i) { try { parsed = JSON.parse(s.slice(i, j + 1)); } catch (e2) { /* noop */ } }\n}\nconst out = { a_text: '', b_text: '', differences: [], engine: 'gemini-2.5-flash' };\n// รายการบรรทัด → ข้อความหลายบรรทัด (สัญญากับแอปเดิม: a_text / b_text)\n// รับ a_text แบบสตริงด้วย เผื่อโมเดลตอบตาม schema เก่า\nfunction joinLines(lines, text) {\n  if (Array.isArray(lines)) {\n    return lines.filter((s) => typeof s === 'string').map((s) => s.trim()).filter(Boolean).join('\\n');\n  }\n  return typeof text === 'string' ? text : '';\n}\nif (parsed && typeof parsed === 'object') {\n  out.a_text = joinLines(parsed.a_lines, parsed.a_text);\n  out.b_text = joinLines(parsed.b_lines, parsed.b_text);\n  out.differences = Array.isArray(parsed.differences) ? parsed.differences : [];\n}\nif (!out.a_text || !out.b_text) {\n  out.error = `incomplete answer (finishReason=${finishReason || 'unknown'})`;\n}\nif (finishReason && finishReason !== 'STOP') {\n  out.warning = `finishReason=${finishReason}`;\n}\nout.usage = r.usageMetadata ?? null;\nreturn [{ json: out }];\n"
       },
-      "id": "b2c3d4e5-0010-4000-8000-000000000010",
-      "name": "Collect",
+      "id": "b2c3d4e5-0005-4000-8000-000000000005",
+      "name": "Code in JavaScript",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1120,
-        128
-      ]
-    },
-    {
-      "parameters": {
-        "conditions": {
-          "options": {
-            "caseSensitive": true,
-            "leftValue": "",
-            "typeValidation": "strict",
-            "version": 2
-          },
-          "conditions": [
-            {
-              "id": "cond-ok",
-              "leftValue": "={{ $json.ok }}",
-              "rightValue": "",
-              "operator": {
-                "type": "boolean",
-                "operation": "true",
-                "singleValue": true
-              }
-            }
-          ],
-          "combinator": "and"
-        },
-        "options": {}
-      },
-      "id": "b2c3d4e5-0012-4000-8000-000000000012",
-      "name": "If ok",
-      "type": "n8n-nodes-base.if",
-      "typeVersion": 2.2,
-      "position": [
-        1344,
-        128
-      ]
-    },
-    {
-      "parameters": {
-        "method": "POST",
-        "url": "https://asia-southeast1-aiplatform.googleapis.com/v1/projects/YOUR_GCP_PROJECT_ID/locations/asia-southeast1/publishers/google/models/gemini-2.5-flash:generateContent",
-        "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "googleApi",
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify($json.gemini_request) }}",
-        "options": {
-          "timeout": 120000
-        }
-      },
-      "id": "b2c3d4e5-0011-4000-8000-000000000011",
-      "name": "HTTP Compare",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [
-        1568,
-        48
-      ],
-      "retryOnFail": true,
-      "maxTries": 2,
-      "waitBetweenTries": 3000,
-      "onError": "continueRegularOutput",
-      "notes": "ตั้ง URL + credential ให้เหมือน workflow OCR ที่ใช้งานได้ (แทน YOUR_GCP_PROJECT_ID) — ต้องตั้งทั้ง HTTP Transcribe และ HTTP Compare · เทียบ (เห็นสองภาพ + ข้อความที่ถอดแยกแล้ว)"
-    },
-    {
-      "parameters": {
-        "jsCode": "// ===== Parse : ผลเทียบ → สัญญาของแอป =====\n// a_text / b_text มาจาก **การถอดแยกคำขอ** (Collect) เสมอ — ขั้นเทียบแก้ไม่ได้\n// ขั้นเทียบล้ม = ส่งข้อความทั้งสองฝั่งกลับพร้อม differences ว่าง + warning\n// (แอปจะใช้ชั้นเทียบข้อความบนข้อความที่ถอดแยก แล้วลดรายการที่ Gemini ไม่ยืนยัน\n//  เป็น REVIEW — ไม่มีทางกลายเป็น PASS เงียบ ๆ)\nconst c = $('Collect').first().json;\nconst r = $input.first().json || {};\nconst out = { a_text: c.a_text, b_text: c.b_text, differences: [],\n              engine: 'gemini-2.5-flash', warning: c.warning || '' };\nif (!c.ok) {\n  out.error = c.error;\n  return [{ json: out }];\n}\nconst warn = [];\nif (c.warning) warn.push(c.warning);\nif (r.error) {\n  warn.push(`compare step failed: ${JSON.stringify(r.error).slice(0, 200)}`);\n} else {\n  const cand = (r.candidates ?? [])[0] ?? {};\n  const raw = ((cand.content ?? {}).parts ?? []).filter((p) => !p.thought)\n    .map((p) => p.text ?? '').join('\\n').trim();\n  let s = raw.replace(/^```(?:json)?\\s*/i, '').replace(/\\s*```$/, '').trim();\n  let parsed = null;\n  try { parsed = JSON.parse(s); } catch (e) {\n    const i = s.indexOf('{'); const j = s.lastIndexOf('}');\n    if (i >= 0 && j > i) { try { parsed = JSON.parse(s.slice(i, j + 1)); } catch (e2) { /* noop */ } }\n  }\n  if (parsed && Array.isArray(parsed.differences)) out.differences = parsed.differences;\n  else warn.push('compare step returned no parsable differences');\n  const fr = cand.finishReason ?? '';\n  if (fr && fr !== 'STOP') warn.push(`compare finishReason=${fr}`);\n}\nout.warning = warn.join(' · ');\nreturn [{ json: out }];\n"
-      },
-      "id": "b2c3d4e5-0013-4000-8000-000000000013",
-      "name": "Parse",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        1792,
+        912,
         128
       ]
     },
@@ -205,7 +117,7 @@
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
       "position": [
-        2016,
+        1136,
         128
       ]
     },
@@ -222,7 +134,7 @@
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
       "position": [
-        672,
+        688,
         480
       ]
     }
@@ -232,14 +144,14 @@
       "main": [
         [
           {
-            "node": "Build",
+            "node": "Code in JavaScript2",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Build": {
+    "Code in JavaScript2": {
       "main": [
         [
           {
@@ -254,7 +166,7 @@
       "main": [
         [
           {
-            "node": "Split",
+            "node": "HTTP Request",
             "type": "main",
             "index": 0
           }
@@ -268,69 +180,18 @@
         ]
       ]
     },
-    "Split": {
+    "HTTP Request": {
       "main": [
         [
           {
-            "node": "HTTP Transcribe",
+            "node": "Code in JavaScript",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "HTTP Transcribe": {
-      "main": [
-        [
-          {
-            "node": "Collect",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Collect": {
-      "main": [
-        [
-          {
-            "node": "If ok",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "If ok": {
-      "main": [
-        [
-          {
-            "node": "HTTP Compare",
-            "type": "main",
-            "index": 0
-          }
-        ],
-        [
-          {
-            "node": "Parse",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "HTTP Compare": {
-      "main": [
-        [
-          {
-            "node": "Parse",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Parse": {
+    "Code in JavaScript": {
       "main": [
         [
           {
