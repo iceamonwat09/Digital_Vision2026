@@ -330,7 +330,7 @@ def apply_texts(ocr_results: List[dict], results: List[dict]) -> List[dict]:
         n["conf"] = None
         n.pop("error", None)
         n["note"] = " · ".join(x for x in (
-            "อ่านคู่กับ %s ในคำขอเดียว (โหมดเทียบคู่) · ข้อความจากการอ่าน"
+            "ข้อความจาก workflow เทียบคู่ (คู่กับ %s) · ข้อความจากการอ่าน"
             "เดี่ยวเดิม %d ตัวอักษร" % (other, len(e.get("text") or "")),
             e.get("note")) if x)
         out.append(n)

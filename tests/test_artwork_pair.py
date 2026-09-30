@@ -533,20 +533,130 @@ def test_route_and_setup_carry_the_flag():
     assert "pair_check" in report._SETUP_KEYS
 
 
+WF = os.path.join(ROOT, "artwork_check", "n8n_artwork_pair.workflow.json")
+
+
 def test_workflow_contract():
-    w = json.load(open(os.path.join(ROOT, "artwork_check",
-                                    "n8n_artwork_pair.workflow.json"),
-                       encoding="utf-8"))
+    w = json.load(open(WF, encoding="utf-8"))
     nodes = {n["name"]: n for n in w["nodes"]}
     assert nodes["Webhook"]["parameters"]["path"] == "artwork-pair"
     assert config.PAIR_WEBHOOK_URL.endswith("/webhook/artwork-pair")
-    build = nodes["Code in JavaScript2"]["parameters"]["jsCode"]
+    build = nodes["Build"]["parameters"]["jsCode"]
     for key in ("image_a_b64", "image_b_b64", "temperature: 0",
-                "propertyOrdering: ['a_text', 'b_text', 'differences']",
-                "NEVER copy text from A into B"):
+                "DO NOT correct spelling, grammar, capitalization"):
         assert key in build, key
+    assert "temperature: 0" in nodes["Collect"]["parameters"]["jsCode"]
     body = nodes["Respond to Webhook"]["parameters"]["responseBody"]
     for key in ("a_text", "b_text", "differences"):
         assert key in body
     ids = [n["id"] for n in w["nodes"]]
     assert len(ids) == len(set(ids))
+    # ทุก node ที่ถูกอ้างใน connections ต้องมีจริง + โค้ดอ้างชื่อ node ที่มีจริง
+    for src, conn in w["connections"].items():
+        assert src in nodes
+        for br in conn["main"]:
+            for c in br:
+                assert c["node"] in nodes, c["node"]
+    for n in nodes.values():
+        for ref in re.findall(r"\$\('([^']+)'\)",
+                              n["parameters"].get("jsCode", "")):
+            assert ref in nodes, ref
+
+
+# รัน Code node ของ workflow **ตัวจริง** แบบ n8n จำลองด้วย node
+HARNESS = r"""
+// รัน Code node ของ workflow จริงแบบ n8n จำลอง · stdin = {body, transcribe:{a,b}, compare}
+const fs = require('fs');
+const w = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+const cfg = JSON.parse(fs.readFileSync(0, 'utf8'));
+const node = (n) => w.nodes.find((x) => x.name === n).parameters.jsCode;
+const outs = {};
+function run(name, items) {
+  const $input = { first: () => items[0], all: () => items };
+  const $ = (n) => ({ first: () => outs[n][0] });
+  const r = new Function('$input', '$', node(name))($input, $);
+  outs[name] = r; return r;
+}
+const log = {};
+const built = run('Build', [{ json: { body: cfg.body } }]);
+log.valid = built[0].json.valid;
+if (!built[0].json.valid) { console.log(JSON.stringify({ log, error: built[0].json.error })); process.exit(0); }
+const split = run('Split', built);
+log.transcribe_images = split.map((i) => i.json.gemini_request.contents[0].parts.filter((p) => p.inlineData).map((p) => p.inlineData.data.slice(0, 8)));
+const resp = (t) => (t && t.error) ? { error: t.error } : { candidates: [{ content: { parts: [{ text: t }] }, finishReason: 'STOP' }] };
+const http1 = split.map((i) => ({ json: resp(cfg.transcribe[i.json.side]) }));
+const col = run('Collect', http1);
+log.ok = col[0].json.ok;
+let parseIn = col;
+if (col[0].json.ok) {
+  const parts = col[0].json.gemini_request.contents[0].parts;
+  log.compare_images = parts.filter((p) => p.inlineData).length;
+  log.compare_has_texts = parts.some((p) => p.text && p.text.startsWith('A_TEXT:')) && parts.some((p) => p.text && p.text.startsWith('B_TEXT:'));
+  parseIn = [{ json: cfg.compare && cfg.compare.error ? { error: cfg.compare.error } : resp(JSON.stringify({ differences: cfg.compare || [] })) }];
+}
+const out = run('Parse', parseIn)[0].json;
+console.log(JSON.stringify({ log, out }));
+"""
+
+
+def _wf(cfg):
+    import shutil
+    import subprocess
+    if not shutil.which("node"):
+        pytest.skip("ไม่มี node")
+    r = subprocess.run(["node", "-e", HARNESS, "x", WF],
+                       input=json.dumps(cfg), capture_output=True, text=True,
+                       timeout=30)
+    assert r.returncode == 0, r.stderr
+    return json.loads(r.stdout)
+
+
+def _b64(ext, v):
+    import base64
+    ok, buf = cv2.imencode(ext, np.full((20, 20, 3), v, np.uint8))
+    return base64.b64encode(buf.tobytes()).decode()
+
+
+BODY = {"image_a_b64": _b64(".jpg", 255), "image_b_b64": _b64(".png", 0)}
+
+
+def test_workflow_transcribes_each_image_in_its_own_request():
+    """หัวใจของ v2: คำขอถอดความเห็นภาพเดียว ⇒ ลอกอีกฝั่งไม่ได้โดยโครงสร้าง
+    (v1 ส่งสองภาพพร้อมกัน แล้ว Gemini เขียนข้อความชุดเดียวให้ทั้งสองฝั่ง)."""
+    got = _wf({"body": BODY,
+               "transcribe": {"a": "D-Calcium", "b": "D-calcium"},
+               "compare": [{"a": "D-Calcium", "b": "D-calcium",
+                            "kind": "text"}]})
+    ta, tb = got["log"]["transcribe_images"]
+    assert len(ta) == 1 and len(tb) == 1
+    assert ta[0] == BODY["image_a_b64"][:8] and tb[0] == BODY["image_b_b64"][:8]
+    assert got["log"]["compare_images"] == 2 and got["log"]["compare_has_texts"]
+    out = got["out"]
+    assert (out["a_text"], out["b_text"]) == ("D-Calcium", "D-calcium")
+    assert out["differences"][0]["b"] == "D-calcium"
+    assert not out.get("error")
+
+
+def test_workflow_compare_step_cannot_rewrite_the_transcripts():
+    got = _wf({"body": BODY, "transcribe": {"a": "Breeds", "b": "Breed"},
+               "compare": []})
+    assert (got["out"]["a_text"], got["out"]["b_text"]) == ("Breeds", "Breed")
+
+
+def test_workflow_failed_transcription_is_an_error_not_empty_text():
+    got = _wf({"body": BODY,
+               "transcribe": {"a": "x", "b": {"error": {"code": 403}}}})
+    assert got["out"]["error"] and "B" in got["out"]["error"]
+
+
+def test_workflow_failed_compare_keeps_both_texts_with_a_warning():
+    got = _wf({"body": BODY, "transcribe": {"a": "x", "b": "y"},
+               "compare": {"error": {"code": 500}}})
+    out = got["out"]
+    assert (out["a_text"], out["b_text"], out["differences"]) == ("x", "y", [])
+    assert "compare step failed" in out["warning"] and not out.get("error")
+
+
+def test_workflow_rejects_a_missing_image():
+    got = _wf({"body": {"image_a_b64": BODY["image_a_b64"]}})
+    assert got["log"]["valid"] is False
