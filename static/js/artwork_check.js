@@ -113,6 +113,21 @@
     return !!(($("awPixelCheck") || {}).checked);
   }
 
+  // โหมดทดลอง "เทียบคู่ด้วย Gemini" — ใช้กับปุ่มส่งตรวจสอบเท่านั้น ·
+  // ช่องที่ซ่อนด้วยธง (data-off) นับเป็นไม่ติ๊กเสมอ (กู้คืนงานเก่าติ๊กไม่ได้)
+  function pairCheckOn() {
+    return expChecked("awPairCheck");
+  }
+
+  // ค่าเริ่มต้นของช่องมาจาก server (ARTWORK_PAIR_DEFAULT_ON → attribute
+  // ``checked`` = ``defaultChecked``) ⇒ งานที่ไม่ได้บอกค่ามา (autosave ก่อนมี
+  // โหมดนี้ / ต้นแบบตอนเปิดค่าเริ่มต้น) ได้ค่าเริ่มต้น ไม่ใช่ "ปิด" เงียบ ๆ
+  function restorePairCheck(v) {
+    const el = $("awPairCheck");
+    if (!el) return;
+    el.checked = (v === undefined ? el.defaultChecked : !!v) && !el.dataset.off;
+  }
+
   function coverageHtml(cov, fontTrust) {
     if (!cov) return "";              // รายงานเก่าที่ยังไม่มีข้อมูลนี้
     const rows = [
@@ -327,6 +342,61 @@
     return h + "</div></div>";
   }
   window.awPixelHtml = pixelHtml;
+
+  // ── โหมดทดลอง "เทียบคู่ด้วย Gemini" — บอกผลต่อกลุ่ม + ตัวเลข A/B ────
+  // ⚠️ ต้องบอกเสมอว่ากลุ่มไหน "ถอยไปใช้โหมดเดิม" และรายการที่ Gemini
+  //    อ้างแต่ยืนยันไม่ได้ / ความต่างด้านภาพ — ไม่ทิ้งเงียบ (กฎเหล็กข้อ 2)
+  //    ใช้คลาส .aw-confirm* ชุดเดิม ⇒ ไม่ต้องเพิ่ม CSS ทั้งสองหน้า
+  function pairHtml(pi) {
+    if (!pi) return "";
+    if (pi.error)
+      return '<div class="aw-confirm warn">🤝 เทียบคู่ด้วย Gemini: ' +
+        esc(pi.error) + " — ผลทั้งหมดมาจากโหมดเดิม</div>";
+    const pairs = pi.pairs || [];
+    const fell = pairs.filter((p) => p.status !== "ok");
+    let h = '<div class="aw-confirm' + (fell.length ? " warn" : "") + '">' +
+      "🤝 เทียบคู่ด้วย Gemini (ทดลอง) · ใช้ผลเทียบคู่ " + esc(pi.used) +
+      "/" + esc(pairs.length) + " กลุ่ม · <b>โหมดเดิมจะฟ้อง " +
+      esc(pi.baseline_count) + " รายการ · โหมดคู่ " + esc(pi.final_count) +
+      " รายการ</b>";
+    h += '<div class="aw-confirm-list">';
+    const q = (d) => "“" + esc(d.a || "—") + "” ↔ “" + esc(d.b || "—") + "”" +
+      (d.where ? " (" + esc(d.where) + ")" : "");
+    pairs.forEach((p) => {
+      h += '<div class="aw-confirm-item"><code>' + esc(p.group) + "</code> ";
+      if (p.status !== "ok") {
+        h += "เทียบคู่ไม่ได้ (" + esc(p.error || "ล้มเหลว") +
+          ") — ใช้ผลโหมดเดิมของกลุ่มนี้</div>";
+        return;
+      }
+      h += "Gemini ระบุ " + esc(p.n_diff) + " จุด · ตรงกับชั้นข้อความ " +
+        esc(p.agreed) + " · ลดเป็น REVIEW " + esc(p.downgraded) +
+        " · เพิ่มจาก Gemini " + esc(p.added) + " · กลุ่มนี้ โหมดเดิม " +
+        esc(p.base_count) + " → โหมดคู่ " + esc(p.pair_count) + " รายการ";
+      if (p.case_kept)
+        h += '<div class="aw-confirm-num">🔠 คงความต่างของตัวพิมพ์ที่การอ่าน' +
+          "แยกทีละโซนเห็นแต่โหมดคู่ไม่เห็น " + esc(p.case_kept) +
+          " รายการ (Gemini มักถอดภาพ 🅱 ตามภาพ 🅰)</div>";
+      (p.unverified || []).forEach((d) => {
+        h += '<div class="aw-confirm-num">❔ Gemini อ้างว่าต่างแต่หาข้อความที่' +
+          "ยกมาไม่เจอในที่ถอดมา (ไม่นับ ไม่วาดกรอบ): " + q(d) + "</div>";
+      });
+      (p.visual || []).forEach((d) => {
+        h += '<div class="aw-confirm-num">🖼 ความต่างด้านภาพ (ชี้ตำแหน่ง' +
+          "ไม่ได้ — โปรดดูด้วยตา): " + esc(d.where || "—") + "</div>";
+      });
+      if (p.warning)
+        h += '<div class="aw-confirm-num">⚠ ' + esc(p.warning) + "</div>";
+      const num = [];
+      if (p.engine) num.push(esc(p.engine));
+      if (p.ms != null) num.push((p.ms / 1000).toFixed(1) + " วินาที");
+      if (num.length)
+        h += '<div class="aw-confirm-num">' + num.join(" · ") + "</div>";
+      h += "</div>";
+    });
+    return h + "</div></div>";
+  }
+  window.awPairHtml = pairHtml;
 
   window.awConfirmHtml = confirmHtml;
 
@@ -572,6 +642,7 @@
     // โหมดอ่านซ้ำ (ถ้าเปิด) — บอกว่ากรองอะไรออกไป ไม่ให้หายเงียบ
     html += confirmHtml(rep.confirm);
     html += pixelHtml(rep.pixel);
+    html += pairHtml(rep.pair);
     // เส้นความคืบหน้าต้อง **ไม่หายไปหลังตรวจเสร็จ** — ผู้ตรวจใช้ยืนยันว่า
     // แต่ละขั้นทำงานจริงหรือตกเงื่อนไข. อ่านจาก rep.flow ที่ฝังใน report.json
     // ⇒ หน้าประวัติและหลังรีสตาร์ตก็ยังเห็น (registry ในหน่วยความจำหายไปแล้ว)
@@ -1433,6 +1504,7 @@
         splitBands: splitBandsOn(),
         confirmReads: confirmReadsOn(),
         pixelCheck: pixelCheckOn(),
+        pairCheck: pairCheckOn(),
         brand: ($("awBrand") || {}).value || "",
         savedAt: Date.now(),
       }));
@@ -1491,6 +1563,7 @@
     if ($("awSplitBands")) $("awSplitBands").checked = !!s.splitBands && !$("awSplitBands").dataset.off;
     if ($("awConfirmReads")) $("awConfirmReads").checked = !!s.confirmReads && !$("awConfirmReads").dataset.off;
     if ($("awPixelCheck")) $("awPixelCheck").checked = !!s.pixelCheck;
+    restorePairCheck(s.pairCheck);
     if ($("awBrand") && s.brand) $("awBrand").value = s.brand;
     showTabs(true);
     switchTab("result");
@@ -1543,6 +1616,10 @@
       refAttached: false, autoRotate: !!st.auto_rotate,
       forceOcr: !!st.force_ocr, splitBands: !!st.split_bands,
       confirmReads: !!st.confirm_reads, pixelCheck: !!st.pixel_check,
+      // ค่าเริ่มต้นเปิด ⇒ ไม่รับค่า "ปิด" จากงานต้นแบบที่ตรวจไว้ก่อนเปิดค่าเริ่มต้น
+      // (ทุกงานเก่าบันทึก false ไว้) — เป็นค่าของโหมด ไม่ใช่ของชิ้นงาน
+      pairCheck: ($("awPairCheck") || {}).defaultChecked ? undefined
+                                                         : !!st.pair_check,
       brand: st.brand || "",
     });
     // มุมจอของ 🅰 ตามงานต้นแบบ · 🅱 ยังไม่มีไฟล์ (ไม่คัดลอกฝั่ง 🅱 โดยตั้งใจ)
@@ -1782,7 +1859,7 @@
   // เดิมค่าถูกบันทึกก็ต่อเมื่อมีการแก้โซน (saveSession ถูกเรียกจาก
   // renderZones) ⇒ ติ๊กแล้วรีเฟรชทันทีจะได้ค่าเก่ากลับมาแบบเงียบ
   ["awForceOcr", "awSplitBands", "awConfirmReads",
-   "awPixelCheck"].forEach((id) => {
+   "awPixelCheck", "awPairCheck"].forEach((id) => {
     const el = $(id);
     if (el) el.addEventListener("change", saveSessionSoon);
   });
@@ -2988,7 +3065,8 @@
                                auto_rotate: autoRotate, force_ocr: forceOcrOn(),
                                split_bands: splitBandsOn(),
                                confirm_reads: confirmReadsOn(),
-                               pixel_check: pixelCheckOn() },
+                               pixel_check: pixelCheckOn(),
+                               pair_check: pairCheckOn() },
                                // มุมที่ "↻ หมุนจอ" ค้างอยู่ตอนลากโซน —
                                // รายงานจะแสดงภาพทั้งหน้าในแนวเดียวกัน
                                // (🅱 มีมุมของตัวเอง — ธงปิดไม่ส่ง = เดิมเป๊ะ)

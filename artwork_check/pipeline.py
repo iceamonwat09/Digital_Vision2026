@@ -36,7 +36,7 @@ from . import confirm as confirm_mod
 from . import appearance
 from . import panelmatch as panelmatch_mod
 from . import progress as progress_mod
-from . import (checks, config, fonttrust, ocr, pixdiff, report, vocab,
+from . import (checks, config, fonttrust, ocr, pairdiff, pixdiff, report, vocab,
                zones as zones_mod)
 from .pdf_ingest import (ArtworkDocument, apply_rotation, encode_jpg,
                          resolve_rotation)
@@ -592,6 +592,7 @@ def run_inspection(rec_id: str, zone_list: List[dict],
                    split_bands: bool = False,
                    confirm_reads: bool = False,
                    pixel_check: bool = False,
+                   pair_check: bool = False,
                    page_rot: int = 0,
                    page_rot_b: Optional[int] = None,
                    progress=None) -> dict:
@@ -622,6 +623,30 @@ def run_inspection(rec_id: str, zone_list: List[dict],
     deadline = (t0 + config.INSPECT_TIMEOUT_S
                 if config.INSPECT_TIMEOUT_S else None)
     timed_out = False
+    # 🤝 โหมดทดลอง "เทียบคู่ด้วย Gemini" — ยิงคู่ในเบื้องหลัง **ก่อน** การอ่าน
+    # ทีละโซน แล้วเก็บผลทีหลัง ⇒ เวลารวม ≈ ตัวที่นานกว่า ไม่ใช่ผลบวก.
+    # การอ่านทีละโซนแบบเดิมยังทำงานครบเสมอ = ทางถอยทันทีเมื่อคู่ไหนล้มเหลว
+    # และได้ตัวเลข A/B ในรอบเดียว · ไม่ติ๊ก ⇒ บล็อกนี้ไม่ทำอะไรเลย
+    pair_list: List[dict] = []
+    pair_job = None
+    pair_why = ""
+    if pair_check:
+        pair_list = pairdiff.eligible_pairs(zone_list)
+        if not pair_list:
+            pair_why = ("ไม่มีกลุ่มที่เข้าเงื่อนไข (ต้องมี 2 โซนพอดี: "
+                        "ไฟล์หลัก 1 + ไฟล์อ้างอิง 1)")
+        elif not config.PAIR_WEBHOOK_URL:
+            pair_why = "ไม่ได้ตั้ง ARTWORK_PAIR_WEBHOOK_URL"
+        else:
+            try:
+                pair_job = pairdiff.PairJob(src, _find_source(d, "source_b"),
+                                            pair_list, page_auto=auto_rotate)
+            except Exception as e:
+                logger.exception("[artwork] เริ่มเทียบคู่ไม่สำเร็จ")
+                pair_why = "เริ่มเทียบคู่ไม่สำเร็จ: %s" % e
+            if pair_job is not None and config.PAIR_PREWARM_HL:
+                _start_prewarm(rec_id, [z for p in pair_list
+                                        for z in (p["a"], p["b"])])
     pg.start("ocr", "กำลังอ่าน %d โซน (พร้อมกันสูงสุด %d สาย)"
              % (n_zone, max(1, int(config.OCR_PARALLEL or 1))))
     ocr_results, trust = _read_all_docs(d, zones_a, zones_b,
@@ -719,6 +744,36 @@ def run_inspection(rec_id: str, zone_list: List[dict],
             pg.done("confirm", progress_mod.FAIL,
                     "อ่านรอบที่สองไม่สำเร็จ — ใช้ผลรอบเดียว")
 
+    pair_info = None
+    if not pair_check:
+        pg.skip("pair", "ไม่ได้ติ๊กช่อง “เทียบคู่ด้วย Gemini”")
+    elif pair_job is None:
+        pair_info = {"pairs": [], "used": 0, "error": pair_why}
+        pg.skip("pair", pair_why)
+    else:
+        pg.start("pair", "รอผลเทียบคู่จาก Gemini %d คู่" % len(pair_list))
+        try:
+            results = pair_job.results(deadline=deadline)
+            pair_ocr = pairdiff.apply_texts(ocr_results, results)
+            defects, pair_info = pairdiff.merge(defects, _checks(pair_ocr),
+                                                results)
+            if config.PAIR_CASE_GUARD and pair_info["used"]:
+                defects, pair_info = pairdiff.case_guard(
+                    defects, _checks(pairdiff.independent_texts(pair_ocr)),
+                    results, pair_info)
+            if pair_info["used"]:
+                # ข้อความที่ใช้ตัดสินกลุ่มเหล่านั้นตอนนี้มาจากการถอดคู่ ⇒
+                # รายงาน/แถบ coverage/กรอบแดงต้องเห็นข้อความชุดเดียวกัน
+                ocr_results = pair_ocr
+            _report_pair_progress(pg, pair_info)
+        except Exception:
+            # เทียบคู่พัง = ใช้ผลโหมดเดิมทั้งหมด (defects ยังไม่ถูกแตะ)
+            logger.exception("[artwork] เทียบคู่ไม่สำเร็จ — ใช้ผลโหมดเดิม")
+            pair_info = {"pairs": [], "used": 0,
+                         "error": "เทียบคู่ไม่สำเร็จ — ผลนี้มาจากโหมดเดิม"}
+            pg.done("pair", progress_mod.FAIL,
+                    "เทียบคู่ไม่สำเร็จ — ใช้ผลโหมดเดิม")
+
     pixel_info = None
     over = bool(deadline) and time.time() > deadline
     if over:
@@ -801,6 +856,9 @@ def run_inspection(rec_id: str, zone_list: List[dict],
         # โหมดเทียบพิกเซล — บอกว่ากลุ่มไหนใช้ผลจากภาพแทนชั้นข้อความ
         "pixel_check": bool(pixel_check),
         "pixel": pixel_info,
+        # โหมดเทียบคู่ด้วย Gemini — กลุ่มไหนใช้ข้อความที่ถอดคู่ + ตัวเลข A/B
+        "pair_check": bool(pair_check),
+        "pair": pair_info,
         # ฟอนต์ที่ text layer เชื่อไม่ได้ — ผู้ตรวจเอาไปบอกคนทำ artwork ได้ว่า
         # ต้อง export ไฟล์ใหม่ (ต้นเหตุจริงอยู่ที่ขั้นตอนนั้น ไม่ใช่ที่ระบบนี้)
         "font_trust": {k: fonttrust.summary(v) for k, v in trust.items()},
@@ -861,6 +919,56 @@ def _report_ocr_progress(pg, ocr_results, trust) -> None:
             pg.note("fonttrust", n)
     else:
         pg.done("fonttrust", progress_mod.OK, "ไม่พบฟอนต์ที่น่าสงสัย")
+
+
+def _report_pair_progress(pg, info) -> None:
+    """บอกว่าคู่ไหนใช้ผลเทียบคู่ได้จริง คู่ไหนถอยไปใช้โหมดเดิม — และเพราะอะไร."""
+    pairs = (info or {}).get("pairs") or []
+    bad = 0
+    for p in pairs:
+        if p.get("status") != "ok":
+            bad += 1
+            pg.note("pair", "กลุ่ม %s · %s → ใช้ผลโหมดเดิม"
+                    % (p.get("group"), p.get("error") or "ล้มเหลว"))
+            continue
+        pg.note("pair", "กลุ่ม %s · Gemini ระบุ %d จุด · ตรงกับชั้นข้อความ %d · "
+                "ลดเป็น REVIEW %d · เพิ่ม %d · ยืนยันไม่ได้ %d%s · %.1fs"
+                % (p.get("group"), p.get("n_diff", 0), p.get("agreed", 0),
+                   p.get("downgraded", 0), p.get("added", 0),
+                   len(p.get("unverified") or []),
+                   (" · 🔠 คงตัวพิมพ์จากการอ่านแยก %d" % p["case_kept"])
+                   if p.get("case_kept") else "",
+                   (p.get("ms") or 0) / 1000.0))
+    pg.done("pair", progress_mod.WARN if bad else progress_mod.OK,
+            "ใช้ผลเทียบคู่ %d/%d กลุ่ม · โหมดเดิมจะฟ้อง %d · โหมดคู่ %d รายการ"
+            % (info.get("used", 0), len(pairs), info.get("baseline_count", 0),
+               info.get("final_count", 0)))
+
+
+def _start_prewarm(rec_id: str, zones: List[dict]) -> None:
+    """อุ่นแคช Tesseract ของชั้นกรอบแดงในเบื้องหลังระหว่างรอ Gemini.
+
+    ภาพต้องตรงกับที่ ``zone_crop_jpg`` เรนเดอร์ทุกพิกเซล (กุญแจแคชคือ hash
+    ของพิกเซล) ⇒ ใช้ ``_render_zone_cached`` ตัวเดียวกัน + มุมที่การ์ดใช้
+    (มุมที่ปักหมุด · ไม่ปักหมุด = 0°). แสดงผลล้วน · ไม่รอ · ไม่โยน exception
+    """
+    def _render(z):
+        crop = _render_zone_cached(rec_id, z["bbox"], config.OCR_DPI,
+                                   "b" if z.get("doc") == "b" else "a")
+        rot = z.get("rotate")
+        if rot in (90, 180, 270) and crop.size:
+            crop = apply_rotation(crop, rot)
+        return crop
+
+    def _go():
+        try:
+            n = pairdiff.prewarm_highlight(zones, _render,
+                                           config.HIGHLIGHT_TESSERACT_LANG)
+            logger.info("[artwork] prewarm Tesseract %d/%d โซน", n, len(zones))
+        except Exception:
+            logger.debug("[artwork] prewarm failed", exc_info=True)
+
+    threading.Thread(target=_go, name="aw-prewarm", daemon=True).start()
 
 
 def _report_pixel_progress(pg, info) -> None:

@@ -348,3 +348,82 @@ $res | ConvertTo-Json -Depth 10
   หรือเปิดรายการเดิมไม่เสียค่า Gemini ใหม่ถ้าข้อความไม่เปลี่ยน
 - ถ้าไม่ตั้งค่า `N8N_TRANSLATE_WEBHOOK_URL` หรือบริการแปลล่ม → ตารางยัง
   แสดงข้อความต้นฉบับ + ไฮไลต์คำสะกด + คำแนะนำได้ตามปกติ แค่คอลัมน์ EN ว่าง
+
+---
+
+# 3) Workflow เทียบคู่ — "Artwork Pair Compare (Gemini)" 🤝 (ทดลอง · 30 ก.ย. 2026)
+
+ไฟล์: **`artwork_check/n8n_artwork_pair.workflow.json`** · webhook path **`artwork-pair`**
+ใช้กับช่องติ๊ก **"🤝 เทียบคู่ด้วย Gemini (ทดลอง)"** บนหน้าตรวจ Artwork เท่านั้น
+(ไม่ติ๊ก = แอปไม่ยิง workflow นี้เลย)
+
+## ทำอะไร — 1 คำขอต่อ 1 คู่โซน
+
+รับภาพโซน 🅰 (ไฟล์หลัก) + 🅱 (ไฟล์อ้างอิง/ภาพถ่าย) ของกลุ่มเดียวกัน แล้วส่งให้ Gemini
+**ในคำขอเดียว** ให้ถอดความทั้งสองภาพเป็น **รายการบรรทัด** (`a_lines`/`b_lines`) แล้วเทียบ
+ทีละบรรทัด · node Parse ต่อบรรทัดด้วยขึ้นบรรทัดก่อนตอบแอป:
+
+```json
+{"a_text": "...", "b_text": "...",
+ "differences": [{"a": "1g", "b": "7g", "kind": "number", "where": "Dietary Fiber row"}],
+ "engine": "gemini-2.5-flash"}
+```
+
+แอปเอา `a_text`/`b_text` ไปเข้าชั้นเทียบข้อความเดิม (deterministic) แล้วเทียบกับ
+`differences` — รายการของชั้นข้อความที่ Gemini ไม่ยืนยัน ⇒ **REVIEW ไม่ลบทิ้ง** ·
+รายการของ Gemini ที่ยกข้อความมาแล้ว **หาไม่เจอในที่ถอดมา** จะไม่ถูกนับ
+
+> ⚠️ **ความเสี่ยงหลักของคำขอเดียว: โมเดลถอดภาพ 🅱 ตามภาพ 🅰** (เกิดจริง 30 ก.ย. —
+> `D-calcium` ถูกถอดเป็น `D-Calcium` · โซนใหญ่กลืนความต่างจริง 4/4) ⇒ ใช้ **โซนเล็ก** เท่านั้น
+> และแอปมีชั้นกันพลาดตัวพิมพ์ (`ARTWORK_PAIR_CASE_GUARD`) คอยเก็บให้
+
+## อัปเดต prompt บน workflow ที่ใช้อยู่ (ไม่ต้อง import ใหม่)
+
+เปิด workflow เทียบคู่ใน N8N แล้ว **วางโค้ดทับ 2 node เดิม** (URL/credential ของ
+`HTTP Request` ไม่ถูกแตะ):
+
+| node | วางโค้ดจาก |
+|---|---|
+| `Code in JavaScript2` (ตรวจภาพ + ประกอบคำขอ) | `jsCode` ของ node ชื่อเดียวกันใน `n8n_artwork_pair.workflow.json` |
+| `Code in JavaScript` (แกะคำตอบ) | `jsCode` ของ node ชื่อเดียวกันในไฟล์เดียวกัน |
+
+→ **Save** (workflow ยัง Active อยู่) · แอปไม่ต้องรีสตาร์ต
+
+## ติดตั้งครั้งแรก
+
+1. N8N → **Import from File** → `n8n_artwork_pair.workflow.json`
+2. ตั้ง **URL + credential ของ `HTTP Request` ให้เหมือน workflow OCR ที่ใช้งานได้**
+   (ค่าตั้งต้นยังเป็น `YOUR_GCP_PROJECT_ID` ⇒ ได้ 403 "Permission denied on resource project")
+3. **Activate** — ใช้ **Production URL** `/webhook/artwork-pair` ไม่ใช่ `/webhook-test/...`
+4. แอปใช้ค่าเริ่มต้น `http://127.0.0.1:5678/webhook/artwork-pair` อยู่แล้ว
+   (ย้ายเครื่องให้ตั้ง env `ARTWORK_PAIR_WEBHOOK_URL`)
+
+## ทดสอบเร็ว (Windows PowerShell)
+
+```powershell
+$a = [Convert]::ToBase64String([IO.File]::ReadAllBytes("C:\temp\zone_a.jpg"))
+$b = [Convert]::ToBase64String([IO.File]::ReadAllBytes("C:\temp\zone_b.jpg"))
+Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:5678/webhook/artwork-pair" `
+  -Body @{ image_a_b64 = $a; image_b_b64 = $b } | ConvertTo-Json -Depth 5
+```
+
+ต้องได้ `a_text` และ `b_text` ที่ **ไม่ว่างและมีหลายบรรทัด** — ถ้าได้คำตอบว่าง แอปจะถือว่า
+ล้มเหลวแล้วใช้ผลโหมดเดิมของกลุ่มนั้น (ดู Executions ใน N8N ว่า node ไหนพัง)
+
+## สิ่งที่ล็อกไว้ใน workflow (มีเทสต์ล็อก)
+
+| ค่า | ทำไม |
+|---|---|
+| `temperature: 0` | ต้องวัดซ้ำได้ — ห้ามแก้ |
+| schema `a_lines`/`b_lines` เป็น **รายการบรรทัด** | สตริงเดียวได้ทั้งแผงเป็นก้อนเดียว ไม่มีขึ้นบรรทัด คำติดกัน (`INSTRUCTIONSAmount`) ⇒ การ์ดขึ้นทั้งแผง และหลายความต่างในแผงเดียวรวมเป็นใบเดียว |
+| prompt *"DO NOT correct … capitalization"* | งาน QC คือหาคำผิด ห้ามแก้ให้ |
+| prompt ยกตัวอย่างที่พลาดจริง (`D-Calcium`/`D-calcium` · `Breeds`/`Breed`) + ห้ามลอกบรรทัดจาก `a_lines` | ความเสี่ยงหลักของคำขอเดียว |
+| อ่าน 🅱 ไม่ออก ⇒ `[?]` ห้ามเติมจาก 🅰 | เดาตาม 🅰 = กลืนความต่าง (ผลที่ผิดแบบมั่นใจ) · `[?]` ⇒ ขึ้นเป็นรายการให้คนดู |
+| `thinkingBudget: 4096` | 1024 ถูกใช้หมดบนงานจริง (`thoughtsTokenCount` 1023) |
+| ตอบฝั่งใดว่าง ⇒ `error` | แอปถอยไปใช้ผลโหมดเดิมของกลุ่มนั้น |
+
+## ⚠️ ก่อนเชื่อผล ต้องวัด "จับของจริงได้ไหม" ด้วย
+
+แก้ภาพถ่าย 🅱 ด้วยโปรแกรมให้ต่างจากต้นฉบับทีละจุด (เช่น `1g`→`7g` · ลบ `®` ·
+ลบคำในส่วนผสม 1 คำ · `1.5`→`15`) แล้วส่งตรวจแบบติ๊กช่องนี้ — ทุกจุดต้องขึ้นเป็น
+รายการ (FAIL หรือ REVIEW) · ถ้าหาย = โมเดลอ่านตามต้นฉบับ ⇒ **ยังใช้ไม่ได้**

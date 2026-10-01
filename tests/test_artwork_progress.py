@@ -29,7 +29,7 @@ def test_the_steps_match_the_real_order_of_the_pipeline():
     """ลำดับบนเส้นต้องตรงกับลำดับที่ ``run_inspection`` ทำจริง — ไม่งั้น
     ผู้ใช้จะอ่านเส้นแล้วเข้าใจกระบวนการผิด."""
     assert [k for k, _ in PG.STEPS] == [
-        "prepare", "fonttrust", "ocr", "checks", "confirm", "pixel",
+        "prepare", "fonttrust", "ocr", "checks", "confirm", "pair", "pixel",
         "coverage", "report"]
 
 

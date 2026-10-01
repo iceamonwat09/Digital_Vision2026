@@ -756,6 +756,21 @@
           ใช้กับกลุ่มที่มีโซน panel <b>สองโซนพอดี</b> และเป็น PDF ทั้งคู่</span>
       </div>
 
+      <!-- โหมดทดลอง: ส่งภาพโซน 🅰+🅱 ของกลุ่มเดียวกันให้ Gemini ถอดความ + หา
+           ความต่างในคำขอเดียว แล้วรวมกับชั้นเทียบข้อความเดิม (pairdiff.py).
+           ที่มา: งานจริง 30 ก.ย. PDF เทียบภาพถ่าย FAIL 9 รายการ ไม่มีของจริง -->
+      <div class="aw-row" style="margin-top:6px;{% if not pair_ui %}display:none;{% endif %}">
+        <label class="aw-rotate-mode" title="ค่าเริ่มต้น: {% if pair_default_on %}เปิด{% else %}ปิด{% endif %} · ปิด = เหมือนเดิมทุกอย่าง · เปิด = กลุ่มที่มี 2 โซนพอดี (ไฟล์หลัก 1 + ไฟล์อ้างอิง 1) ส่งภาพคู่ให้ Gemini ในคำขอเดียว">
+          <input type="checkbox" id="awPairCheck"{% if not pair_ui %} data-off="1" tabindex="-1"{% elif pair_default_on %} checked{% endif %}> 🤝 เทียบคู่ด้วย Gemini
+        </label>
+        <span class="aw-rotate-hint" style="font-size:12px;color:#78909c;">
+          ปิด = เหมือนเดิมทุกอย่าง · เปิดแล้ว Gemini เห็น<b>ภาพสองฝั่งพร้อมกัน</b>
+          ถอดความทั้งคู่ + ระบุความต่าง · ชั้นข้อความเห็นตรง = FAIL ·
+          เห็นชั้นเดียว = <b>REVIEW (ไม่ลบทิ้ง)</b> · รายงานบอกตัวเลข
+          <b>โหมดเดิม vs โหมดคู่</b> · เทียบคู่ไม่ได้ ⇒ กลุ่มนั้นใช้ผลโหมดเดิม ·
+          ต้องมี workflow <code>artwork-pair</code> ใน N8N</span>
+      </div>
+
       <div id="awProps" class="aw-props" style="display:none;">
         <b>โซนที่เลือก: <span id="awPropId"></span></b>
         <span id="awPropDoc" class="aw-doc-badge doc-a" style="display:none;"></span>

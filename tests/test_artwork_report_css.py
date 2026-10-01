@@ -37,6 +37,7 @@ _HELPERS = [
      "  window.awCoverageHtml = coverageHtml;"),
     ("  function pixdiffHtml(pd, recId) {", "  window.awPixdiffHtml = pixdiffHtml;"),
     ("  function pixelHtml(px) {", "  window.awPixelHtml = pixelHtml;"),
+    ("  function pairHtml(pi) {", "  window.awPairHtml = pairHtml;"),
     ("  function confirmHtml(cf) {", "  window.awConfirmHtml = confirmHtml;"),
     ("  function flowHtml(pr, done) {", "  window.awFlowHtml = flowHtml;"),
     ("  function markDiff(text, spans) {", "  window.awMarkDiff = markDiff;"),
