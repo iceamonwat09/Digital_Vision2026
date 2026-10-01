@@ -518,8 +518,8 @@ def test_js_sends_saves_and_restores_the_flag():
     assert "pair_check: pairCheckOn()" in JS
     assert 'return expChecked("awPairCheck")' in JS
     assert "pairCheck: pairCheckOn()" in JS                  # autosave
-    assert "!!s.pairCheck && !$(\"awPairCheck\").dataset.off" in JS
-    assert "pairCheck: !!st.pair_check" in JS                 # clone
+    assert "restorePairCheck(s.pairCheck);" in JS
+    assert ": !!st.pair_check" in JS                          # clone
     assert re.search(r'"awPixelCheck", "awPairCheck"\]\.forEach', JS)
     assert "html += pairHtml(rep.pair);" in JS
 
@@ -531,6 +531,103 @@ def test_route_and_setup_carry_the_flag():
     assert "pair_check=pair_check" in src
     assert "pair_ui=config.PAIR_COMPARE_UI" in src
     assert "pair_check" in report._SETUP_KEYS
+
+
+# ── ค่าเริ่มต้นเปิด (ผู้ใช้สั่ง 1 ต.ค. 2026) ─────────────────────────────
+
+def _page(monkeypatch, **flags):
+    flask = pytest.importorskip("flask")
+    from artwork_check.routes import artwork_bp
+    for k, v in flags.items():
+        monkeypatch.setattr(config, k, v)
+    app = flask.Flask(__name__,
+                      template_folder=os.path.join(ROOT, "templates"),
+                      static_folder=os.path.join(ROOT, "static"))
+
+    @app.context_processor
+    def _ctx():
+        return {"config_version": "test", "current_user": None,
+                "auth_enabled": False, "has_perm": lambda *a, **k: True}
+
+    app.register_blueprint(artwork_bp)
+    with app.test_client() as c:
+        r = c.get("/artwork_check")
+        assert r.status_code == 200
+        return r.get_data(as_text=True)
+
+
+def _pair_input(html):
+    m = re.search(r'<input type="checkbox" id="awPairCheck"[^>]*>', html)
+    assert m, "ไม่พบช่องติ๊ก"
+    return m.group(0)
+
+
+def test_checkbox_is_ticked_by_default(monkeypatch):
+    assert config.PAIR_DEFAULT_ON is True
+    tag = _pair_input(_page(monkeypatch))
+    assert re.search(r"\bchecked\b", tag)
+    assert "data-off" not in tag
+
+
+def test_flag_off_gives_the_old_unticked_box(monkeypatch):
+    tag = _pair_input(_page(monkeypatch, PAIR_DEFAULT_ON=False))
+    assert not re.search(r"\bchecked\b", tag)
+
+
+def test_hidden_ui_is_never_ticked(monkeypatch):
+    # ซ่อนช่อง = นับว่าไม่ติ๊กเสมอ แม้ค่าเริ่มต้นจะเปิด
+    tag = _pair_input(_page(monkeypatch, PAIR_COMPARE_UI=False,
+                            PAIR_DEFAULT_ON=True))
+    assert "data-off" in tag
+    assert not re.search(r"\bchecked\b", tag)
+
+
+def test_api_without_the_key_stays_off():
+    # ค่าเริ่มต้นเป็นเรื่องของหน้าเว็บเท่านั้น — สคริปต์ที่ไม่ส่งคีย์ต้องได้ทางเดิม
+    src = open(os.path.join(ROOT, "artwork_check", "routes.py"),
+               encoding="utf-8").read()
+    assert 'pair_check = bool(body.get("pair_check"))' in src
+
+
+def _run_restore(default_checked, value, off=False):
+    import shutil
+    import subprocess
+    if not shutil.which("node"):
+        pytest.skip("ไม่มี node")
+    m = re.search(r"function restorePairCheck\(v\) \{.*?\n  \}", JS, re.S)
+    assert m, "ไม่พบ restorePairCheck"
+    prog = ("const el={checked:%s,defaultChecked:%s,dataset:%s};"
+            "const $=(id)=>id==='awPairCheck'?el:null;%s;"
+            "restorePairCheck(%s);console.log(JSON.stringify(el.checked));"
+            % (json.dumps(not default_checked), json.dumps(default_checked),
+               '{off:"1"}' if off else "{}", m.group(0),
+               "undefined" if value is None else json.dumps(value)))
+    out = subprocess.run(["node", "-e", prog], capture_output=True,
+                         text=True, check=True)
+    return json.loads(out.stdout)
+
+
+@pytest.mark.parametrize("default_checked,value,want", [
+    (True, None, True),     # autosave เก่า/ต้นแบบที่ไม่บอกค่า ⇒ ค่าเริ่มต้น
+    (False, None, False),
+    (True, False, False),   # ผู้ใช้เอาติ๊กออกเองแล้วรีเฟรช ⇒ เคารพค่านั้น
+    (False, True, True),
+])
+def test_restore_uses_the_default_only_when_no_value(default_checked, value,
+                                                     want):
+    assert _run_restore(default_checked, value) is want
+
+
+def test_restore_never_ticks_a_hidden_box():
+    assert _run_restore(True, None, off=True) is False
+    assert _run_restore(True, True, off=True) is False
+
+
+def test_clone_does_not_carry_old_unticked_jobs_when_default_is_on():
+    i = JS.index("function loadFromClone(res)")
+    body = JS[i:i + 1500]
+    assert re.search(r'\.defaultChecked \? undefined\s*: !!st\.pair_check',
+                     body)
 
 
 WF = os.path.join(ROOT, "artwork_check", "n8n_artwork_pair.workflow.json")

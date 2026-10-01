@@ -119,6 +119,15 @@
     return expChecked("awPairCheck");
   }
 
+  // ค่าเริ่มต้นของช่องมาจาก server (ARTWORK_PAIR_DEFAULT_ON → attribute
+  // ``checked`` = ``defaultChecked``) ⇒ งานที่ไม่ได้บอกค่ามา (autosave ก่อนมี
+  // โหมดนี้ / ต้นแบบตอนเปิดค่าเริ่มต้น) ได้ค่าเริ่มต้น ไม่ใช่ "ปิด" เงียบ ๆ
+  function restorePairCheck(v) {
+    const el = $("awPairCheck");
+    if (!el) return;
+    el.checked = (v === undefined ? el.defaultChecked : !!v) && !el.dataset.off;
+  }
+
   function coverageHtml(cov, fontTrust) {
     if (!cov) return "";              // รายงานเก่าที่ยังไม่มีข้อมูลนี้
     const rows = [
@@ -1554,7 +1563,7 @@
     if ($("awSplitBands")) $("awSplitBands").checked = !!s.splitBands && !$("awSplitBands").dataset.off;
     if ($("awConfirmReads")) $("awConfirmReads").checked = !!s.confirmReads && !$("awConfirmReads").dataset.off;
     if ($("awPixelCheck")) $("awPixelCheck").checked = !!s.pixelCheck;
-    if ($("awPairCheck")) $("awPairCheck").checked = !!s.pairCheck && !$("awPairCheck").dataset.off;
+    restorePairCheck(s.pairCheck);
     if ($("awBrand") && s.brand) $("awBrand").value = s.brand;
     showTabs(true);
     switchTab("result");
@@ -1607,7 +1616,10 @@
       refAttached: false, autoRotate: !!st.auto_rotate,
       forceOcr: !!st.force_ocr, splitBands: !!st.split_bands,
       confirmReads: !!st.confirm_reads, pixelCheck: !!st.pixel_check,
-      pairCheck: !!st.pair_check,
+      // ค่าเริ่มต้นเปิด ⇒ ไม่รับค่า "ปิด" จากงานต้นแบบที่ตรวจไว้ก่อนเปิดค่าเริ่มต้น
+      // (ทุกงานเก่าบันทึก false ไว้) — เป็นค่าของโหมด ไม่ใช่ของชิ้นงาน
+      pairCheck: ($("awPairCheck") || {}).defaultChecked ? undefined
+                                                         : !!st.pair_check,
       brand: st.brand || "",
     });
     // มุมจอของ 🅰 ตามงานต้นแบบ · 🅱 ยังไม่มีไฟล์ (ไม่คัดลอกฝั่ง 🅱 โดยตั้งใจ)

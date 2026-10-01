@@ -123,6 +123,7 @@ def artwork_page():
                            clone_ui=config.CLONE_FROM_HISTORY,
                            experiment_ocr_ui=config.EXPERIMENT_OCR_UI,
                            pair_ui=config.PAIR_COMPARE_UI,
+                           pair_default_on=config.PAIR_DEFAULT_ON,
                            zone_rotate_inherit=config.ZONE_ROTATE_INHERIT,
                            page_rot_per_doc=config.PAGE_ROT_PER_DOC,
                            preview_hi=config.PREVIEW_DISPLAY_DPI > config.PREVIEW_DPI,
