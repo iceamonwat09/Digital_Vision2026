@@ -150,7 +150,27 @@
     sel.disabled = n <= 1;
   }
 
+  // ผลของงานก่อนหน้า/รุ่นโค้ดก่อนหน้าต้องไม่ค้างบนจอ — ผู้ตรวจจะเข้าใจว่าเป็นผลของงานที่เปิดอยู่
+  const V2_VERSION = ($("v2Root") && $("v2Root").dataset.version) || "";
+
+  function hideResult() {
+    S.result = null;
+    $("v2ResCard").classList.add("v2-hidden");
+    $("v2LogCard").classList.add("v2-hidden");
+    $("v2Verdict").innerHTML = "";
+    $("v2Warn").innerHTML = "";
+    $("v2PairsRes").innerHTML = "";
+    $("v2Log").value = "";
+    $("v2RunMsg").textContent = "";
+  }
+
+  async function showLastRun(jobId, run) {
+    try { showResult(await api("/api/artwork_v2/jobs/" + jobId + "/runs/" + run)); }
+    catch (e) { $("v2RunMsg").innerHTML = '<span class="v2-bad">เปิดผลรอบ ' + esc(run) + " ไม่ได้: " + esc(e.message) + "</span>"; }
+  }
+
   async function openJob(id, pairs, page) {
+    hideResult();
     let m;
     try { m = await api("/api/artwork_v2/jobs/" + encodeURIComponent(id)); }
     catch (e) {
@@ -172,8 +192,17 @@
     renderZones();
     saveSession();
     if (m.runs && m.runs.length) {
-      try { showResult(await api("/api/artwork_v2/jobs/" + m.id + "/runs/" + m.runs[m.runs.length - 1])); }
+      const run = m.runs[m.runs.length - 1];
+      let r = null;
+      try { r = await api("/api/artwork_v2/jobs/" + m.id + "/runs/" + run); }
       catch (e) { /* รอบเก่าเปิดไม่ได้ — ไม่เป็นไร */ }
+      if (!r || !S.job || S.job.id !== m.id) return;          // ผู้ใช้เปิดงานอื่นไปแล้วระหว่างรอ
+      if (!V2_VERSION || r.version === V2_VERSION) { showResult(r); return; }
+      // ผลจากโค้ดรุ่นก่อน — ไม่แสดงเอง เพราะจะถูกอ่านว่าเป็นผลของรุ่นปัจจุบัน
+      $("v2RunMsg").innerHTML = '<span class="v2-warn">ผลรอบล่าสุด (' + esc(run) + ') ตรวจด้วยรุ่น ' +
+        esc(r.version || "ไม่ทราบ") + " ไม่ใช่รุ่นปัจจุบัน " + esc(V2_VERSION) +
+        ' — กด "ตรวจ" เพื่อได้ผลของรุ่นนี้</span> <button class="v2-btn" id="v2ShowOld">ดูผลเดิม</button>';
+      $("v2ShowOld").addEventListener("click", () => { $("v2RunMsg").textContent = ""; showResult(r); });
     }
   }
 
@@ -380,7 +409,7 @@
     $("v2LogCard").classList.remove("v2-hidden");
     $("v2Verdict").innerHTML = '<div class="v2-verdict v2-v-' + esc(r.verdict) + '">' + esc(r.verdict) + " — " +
       esc(r.verdict_th) + "<small>" + (r.reasons || []).map(esc).join(" · ") + " · รอบ " + esc(r.run) +
-      " · " + esc(r.at) + "</small></div>";
+      " · " + esc(r.at) + (r.version ? " · รุ่น " + esc(r.version) : "") + "</small></div>";
     $("v2Warn").innerHTML = (r.warnings && r.warnings.length)
       ? '<div class="v2-warnbox">⚠️ ' + r.warnings.map(esc).join("<br>⚠️ ") + "</div>" : "";
     renderPairs();

@@ -70,7 +70,7 @@
 {% endblock %}
 
 {% block content %}
-<div class="v2" id="v2Root" data-can-manage="{{ 1 if can_manage_key else 0 }}">
+<div class="v2" id="v2Root" data-can-manage="{{ 1 if can_manage_key else 0 }}" data-version="{{ v2_version }}">
   <div class="v2-head">
     <h2>Artwork V2 <span class="v2-sub">เทียบข้อความสองไฟล์ด้วย Google Cloud Vision OCR · PoC</span></h2>
     <span class="v2-sub">โมดูล {{ v2_version }}</span>
