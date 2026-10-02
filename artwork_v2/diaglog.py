@@ -111,6 +111,10 @@ def build_text(r: dict) -> str:
           "reflow_lines_b=%s reflow_edges=%s" % (
               len(p.get("line_pairs") or []), un.get("a"), un.get("b"), rl.get("A"),
               rl.get("B"), [e["side"] + ":" + e["text"] for e in p.get("reflow_edges") or []]))
+        rm = p.get("row_merges") or []
+        a("  row_merges (%d) — ต่อแถวที่ OCR ตัดตรงเส้นตกแต่ง:" % len(rm))
+        for m in rm:
+            a("     %s: %s + %s" % (m["side"], _q(m["left"], 80), _q(m["right"], 80)))
         a("  findings (%d):" % len(p.get("findings") or []))
         for f in p.get("findings") or []:
             a("   F%d %s %s method=%s score=%s" % (
@@ -139,13 +143,13 @@ def build_text(r: dict) -> str:
 
     rr = r.get("reread") or {}
     a("")
-    a("[REREAD] enabled=%s candidates=%s done=%s confirmed=%s downgraded=%s skipped_cap=%s "
-      "errors=%s" % (rr.get("enabled"), rr.get("candidates"), rr.get("done"),
-                     rr.get("confirmed"), rr.get("downgraded"), rr.get("skipped_cap"),
-                     rr.get("errors")))
+    a("[REREAD] enabled=%s candidates=%s crops=%s done=%s confirmed=%s downgraded=%s "
+      "skipped_cap=%s errors=%s" % (rr.get("enabled"), rr.get("candidates"), rr.get("crops"),
+                                    rr.get("done"), rr.get("confirmed"), rr.get("downgraded"),
+                                    rr.get("skipped_cap"), rr.get("errors")))
     for it in rr.get("items") or []:
-        a("  %s class=%s result=%s A=%s B=%s found_in_other=%s crop_findings=%s err=%s" % (
-            it["crops"]["a"]["image"].split("_")[0], it.get("finding_class"), it.get("result"),
+        a("  %s classes=%s results=%s A=%s B=%s found_in_other=%s crop_findings=%s err=%s" % (
+            it["crops"]["a"]["image"].split("_")[0], it.get("classes"), it.get("results"),
             {k: it["crops"]["a"].get(k) for k in ("px", "dpi", "jpeg_bytes")},
             {k: it["crops"]["b"].get(k) for k in ("px", "dpi", "jpeg_bytes")},
             it.get("found_in_other", "-"), it.get("crop_findings", "-"), it.get("error", "-")))

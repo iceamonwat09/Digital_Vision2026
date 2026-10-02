@@ -203,6 +203,7 @@ def run(job_id: str, raw_pairs, poster: Optional[Callable] = None,
         pr["pair_methods"] = cmp_["pair_methods"]
         pr["reflow_edges"] = cmp_["reflow_edges"]
         pr["reflow_lines"] = cmp_["reflow_lines"]
+        pr["row_merges"] = cmp_.get("row_merges", [])
         pr["unpaired"] = {"a": cmp_["unpaired_a"], "b": cmp_["unpaired_b"]}
         pr["lines"] = {"a": _compact_lines(cmp_["lines_a"]), "b": _compact_lines(cmp_["lines_b"])}
         pr["line_pairs"] = cmp_["pairs"]
@@ -263,11 +264,14 @@ def settings_snapshot() -> dict:
         "MAX_REQUEST_BYTES", "MAX_IMAGE_BYTES", "MAX_IMAGE_MP", "JPEG_QUALITIES",
         "PDF_ZONE_DPI", "PDF_ZONE_DPI_MAX", "ZONE_MIN_LONG_SIDE",
         "CONF_FAIL", "CONF_LOW", "COVERAGE_MIN", "PAIR_MIN_SIM", "PAIR_MIN_RUN",
-        "PAIR_MAX_DIST", "REREAD_ENABLED", "REREAD_MAX", "REREAD_SCALE", "REREAD_MAX_SIDE")}
+        "PAIR_MAX_DIST", "ROW_MERGE_ENABLED", "ROW_MAX_ANGLE",
+        "PUNCT_CAN_FAIL", "REREAD_ENABLED", "REREAD_MAX", "REREAD_SCALE", "REREAD_MAX_SIDE")}
 
 
 def _reread(pairs, srcs, rd, poster, key, calls, warnings, say) -> dict:
-    log = {"enabled": config.REREAD_ENABLED, "candidates": 0, "done": 0,
+    """อ่านซ้ำแบบซูมเฉพาะจุดแดง · **ครอปละ 1 คู่บรรทัด** (หลายจุดในบรรทัดเดียวกัน
+    ใช้ภาพซูมชุดเดียวกัน — ไม่จ่ายค่า Vision ซ้ำ) · ยืนยันทีละจุดจากผลชุดนั้น"""
+    log = {"enabled": config.REREAD_ENABLED, "candidates": 0, "done": 0, "crops": 0,
            "confirmed": 0, "downgraded": 0, "skipped_cap": 0, "errors": 0, "items": []}
     reds = [(pr, f) for pr in pairs for f in pr.get("findings", []) if f["severity"] == "red"]
     log["candidates"] = len(reds)
@@ -275,17 +279,39 @@ def _reread(pairs, srcs, rd, poster, key, calls, warnings, say) -> dict:
         return log
     if not config.REREAD_ENABLED:
         for _, f in reds:
-            f["notes"].append("ไม่ได้อ่านซ้ำ (ปิดอยู่)")
+            if f["class"] == "PUNCT":
+                # เครื่องหมายวรรคตอนเป็นแดงได้ **เฉพาะเมื่ออ่านซ้ำยืนยันแล้ว**
+                f["severity"] = "yellow"
+                f["notes"].append("เครื่องหมายวรรคตอนต้องยืนยันด้วยการอ่านซ้ำ (ปิดอยู่) — ยังไม่ยืนยัน")
+            else:
+                f["notes"].append("ไม่ได้อ่านซ้ำ (ปิดอยู่)")
         return log
-    order = {"NUMBER": 0, "CASE": 1, "TEXT": 2, "MISSING_IN_B": 3, "EXTRA_IN_B": 3}
+    order = {"NUMBER": 0, "CASE": 1, "TEXT": 2, "PUNCT": 3, "MISSING_IN_B": 4, "EXTRA_IN_B": 4}
     reds.sort(key=lambda t: order.get(t[1]["class"], 9))
+
+    # จัดกลุ่ม: จุดที่อยู่คู่บรรทัดเดียวกันใช้ครอปเดียวกัน
+    groups_by_key: Dict[tuple, list] = {}
+    order_keys: List[tuple] = []
+    for pr, f in reds:
+        if f["a"]["line"] is not None and f["b"]["line"] is not None:
+            k = (pr["n"], f["a"]["line"], f["b"]["line"])
+        else:
+            k = (pr["n"], id(f))
+        if k not in groups_by_key:
+            groups_by_key[k] = []
+            order_keys.append(k)
+        groups_by_key[k].append((pr, f))
+
     todo, groups = [], []
-    for k, (pr, f) in enumerate(reds):
-        if k >= config.REREAD_MAX:
-            f["severity"] = "yellow"
-            f["notes"].append("เกินเพดานอ่านซ้ำ (%d จุด) — ยังไม่ยืนยัน" % config.REREAD_MAX)
-            log["skipped_cap"] += 1
+    for gi, k in enumerate(order_keys):
+        members = groups_by_key[k]
+        if gi >= config.REREAD_MAX:
+            for _, f in members:
+                f["severity"] = "yellow"
+                f["notes"].append("เกินเพดานอ่านซ้ำ (%d ครอป) — ยังไม่ยืนยัน" % config.REREAD_MAX)
+                log["skipped_cap"] += 1
             continue
+        pr, f = members[0]
         cmp_ = pr["_cmp"]
         crops = {}
         for s, other in (("a", "b"), ("b", "a")):
@@ -309,83 +335,89 @@ def _reread(pairs, srcs, rd, poster, key, calls, warnings, say) -> dict:
                 continue
             crops[s] = nb
         if len(crops) < 2:
-            f["severity"] = "yellow"
-            f["notes"].append("อ่านซ้ำไม่ได้ (คำนวณกรอบครอปไม่ได้) — ยังไม่ยืนยัน")
-            log["errors"] += 1
+            for _, ff in members:
+                ff["severity"] = "yellow"
+                ff["notes"].append("อ่านซ้ำไม่ได้ (คำนวณกรอบครอปไม่ได้) — ยังไม่ยืนยัน")
+                log["errors"] += 1
             continue
         grp = []
-        item = {"finding_ref": (pr["n"], id(f)), "class": f["class"], "crops": {}}
+        item = {"classes": [ff["class"] for _, ff in members], "crops": {}}
+        rid = "rr%d" % (len(todo) + 1)
         for s in ("a", "b"):
             side = pr["sides"][s]
             img, info = srcs[s].render_zone(side["page"], crops[s],
                                             scale=config.REREAD_SCALE,
                                             max_side=config.REREAD_MAX_SIDE)
             jpeg, sent, einfo = imaging.fit_jpeg(img, config.MAX_IMAGE_BYTES)
-            fname = "rr%d_%s.jpg" % (k + 1, s)
+            fname = "%s_%s.jpg" % (rid, s)
             with open(os.path.join(rd, "img", fname), "wb") as fh:
                 fh.write(jpeg)
             item["crops"][s] = {"bbox": crops[s], "image": fname,
                                 "px": [int(sent.shape[1]), int(sent.shape[0])],
                                 "dpi": info.get("dpi"), "jpeg_bytes": len(jpeg)}
-            grp.append({"id": "rr%d_%s" % (k + 1, s), "jpeg": jpeg})
-        todo.append((pr, f, item))
+            grp.append({"id": "%s_%s" % (rid, s), "jpeg": jpeg})
+        todo.append((rid, members, item))
         groups.append(grp)
     if not groups:
         return log
-    say("อ่านซ้ำแบบซูม %d จุด" % len(groups))
+    log["crops"] = len(groups)
+    say("อ่านซ้ำแบบซูม %d จุด (%d ครอป)" % (sum(len(m) for _, m, _ in todo), len(groups)))
     vres = vision_client.annotate(groups, poster=poster, key=key)
     for c in vres["calls"]:
         c["index"] = len(calls)
         c["phase"] = "reread:" + c["phase"]
         calls.append(c)
-    for k, (pr, f, item) in enumerate(todo):
-        rid = item["crops"]["a"]["image"].split("_")[0]
+    for rid, members, item in todo:
         ra = vres["results"].get(rid + "_a") or {}
         rb = vres["results"].get(rid + "_b") or {}
-        item.pop("finding_ref", None)
-        item["finding_class"] = f["class"]
-        log["done"] += 1
+        item["results"] = []
         if not (ra.get("ok") and rb.get("ok")):
-            f["severity"] = "yellow"
             err = ra.get("error") or rb.get("error") or "ไม่ทราบสาเหตุ"
-            f["notes"].append("อ่านซ้ำไม่สำเร็จ — ยังไม่ยืนยัน (%s)" % err)
-            item["result"] = "error"
+            for _, f in members:
+                f["severity"] = "yellow"
+                f["notes"].append("อ่านซ้ำไม่สำเร็จ — ยังไม่ยืนยัน (%s)" % err)
+                item["results"].append("error")
+                log["errors"] += 1
+                log["done"] += 1
             item["error"] = err
-            log["errors"] += 1
             log["items"].append(item)
             continue
         la = textmodel.parse(ra.get("fta") or {}, *item["crops"]["a"]["px"])["lines"]
         lb = textmodel.parse(rb.get("fta") or {}, *item["crops"]["b"]["px"])["lines"]
         item["text_a"] = " / ".join(l["text"] for l in la)[:300]
         item["text_b"] = " / ".join(l["text"] for l in lb)[:300]
-        if f["class"] in ("MISSING_IN_B", "EXTRA_IN_B"):
-            # ยืนยันว่า "ฝั่งที่ไม่มี" ไม่มีจริง: หาข้อความในครอปของฝั่งนั้น
-            have, lack = ("a", lb) if f["class"] == "MISSING_IN_B" else ("b", la)
-            sim = _crop_contains(lack, f[have]["text"])
-            item["found_in_other"] = round(sim, 3)
-            ok = sim < 0.8
-        else:
-            rc = compare.compare(la, lb)
-            # ต้องเป็นความต่าง "ชนิดเดียวกัน ที่ตำแหน่งเดียวกัน" — ไม่ใช่ความต่างของ
-            # บรรทัดข้างเคียงที่ติดมาในครอป (กันยืนยันผิดตัว)
-            ka = compare.diff_key(f["a"]["frag"])[0]
-            kb = compare.diff_key(f["b"]["frag"])[0]
-            same = [x for x in rc["findings"] if x["pair_method"] != "unpaired"
-                    and x["class"] == f["class"]
-                    and ((ka and compare.diff_key(x["a"]["frag"])[0] == ka)
-                         or (kb and compare.diff_key(x["b"]["frag"])[0] == kb))]
-            item["crop_findings"] = [{"class": x["class"], "a": x["a"]["frag"],
-                                      "b": x["b"]["frag"]} for x in rc["findings"]][:10]
-            ok = bool(same)
-        if ok:
-            f["notes"].append("ยืนยันด้วยการอ่านซ้ำแบบซูมแล้ว")
-            item["result"] = "confirmed"
-            log["confirmed"] += 1
-        else:
-            f["severity"] = "yellow"
-            f["notes"].append("อ่านซ้ำแบบซูมแล้วไม่พบความต่างเดิม — อาจเป็น OCR อ่านเพี้ยน "
-                              "(ยังแสดงไว้ ไม่ลบ)")
-            item["result"] = "downgraded"
-            log["downgraded"] += 1
+        rc = None
+        for _, f in members:
+            log["done"] += 1
+            if f["class"] in ("MISSING_IN_B", "EXTRA_IN_B"):
+                # ยืนยันว่า "ฝั่งที่ไม่มี" ไม่มีจริง: หาข้อความในครอปของฝั่งนั้น
+                have, lack = ("a", lb) if f["class"] == "MISSING_IN_B" else ("b", la)
+                sim = _crop_contains(lack, f[have]["text"])
+                item["found_in_other"] = round(sim, 3)
+                ok = sim < 0.8
+            else:
+                if rc is None:
+                    rc = compare.compare(la, lb)
+                    item["crop_findings"] = [{"class": x["class"], "a": x["a"]["frag"],
+                                              "b": x["b"]["frag"]} for x in rc["findings"]][:10]
+                # ต้องเป็นความต่าง "ชนิดเดียวกัน ที่ตำแหน่งเดียวกัน" — ไม่ใช่ความต่างของ
+                # บรรทัดข้างเคียงที่ติดมาในครอป (กันยืนยันผิดตัว)
+                ka = compare.diff_key(f["a"]["frag"])[0]
+                kb = compare.diff_key(f["b"]["frag"])[0]
+                same = [x for x in rc["findings"] if x["pair_method"] != "unpaired"
+                        and x["class"] == f["class"]
+                        and ((ka and compare.diff_key(x["a"]["frag"])[0] == ka)
+                             or (kb and compare.diff_key(x["b"]["frag"])[0] == kb))]
+                ok = bool(same)
+            if ok:
+                f["notes"].append("ยืนยันด้วยการอ่านซ้ำแบบซูมแล้ว")
+                item["results"].append("confirmed")
+                log["confirmed"] += 1
+            else:
+                f["severity"] = "yellow"
+                f["notes"].append("อ่านซ้ำแบบซูมแล้วไม่พบความต่างเดิม — อาจเป็น OCR อ่านเพี้ยน "
+                                  "(ยังแสดงไว้ ไม่ลบ)")
+                item["results"].append("downgraded")
+                log["downgraded"] += 1
         log["items"].append(item)
     return log

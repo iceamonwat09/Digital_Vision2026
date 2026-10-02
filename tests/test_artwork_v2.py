@@ -172,7 +172,14 @@ def test_arabic_indic_digits_equal_ascii():
     assert r["findings"] == []
 
 
-def test_punctuation_only_is_yellow():
+def test_confident_punctuation_is_red_candidate():
+    """ลูกน้ำหายจริง (Hwy, ↔ Hwy) ความมั่นใจสูง = แดงได้ — แต่ต้องผ่านการอ่านซ้ำ"""
+    r = _cmp([("Thai Union Co., Ltd.", 10, 10)], [("Thai Union Co. Ltd.", 10, 10)])
+    assert _kinds(r) == [("PUNCT", "red")]
+
+
+def test_punctuation_flag_off_keeps_yellow(monkeypatch):
+    monkeypatch.setattr(config, "PUNCT_CAN_FAIL", False)
     r = _cmp([("Thai Union Co., Ltd.", 10, 10)], [("Thai Union Co. Ltd.", 10, 10)])
     assert _kinds(r) == [("PUNCT", "yellow")]
 
@@ -481,6 +488,47 @@ def test_reread_disabled_keeps_red_with_note(monkeypatch):
     r = pipeline.run(_job(), FULL)
     f = r["pairs"][0]["findings"][0]
     assert r["verdict"] == "FAIL" and "ไม่ได้อ่านซ้ำ" in f["notes"][0]
+
+
+TPA = ["Thai Union Co., Ltd. Bangkok", "Fat 1.5g"]
+TPB = ["Thai Union Co. Ltd. Bangkok", "Fat 1.5g"]
+
+
+def test_punctuation_without_reread_is_never_red(monkeypatch):
+    """เครื่องหมายวรรคตอนแดงได้ **เฉพาะเมื่ออ่านซ้ำยืนยันแล้ว**"""
+    monkeypatch.setattr(config, "REREAD_ENABLED", False)
+    monkeypatch.setattr(vision_client, "annotate", _fake_annotate(TPA, TPB))
+    job = jobs.create(("a.pdf", _pdf(TPA)), ("b.pdf", _pdf(TPB)))["id"]
+    r = pipeline.run(job, FULL)
+    f = r["pairs"][0]["findings"]
+    assert [x["class"] for x in f] == ["PUNCT"] and f[0]["severity"] == "yellow"
+    assert r["verdict"] == "REVIEW"
+
+
+def test_punctuation_confirmed_by_reread_is_red(monkeypatch):
+    monkeypatch.setattr(vision_client, "annotate", _fake_annotate(TPA, TPB))
+    job = jobs.create(("a.pdf", _pdf(TPA)), ("b.pdf", _pdf(TPB)))["id"]
+    r = pipeline.run(job, FULL)
+    assert r["verdict"] == "FAIL" and r["reread"]["confirmed"] == 1
+
+
+def test_reread_uses_one_crop_per_line(monkeypatch):
+    """3 จุดในบรรทัดเดียวกัน = ครอปเดียว (เดิมยิง Vision ซ้ำบรรทัดเดิม — Log จริง rr3/rr4)"""
+    a = ["16321 Arrow Hwy, Irwindale Park, CA 91706", "Fat 1.5g"]
+    b = ["16321 Arrow Hwy Irwindale, CA 91706 USA", "Fat 1.5g"]
+    sent = []
+    inner = _fake_annotate(a, b)
+
+    def spy(groups, poster=None, key=None):
+        sent.append([it["id"] for g in groups for it in g])
+        return inner(groups, poster, key)
+    monkeypatch.setattr(vision_client, "annotate", spy)
+    job = jobs.create(("a.pdf", _pdf(a)), ("b.pdf", _pdf(b)))["id"]
+    r = pipeline.run(job, FULL)
+    reds = [f for f in r["pairs"][0]["findings"] if f["severity"] == "red"]
+    assert len(reds) == 3 and r["reread"]["confirmed"] == 3
+    assert r["reread"]["crops"] == 1 and sent[1] == ["rr1_a", "rr1_b"]
+    assert "crops=1" in r["log_text"]
 
 
 @pytest.mark.parametrize("bad", [None, [], [{"a": {"bbox": [0, 0, 1, 1]}}],

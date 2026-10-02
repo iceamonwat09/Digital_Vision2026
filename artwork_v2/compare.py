@@ -31,10 +31,29 @@ _QUOTES = {ord("’"): "'", ord("‘"): "'", ord("‚"): "'", ord("“"): '"',
            ord("”"): '"', ord("„"): '"', ord("´"): "'", ord("`"): "'"}
 _DROP = {0x0640, 0x200B, 0x200C, 0x200D, 0x200E, 0x200F, 0xFEFF, 0x00AD}
 
+# ── ชั้น A: "อักษรที่หน้าตาเหมือนกัน แต่ OCR ใช้รหัสต่างกัน" ─────────────────
+# กติกา: รวมเฉพาะสิ่งที่ **พิมพ์ออกมาเป็นรูปเดียวกันบนฉลาก** และไม่เปลี่ยนความหมาย
+# · ห้ามรวมตัวพิมพ์ใหญ่-เล็ก (ของจริงที่ต้องจับ) · ห้ามรวม ² กับ 2 (m² ≠ m2)
+# ใช้ **ก่อน** NFKC — ไม่งั้น NFKC เปลี่ยน Ⓡ เป็นตัว "R" ธรรมดา
+EQUIV_PRE = {
+    0x24C7: "®", 0x24E1: "®",          # Ⓡ ⓡ  (Vision สลับกับ ® ในไฟล์เดียวกัน — วัดแล้ว)
+    0x24B8: "©", 0x24D2: "©",          # Ⓒ ⓒ
+    0x2022: "•", 0x25CF: "•", 0x2219: "•", 0x30FB: "•", 0x25AA: "•",   # จุดหัวข้อ
+}
+# ใช้ **หลัง** NFKC — NFKC แตก ½ เป็น "1⁄2" (fraction slash) ต้องตามมาเป็น "/"
+EQUIV_POST = {0x2044: "/", 0x2215: "/"}
+
+# ── อักขระตกแต่งที่ซ้ำต่อกัน (จุดไข่ปลา/ขีดเส้น) ─────────────────────────
+# OCR นับจำนวนจุดเล็ก ๆ ไม่ได้แน่นอน (วัดจริง: ไฟล์เดียวกันอ่านได้ 10/15 จุด ·
+# ซูม 2400 dpi ยังได้ 5/3) ⇒ เช็ค "มี/ไม่มี" แต่ไม่นับจำนวน
+FILLER = "\u2026"                       # … ตัวแทน "เส้นตกแต่ง" หนึ่งเส้น
+FILLER_RUN = {".": 2, "_": 2, "·": 2, "-": 3}
+
 
 def _norm_char(ch: str) -> str:
     if ord(ch) in _DROP:
         return ""
+    ch = EQUIV_PRE.get(ord(ch), ch)
     n = unicodedata.normalize("NFKC", ch)
     out = []
     for c in n:
@@ -45,20 +64,52 @@ def _norm_char(ch: str) -> str:
             d = unicodedata.digit(c, None)
             if d is not None:
                 c = str(d)
-        out.append(c.translate(_DASHES).translate(_QUOTES))
+        out.append(c.translate(_DASHES).translate(_QUOTES).translate(EQUIV_POST))
     return "".join(out)
 
 
-def diff_key(text: str) -> Tuple[str, List[int]]:
-    """คีย์เทียบแบบ **ไม่มีช่องว่าง** + แผนที่ตำแหน่งกลับไปยังตัวอักษรเดิม"""
-    out, idx = [], []
+def diff_key_map(text: str) -> Tuple[str, List[int], List[int]]:
+    """คีย์เทียบแบบ **ไม่มีช่องว่าง** + ตำแหน่งเริ่ม/จบในข้อความเดิมของแต่ละตัว
+
+    อักขระตกแต่งที่ซ้ำต่อกันถูกยุบเป็น ``FILLER`` ตัวเดียว (จุดไข่ปลาที่ต้นบรรทัด
+    นับเป็นเส้นตกแต่งแม้มีจุดเดียว — ไม่มีประโยคไหนขึ้นต้นด้วยจุด) · จุดทศนิยม
+    เดี่ยวกลางตัวเลข (``7.0``) ไม่ถูกแตะ
+    """
+    raw, idx = [], []
     for i, ch in enumerate(text):
         for c in _norm_char(ch):
             if c == " ":
                 continue
-            out.append(c)
+            raw.append(c)
             idx.append(i)
-    return "".join(out), idx
+    key, st, en = [], [], []
+    n, k = len(raw), 0
+    while k < n:
+        c = raw[k]
+        if c in FILLER_RUN:
+            m = k
+            while m < n and raw[m] == c:
+                m += 1
+            if m - k >= FILLER_RUN[c] or (k == 0 and c == "."):
+                if key and key[-1] == FILLER:
+                    en[-1] = idx[m - 1] + 1
+                else:
+                    key.append(FILLER)
+                    st.append(idx[k])
+                    en.append(idx[m - 1] + 1)
+                k = m
+                continue
+        key.append(c)
+        st.append(idx[k])
+        en.append(idx[k] + 1)
+        k += 1
+    return "".join(key), st, en
+
+
+def diff_key(text: str) -> Tuple[str, List[int]]:
+    """คีย์เทียบ + ตำแหน่งเริ่มในข้อความเดิม (รูปแบบเดิม — ใช้ในการอ่านซ้ำ)"""
+    k, st, _ = diff_key_map(text)
+    return k, st
 
 
 def pair_key(text: str) -> str:
@@ -103,15 +154,113 @@ def _dist(ca, cb) -> float:
     return ((ca[0] - cb[0]) ** 2 + (ca[1] - cb[1]) ** 2) ** 0.5
 
 
-def _prep(lines: List[dict]) -> List[dict]:
+def _prep(lines: List[dict], side: str = "", merges: Optional[list] = None) -> List[dict]:
+    rows = _merge_leader_rows(lines, side, merges)
     out = []
-    for ln in _join_hyphenated(lines):
-        dk, idx = diff_key(ln["text"])
+    for ln in _join_hyphenated(rows):
+        dk, st, en = diff_key_map(ln["text"])
         if not dk:
             continue
-        out.append(dict(ln, dk=dk, dk_idx=idx, pk=pair_key(ln["text"]),
+        out.append(dict(ln, dk=dk, dk_idx=st, dk_end=en, pk=pair_key(ln["text"]),
                         letters=has_letters(ln["text"])))
     return out
+
+
+# ── ชั้น B: ต่อแถวที่ OCR ตัดตรงเส้นตกแต่ง ────────────────────────────────
+
+def _upright(ln: dict) -> bool:
+    a = ln.get("angle")
+    return a is None or min(a % 360, 360 - a % 360) <= config.ROW_MAX_ANGLE
+
+
+def _same_row(a: dict, b: dict) -> bool:
+    ba, bb = a.get("box"), b.get("box")
+    if not ba or not bb:
+        return False
+    ha, hb = ba[3] - ba[1], bb[3] - bb[1]
+    if ha <= 0 or hb <= 0 or max(ha, hb) > 2.0 * min(ha, hb):
+        return False
+    ov = min(ba[3], bb[3]) - max(ba[1], bb[1])
+    return ov >= 0.5 * min(ha, hb)
+
+
+def _merge_two(L: dict, M: dict) -> dict:
+    chars = list(L["chars"]) + [{"c": " ", "box": None, "conf": None}] + list(M["chars"])
+    cc = [c["conf"] for c in chars if c.get("conf") is not None]
+    nl, nm = max(1, len(L["text"])), max(1, len(M["text"]))
+    ca, cb = L.get("center") or (0.5, 0.5), M.get("center") or (0.5, 0.5)
+    out = dict(L)
+    out.update(chars=chars, text="".join(c["c"] for c in chars),
+               box=union([L.get("box"), M.get("box")]),
+               center=((ca[0] * nl + cb[0] * nm) / (nl + nm), (ca[1] * nl + cb[1] * nm) / (nl + nm)),
+               conf_mean=(sum(cc) / len(cc)) if cc else None,
+               conf_min=min(cc) if cc else None,
+               soft_hyphen=M.get("soft_hyphen", False), row_merged=True)
+    return out
+
+
+def _merge_leader_rows(lines: List[dict], side: str = "", merges: Optional[list] = None) -> List[dict]:
+    """OCR ตัดแถวตาราง ``Crude Protein (min)........`` | ``..7.0%`` เป็นสองบรรทัด
+    ส่วนอีกฝั่งอ่านเป็นบรรทัดเดียว ⇒ ต่อกลับจาก **ตำแหน่งในภาพ** ไม่ใช่จากข้อความ
+
+    ต่อเมื่อครบทุกข้อ (ไม่มีเกณฑ์ระยะห่างตายตัว — ใช้ได้ทุกขนาดภาพ/ตัวอักษร):
+    * อยู่แถวเดียวกัน (ซ้อนแนวตั้ง ≥ 50% · ความสูงไม่ต่างเกิน 2 เท่า · ข้อความตั้งตรง)
+    * เป็น **เพื่อนบ้านติดกันจริง** ทั้งสองทาง (ไม่มีบรรทัดอื่นคั่นบนแถวนั้น)
+    * รอยต่อมี **เส้นตกแต่ง** (ฝั่งซ้ายจบด้วย หรือฝั่งขวาขึ้นต้นด้วยจุดไข่ปลา)
+      — เงื่อนไขนี้คือสิ่งที่กันไม่ให้ไปต่อข้ามคอลัมน์ เพราะเส้นตกแต่ง
+      มีไว้โยง "ชื่อรายการ" กับ "ค่า" ของแถวเดียวกันเสมอ
+    """
+    if not config.ROW_MERGE_ENABLED:
+        return list(lines)
+    rows = list(lines)
+    while True:
+        keys = [diff_key_map(l["text"])[0] for l in rows]
+        n = len(rows)
+
+        def right_of(i):
+            best = None
+            for j in range(n):
+                if j == i or not _same_row(rows[i], rows[j]):
+                    continue
+                gap = rows[j]["box"][0] - rows[i]["box"][2]
+                h = rows[i]["box"][3] - rows[i]["box"][1]
+                if gap < -0.3 * h:
+                    continue
+                if best is None or gap < best[0]:
+                    best = (gap, j)
+            return best[1] if best else None
+
+        def left_of(j):
+            best = None
+            for i in range(n):
+                if i == j or not _same_row(rows[i], rows[j]):
+                    continue
+                gap = rows[j]["box"][0] - rows[i]["box"][2]
+                h = rows[j]["box"][3] - rows[j]["box"][1]
+                if gap < -0.3 * h:
+                    continue
+                if best is None or gap < best[0]:
+                    best = (gap, i)
+            return best[1] if best else None
+
+        done = False
+        for i in range(n):
+            L = rows[i]
+            if not L.get("box") or not keys[i] or not _upright(L):
+                continue
+            j = right_of(i)
+            if j is None or not keys[j] or not _upright(rows[j]) or left_of(j) != i:
+                continue
+            if not (keys[i].endswith(FILLER) or keys[j].startswith(FILLER)):
+                continue
+            if merges is not None:
+                merges.append({"side": side, "left": L["text"], "right": rows[j]["text"]})
+            rows[i] = _merge_two(L, rows[j])
+            del rows[j]
+            done = True
+            break
+        if not done:
+            return rows
 
 
 def _median_offset(A, B, pairs) -> Tuple[float, float]:
@@ -261,12 +410,12 @@ def _span_conf(line: dict, s: int, e: int) -> Optional[float]:
 
 def _orig_span(line: dict, k0: int, k1: int) -> Tuple[int, int]:
     """ตำแหน่งในคีย์ ``[k0, k1)`` → ตำแหน่งในข้อความเดิม"""
-    idx = line["dk_idx"]
+    idx, end_ = line["dk_idx"], line.get("dk_end")
     if k0 < k1:
-        return idx[k0], idx[k1 - 1] + 1
+        return idx[k0], (end_[k1 - 1] if end_ else idx[k1 - 1] + 1)
     if k0 < len(idx):
         return idx[k0], idx[k0]
-    end = (idx[-1] + 1) if idx else 0
+    end = (end_[-1] if end_ else idx[-1] + 1) if idx else 0
     return end, end
 
 
@@ -327,7 +476,11 @@ def diff_pair(a: dict, b: dict, A: List[dict], B: List[dict],
         a_txt, b_txt = a["text"][sa[0]:sa[1]], b["text"][sb[0]:sb[1]]
         a_ctx = a["dk"][max(0, i1 - 1):i2 + 1]
         b_ctx = b["dk"][max(0, j1 - 1):j2 + 1]
-        cls = classify(a_txt, b_txt, a_ctx, b_ctx)
+        if (FILLER in a_frag + b_frag
+                and a_frag.replace(FILLER, "") == b_frag.replace(FILLER, "")):
+            cls = "FILLER"          # มี/ไม่มีเส้นตกแต่ง — OCR ไม่นิ่ง จึงไม่ตัดสินเป็นแดง
+        else:
+            cls = classify(a_txt, b_txt, a_ctx, b_ctx)
         ca, cb = _span_conf(a, *sa), _span_conf(b, *sb)
         finds.append({
             "class": cls,
@@ -369,7 +522,15 @@ def _crosses_lines(frag: str, lines: List[dict]) -> bool:
 
 
 def severity(f: dict) -> str:
-    if f["class"] == "PUNCT":
+    """ตัดสินจาก **น้ำหนักหลักฐาน** ไม่ใช่ชนิดของความต่าง
+
+    * ``FILLER`` = เหลืองเสมอ (OCR นับจุดเล็ก ๆ ไม่ได้)
+    * ``PUNCT`` = แดงได้เมื่อ ``PUNCT_CAN_FAIL`` และความมั่นใจถึงเกณฑ์ — แต่ต้อง
+      ผ่านการอ่านซ้ำแบบซูมก่อนเสมอ (ปิดการอ่านซ้ำ ⇒ ลดเป็นเหลือง ใน pipeline)
+    """
+    if f["class"] == "FILLER":
+        return "yellow"
+    if f["class"] == "PUNCT" and not config.PUNCT_CAN_FAIL:
         return "yellow"
     confs = [c for c in (f["a"].get("conf"), f["b"].get("conf")) if c is not None]
     if not confs or min(confs) < config.CONF_FAIL:
@@ -378,7 +539,8 @@ def severity(f: dict) -> str:
 
 
 def compare(lines_a: List[dict], lines_b: List[dict]) -> dict:
-    A, B = _prep(lines_a), _prep(lines_b)
+    merges: List[dict] = []
+    A, B = _prep(lines_a, "A", merges), _prep(lines_b, "B", merges)
     pairs, ua, ub = pair_lines(A, B)
     findings: List[dict] = []
     reflow: List[dict] = []
@@ -444,6 +606,7 @@ def compare(lines_a: List[dict], lines_b: List[dict]) -> dict:
         "unpaired_a": ua, "unpaired_b": ub,
         "reflow_edges": reflow,
         "reflow_lines": reflow_lines,
+        "row_merges": merges,
         "pair_methods": methods,
         "coverage_a": None if cov_a is None else round(cov_a, 4),
         "coverage_b": None if cov_b is None else round(cov_b, 4),

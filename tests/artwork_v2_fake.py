@@ -64,3 +64,58 @@ def fta(lines, W=1000, H=1000, block_type="TEXT"):
                        "property": {"detectedLanguages": [{"languageCode": "en",
                                                            "confidence": 0.9}]},
                        "blocks": [{"blockType": block_type, "paragraphs": paras}]}]}
+
+
+# ── ข้อมูล OCR จริง (บรรทัด + กรอบบรรทัด) → fullTextAnnotation ───────────
+
+def para_in_box(text, box, conf=0.98, end="LINE_BREAK"):
+    """บรรทัดเดียวในกรอบ ``box`` — กระจายตัวอักษรเท่า ๆ กัน (ช่องว่าง = 1 ช่อง)"""
+    x0, y0, x1, y1 = box
+    n = max(1, len(text))
+    cw = (x1 - x0) / float(n)
+    words, cur, k = [], [], 0
+    toks = text.split(" ")
+    for wi, tok in enumerate(toks):
+        syms = []
+        for ci, ch in enumerate(tok):
+            brk = None
+            if ci == len(tok) - 1:
+                brk = end if wi == len(toks) - 1 else "SPACE"
+            sx = x0 + k * cw
+            syms.append(_sym(ch, sx, y0, cw, y1 - y0, conf, brk))
+            k += 1
+        k += 1
+        if not syms:
+            continue
+        xs0 = syms[0]["boundingBox"]["vertices"][0]["x"]
+        xs1 = syms[-1]["boundingBox"]["vertices"][1]["x"]
+        words.append({"confidence": conf, "symbols": syms,
+                      "boundingBox": {"vertices": [{"x": xs0, "y": y0}, {"x": xs1, "y": y0},
+                                                   {"x": xs1, "y": y1}, {"x": xs0, "y": y1}]}})
+    return {"words": words}
+
+
+def fta_from_lines(lines, W, H):
+    """``lines`` = [(text, box, conf)] → fta หนึ่งบรรทัดต่อหนึ่งย่อหน้า"""
+    paras = [para_in_box(t, b, c) for t, b, c in lines if t.strip()]
+    return {"text": "\n".join(t for t, _, _ in lines),
+            "pages": [{"width": W, "height": H,
+                       "blocks": [{"blockType": "TEXT", "paragraphs": paras}]}]}
+
+
+def load_real(path):
+    """อ่านไฟล์ ``tests/data/artwork_v2/*_lines.txt`` → {side: (W, H, [(text, box, conf)])}"""
+    import re
+    rx = re.compile(r'^\s*([AB])\d+ conf=([0-9.]+) .*?box=\[([0-9,]+)\] "(.*)"\s*$')
+    sizes, out = {}, {"A": [], "B": []}
+    with open(path, encoding="utf-8") as f:
+        for raw in f:
+            if raw.startswith("SIZE"):
+                _, s, w, h = raw.split()
+                sizes[s] = (int(w), int(h))
+                continue
+            m = rx.match(raw)
+            if m:
+                box = tuple(float(v) for v in m.group(3).split(","))
+                out[m.group(1)].append((m.group(4), box, float(m.group(2))))
+    return {s: (sizes[s][0], sizes[s][1], out[s]) for s in ("A", "B")}

@@ -73,6 +73,12 @@ PAIR_MIN_SIM = _f("ARTWORK_V2_PAIR_MIN_SIM", "0.60")  # ความคล้า
 PAIR_MIN_RUN = _f("ARTWORK_V2_PAIR_MIN_RUN", "0.40")  # ช่วงคำติดกัน (ค่าที่วัดในโปรเจกต์)
 PAIR_MAX_DIST = _f("ARTWORK_V2_PAIR_MAX_DIST", "0.12")  # ระยะในโซน (0..1) สำหรับบรรทัดตัวเลขล้วน
 
+# ต่อแถวตารางที่ OCR ตัดตรงจุดไข่ปลา (ดู compare._merge_leader_rows) · 0 = ปิด
+ROW_MERGE_ENABLED = _b("ARTWORK_V2_ROW_MERGE", "1")
+ROW_MAX_ANGLE = _f("ARTWORK_V2_ROW_MAX_ANGLE", "10")   # องศา — เกินนี้ไม่ต่อแถว
+# เครื่องหมายวรรคตอนต่าง (ลูกน้ำ/จุดหาย) เป็นแดงได้ — ต้องผ่านการอ่านซ้ำแบบซูมเสมอ
+PUNCT_CAN_FAIL = _b("ARTWORK_V2_PUNCT_CAN_FAIL", "1")
+
 # ── อ่านซ้ำแบบซูม ────────────────────────────────────────────────────
 REREAD_ENABLED = _b("ARTWORK_V2_REREAD", "1")
 REREAD_MAX = _i("ARTWORK_V2_REREAD_MAX", "12")
