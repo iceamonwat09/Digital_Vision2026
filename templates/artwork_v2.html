@@ -1,0 +1,161 @@
+{% extends "base.html" %}
+{% block title %}Artwork V2 — เทียบข้อความด้วย Cloud Vision{% endblock %}
+
+{% block extra_css %}
+<style>
+  .main-content { max-width: none; }
+  .v2 { max-width: 1600px; margin: 20px auto; padding: 0 16px; }
+  .v2-head { display:flex; align-items:baseline; justify-content:space-between; flex-wrap:wrap; gap:8px; }
+  .v2-head h2 { margin:0; }
+  .v2-sub { color:#64748b; font-size:13px; }
+  .v2-card { background:#fff; border:1px solid #e2e8f0; border-radius:10px; padding:14px 16px; margin:14px 0; box-shadow:0 1px 2px rgba(15,23,42,.04); }
+  .v2-card h3 { margin:0 0 10px; font-size:16px; }
+  .v2-row { display:flex; flex-wrap:wrap; gap:10px; align-items:center; }
+  .v2-row label { font-size:13px; color:#334155; }
+  .v2-muted { color:#64748b; font-size:13px; }
+  .v2-ok { color:#15803d; } .v2-bad { color:#b91c1c; } .v2-warn { color:#a16207; }
+  .v2-btn { border:1px solid #cbd5e1; background:#fff; border-radius:6px; padding:7px 12px; cursor:pointer; font:inherit; font-size:14px; }
+  .v2-btn:hover { background:#f8fafc; }
+  .v2-btn.primary { background:#1d4ed8; color:#fff; border-color:#1d4ed8; }
+  .v2-btn.primary:hover { background:#1e40af; }
+  .v2-btn.danger { color:#b91c1c; border-color:#fca5a5; }
+  .v2-btn:disabled { opacity:.5; cursor:not-allowed; }
+  .v2-input { border:1px solid #cbd5e1; border-radius:6px; padding:7px 10px; font:inherit; font-size:14px; min-width:0; }
+  .v2-key { width:min(420px,100%); font-family:monospace; }
+  .v2-panes { display:grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap:14px; }
+  @media (max-width: 900px) { .v2-panes { grid-template-columns: minmax(0,1fr); } }
+  .v2-pane-h { display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:6px; flex-wrap:wrap; }
+  .v2-pane-h b { font-size:14px; }
+  .v2-stage { position:relative; border:1px solid #cbd5e1; border-radius:6px; overflow:hidden; background:#f1f5f9; user-select:none; touch-action:none; }
+  .v2-stage img { display:block; width:100%; height:auto; pointer-events:none; }
+  .v2-stage .v2-ov { position:absolute; inset:0; cursor:crosshair; }
+  .v2-zone { position:absolute; border:2px solid; box-sizing:border-box; pointer-events:none; }
+  .v2-zone span { position:absolute; left:-2px; top:-20px; font-size:12px; font-weight:600; color:#fff; padding:1px 5px; border-radius:3px; white-space:nowrap; }
+  .v2-zone.draft { border-style:dashed; }
+  .v2-pairs { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
+  .v2-chip { display:inline-flex; gap:6px; align-items:center; border:1px solid #cbd5e1; border-radius:14px; padding:3px 4px 3px 10px; font-size:13px; }
+  .v2-chip button { border:0; background:#f1f5f9; border-radius:10px; cursor:pointer; padding:1px 7px; }
+  .v2-verdict { border-radius:10px; padding:12px 16px; font-size:20px; font-weight:700; }
+  .v2-verdict small { display:block; font-size:13px; font-weight:400; margin-top:4px; }
+  .v2-v-PASS { background:#dcfce7; color:#14532d; }
+  .v2-v-REVIEW { background:#fef9c3; color:#713f12; }
+  .v2-v-FAIL { background:#fee2e2; color:#7f1d1d; }
+  .v2-v-UNREADABLE { background:#e2e8f0; color:#1e293b; }
+  .v2-res-stage { position:relative; border:1px solid #cbd5e1; border-radius:6px; overflow:hidden; background:#fff; }
+  .v2-res-stage img { display:block; width:100%; height:auto; }
+  .v2-res-stage svg { position:absolute; inset:0; width:100%; height:100%; }
+  .v2-res-stage rect.f { fill:none; stroke-width:3; vector-effect:non-scaling-stroke; }
+  .v2-res-stage rect.f.red { stroke:#dc2626; }
+  .v2-res-stage rect.f.yellow { stroke:#d97706; stroke-dasharray:6 3; }
+  .v2-res-stage rect.ocr { fill:none; stroke:#2563eb; stroke-width:1; vector-effect:non-scaling-stroke; opacity:.55; }
+  .v2-res-stage rect.skip { fill:rgba(100,116,139,.18); stroke:#64748b; stroke-width:1; vector-effect:non-scaling-stroke; }
+  .v2-res-stage rect.f.hot { stroke-width:6; }
+  .v2-res-stage text { font-size:14px; font-weight:700; paint-order:stroke; stroke:#fff; stroke-width:3px; }
+  .v2-tbl-wrap { overflow-x:auto; margin-top:10px; }
+  table.v2-tbl { border-collapse:collapse; width:100%; font-size:13px; }
+  .v2-tbl th, .v2-tbl td { border-bottom:1px solid #e2e8f0; padding:6px 8px; text-align:left; vertical-align:top; }
+  .v2-tbl tr.click { cursor:pointer; } .v2-tbl tr.click:hover { background:#f8fafc; }
+  .v2-tbl tr.sel { background:#eff6ff; }
+  .v2-sev { display:inline-block; border-radius:4px; padding:1px 6px; font-weight:600; font-size:12px; }
+  .v2-sev.red { background:#fee2e2; color:#991b1b; } .v2-sev.yellow { background:#fef3c7; color:#92400e; }
+  mark.v2-d { background:#fecaca; color:inherit; padding:0 1px; border-radius:2px; }
+  .v2-log { width:100%; min-height:280px; font-family:ui-monospace,Consolas,monospace; font-size:12px; white-space:pre; border:1px solid #cbd5e1; border-radius:6px; padding:8px; box-sizing:border-box; }
+  .v2-spin { display:inline-block; width:14px; height:14px; border:2px solid #93c5fd; border-top-color:#1d4ed8; border-radius:50%; animation:v2s 0.8s linear infinite; vertical-align:-2px; }
+  @keyframes v2s { to { transform:rotate(360deg); } }
+  .v2-warnbox { background:#fffbeb; border:1px solid #fde68a; border-radius:6px; padding:8px 10px; font-size:13px; margin-top:8px; }
+  .v2-hidden { display:none !important; }
+  .v2-legend span { display:inline-flex; align-items:center; gap:4px; margin-right:12px; font-size:12px; color:#475569; }
+  .v2-legend i { display:inline-block; width:14px; height:10px; border:2px solid; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="v2" id="v2Root" data-can-manage="{{ 1 if can_manage_key else 0 }}">
+  <div class="v2-head">
+    <h2>Artwork V2 <span class="v2-sub">เทียบข้อความสองไฟล์ด้วย Google Cloud Vision OCR · PoC</span></h2>
+    <span class="v2-sub">โมดูล {{ v2_version }}</span>
+  </div>
+
+  <!-- ① ตั้งค่า API key -->
+  <section class="v2-card" id="v2KeyCard">
+    <h3>① Cloud Vision API key</h3>
+    <div class="v2-row"><span id="v2KeyStatus" class="v2-muted">กำลังตรวจสถานะ…</span></div>
+    <div class="v2-row" id="v2KeyForm" style="margin-top:8px">
+      <input type="password" id="v2KeyInput" class="v2-input v2-key" placeholder="วาง API key (AIza…)" autocomplete="off" spellcheck="false">
+      <button class="v2-btn primary" id="v2KeySave">บันทึก</button>
+      <button class="v2-btn" id="v2KeyTest">ทดสอบกุญแจ</button>
+      <button class="v2-btn danger" id="v2KeyDel">ลบกุญแจ</button>
+    </div>
+    <div class="v2-row" style="margin-top:6px"><span id="v2KeyMsg" class="v2-muted"></span></div>
+    <div class="v2-muted" style="margin-top:6px">กุญแจเก็บฝั่งเซิร์ฟเวอร์ (ไม่เก็บในเบราว์เซอร์ · ไม่แสดงเต็มอีก · ไม่อยู่ใน Log) · ตั้งใน Google Cloud ให้จำกัดเฉพาะ Cloud Vision API และ IP ของโรงงาน</div>
+  </section>
+
+  <!-- ② อัปโหลด -->
+  <section class="v2-card">
+    <h3>② ไฟล์ที่จะเทียบ</h3>
+    <div class="v2-row">
+      <label>🅰 ไฟล์ต้นฉบับ <input type="file" id="v2FileA" accept=".pdf,.jpg,.jpeg,.png,.webp,.tif,.tiff,.bmp"></label>
+      <label>🅱 ไฟล์ที่ตรวจ <input type="file" id="v2FileB" accept=".pdf,.jpg,.jpeg,.png,.webp,.tif,.tiff,.bmp"></label>
+      <button class="v2-btn primary" id="v2Upload">เริ่มงานใหม่</button>
+      <span id="v2UpMsg" class="v2-muted"></span>
+    </div>
+    <div class="v2-row" style="margin-top:8px">
+      <label>หรือเปิดงานเดิม <select id="v2Recent" class="v2-input"><option value="">— เลือก —</option></select></label>
+    </div>
+  </section>
+
+  <!-- ③ วาดโซน -->
+  <section class="v2-card v2-hidden" id="v2DrawCard">
+    <h3>③ วาดโซนคู่ <span class="v2-muted" id="v2JobLabel"></span></h3>
+    <div class="v2-muted">ลากกรอบบน 🅰 แล้วลากกรอบที่ตรงกันบน 🅱 (1 คู่ = 1 โซนต่อฝั่ง · สูงสุด 8 คู่) — ส่งให้ Google เฉพาะภาพในกรอบเท่านั้น · ลากกรอบให้ครอบบรรทัดเต็ม ๆ ไม่ตัดผ่านตัวหนังสือ</div>
+    <div class="v2-panes" style="margin-top:10px">
+      <div>
+        <div class="v2-pane-h"><b>🅰 <span id="v2NameA"></span></b><label class="v2-muted">หน้า <select id="v2PageA" class="v2-input"></select></label></div>
+        <div class="v2-stage" id="v2StageA"><img id="v2ImgA" alt="ภาพตัวอย่างไฟล์ A"><div class="v2-ov" data-side="a"></div></div>
+      </div>
+      <div>
+        <div class="v2-pane-h"><b>🅱 <span id="v2NameB"></span></b><label class="v2-muted">หน้า <select id="v2PageB" class="v2-input"></select></label></div>
+        <div class="v2-stage" id="v2StageB"><img id="v2ImgB" alt="ภาพตัวอย่างไฟล์ B"><div class="v2-ov" data-side="b"></div></div>
+      </div>
+    </div>
+    <div class="v2-pairs" id="v2Pairs"></div>
+    <div class="v2-row" style="margin-top:10px">
+      <button class="v2-btn primary" id="v2Run">ตรวจ</button>
+      <button class="v2-btn" id="v2Clear">ล้างโซนทั้งหมด</button>
+      <span id="v2RunMsg" class="v2-muted"></span>
+    </div>
+  </section>
+
+  <!-- ④ ผล -->
+  <section class="v2-card v2-hidden" id="v2ResCard">
+    <h3>④ ผลการตรวจ</h3>
+    <div id="v2Verdict"></div>
+    <div id="v2Warn"></div>
+    <div class="v2-row v2-legend" style="margin-top:10px">
+      <span><i style="border-color:#dc2626"></i>ต่าง (มั่นใจ)</span>
+      <span><i style="border-color:#d97706;border-style:dashed"></i>ไม่มั่นใจ — ดูด้วยตา</span>
+      <label><input type="checkbox" id="v2ShowOcr"> แสดงกรอบบรรทัดที่ OCR อ่านได้</label>
+      <label><input type="checkbox" id="v2ShowSkip" checked> แสดงพื้นที่ที่ไม่ได้ตรวจ (ภาพ/บาร์โค้ด)</label>
+    </div>
+    <div id="v2PairsRes"></div>
+  </section>
+
+  <!-- ⑤ Log -->
+  <section class="v2-card v2-hidden" id="v2LogCard">
+    <h3>⑤ Log สำหรับวิเคราะห์</h3>
+    <div class="v2-muted">กด “คัดลอก Log” แล้ววางส่งให้ Claude ได้ทันที — มีทุกค่าที่ใช้ตัดสิน และไม่มี API key</div>
+    <div class="v2-row" style="margin:8px 0">
+      <button class="v2-btn primary" id="v2CopyLog">คัดลอก Log</button>
+      <a class="v2-btn" id="v2DlLog" href="#">ดาวน์โหลด log.txt</a>
+      <a class="v2-btn" id="v2DlJson" href="#" download>ดาวน์โหลด result.json</a>
+      <span id="v2RawLinks" class="v2-muted"></span>
+      <span id="v2CopyMsg" class="v2-muted"></span>
+    </div>
+    <textarea class="v2-log" id="v2Log" readonly spellcheck="false"></textarea>
+  </section>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/artwork_v2.js') }}?v={{ v2_version }}"></script>
+{% endblock %}

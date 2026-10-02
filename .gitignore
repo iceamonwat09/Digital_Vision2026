@@ -65,6 +65,8 @@ data/label_paper/skus/*/master_*dpi.png
 # Artwork Proof Check — runtime data, not source
 # (zone templates + brand vocab are kept in git so the team shares them)
 data/artwork_check/inspections/
+# Artwork V2 — งาน + API key ของ Cloud Vision (ห้ามขึ้น git เด็ดขาด)
+data/artwork_v2/
 
 # Auth — JWT signing secret is generated per deployment, never commit it
 data/auth/

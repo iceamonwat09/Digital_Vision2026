@@ -1,0 +1,239 @@
+"""อ่านไฟล์ต้นฉบับ (PDF / ภาพ) · ภาพตัวอย่างสำหรับวาดโซน · เรนเดอร์ภาพโซนที่จะส่ง
+
+หลักการ: **ส่งเฉพาะพิกเซลของโซน** — PDF ถูกเรนเดอร์เป็นภาพเสมอ จึงไม่มี
+ข้อความที่มองไม่เห็นใน PDF ติดไปด้วย (ข้อความซ่อนไม่มีหมึกบนภาพ)
+
+พิกัดโซนทุกที่เป็นสัดส่วน ``[x, y, w, h]`` (0..1) ของหน้า/ภาพ ที่ **หมุนตาม
+EXIF แล้ว** (ภาพที่ผู้ใช้เห็นบนจอ = ภาพที่ใช้คำนวณ)
+"""
+
+from __future__ import annotations
+
+import hashlib
+import io
+import math
+import os
+from typing import List, Optional, Tuple
+
+import numpy as np
+
+try:
+    import fitz  # PyMuPDF
+except ImportError:          # pragma: no cover
+    fitz = None
+
+from PIL import Image, ImageOps
+
+from . import config
+
+PDF_EXT = (".pdf",)
+IMAGE_EXT = (".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tif", ".tiff")
+
+# กันไฟล์ภาพปลอมที่ประกาศขนาดใหญ่มาก (decompression bomb) — 200 MP พอสำหรับกล้อง
+Image.MAX_IMAGE_PIXELS = 200_000_000
+
+
+def sha1_bytes(b: bytes) -> str:
+    return hashlib.sha1(b).hexdigest()
+
+
+def clamp_bbox(bbox) -> Optional[List[float]]:
+    """ตรวจ/ตัด bbox ให้อยู่ใน 0..1 — คืน ``None`` ถ้าใช้ไม่ได้"""
+    try:
+        x, y, w, h = [float(v) for v in bbox]
+    except (TypeError, ValueError):
+        return None
+    if not all(math.isfinite(v) for v in (x, y, w, h)):
+        return None
+    x0, y0 = max(0.0, min(1.0, x)), max(0.0, min(1.0, y))
+    x1, y1 = max(0.0, min(1.0, x + w)), max(0.0, min(1.0, y + h))
+    if x1 - x0 < 0.002 or y1 - y0 < 0.002:
+        return None
+    return [round(x0, 6), round(y0, 6), round(x1 - x0, 6), round(y1 - y0, 6)]
+
+
+class Source:
+    """ไฟล์ต้นฉบับหนึ่งฝั่ง (A หรือ B)"""
+
+    def __init__(self, path: str):
+        self.path = path
+        ext = os.path.splitext(path)[1].lower()
+        self.is_pdf = ext in PDF_EXT
+        self.page_count = 1
+        self.pages_pt: List[Tuple[float, float]] = []
+        self.exif_orientation: Optional[int] = None
+        self.raw_size: Tuple[int, int] = (0, 0)      # ก่อนหมุน EXIF
+        self._img: Optional[np.ndarray] = None       # BGR หลังหมุน EXIF
+        if self.is_pdf:
+            if fitz is None:
+                raise RuntimeError("ไม่ได้ติดตั้ง PyMuPDF")
+            with fitz.open(path) as doc:
+                if doc.needs_pass:
+                    raise ValueError("PDF ติดรหัสผ่าน — เปิดไม่ได้")
+                self.page_count = doc.page_count
+                if self.page_count < 1:
+                    raise ValueError("PDF ไม่มีหน้า")
+                self.pages_pt = [(p.rect.width, p.rect.height) for p in doc]
+        elif ext in IMAGE_EXT:
+            with Image.open(path) as im:
+                self.raw_size = im.size
+                try:
+                    self.exif_orientation = im.getexif().get(0x0112)
+                except Exception:                      # noqa: BLE001
+                    self.exif_orientation = None
+                im2 = ImageOps.exif_transpose(im)      # หมุนตามที่กล้องบอก
+                im2 = im2.convert("RGB")
+                self._img = np.asarray(im2)[:, :, ::-1].copy()
+            h, w = self._img.shape[:2]
+            self.pages_pt = [(float(w), float(h))]     # หน่วยเป็น px สำหรับภาพ
+        else:
+            raise ValueError("ชนิดไฟล์ไม่รองรับ: %s" % ext)
+
+    # ── ข้อมูล ───────────────────────────────────────────────────────
+    def info(self) -> dict:
+        d = {"type": "pdf" if self.is_pdf else "image", "pages": self.page_count}
+        if self.is_pdf:
+            d["pages_pt"] = [[round(w, 2), round(h, 2)] for w, h in self.pages_pt]
+            d["pages_mm"] = [[round(w / 72 * 25.4, 1), round(h / 72 * 25.4, 1)]
+                             for w, h in self.pages_pt]
+        else:
+            h, w = self._img.shape[:2]
+            d["image_px"] = [w, h]
+            d["raw_px"] = list(self.raw_size)
+            d["exif_orientation"] = self.exif_orientation
+        return d
+
+    def _check_page(self, page: int) -> int:
+        page = int(page or 0)
+        if not (0 <= page < self.page_count):
+            raise ValueError("หน้า %d ไม่มีในไฟล์ (มี %d หน้า)" % (page + 1, self.page_count))
+        return page
+
+    # ── ภาพตัวอย่างสำหรับวาดโซน ───────────────────────────────────────
+    def preview(self, page: int = 0, max_side: Optional[int] = None) -> np.ndarray:
+        max_side = max_side or config.PREVIEW_MAX_SIDE
+        page = self._check_page(page)
+        if self.is_pdf:
+            w, h = self.pages_pt[page]
+            zoom = max_side / float(max(w, h))
+            with fitz.open(self.path) as doc:
+                pix = doc[page].get_pixmap(matrix=fitz.Matrix(zoom, zoom), alpha=False)
+            return _pix_to_bgr(pix)
+        img = self._img
+        h, w = img.shape[:2]
+        if max(w, h) <= max_side:
+            return img.copy()
+        s = max_side / float(max(w, h))
+        return _resize(img, s)
+
+    # ── ภาพโซนที่จะส่งให้ Vision ──────────────────────────────────────
+    def render_zone(self, page: int, bbox: List[float],
+                    scale: float = 1.0, max_side: Optional[int] = None) -> Tuple[np.ndarray, dict]:
+        """คืน ``(ภาพ BGR, ข้อมูล)`` · ``scale`` > 1 ใช้กับการอ่านซ้ำแบบซูม"""
+        page = self._check_page(page)
+        x, y, w, h = bbox
+        info: dict = {"warnings": []}
+        if self.is_pdf:
+            pw, ph = self.pages_pt[page]
+            w_in, h_in = w * pw / 72.0, h * ph / 72.0
+            dpi = float(config.PDF_ZONE_DPI) * scale
+            long_in = max(w_in, h_in)
+            if long_in * dpi < config.ZONE_MIN_LONG_SIDE * scale:
+                dpi = min(config.PDF_ZONE_DPI_MAX * scale,
+                          config.ZONE_MIN_LONG_SIDE * scale / long_in)
+            mp = w_in * h_in * dpi * dpi / 1e6
+            if mp > config.MAX_IMAGE_MP:
+                dpi = math.sqrt(config.MAX_IMAGE_MP * 1e6 / (w_in * h_in))
+                info["warnings"].append("ลด dpi ให้ไม่เกิน %.0f MP" % config.MAX_IMAGE_MP)
+            if max_side and long_in * dpi > max_side:
+                dpi = max_side / long_in
+            clip = fitz.Rect(x * pw, y * ph, (x + w) * pw, (y + h) * ph)
+            with fitz.open(self.path) as doc:
+                pix = doc[page].get_pixmap(matrix=fitz.Matrix(dpi / 72, dpi / 72),
+                                           clip=clip, alpha=False)
+            img = _pix_to_bgr(pix)
+            info.update({"dpi": round(dpi, 1),
+                         "zone_mm": [round(w_in * 25.4, 1), round(h_in * 25.4, 1)]})
+        else:
+            full = self._img
+            H, W = full.shape[:2]
+            x0, y0 = int(round(x * W)), int(round(y * H))
+            x1, y1 = int(round((x + w) * W)), int(round((y + h) * H))
+            img = full[max(0, y0):min(H, y1), max(0, x0):min(W, x1)].copy()
+            s = 1.0
+            mp = img.shape[0] * img.shape[1] / 1e6
+            if mp > config.MAX_IMAGE_MP:
+                s = math.sqrt(config.MAX_IMAGE_MP / mp)
+                info["warnings"].append("ย่อภาพถ่ายให้ไม่เกิน %.0f MP" % config.MAX_IMAGE_MP)
+            if max_side and max(img.shape[:2]) * s > max_side:
+                s = max_side / float(max(img.shape[:2]))
+            if s < 1.0:
+                img = _resize(img, s)
+            info["image_scale"] = round(s, 4)
+            info["zone_src_px"] = [x1 - x0, y1 - y0]
+            if max(img.shape[:2]) < 1024 and scale <= 1.0:
+                info["warnings"].append(
+                    "ภาพโซนเล็ก (ด้านยาว %d px) — Vision แนะนำอย่างน้อย 1024 px"
+                    % max(img.shape[:2]))
+        if img.size == 0:
+            raise ValueError("โซนว่าง (อยู่นอกภาพ)")
+        info["px"] = [int(img.shape[1]), int(img.shape[0])]
+        info["mp"] = round(img.shape[0] * img.shape[1] / 1e6, 2)
+        return img, info
+
+
+def _pix_to_bgr(pix) -> np.ndarray:
+    img = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width, pix.n)
+    if pix.n == 1:
+        img = np.repeat(img, 3, axis=2)
+    elif pix.n == 4:
+        img = img[:, :, :3]
+    return img[:, :, ::-1].copy()
+
+
+def _resize(img: np.ndarray, s: float) -> np.ndarray:
+    h, w = img.shape[:2]
+    nw, nh = max(1, int(round(w * s))), max(1, int(round(h * s)))
+    im = Image.fromarray(img[:, :, ::-1])
+    im = im.resize((nw, nh), Image.LANCZOS)
+    return np.asarray(im)[:, :, ::-1].copy()
+
+
+def encode_jpeg(img: np.ndarray, quality: int) -> bytes:
+    """JPEG แบบไม่ลดความละเอียดสี (4:4:4) — ตัวหนังสือสีเล็ก ๆ ไม่เลือนขอบ"""
+    buf = io.BytesIO()
+    Image.fromarray(img[:, :, ::-1]).save(buf, format="JPEG", quality=int(quality),
+                                          subsampling=0)
+    return buf.getvalue()
+
+
+def encode_png(img: np.ndarray) -> bytes:
+    buf = io.BytesIO()
+    Image.fromarray(img[:, :, ::-1]).save(buf, format="PNG", optimize=False)
+    return buf.getvalue()
+
+
+def fit_jpeg(img: np.ndarray, max_bytes: int) -> Tuple[bytes, np.ndarray, dict]:
+    """เข้ารหัสให้ไม่เกิน ``max_bytes`` — ลดคุณภาพก่อน แล้วค่อยย่อ (และบอกเสมอ)
+
+    คืน ``(jpeg, ภาพที่เข้ารหัสจริง, ข้อมูล)`` — ภาพที่คืนคือภาพที่ Vision เห็น
+    จึงต้องใช้ภาพนี้วาดกรอบ ไม่ใช่ภาพก่อนย่อ
+    """
+    info = {"warnings": [], "downscale": 1.0}
+    for q in config.JPEG_QUALITIES:
+        data = encode_jpeg(img, q)
+        if len(data) <= max_bytes:
+            info["quality"] = q
+            return data, img, info
+    # ทุกคุณภาพยังเกิน ⇒ ย่อภาพ (ไม่เงียบ — ใส่คำเตือนลง Log/หน้าเว็บ)
+    cur, q = img, config.JPEG_QUALITIES[-1]
+    for _ in range(8):
+        s = max(0.3, math.sqrt(max_bytes / float(len(data))) * 0.95)
+        cur = _resize(cur, s)
+        info["downscale"] = round(info["downscale"] * s, 4)
+        data = encode_jpeg(cur, q)
+        if len(data) <= max_bytes:
+            break
+    info["quality"] = q
+    info["warnings"].append("ไฟล์ใหญ่เกินขีดคำขอ — ย่อภาพเหลือ %.0f%%" % (info["downscale"] * 100))
+    return data, cur, info
