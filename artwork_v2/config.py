@@ -71,10 +71,13 @@ PREVIEW_MAX_SIDE = _i("ARTWORK_V2_PREVIEW_MAX_SIDE", "2000")
 #                ไม่ต่ำกว่าแบบมาตรฐานเด็ดขาด · ภาพถ่ายส่งพิกเซลต้นฉบับอยู่แล้ว = เหมือนเดิม
 #   "standard" = 400 dpi แบบเดิมเป๊ะ (ทุกไบต์)
 # หน้าเว็บเลือกได้ต่อรอบ (ช่อง "ภาพที่ส่ง") — ค่านี้คือค่าที่เลือกไว้ตอนเปิดหน้า
+# ค่าเริ่มต้นกลับเป็น "standard" (3 ต.ค. รอบ 4): วัดบนสถานีแล้ว "max" แย่ลงทุกตัวชี้วัด —
+# แถวตารางถูกตัดมากขึ้น · ความมั่นใจเฉลี่ย 0.974→0.957 · เหลือง 2→8 · แดงปลอม 0→1 · ช้าลง 2.6 เท่า
+# (ชุดข้อมูล station_runs/avoderm_m1m2_run003_max)
 SHARPNESS_MODES = ("max", "standard")
-SHARPNESS = os.getenv("ARTWORK_V2_SHARPNESS", "max").strip().lower()
+SHARPNESS = os.getenv("ARTWORK_V2_SHARPNESS", "standard").strip().lower()
 if SHARPNESS not in SHARPNESS_MODES:
-    SHARPNESS = "max"
+    SHARPNESS = "standard"
 SHARP_FILL = _f("ARTWORK_V2_SHARP_FILL", "0.92")      # เป้าใช้งบไบต์กี่ส่วน (เผื่อคลาด)
 SHARP_MAX_RENDERS = _i("ARTWORK_V2_SHARP_MAX_RENDERS", "4")
 

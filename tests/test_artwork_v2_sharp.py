@@ -256,8 +256,9 @@ def test_unknown_mode_falls_back_to_station_default(monkeypatch):
     assert pipeline.norm_sharpness("MAX") == "max"
 
 
-def test_default_mode_is_max():
-    assert config.SHARPNESS == "max"
+def test_default_mode_is_standard():
+    # วัดบนสถานี: "max" แย่ลงทุกตัวชี้วัด (ชุด run003_max) ⇒ ค่าเริ่มต้นกลับเป็นภาพเดิม
+    assert config.SHARPNESS == "standard"
     assert "SHARPNESS" in pipeline.settings_snapshot()
 
 
@@ -286,7 +287,7 @@ def test_route_passes_mode_and_page_has_selector(monkeypatch):
         return {"run": "run_001", "verdict": "PASS", "stage": {}}
     monkeypatch.setattr(pipeline, "run", fake_run)
     html = c.get("/artwork_v2").get_data(as_text=True)
-    assert 'id="v2Sharp"' in html and '<option value="max" selected>' in html
+    assert 'id="v2Sharp"' in html and '<option value="standard" selected>' in html
     jid = jobs.create(("a.pdf", _tiny_pdf()),
                       ("b.pdf", _tiny_pdf()))["id"]
     r = c.post("/api/artwork_v2/jobs/%s/run" % jid, json={"pairs": [], "sharpness": "standard"})
