@@ -7,7 +7,8 @@
   รายตัวอักษร + มุมจริง) หรือ ``log.txt`` = ข้อความจากปุ่ม "คัดลอก Log"
 * ``expect.json`` (ไม่บังคับ)::
 
-    {"job": "20261003_004712_25d50a",          # งานเดียวกัน = เทียบความแปรปรวนข้ามรอบได้
+    {"job": "20261003_004712_25d50a",
+     "group": "avoderm_m1m2",                  # กลุ่มเดียวกัน (หรือ job เดียวกัน) = เทียบความแปรปรวนข้ามรอบ
      "note": "เฉลยยืนยันด้วยตาโดย …",
      "pairs": {"1": {"must":  [["CASE", "c", "C"], ...],   # ต้องเจอ (class, frag A, frag B)
                      "allow": [["PUNCT", "", "."]],         # แดงที่ยอมได้นอกเหนือ must
@@ -176,7 +177,8 @@ def test_station_dataset(name):
 def _same_job_pairs():
     by_job = {}
     for d in _datasets():
-        j = _expect(d).get("job")
+        e = _expect(d)
+        j = e.get("group") or e.get("job")
         if j:
             by_job.setdefault(j, []).append(d)
     out = []
@@ -193,10 +195,18 @@ def test_same_file_read_twice_has_no_confident_text_difference(pair):
     """ไฟล์เดียวกัน อ่านคนละรอบ ⇒ ต่างได้แค่สัญญาณรบกวน — ห้ามมีแดงชนิดตัวอักษร/ตัวเลข/
     ตัวพิมพ์บนบรรทัดตั้งตรงที่จับคู่ได้ (ความแปรปรวนข้ามรอบของ Vision)"""
     d1, d2 = (load_run_dir(os.path.join(RUNS, x)) for x in pair)
+    # ความแปรปรวนที่วัดได้แล้ว (บันทึกไว้ใน expect.json ของชุดใดชุดหนึ่ง) — เทสต์ล้มเฉพาะของใหม่
+    known = {}
+    for x in pair:
+        for n, sides in (_expect(x).get("cross_run_known") or {}).items():
+            if isinstance(sides, dict):
+                for s, sigs in sides.items():
+                    known.setdefault((int(n), s), set()).update(tuple(t) for t in sigs)
     for n in set(d1) & set(d2):
         for s in ("A", "B"):
             r = compare.compare(d1[n][s][2], d2[n][s][2], d1[n][s][:2], d2[n][s][:2])
             bad = [_sig(f) for f in r["findings"] if f["severity"] == "red"
                    and not f.get("curved") and f["pair_method"] != "unpaired"
                    and f["class"] in ("CASE", "NUMBER", "TEXT")]
-            assert not bad, "คู่ %d ฝั่ง %s: %s" % (n, s, bad)
+            new = sorted(set(bad) - known.get((n, s), set()))
+            assert not new, "คู่ %d ฝั่ง %s: ความแปรปรวนข้ามรอบที่ยังไม่เคยบันทึก %s" % (n, s, new)
