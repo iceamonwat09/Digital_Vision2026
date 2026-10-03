@@ -334,7 +334,7 @@
     try {
       const r = await api("/api/artwork_v2/jobs/" + S.job.id + "/run", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pairs: ready }),
+        body: JSON.stringify({ pairs: ready, sharpness: $("v2Sharp") ? $("v2Sharp").value : undefined }),
       });
       $("v2RunMsg").textContent = "เสร็จใน " + ((Date.now() - t0) / 1000).toFixed(1) + " วินาที";
       showResult(r);
@@ -428,7 +428,9 @@
     $("v2LogCard").classList.remove("v2-hidden");
     $("v2Verdict").innerHTML = '<div class="v2-verdict v2-v-' + esc(r.verdict) + '">' + esc(r.verdict) + " — " +
       esc(r.verdict_th) + "<small>" + (r.reasons || []).map(esc).join(" · ") + " · รอบ " + esc(r.run) +
-      " · " + esc(r.at) + (r.version ? " · รุ่น " + esc(r.version) : "") + "</small></div>";
+      " · " + esc(r.at) + (r.version ? " · รุ่น " + esc(r.version) : "") +
+      (r.sharpness ? " · ภาพที่ส่ง: " + (r.sharpness === "max" ? "คมสูงสุด" : "มาตรฐาน 400 dpi") : "") +
+      "</small></div>";
     $("v2Warn").innerHTML = (r.warnings && r.warnings.length)
       ? '<div class="v2-warnbox">⚠️ ' + r.warnings.map(esc).join("<br>⚠️ ") + "</div>" : "";
     renderPairs();

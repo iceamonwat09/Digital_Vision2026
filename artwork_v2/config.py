@@ -65,6 +65,19 @@ PDF_ZONE_DPI_MAX = _i("ARTWORK_V2_PDF_ZONE_DPI_MAX", "1200")
 ZONE_MIN_LONG_SIDE = _i("ARTWORK_V2_ZONE_MIN_LONG_SIDE", "1600")
 PREVIEW_MAX_SIDE = _i("ARTWORK_V2_PREVIEW_MAX_SIDE", "2000")
 
+# ความคมของภาพที่ส่ง (ผู้ใช้สั่ง 3 ต.ค.: "ภาพที่ส่งต้องคมชัดที่สุดเท่าที่ทำได้")
+#   "max"      = ไฟล์ PDF: ไล่ dpi ขึ้นทีละฝั่งจนเต็มงบ — ภาพคู่ A/B ยังต้องอยู่คำขอเดียวกัน
+#                (≤ MAX_REQUEST_BYTES) · ไม่เกิน MAX_IMAGE_MP · ไม่เกิน PDF_ZONE_DPI_MAX ·
+#                ไม่ต่ำกว่าแบบมาตรฐานเด็ดขาด · ภาพถ่ายส่งพิกเซลต้นฉบับอยู่แล้ว = เหมือนเดิม
+#   "standard" = 400 dpi แบบเดิมเป๊ะ (ทุกไบต์)
+# หน้าเว็บเลือกได้ต่อรอบ (ช่อง "ภาพที่ส่ง") — ค่านี้คือค่าที่เลือกไว้ตอนเปิดหน้า
+SHARPNESS_MODES = ("max", "standard")
+SHARPNESS = os.getenv("ARTWORK_V2_SHARPNESS", "max").strip().lower()
+if SHARPNESS not in SHARPNESS_MODES:
+    SHARPNESS = "max"
+SHARP_FILL = _f("ARTWORK_V2_SHARP_FILL", "0.92")      # เป้าใช้งบไบต์กี่ส่วน (เผื่อคลาด)
+SHARP_MAX_RENDERS = _i("ARTWORK_V2_SHARP_MAX_RENDERS", "4")
+
 # ── การเทียบ ─────────────────────────────────────────────────────────
 CONF_FAIL = _f("ARTWORK_V2_CONF_FAIL", "0.80")        # ต่ำกว่านี้ = ไม่มั่นใจ (เหลือง)
 CONF_LOW = _f("ARTWORK_V2_CONF_LOW", "0.60")          # ใช้นับสัดส่วนตัวอักษรความมั่นใจต่ำ

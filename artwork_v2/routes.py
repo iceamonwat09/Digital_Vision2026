@@ -71,7 +71,8 @@ def _err(msg, code=400):
 @artwork_v2_bp.route("/artwork_v2")
 def page():
     return render_template("artwork_v2.html", v2_version=VERSION,
-                           can_manage_key=_is_admin(_viewer()))
+                           can_manage_key=_is_admin(_viewer()),
+                           v2_sharpness=config.SHARPNESS)
 
 
 # ── API key ──────────────────────────────────────────────────────────
@@ -194,7 +195,7 @@ def job_preview(job_id, side, page):
 def job_run(job_id):
     body = request.get_json(silent=True) or {}
     try:
-        res = pipeline.run(job_id, body.get("pairs"))
+        res = pipeline.run(job_id, body.get("pairs"), sharpness=body.get("sharpness"))
     except ValueError as e:
         return _err(str(e))
     except Exception as e:                       # noqa: BLE001

@@ -110,9 +110,16 @@ def _crop_contains(lines: List[dict], target: str) -> float:
     return m / float(len(key))
 
 
+def norm_sharpness(v) -> str:
+    """ค่าที่ไม่รู้จัก/ไม่ส่งมา = ค่าตั้งของเครื่อง (``config.SHARPNESS``)"""
+    v = str(v or "").strip().lower()
+    return v if v in config.SHARPNESS_MODES else config.SHARPNESS
+
+
 def run(job_id: str, raw_pairs, poster: Optional[Callable] = None,
-        progress: Optional[Callable] = None) -> dict:
+        progress: Optional[Callable] = None, sharpness: Optional[str] = None) -> dict:
     t_all = time.time()
+    sharp = norm_sharpness(sharpness)
     stage: Dict[str, int] = {}
     warnings: List[str] = []
     pairs_in = parse_pairs(raw_pairs)
@@ -139,8 +146,19 @@ def run(job_id: str, raw_pairs, poster: Optional[Callable] = None,
         grp = []
         for s in ("a", "b"):
             z = p[s]
-            img, rinfo = srcs[s].render_zone(z["page"], z["bbox"])
-            jpeg, sent, einfo = imaging.fit_jpeg(img, config.MAX_IMAGE_BYTES)
+            got = None
+            if sharp == "max":
+                got = imaging.render_zone_sharp(srcs[s], z["page"], z["bbox"],
+                                                imaging.pair_image_budget(2))
+            if got is not None:
+                sent, jpeg, rinfo = got
+                einfo = {"warnings": [], "downscale": 1.0,
+                         "quality": config.JPEG_QUALITIES[0]}
+            else:
+                img, rinfo = srcs[s].render_zone(z["page"], z["bbox"])
+                rinfo["sharpness"] = "standard" if sharp == "standard" else (
+                    "max→standard" if srcs[s].is_pdf else "source_pixels")
+                jpeg, sent, einfo = imaging.fit_jpeg(img, config.MAX_IMAGE_BYTES)
             fname = "p%d_%s.jpg" % (n, s)
             with open(os.path.join(rd, "img", fname), "wb") as f:
                 f.write(jpeg)
@@ -219,6 +237,7 @@ def run(job_id: str, raw_pairs, poster: Optional[Callable] = None,
     # ── 4) อ่านซ้ำแบบซูมเฉพาะจุดแดง ────────────────────────────────────
     t0 = time.time()
     reread_log = _reread(pairs, srcs, rd, poster, key, calls, warnings, say)
+    reread_log["sharpness"] = sharp
     stage["reread_ms"] = int((time.time() - t0) * 1000)
 
     # ── 5) ผลตัดสิน + บันทึก ─────────────────────────────────────────
@@ -242,6 +261,7 @@ def run(job_id: str, raw_pairs, poster: Optional[Callable] = None,
         "version": VERSION, "job": job_id, "run": run_name,
         "at": time.strftime("%Y-%m-%d %H:%M:%S"),
         "verdict": verdict, "verdict_th": VERDICT_TH[verdict], "reasons": reasons,
+        "sharpness": sharp,
         "pairs": pairs, "calls": calls, "reread": reread_log,
         "warnings": warnings, "stage": stage,
         "key": {"source": key_src, "masked": keystore.mask(key), "length": len(key)},
@@ -272,6 +292,7 @@ def settings_snapshot() -> dict:
         "ENDPOINT", "MODEL", "LANGUAGE_HINTS", "TIMEOUT_S", "RETRIES",
         "MAX_REQUEST_BYTES", "MAX_IMAGE_BYTES", "MAX_IMAGE_MP", "JPEG_QUALITIES",
         "PDF_ZONE_DPI", "PDF_ZONE_DPI_MAX", "ZONE_MIN_LONG_SIDE",
+        "SHARPNESS", "SHARP_FILL", "SHARP_MAX_RENDERS",
         "CONF_FAIL", "CONF_LOW", "COVERAGE_MIN", "PAIR_MIN_SIM", "PAIR_MIN_RUN",
         "PAIR_MAX_DIST", "ROW_MERGE_ENABLED", "ROW_MAX_ANGLE",
         "PUNCT_CAN_FAIL", "CURVED_GROUP_ENABLED", "TILT_ANGLE", "CURVED_NEIGHBOR_MAX_CHARS",
@@ -359,9 +380,20 @@ def _reread(pairs, srcs, rd, poster, key, calls, warnings, say) -> dict:
         rid = "rr%d" % (len(todo) + 1)
         for s in ("a", "b"):
             side = pr["sides"][s]
-            img, info = srcs[s].render_zone(side["page"], crops[s],
-                                            scale=config.REREAD_SCALE,
-                                            max_side=config.REREAD_MAX_SIDE)
+            rnd = side.get("render") or {}
+            if rnd.get("sharpness") == "max" and rnd.get("dpi"):
+                # โหมดคมสูงสุด: อ่านซ้ำที่ REREAD_SCALE เท่าของ dpi ที่ใช้จริงในรอบหลัก
+                # (ไม่ใช่ของ 400 dpi) · เพดาน PDF_ZONE_DPI_MAX แทนเพดานด้านยาว —
+                # ไม่งั้นครอปซูมอาจได้ dpi ต่ำกว่ารอบหลัก = "ซูม" ที่หยาบกว่าเดิม
+                img, info = srcs[s].render_zone(side["page"], crops[s],
+                                                scale=config.REREAD_SCALE,
+                                                base_dpi=float(rnd["dpi"]),
+                                                dpi_cap=max(float(config.PDF_ZONE_DPI_MAX),
+                                                            float(rnd["dpi"])))
+            else:
+                img, info = srcs[s].render_zone(side["page"], crops[s],
+                                                scale=config.REREAD_SCALE,
+                                                max_side=config.REREAD_MAX_SIDE)
             jpeg, sent, einfo = imaging.fit_jpeg(img, config.MAX_IMAGE_BYTES)
             fname = "%s_%s.jpg" % (rid, s)
             with open(os.path.join(rd, "img", fname), "wb") as fh:

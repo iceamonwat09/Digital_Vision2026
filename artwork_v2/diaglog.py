@@ -42,6 +42,9 @@ def build_text(r: dict) -> str:
     a("time_ms: render=%s vision=%s compare=%s reread=%s total=%s" % (
         st.get("render_ms"), st.get("vision_ms"), st.get("compare_ms"),
         st.get("reread_ms"), st.get("total_ms")))
+    a("sharpness=%s (ภาพที่ส่ง: %s)" % (
+        r.get("sharpness", "standard"),
+        "คมสูงสุด" if r.get("sharpness") == "max" else "มาตรฐาน 400 dpi"))
     k = r["key"]
     a("api_key: source=%s masked=%s length=%s" % (k["source"] or "NONE", k["masked"] or "-",
                                                   k["length"]))
@@ -91,6 +94,13 @@ def build_text(r: dict) -> str:
                   sd["sent_px"], en.get("quality"), en.get("downscale"), sd["jpeg_bytes"],
                   sd["sha1"], sd.get("request_index"), sd.get("ok"),
                   (" ERROR=" + sd["error"]) if sd.get("error") else ""))
+            if rd.get("sharpness"):
+                tries = " ".join("%.0f:%dk%s" % (t["dpi"], t["bytes"] // 1000,
+                                                 "" if t["fit"] else "(เกินงบ)")
+                                 for t in rd.get("tries", []))
+                a("     sharp: mode=%s base_dpi=%s → dpi=%s (×%s) budget=%sk tries=[%s]" % (
+                    rd["sharpness"], rd.get("base_dpi", rd.get("dpi", "-")), rd.get("dpi", "-"),
+                    rd.get("gain", 1.0), (rd.get("budget_bytes") or 0) // 1000 or "-", tries))
             stt = sd.get("stats")
             if stt:
                 a("     ocr: blocks=%s by_type=%s paragraphs=%s words=%s symbols=%s lines=%s "

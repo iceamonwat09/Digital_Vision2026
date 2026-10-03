@@ -128,15 +128,23 @@ class Source:
 
     # ── ภาพโซนที่จะส่งให้ Vision ──────────────────────────────────────
     def render_zone(self, page: int, bbox: List[float],
-                    scale: float = 1.0, max_side: Optional[int] = None) -> Tuple[np.ndarray, dict]:
-        """คืน ``(ภาพ BGR, ข้อมูล)`` · ``scale`` > 1 ใช้กับการอ่านซ้ำแบบซูม"""
+                    scale: float = 1.0, max_side: Optional[int] = None,
+                    base_dpi: Optional[float] = None,
+                    dpi_cap: Optional[float] = None) -> Tuple[np.ndarray, dict]:
+        """คืน ``(ภาพ BGR, ข้อมูล)`` · ``scale`` > 1 ใช้กับการอ่านซ้ำแบบซูม
+
+        ``base_dpi`` แทน ``PDF_ZONE_DPI`` (โหมดคมสูงสุด) · ``dpi_cap`` = เพดาน dpi
+        ไม่ส่งทั้งคู่ = เส้นทางเดิมเป๊ะ
+        """
         page = self._check_page(page)
         x, y, w, h = bbox
         info: dict = {"warnings": []}
         if self.is_pdf:
             pw, ph = self.pages_pt[page]
             w_in, h_in = w * pw / 72.0, h * ph / 72.0
-            dpi = float(config.PDF_ZONE_DPI) * scale
+            dpi = float(base_dpi or config.PDF_ZONE_DPI) * scale
+            if dpi_cap:
+                dpi = min(dpi, float(dpi_cap))
             long_in = max(w_in, h_in)
             if long_in * dpi < config.ZONE_MIN_LONG_SIDE * scale:
                 dpi = min(config.PDF_ZONE_DPI_MAX * scale,
@@ -180,6 +188,67 @@ class Source:
         info["px"] = [int(img.shape[1]), int(img.shape[0])]
         info["mp"] = round(img.shape[0] * img.shape[1] / 1e6, 2)
         return img, info
+
+
+def pair_image_budget(n: int = 2) -> int:
+    """ไบต์ JPEG สูงสุดต่อภาพ ที่ทำให้ ``n`` ภาพยังอยู่ในคำขอ Vision เดียวกันได้
+
+    สูตรเดียวกับ ``vision_client._item_cost`` (base64 = 4/3 เท่า + หัว JSON 400 ไบต์)
+    และขีด ``MAX_REQUEST_BYTES - 200`` ของ ``vision_client.pack`` — คู่ A/B ที่อยู่
+    คำขอเดียวกันถูกอ่านด้วยโมเดลรุ่นเดียวกันเสมอ
+    """
+    per_item = (config.MAX_REQUEST_BYTES - 200 - 4096) // max(1, int(n))
+    return max(0, (per_item - 400) // 4 * 3 - 3)
+
+
+def render_zone_sharp(src: "Source", page: int, bbox: List[float],
+                      max_bytes: int) -> Tuple[np.ndarray, bytes, dict]:
+    """โหมดคมสูงสุด — ไล่ dpi ขึ้นจนภาพ JPEG (คุณภาพสูงสุดในรายการ) เต็มงบ ``max_bytes``
+
+    * เริ่มจากภาพมาตรฐาน (``render_zone`` เดิม) ⇒ **ไม่มีทางได้ dpi ต่ำกว่าเดิม**
+    * เพดาน: ``PDF_ZONE_DPI_MAX`` · ``MAX_IMAGE_MP`` (ใน ``render_zone``)
+    * ไม่ย่อภาพ ไม่ลดคุณภาพ JPEG เพื่อให้ dpi สูงขึ้น — ความละเอียดได้จากการเรนเดอร์
+      vector ใหม่เท่านั้น
+    * ภาพถ่าย / ภาพมาตรฐานยังเกินงบ ⇒ คืน ``None`` ให้ผู้เรียกใช้เส้นทางเดิม
+
+    คืน ``(ภาพ, jpeg, ข้อมูล)`` หรือ ``None``
+    """
+    if not src.is_pdf:
+        return None
+    q = config.JPEG_QUALITIES[0]
+    img0, info0 = src.render_zone(page, bbox)
+    jpg0 = encode_jpeg(img0, q)
+    base_dpi = float(info0["dpi"])
+    if len(jpg0) > max_bytes:
+        return None
+    best = (base_dpi, img0, jpg0, info0)
+    tries = [{"dpi": round(base_dpi, 1), "bytes": len(jpg0), "fit": True}]
+    cap = float(config.PDF_ZONE_DPI_MAX)
+    target = max_bytes * config.SHARP_FILL
+    dpi, nbytes = base_dpi, len(jpg0)
+    k = 2.0          # ไบต์ ∝ dpi^k — เริ่มที่ 2 (ตามพื้นที่) แล้ววัดจริงจากสองจุดล่าสุด
+    for _ in range(max(0, config.SHARP_MAX_RENDERS - 1)):
+        nxt = min(cap, dpi * (target / float(max(1, nbytes))) ** (1.0 / k))
+        if nxt <= best[0] * 1.02:          # ขยับได้ไม่ถึง 2% — ไม่คุ้มเรนเดอร์ใหม่
+            break
+        img, info = src.render_zone(page, bbox, base_dpi=nxt, dpi_cap=cap)
+        jpg = encode_jpeg(img, q)
+        got = float(info["dpi"])
+        fit = len(jpg) <= max_bytes
+        tries.append({"dpi": round(got, 1), "bytes": len(jpg), "fit": fit})
+        if got > dpi * 1.01 and len(jpg) > nbytes:
+            k = min(2.0, max(1.0, math.log(len(jpg) / float(nbytes)) / math.log(got / dpi)))
+        dpi, nbytes = got, len(jpg)
+        if fit and got > best[0]:
+            best = (got, img, jpg, info)
+        if fit and (len(jpg) >= 0.85 * max_bytes or got >= cap - 0.5 or got < nxt - 0.5):
+            break                           # เต็มงบพอ / ชนเพดาน dpi / ชนเพดาน MP
+    _, img, jpg, info = best
+    info = dict(info)
+    info.update({"sharpness": "max", "base_dpi": round(base_dpi, 1),
+                 "budget_bytes": int(max_bytes), "tries": tries,
+                 "gain": round(float(info["dpi"]) / base_dpi, 3)})
+    return img, jpg, info
 
 
 def _pix_to_bgr(pix) -> np.ndarray:

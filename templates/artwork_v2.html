@@ -123,6 +123,11 @@
     <div class="v2-row" style="margin-top:10px">
       <button class="v2-btn primary" id="v2Run">ตรวจ</button>
       <button class="v2-btn" id="v2Clear">ล้างโซนทั้งหมด</button>
+      <label class="v2-muted" title="คมสูงสุด = เรนเดอร์ PDF ที่ dpi สูงสุดที่คู่ภาพยังส่งในคำขอเดียวกันได้ (ภาพถ่ายส่งพิกเซลต้นฉบับอยู่แล้ว)">ภาพที่ส่ง
+        <select id="v2Sharp" class="v2-input">
+          <option value="max"{% if v2_sharpness == "max" %} selected{% endif %}>คมสูงสุด</option>
+          <option value="standard"{% if v2_sharpness == "standard" %} selected{% endif %}>มาตรฐาน 400 dpi (เดิม)</option>
+        </select></label>
       <span id="v2RunMsg" class="v2-muted"></span>
     </div>
   </section>
