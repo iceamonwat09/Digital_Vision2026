@@ -125,6 +125,10 @@ def build_text(r: dict) -> str:
         a("  row_merges (%d) — ต่อแถวที่ OCR ตัดตรงเส้นตกแต่ง:" % len(rm))
         for m in rm:
             a("     %s: %s + %s" % (m["side"], _q(m["left"], 80), _q(m["right"], 80)))
+            if m.get("via") == "cross_side":
+                # บรรทัดแยก — รูปแบบบรรทัดบนต้องคงเดิม (ตัวโหลดชุดข้อมูลอ่านมัน)
+                a("        ↳ ต่อด้วยหลักฐานจากอีกฝั่ง (ใส่ … แทนจุดไข่ปลาที่ OCR ทิ้ง): %s"
+                  % _q(m.get("evidence") or "", 80))
         cl = p.get("curved_lines") or {}
         a("  curved_lines (เอียง > %s° จากแนวหลัก + เศษติดกัน): A=%s B=%s" % (
             _f(config.TILT_ANGLE, 0), cl.get("A"), cl.get("B")))

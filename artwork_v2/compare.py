@@ -19,6 +19,7 @@
 
 from __future__ import annotations
 
+import re
 import unicodedata
 from difflib import SequenceMatcher
 from typing import Dict, List, Optional, Tuple
@@ -112,6 +113,34 @@ def diff_key(text: str) -> Tuple[str, List[int]]:
     return k, st
 
 
+def line_key_map(ln: dict) -> Tuple[str, List[int], List[int]]:
+    """คีย์เทียบของบรรทัด — บรรทัดที่ต่อจากหลายชิ้น (``parts``) ทำคีย์ **ทีละชิ้น** แล้วต่อกัน
+
+    ถ้าทำคีย์จากข้อความที่ต่อแล้ว จุดเดี่ยวที่ต้นชิ้นขวา (``.294`` = จุดไข่ปลาที่ OCR อ่านได้
+    จุดเดียว) จะกลายเป็น "จุดกลางบรรทัด" แล้วถูกเทียบเป็นเครื่องหมาย (``SEAM_FILLER``)
+    """
+    parts = ln.get("parts")
+    if not (config.SEAM_FILLER and parts):
+        return diff_key_map(ln["text"])
+    key: List[str] = []
+    st: List[int] = []
+    en: List[int] = []
+    for off, txt in parts:
+        k, s0, e0 = diff_key_map(txt)
+        # จุดไข่ปลาที่คร่อมรอยต่อ ("(min)." + "..0.16%") = เส้นเดียวกัน — จุดท้ายชิ้นซ้าย
+        # ถูกนับเข้าเส้นตกแต่ง เหมือนตอนทำคีย์จากข้อความที่ต่อแล้ว
+        if k.startswith(FILLER) and key and key[-1] in FILLER_RUN:
+            key[-1] = FILLER
+        for c, a, b in zip(k, s0, e0):
+            if c == FILLER and key and key[-1] == FILLER:
+                en[-1] = off + b
+                continue
+            key.append(c)
+            st.append(off + a)
+            en.append(off + b)
+    return "".join(key), st, en
+
+
 def pair_key(text: str) -> str:
     out = []
     for ch in text:
@@ -158,7 +187,7 @@ def _prep(lines: List[dict], side: str = "", merges: Optional[list] = None) -> L
     rows = _merge_leader_rows(lines, side, merges)
     out = []
     for ln in _join_hyphenated(rows):
-        dk, st, en = diff_key_map(ln["text"])
+        dk, st, en = line_key_map(ln)
         if not dk:
             continue
         out.append(dict(ln, dk=dk, dk_idx=st, dk_end=en, pk=pair_key(ln["text"]),
@@ -189,8 +218,11 @@ def _merge_two(L: dict, M: dict) -> dict:
     cc = [c["conf"] for c in chars if c.get("conf") is not None]
     nl, nm = max(1, len(L["text"])), max(1, len(M["text"]))
     ca, cb = L.get("center") or (0.5, 0.5), M.get("center") or (0.5, 0.5)
+    off = len(L["text"]) + 1
+    parts = list(L.get("parts") or [(0, L["text"])])
+    parts += [(off + o, t) for o, t in (M.get("parts") or [(0, M["text"])])]
     out = dict(L)
-    out.update(chars=chars, text="".join(c["c"] for c in chars),
+    out.update(chars=chars, text="".join(c["c"] for c in chars), parts=parts,
                box=union([L.get("box"), M.get("box")]),
                center=((ca[0] * nl + cb[0] * nm) / (nl + nm), (ca[1] * nl + cb[1] * nm) / (nl + nm)),
                conf_mean=(sum(cc) / len(cc)) if cc else None,
@@ -214,7 +246,7 @@ def _merge_leader_rows(lines: List[dict], side: str = "", merges: Optional[list]
         return list(lines)
     rows = list(lines)
     while True:
-        keys = [diff_key_map(l["text"])[0] for l in rows]
+        keys = [line_key_map(l)[0] for l in rows]
         n = len(rows)
 
         def right_of(i):
@@ -263,6 +295,86 @@ def _merge_leader_rows(lines: List[dict], side: str = "", merges: Optional[list]
             return rows
 
 
+def _row_neighbor(rows: List[dict], i: int, right: bool) -> Optional[int]:
+    """เพื่อนบ้านติดกันบนแถวเดียวกัน (ขวา/ซ้าย) — กติกาเดียวกับ ``_merge_leader_rows``"""
+    best = None
+    for j in range(len(rows)):
+        if j == i or not rows[j].get("box") or not _same_row(rows[i], rows[j]):
+            continue
+        L, R = (rows[i], rows[j]) if right else (rows[j], rows[i])
+        gap = R["box"][0] - L["box"][2]
+        h = rows[i]["box"][3] - rows[i]["box"][1]
+        if gap < -0.3 * h:
+            continue
+        if best is None or gap < best[0]:
+            best = (gap, j)
+    return best[1] if best else None
+
+
+def _reprep(ln: dict) -> dict:
+    dk, st, en = line_key_map(ln)
+    return dict(ln, dk=dk, dk_idx=st, dk_end=en, pk=pair_key(ln["text"]),
+                letters=has_letters(ln["text"]))
+
+
+def _filler_piece(L: dict, M: dict) -> dict:
+    ca, cb = L.get("center") or (0.5, 0.5), M.get("center") or (0.5, 0.5)
+    return {"text": FILLER, "box": None, "center": ((ca[0] + cb[0]) / 2, (ca[1] + cb[1]) / 2),
+            "chars": [{"c": FILLER, "box": None, "conf": None, "synthetic": True}]}
+
+
+def _cross_join(X: List[dict], Y: List[dict], pairs, ux, side: str,
+                merges: Optional[list]) -> bool:
+    """ต่อแถวที่ฝั่ง ``X`` ถูกตัด โดยใช้ **อีกฝั่งเป็นหลักฐาน** (``CROSS_ROW_JOIN``)
+
+    กรณีจริง: ``Phosphorus (min)`` | ``0.16%`` — Vision ทิ้งจุดไข่ปลากลางแถว ช่องว่างจึง
+    กว้างกว่าช่องว่างระหว่างคอลัมน์ (265 vs 84 px) ⇒ ใช้ระยะห่างตัดสินไม่ได้ ⇒ ต่อเมื่อ:
+    * บรรทัดคู่ใน ``X`` ขาด "ส่วนหัวหรือท้าย" ที่ ``Y`` มี (``Y`` = ``X`` + ส่วนนั้น พอดี)
+    * มีบรรทัด **ไม่มีคู่** ใน ``X`` อยู่ติดกันบนแถวเดียวกัน (เพื่อนบ้านของกันและกัน · ตั้งตรง)
+    * ``Y`` มี **เส้นตกแต่งตรงรอยต่อ** (แถวตาราง) — ตำแหน่งนั้นคือที่ Vision ทิ้งจุดไป จึงใส่
+      เส้นตกแต่งให้ ``X`` ตรงนั้นด้วย (อักขระสังเคราะห์ ไม่มีกรอบ/ความมั่นใจ)
+    * ต่อแล้วคีย์ **เท่ากับ** ``Y`` ทุกตัวอักษร · ไม่เท่า = ไม่ต่อ
+    """
+    side_i = 0 if side == "A" else 1
+    for pr in pairs:
+        xi, yi = pr[side_i], pr[1 - side_i]
+        kx, ky = X[xi]["dk"], Y[yi]["dk"]
+        if len(ky) <= len(kx) or not _upright(X[xi]) or not X[xi].get("box"):
+            continue
+        if ky.startswith(kx):
+            frag, right = ky[len(kx):], True
+        elif ky.endswith(kx):
+            frag, right = ky[:len(ky) - len(kx)], False
+        else:
+            continue
+        core = frag.strip(FILLER)
+        # รอยต่อต้องเป็น **เส้นตกแต่ง** ในอีกฝั่ง (แถวตาราง "ชื่อ……ค่า" ที่ Vision ทิ้งจุดไป) —
+        # ไม่ต่อแถวทั่วไป เช่นเลขใต้บาร์โค้ด "0 5290700241 0" ที่อีกฝั่งอ่านตก "0" ตัวหน้า
+        seam_fill = frag.startswith(FILLER) if right else frag.endswith(FILLER)
+        if not core or not seam_fill:
+            continue
+        u = _row_neighbor(X, xi, right)
+        if u is None or u not in ux or X[u]["dk"] != core or not _upright(X[u]):
+            continue
+        if _row_neighbor(X, u, not right) != xi:
+            continue
+        L, M = (X[xi], X[u]) if right else (X[u], X[xi])
+        if not (L["dk"].endswith(FILLER) or M["dk"].startswith(FILLER)):
+            L = _merge_two(L, _filler_piece(L, M))
+        merged = _reprep(_merge_two(L, M))
+        if merged["dk"] != ky:
+            continue
+        merged["cross_joined"] = True
+        if merges is not None:
+            merges.append({"side": side, "left": (X[xi] if right else X[u])["text"],
+                           "right": (X[u] if right else X[xi])["text"],
+                           "via": "cross_side", "evidence": Y[yi]["text"]})
+        X[xi] = merged
+        del X[u]
+        return True
+    return False
+
+
 def _median_offset(A, B, pairs) -> Tuple[float, float]:
     """ค่ากลางของ (ตำแหน่ง B − ตำแหน่ง A) จากคู่ที่จับได้ด้วยข้อความ"""
     if not pairs:
@@ -298,7 +410,7 @@ def _join_hyphenated(lines: List[dict]) -> List[dict]:
             merged = dict(ln)
             merged.update(chars=chars, text="".join(c["c"] for c in chars),
                           box=union([ln["box"], nxt["box"]]), soft_hyphen=False,
-                          joined=True)
+                          joined=True, parts=None)
             out.append(merged)
             k += 2
             continue
@@ -373,13 +485,51 @@ def _is_punct(s: str) -> bool:
     return bool(s) and all(unicodedata.category(c)[0] in ("P", "S") for c in s)
 
 
-def classify(a_txt: str, b_txt: str, a_ctx: str, b_ctx: str) -> str:
+_FRAC_RE = re.compile(r"(?<![0-9/])(\d)/(\d{1,2})(?![0-9/])")
+
+
+def _has_vulgar(text: str) -> bool:
+    return any("VULGAR FRACTION" in unicodedata.name(c, "") or c == "\u2044" for c in text)
+
+
+def fraction_confusion(a: dict, b: dict, ops: tuple) -> bool:
+    """ความต่างทั้งบรรทัดอธิบายได้ด้วย "เศษส่วนถูกอ่านเป็น ตัวเศษ/ตัวส่วน/หาย" เท่านั้น
+
+    วัดจริง: ½ ตัวเดียวกัน Vision อ่านได้ ``½`` · ``1/2`` · ``2`` · ``1`` · หาย ⇒ แยกจากการแก้งาน
+    จริงด้วยข้อความไม่ได้ (``½``→``1`` ของจริงก็หน้าตาเดียวกัน) ⇒ เหลืองเสมอ ให้ตาตัดสิน
+    เงื่อนไขแคบ: ต้องมีเศษส่วนจริงบนฉลาก (อักษรเศษส่วน หรือ n/d หลักเดียวที่ n<d) ฝั่งใดฝั่งหนึ่ง
+    และเมื่อแทนเศษส่วนด้วยตัวเศษ/ตัวส่วน/ว่าง แล้ว **คีย์ทั้งบรรทัดเท่าอีกฝั่งพอดี**
+    """
+    i1, i2, j1, j2 = ops
+    for X, Y, x1, x2, tx in ((a["dk"], b["dk"], i1, i2, a["text"]),
+                             (b["dk"], a["dk"], j1, j2, b["text"])):
+        for m in _FRAC_RE.finditer(X):
+            if m.end() < x1 or m.start() > x2:
+                continue
+            n, d = m.group(1), m.group(2)
+            if not (_has_vulgar(tx) or int(n) < int(d)):
+                continue
+            for v in (n, d, ""):
+                if X[:m.start()] + v + X[m.end():] == Y:
+                    return True
+    return False
+
+
+def _standalone(text: str, s: int, e: int) -> bool:
+    """ช่วง ``[s, e)`` เป็นคำเดี่ยว (ช่องว่าง/ต้น-ท้ายบรรทัดทั้งสองข้าง)"""
+    return s < e and (s == 0 or text[s - 1].isspace()) and (e >= len(text) or text[e].isspace())
+
+
+def classify(a_txt: str, b_txt: str, a_ctx: str, b_ctx: str, standalone: bool = False) -> str:
     if a_txt and b_txt and a_txt.casefold() == b_txt.casefold():
         return "CASE"
     if any(c.isdigit() for c in a_txt + b_txt):
         return "NUMBER"
     if _is_punct(a_txt + b_txt):
         # เครื่องหมายที่ติดตัวเลข (1.5 vs 15 · 1,000 vs 1.000) = เรื่องตัวเลข
+        # · ยกเว้นเครื่องหมายที่เป็นคำเดี่ยว ("6286 • AvoDerm") — ไม่ได้ติดตัวเลขบนฉลาก
+        if standalone:
+            return "PUNCT"
         if any(c.isdigit() for c in a_ctx + b_ctx):
             return "NUMBER"
         return "PUNCT"
@@ -479,8 +629,14 @@ def diff_pair(a: dict, b: dict, A: List[dict], B: List[dict],
         if (FILLER in a_frag + b_frag
                 and a_frag.replace(FILLER, "") == b_frag.replace(FILLER, "")):
             cls = "FILLER"          # มี/ไม่มีเส้นตกแต่ง — OCR ไม่นิ่ง จึงไม่ตัดสินเป็นแดง
+        elif config.FRACTION_YELLOW and fraction_confusion(a, b, (i1, i2, j1, j2)):
+            cls = "FRACTION"
         else:
-            cls = classify(a_txt, b_txt, a_ctx, b_ctx)
+            alone = False
+            if config.SYMBOL_TOKEN and (not a_txt or not b_txt):
+                t, sp, ln_ = (a_txt, sa, a) if a_txt else (b_txt, sb, b)
+                alone = _is_punct(t.strip()) and _standalone(ln_["text"], *sp)
+            cls = classify(a_txt, b_txt, a_ctx, b_ctx, alone)
         ca, cb = _span_conf(a, *sa), _span_conf(b, *sb)
         finds.append({
             "class": cls,
@@ -528,7 +684,7 @@ def severity(f: dict) -> str:
     * ``PUNCT`` = แดงได้เมื่อ ``PUNCT_CAN_FAIL`` และความมั่นใจถึงเกณฑ์ — แต่ต้อง
       ผ่านการอ่านซ้ำแบบซูมก่อนเสมอ (ปิดการอ่านซ้ำ ⇒ ลดเป็นเหลือง ใน pipeline)
     """
-    if f["class"] == "FILLER":
+    if f["class"] in ("FILLER", "FRACTION"):
         return "yellow"
     if f["class"] == "PUNCT" and not config.PUNCT_CAN_FAIL:
         return "yellow"
@@ -655,6 +811,12 @@ def compare(lines_a: List[dict], lines_b: List[dict],
     merges: List[dict] = []
     A, B = _prep(lines_a, "A", merges), _prep(lines_b, "B", merges)
     pairs, ua, ub = pair_lines(A, B)
+    if config.CROSS_ROW_JOIN:
+        for _ in range(50):
+            if not (_cross_join(B, A, pairs, set(ub), "B", merges)
+                    or _cross_join(A, B, pairs, set(ua), "A", merges)):
+                break
+            pairs, ua, ub = pair_lines(A, B)
     findings: List[dict] = []
     reflow: List[dict] = []
     for ia, ib, method, score in pairs:
@@ -700,6 +862,9 @@ def compare(lines_a: List[dict], lines_b: List[dict],
             sev = "yellow" if short or conf is None or conf < config.CONF_FAIL else "red"
         f["severity"] = sev
         f["notes"] = []
+        if f["class"] == "FRACTION":
+            f["notes"].append("เศษส่วน — Vision อ่านตัวเดียวกันไม่นิ่ง (วัดแล้ว: ½ · 1/2 · 2 · 1 · หาย) "
+                              "แยกจากการแก้งานจริงด้วยข้อความไม่ได้ โปรดดูด้วยตา")
 
     # เศษอักขระ: ทุกบรรทัดที่เกี่ยวข้องต้องเป็นเศษ ⇒ ย้ายไปรายการพับ (ไม่นับเป็นเหลือง)
     debris: List[dict] = []

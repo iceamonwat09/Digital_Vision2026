@@ -188,13 +188,19 @@ def load_log(path):
     rx_side = re.compile(r"^\s+([AB]): page=.*?sent_px=\[(\d+), (\d+)\]")
     rx_line = re.compile(r'^\s+([AB])\d+ conf=([0-9.-]+) min=\S+ ang=([0-9.-]+) '
                          r'box=\[([0-9,-]+)\] "(.*)"(?: \[soft-hyphen\])?\s*$')
-    out, n = {}, None
+    rx_merge = re.compile(r'^\s+([AB]): "(.*)" \+ "(.*)"\s*$')
+    out, n, merges = {}, None, {}
     with open(path, encoding="utf-8") as f:
         for raw in f:
             m = rx_pair.match(raw)
             if m:
                 n = int(m.group(1))
                 out[n] = {"A": [0, 0, []], "B": [0, 0, []]}
+                merges[n] = []
+                continue
+            m = rx_merge.match(raw) if n is not None else None
+            if m:
+                merges[n].append((m.group(1), m.group(2), m.group(3)))
                 continue
             if n is None:
                 continue
@@ -209,5 +215,18 @@ def load_log(path):
                 ang = None if m.group(3) == "-" else float(m.group(3))
                 box = tuple(float(v) for v in m.group(4).split(","))
                 out[n][m.group(1)][2].append((m.group(5), box, conf, ang))
+    # บรรทัดใน Log เป็นบรรทัด **หลังต่อแถว** — แยกกลับเป็นชิ้นตามรายการ row_merges
+    # (กรอบแบ่งตามสัดส่วนจำนวนตัวอักษร) ให้ compare ต่อเองเหมือนบนสถานี
+    for k, d in out.items():
+        for side, left, right in reversed(merges.get(k, [])):
+            ls = d[side][2]
+            for idx, (text, box, conf, ang) in enumerate(ls):
+                if text not in (left + " " + right, left + " \u2026 " + right):
+                    continue          # แบบที่สอง = ต่อด้วยหลักฐานจากอีกฝั่ง (… สังเคราะห์)
+                cut = box[0] + (box[2] - box[0]) * len(left) / float(len(text))
+                gap = 0.25 * (box[3] - box[1])
+                ls[idx:idx + 1] = [(left, (box[0], box[1], cut - gap / 2, box[3]), conf, ang),
+                                   (right, (cut + gap / 2, box[1], box[2], box[3]), conf, ang)]
+                break
     return {k: {s: tuple(v) for s, v in d.items()} for k, d in out.items()
             if d["A"][2] or d["B"][2]}
