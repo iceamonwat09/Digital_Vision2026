@@ -334,7 +334,8 @@
     try {
       const r = await api("/api/artwork_v2/jobs/" + S.job.id + "/run", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pairs: ready, sharpness: $("v2Sharp") ? $("v2Sharp").value : undefined }),
+        body: JSON.stringify({ pairs: ready, sharpness: $("v2Sharp") ? $("v2Sharp").value : undefined,
+          ai_mode: $("v2Ai") ? $("v2Ai").value : undefined }),
       });
       $("v2RunMsg").textContent = "เสร็จใน " + ((Date.now() - t0) / 1000).toFixed(1) + " วินาที";
       showResult(r);
@@ -364,15 +365,75 @@
       "</span> " + marked(m[side].text, m[side].span)).join("<br>");
   }
 
+  const SEV_TH = { red: "ต่าง", yellow: "ไม่มั่นใจ", debris: "เศษ", dismissed: "AI: สัญญาณรบกวน" };
+  const AI_TH = { real: "ต่างจริง", noise: "สัญญาณรบกวนของ OCR", uncertain: "ไม่แน่ใจ" };
+  function pct(v) { return v == null ? "-" : Math.round(v * 100) + "%"; }
+
+  // % ความมั่นใจ = ค่าต่ำสุดที่ Vision มั่นใจในตัวอักษรที่ต่าง (ทั้งสองฝั่ง) — ไม่ใช่ตัวเลขจาก AI
+  function confCell(f) {
+    const c = f.confidence;
+    const lo = c != null && c < 0.8;
+    return '<span class="v2-conf' + (lo ? " lo" : "") + '" title="ค่าความมั่นใจของ Vision ตรงตัวอักษรที่ต่าง">' +
+      pct(c) + '</span><br><span class="v2-muted">A ' + pct(f.a.conf) + " · B " + pct(f.b.conf) + "</span>";
+  }
+
+  function aiNote(f) {
+    const ai = f.ai;
+    if (!ai) return "";
+    if (!ai.verdict) return '<span class="v2-ai-note v2-muted">🤖 AI ไม่ได้ตอบจุดนี้</span>';
+    return '<span class="v2-ai-note">🤖 <b>' + esc(AI_TH[ai.verdict] || ai.verdict) + "</b>" +
+      (ai.reason ? " — " + esc(ai.reason) : "") + "</span>" +
+      (ai.suggestion ? '<span class="v2-ai-note">💡 ' + esc(ai.suggestion) + "</span>" : "");
+  }
+
   function findingRow(f) {
-    const sev = f.severity === "red" ? "ต่าง" : (f.severity === "debris" ? "เศษ" : "ไม่มั่นใจ");
+    const sev = SEV_TH[f.severity] || f.severity;
+    const notes = (f.notes || []).filter((n) => !/^AI: /.test(n)).map(esc).join("<br>");
     return '<tr class="click" data-f="' + f.id + '"><td>' + f.id + '</td><td><span class="v2-sev ' + f.severity + '">' +
       sev + "</span></td><td>" + esc(CLASS_TH[f.class] || f.class) +
-      "</td><td>" + cellText(f, "a") + "</td><td>" + cellText(f, "b") + "</td><td>" +
-      (f.a.conf != null ? f.a.conf.toFixed(2) : "-") + " / " + (f.b.conf != null ? f.b.conf.toFixed(2) : "-") +
-      "</td><td>" + (f.notes || []).map(esc).join("<br>") + "</td></tr>";
+      (f.source === "ai" ? '<span class="v2-ai-tag">AI</span>' : "") +
+      "</td><td>" + cellText(f, "a") + "</td><td>" + cellText(f, "b") + "</td><td>" + confCell(f) +
+      "</td><td>" + notes + aiNote(f) + "</td></tr>";
   }
-  const TBL_HEAD = '<thead><tr><th>#</th><th>ระดับ</th><th>ชนิด</th><th>🅰</th><th>🅱</th><th>ความมั่นใจ A/B</th><th>หมายเหตุ</th></tr></thead>';
+  const TBL_HEAD = '<thead><tr><th>#</th><th>ระดับ</th><th>ชนิด</th><th>🅰</th><th>🅱</th><th>ความมั่นใจ (Vision)</th><th>หมายเหตุ</th></tr></thead>';
+
+  const AI_MODE_TH = { assist: "อัลกอริทึมตัดสิน + AI เสริม", judge: "AI ตัดสินหลัก", off: "ปิด AI" };
+  function folded(title, list) {
+    if (!list || !list.length) return "";
+    return '<details class="v2-debris" style="margin-top:8px"><summary>' + esc(title) + " (" + list.length +
+      ')</summary><div class="v2-tbl-wrap"><table class="v2-tbl">' + TBL_HEAD + "<tbody>" +
+      list.map(findingRow).join("") + "</tbody></table></div></details>";
+  }
+
+  function aiBox(p) {
+    const ai = p.ai;
+    if (!ai || ai.status === "off") return "";
+    const head = "<h4>🤖 AI ตรวจทาน (Gemini) — " + esc(AI_MODE_TH[ai.mode] || ai.mode) + "</h4>";
+    if (ai.status !== "ok") {
+      return '<div class="v2-ai">' + head + '<div class="v2-bad">' +
+        esc(ai.status === "skipped" ? (ai.reason || "ข้าม") : "ไม่สำเร็จ: " + (ai.error || "-")) +
+        "</div><div class=\"v2-muted\">ผลที่แสดงมาจากอัลกอริทึมทั้งหมด</div></div>";
+    }
+    const vc = ai.vision_conf || {};
+    let stat = "ข้อมูลที่ AI ใช้ตอบ: Vision มั่นใจเฉลี่ย A " + pct(vc.a) + " · B " + pct(vc.b);
+    if (ai.ref_accuracy != null) {
+      const tot = (ai.items_total || 0) + (ai.reviews_total || 0);
+      const ok = (ai.items_valid || 0) + (ai.reviews_valid || 0);
+      stat += " · AI อ้างอิงข้อมูล Vision ถูกต้อง " + ok + "/" + tot + " ข้อ (" + pct(ai.ref_accuracy) + ")";
+    }
+    if (ai.mode === "assist" && ai.reviewable) stat += " · ตอบครบ " + ai.reviewed + "/" + ai.reviewable + " จุด";
+    if (ai.extra_added) stat += " · พบเพิ่ม " + ai.extra_added + " จุด";
+    stat += (ai.ms != null ? " · " + (ai.ms / 1000).toFixed(1) + " วินาที" : "");
+    const sugs = (ai.suggestions || []).map((x) => "<li>" + esc(x) + "</li>").join("");
+    const bad = (ai.invalid || []).length
+      ? '<details style="margin-top:6px"><summary class="v2-muted">คำตอบที่ไม่ได้ใช้ เพราะไม่ตรงกับข้อมูล Vision (' + ai.invalid.length +
+        ")</summary><ul>" + ai.invalid.map((x) => "<li>" + esc(x.what + ": " + x.reason) + "</li>").join("") + "</ul></details>" : "";
+    return '<div class="v2-ai">' + head + '<div class="v2-muted">' + esc(stat) + "</div>" +
+      (ai.summary ? '<div style="margin-top:6px"><b>สรุป:</b> ' + esc(ai.summary) + "</div>" : "") +
+      (sugs ? '<div style="margin-top:6px"><b>ข้อเสนอแนะ:</b><ul>' + sugs + "</ul></div>" : "") +
+      '<div class="v2-muted" style="margin-top:6px">ข้อความสรุป/ข้อเสนอแนะเขียนโดย AI — ตรวจทานก่อนใช้ · % ความมั่นใจทุกจุดคิดจาก Vision ไม่ใช่จาก AI</div>' +
+      bad + "</div>";
+  }
 
   function marked(text, span) {
     const s = span && span.length === 2 ? span : [0, 0];
@@ -430,6 +491,7 @@
       esc(r.verdict_th) + "<small>" + (r.reasons || []).map(esc).join(" · ") + " · รอบ " + esc(r.run) +
       " · " + esc(r.at) + (r.version ? " · รุ่น " + esc(r.version) : "") +
       (r.sharpness ? " · ภาพที่ส่ง: " + (r.sharpness === "max" ? "คมสูงสุด" : "มาตรฐาน 400 dpi") : "") +
+      (r.ai && r.ai.mode ? " · AI: " + esc(AI_MODE_TH[r.ai.mode] || r.ai.mode) : "") +
       "</small></div>";
     $("v2Warn").innerHTML = (r.warnings && r.warnings.length)
       ? '<div class="v2-warnbox">⚠️ ' + r.warnings.map(esc).join("<br>⚠️ ") + "</div>" : "";
@@ -448,11 +510,9 @@
     if (!r) return;
     $("v2PairsRes").innerHTML = (r.pairs || []).map((p) => {
       const rows = (p.findings || []).map(findingRow).join("");
-      const deb = p.debris || [];
-      const debHtml = deb.length
-        ? '<details class="v2-debris" style="margin-top:8px"><summary>เศษอักขระ / ขอบโซน (' + deb.length +
-          ') — ไม่นับในผลตัดสิน</summary><div class="v2-tbl-wrap"><table class="v2-tbl">' + TBL_HEAD + "<tbody>" +
-          deb.map(findingRow).join("") + "</tbody></table></div></details>" : "";
+      const debHtml = folded("เศษอักขระ / ขอบโซน — ไม่นับในผลตัดสิน", p.debris) +
+        folded("อัลกอริทึมพบ แต่ AI ไม่ได้ระบุ — ไม่นับในผลตัดสิน (โหมด AI ตัดสินหลัก)", p.algo_only) +
+        folded("AI ตัดสินว่าเป็นสัญญาณรบกวนของ OCR — ไม่นับในผลตัดสิน", p.ai_dismissed);
       return '<div class="v2-card" style="margin:12px 0"><b>คู่ ' + p.n + "</b> — " + esc(p.verdict || "") +
         (p.coverage != null ? " · จับคู่ข้อความได้ " + Math.round(p.coverage * 100) + "%" : "") +
         (p.reasons && p.reasons.length ? ' <span class="v2-muted">(' + p.reasons.map(esc).join(" · ") + ")</span>" : "") +
@@ -460,7 +520,7 @@
         "</div><div>🅱 " + sideInfo(p.sides.b) + svgFor(p, "b", r) + "</div></div>" +
         (rows ? '<div class="v2-tbl-wrap"><table class="v2-tbl">' + TBL_HEAD + "<tbody>" +
           rows + "</tbody></table></div>" : (p.unreadable ? "" : '<div class="v2-muted" style="margin-top:6px">ไม่พบจุดต่าง</div>')) +
-        debHtml + "</div>";
+        aiBox(p) + debHtml + "</div>";
     }).join("");
   }
 

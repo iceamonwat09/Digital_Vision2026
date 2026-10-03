@@ -1,7 +1,8 @@
 """ลำดับงานหนึ่งรอบของ Artwork V2
 
     ตรวจโซน → เรนเดอร์ภาพโซน → เข้ารหัสให้พอดีขีด → Vision (คู่ A/B ในคำขอเดียว)
-    → ประกอบบรรทัด → เทียบ → อ่านซ้ำแบบซูมเฉพาะจุดแดง → ผลตัดสิน → Log
+    → ประกอบบรรทัด → เทียบ → อ่านซ้ำแบบซูมเฉพาะจุดแดง (ปิดเป็นค่าเริ่มต้น)
+    → AI ตรวจทานข้อความของ Vision (Gemini ผ่าน N8N) → ผลตัดสิน → Log
 
 กติกาความปลอดภัย (กฎเหล็กของโปรเจกต์):
 * ฝั่งใดอ่านไม่สำเร็จ = คู่นั้น "อ่านไม่ได้" **ห้ามเป็น PASS**
@@ -17,7 +18,7 @@ import time
 from difflib import SequenceMatcher
 from typing import Callable, Dict, List, Optional
 
-from . import VERSION, compare, config, imaging, jobs, keystore, textmodel, vision_client
+from . import VERSION, ai_review, compare, config, imaging, jobs, keystore, textmodel, vision_client
 from . import diaglog
 
 MAX_PAIRS = 8          # 16 ภาพ = เพดานต่อคำขอของ Vision
@@ -117,9 +118,11 @@ def norm_sharpness(v) -> str:
 
 
 def run(job_id: str, raw_pairs, poster: Optional[Callable] = None,
-        progress: Optional[Callable] = None, sharpness: Optional[str] = None) -> dict:
+        progress: Optional[Callable] = None, sharpness: Optional[str] = None,
+        ai_mode: Optional[str] = None, ai_poster: Optional[Callable] = None) -> dict:
     t_all = time.time()
     sharp = norm_sharpness(sharpness)
+    ai_mode = ai_review.norm_mode(ai_mode)
     stage: Dict[str, int] = {}
     warnings: List[str] = []
     pairs_in = parse_pairs(raw_pairs)
@@ -240,7 +243,7 @@ def run(job_id: str, raw_pairs, poster: Optional[Callable] = None,
     reread_log["sharpness"] = sharp
     stage["reread_ms"] = int((time.time() - t0) * 1000)
 
-    # ── 5) ผลตัดสิน + บันทึก ─────────────────────────────────────────
+    # ── 5) เลขจุด ────────────────────────────────────────────────────
     fid = 0
     for pr in pairs:
         if config.CURVED_GROUP_ENABLED and pr.get("findings"):
@@ -251,18 +254,36 @@ def run(job_id: str, raw_pairs, poster: Optional[Callable] = None,
         for f in pr.get("debris", []):
             fid += 1
             f["id"] = fid
+
+    # ── 6) AI ตรวจทาน (ข้อความของ Vision → N8N/Gemini · ไม่ส่งภาพ · ไม่ยิง Vision ซ้ำ) ──
+    t0 = time.time()
+    ai_sum, fid = ai_review.run_all(pairs, ai_mode, warnings, say, fid, ai_poster)
+    stage["ai_ms"] = int((time.time() - t0) * 1000)
+
+    # ── 7) ผลตัดสิน + บันทึก ─────────────────────────────────────────
+    for pr in pairs:
         pr.pop("_cmp", None)
+        for key in ("findings", "debris", "algo_only", "ai_dismissed"):
+            for f in pr.get(key) or []:
+                if "confidence" not in f:
+                    f["confidence"] = ai_review.confidence(f)
         v, rs = verdict_of([pr])
+        if pr.get("algo_only"):
+            rs.append("อัลกอริทึมพบอีก %d จุดที่ AI ไม่ได้ระบุ (รายการพับ — ไม่นับ)"
+                      % len(pr["algo_only"]))
         pr["verdict"] = v
         pr["reasons"] = rs
     verdict, reasons = verdict_of(pairs)
+    n_algo = sum(len(pr.get("algo_only") or []) for pr in pairs)
+    if n_algo:
+        reasons.append("อัลกอริทึมพบอีก %d จุดที่ AI ไม่ได้ระบุ (รายการพับ — ไม่นับ)" % n_algo)
     stage["total_ms"] = int((time.time() - t_all) * 1000)
     result = {
         "version": VERSION, "job": job_id, "run": run_name,
         "at": time.strftime("%Y-%m-%d %H:%M:%S"),
         "verdict": verdict, "verdict_th": VERDICT_TH[verdict], "reasons": reasons,
         "sharpness": sharp,
-        "pairs": pairs, "calls": calls, "reread": reread_log,
+        "pairs": pairs, "calls": calls, "reread": reread_log, "ai": ai_sum,
         "warnings": warnings, "stage": stage,
         "key": {"source": key_src, "masked": keystore.mask(key), "length": len(key)},
         "settings": settings_snapshot(),
@@ -297,7 +318,8 @@ def settings_snapshot() -> dict:
         "PAIR_MAX_DIST", "ROW_MERGE_ENABLED", "ROW_MAX_ANGLE",
         "PUNCT_CAN_FAIL", "CURVED_GROUP_ENABLED", "TILT_ANGLE", "CURVED_NEIGHBOR_MAX_CHARS",
         "DEBRIS_ENABLED", "DEBRIS_CONF", "SEAM_FILLER", "CROSS_ROW_JOIN", "SYMBOL_TOKEN",
-        "FRACTION_YELLOW", "REREAD_ENABLED", "REREAD_MAX", "REREAD_SCALE", "REREAD_MAX_SIDE")}
+        "FRACTION_YELLOW", "REREAD_ENABLED", "REREAD_MAX", "REREAD_SCALE", "REREAD_MAX_SIDE",
+        "AI_MODE", "AI_REVIEW_URL", "AI_TIMEOUT_S", "AI_RETRIES")}
 
 
 def _reread(pairs, srcs, rd, poster, key, calls, warnings, say) -> dict:

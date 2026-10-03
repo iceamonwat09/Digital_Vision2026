@@ -59,6 +59,12 @@
   .v2-sev { display:inline-block; border-radius:4px; padding:1px 6px; font-weight:600; font-size:12px; }
   .v2-sev.red { background:#fee2e2; color:#991b1b; } .v2-sev.yellow { background:#fef3c7; color:#92400e; } .v2-sev.debris { background:#f1f5f9; color:#475569; }
   .v2-debris summary { cursor:pointer; color:#475569; font-size:13px; }
+  .v2-sev.dismissed { background:#f1f5f9; color:#475569; }
+  .v2-conf { font-weight:600; white-space:nowrap; } .v2-conf.lo { color:#b45309; }
+  .v2-ai { background:#f5f3ff; border:1px solid #ddd6fe; border-radius:6px; padding:8px 10px; font-size:13px; margin-top:10px; }
+  .v2-ai h4 { margin:0 0 4px; font-size:14px; } .v2-ai ul { margin:4px 0 0 18px; padding:0; }
+  .v2-ai-note { display:block; margin-top:3px; color:#5b21b6; }
+  .v2-ai-tag { display:inline-block; border-radius:4px; padding:0 5px; font-size:11px; background:#ede9fe; color:#5b21b6; margin-left:4px; }
   mark.v2-d { background:#fecaca; color:inherit; padding:0 1px; border-radius:2px; }
   .v2-log { width:100%; min-height:280px; font-family:ui-monospace,Consolas,monospace; font-size:12px; white-space:pre; border:1px solid #cbd5e1; border-radius:6px; padding:8px; box-sizing:border-box; }
   .v2-spin { display:inline-block; width:14px; height:14px; border:2px solid #93c5fd; border-top-color:#1d4ed8; border-radius:50%; animation:v2s 0.8s linear infinite; vertical-align:-2px; }
@@ -127,6 +133,12 @@
         <select id="v2Sharp" class="v2-input">
           <option value="max"{% if v2_sharpness == "max" %} selected{% endif %}>คมสูงสุด (ทดลอง)</option>
           <option value="standard"{% if v2_sharpness == "standard" %} selected{% endif %}>มาตรฐาน 400 dpi (แนะนำ)</option>
+        </select></label>
+      <label class="v2-muted" title="ส่งข้อความที่ Vision อ่านได้ให้ Gemini (ผ่าน N8N) ตรวจทาน — ไม่ส่งภาพ ไม่ยิง Vision ซ้ำ · % ความมั่นใจคิดจาก Vision เสมอ">AI ตรวจทาน
+        <select id="v2Ai" class="v2-input">
+          <option value="assist"{% if v2_ai_mode == "assist" %} selected{% endif %}>อัลกอริทึมตัดสิน + AI เสริม</option>
+          <option value="judge"{% if v2_ai_mode == "judge" %} selected{% endif %}>AI ตัดสินหลัก (ทดลอง)</option>
+          <option value="off"{% if v2_ai_mode == "off" %} selected{% endif %}>ปิด AI</option>
         </select></label>
       <span id="v2RunMsg" class="v2-muted"></span>
     </div>

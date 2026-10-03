@@ -119,10 +119,29 @@ SYMBOL_TOKEN = _b("ARTWORK_V2_SYMBOL_TOKEN", "1")
 FRACTION_YELLOW = _b("ARTWORK_V2_FRACTION_YELLOW", "1")
 
 # ── อ่านซ้ำแบบซูม ────────────────────────────────────────────────────
-REREAD_ENABLED = _b("ARTWORK_V2_REREAD", "1")
+# ปิดเป็นค่าเริ่มต้น (3 ต.ค. รอบ 5 · ผู้ใช้สั่ง "ห้ามส่งซ้ำ"): การอ่านซ้ำส่งภาพครอปให้ Vision
+# อีกรอบ — วัดจาก Log สถานีแล้วกิน ~90% ของภาพที่ส่งต่องาน (หลัก 2 ภาพ · อ่านซ้ำ 18 ภาพ)
+# ตั้ง ``ARTWORK_V2_REREAD=1`` = กลับมาเปิดเหมือนเดิม
+REREAD_ENABLED = _b("ARTWORK_V2_REREAD", "0")
 REREAD_MAX = _i("ARTWORK_V2_REREAD_MAX", "12")
 REREAD_SCALE = _f("ARTWORK_V2_REREAD_SCALE", "2.0")
 REREAD_MAX_SIDE = _i("ARTWORK_V2_REREAD_MAX_SIDE", "2400")
+
+# ── ตรวจทานด้วย AI (Gemini ผ่าน N8N) — ส่ง **ข้อความ** ที่ Vision อ่านได้ ไม่ส่งภาพ ─────
+#   "assist" = อัลกอริทึมตัดสิน · AI อธิบาย/ให้คำแนะนำทุกจุด + หาจุดที่ขาด (ขึ้นเหลือง) ·
+#              AI ลบหรือลดระดับจุดของอัลกอริทึมไม่ได้
+#   "judge"  = AI ตัดสินหลัก · จุดของอัลกอริทึมที่ AI ไม่ระบุไปอยู่ในรายการพับ (ไม่นับ)
+#   "off"    = ไม่เรียก AI = ผลเดิมเป๊ะ
+# % ความมั่นใจทุกจุดคิดจากค่าความมั่นใจของ Vision ตรงตัวอักษรนั้น — **ไม่ใช่ตัวเลขที่ AI บอก**
+# หน้าเว็บเลือกได้ต่อรอบ (ช่อง "AI ตรวจทาน") — ค่านี้คือค่าที่เลือกไว้ตอนเปิดหน้า
+AI_MODES = ("assist", "judge", "off")
+AI_MODE = os.getenv("ARTWORK_V2_AI_MODE", "assist").strip().lower()
+if AI_MODE not in AI_MODES:
+    AI_MODE = "off"
+AI_REVIEW_URL = os.getenv("ARTWORK_V2_AI_REVIEW_URL",
+                          "http://127.0.0.1:5678/webhook/artwork-v2-review").strip()
+AI_TIMEOUT_S = _f("ARTWORK_V2_AI_TIMEOUT_S", "180")
+AI_RETRIES = _i("ARTWORK_V2_AI_RETRIES", "1")
 
 # จำนวนบรรทัด OCR ต่อฝั่งที่พิมพ์ลง Log (กัน Log ยาวเกินไปจนก๊อปไม่ได้)
 LOG_MAX_LINES = _i("ARTWORK_V2_LOG_MAX_LINES", "400")

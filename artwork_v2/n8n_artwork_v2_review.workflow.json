@@ -1,0 +1,212 @@
+{
+  "name": "Artwork V2 — AI review (Vision text → Gemini)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "artwork-v2-review",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "d33f55b9-e480-4de2-b52a-8816ecd93b4e",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        300
+      ],
+      "webhookId": "a22af56f-cdcd-4911-a774-b0b09acb6be9"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ===== Build Gemini request : Artwork V2 review (ข้อความจาก Google Vision → Gemini) =====\n// แอป (artwork_v2/ai_review.py) ส่ง POST JSON:\n//   {contract, pair, mode: \"assist\"|\"judge\", zone_a: [line], zone_b: [line], candidates: [...]}\n//   line = {id: \"A12\", box: [x0,y0,x1,y1] (0-1000), conf, words: [...], word_conf: [...]}\n// ไม่มีภาพ · ไม่มีกุญแจ API · Gemini ต้องตอบด้วยรหัสคำของ Vision เท่านั้น\n// ⚠️ แก้ prompt ที่นี่แล้ว ให้แก้ docs/N8N_ARTWORK_V2_REVIEW_PROMPT.md ให้ตรงกันด้วย (มีเทสต์เทียบ)\nconst PROMPT = `You are a meticulous packaging-artwork proofreader (QC). You receive the OCR output of Google Cloud Vision for the SAME region of two versions of a label: zone_a (version A) and zone_b (version B). You never see the images. Your ONLY source of truth is the JSON data given. Do not guess what the label \"should\" say, do not correct spelling, do not use outside knowledge to fill in or fix text.\n\nDATA\n- zone_a / zone_b: lines as Vision returned them. Each line has: id (e.g. \"A12\"), box [x0,y0,x1,y1] in 0-1000 of the zone image, conf (Vision mean confidence 0-1), words (list of strings), word_conf (Vision lowest character confidence of each word, 0-1, null = unknown).\n- A word is referenced as \"<lineId>:<wordIndex>\", the 0-based index into that line's words. Example: line \"A12\" with words [\"Crude\",\"Fat\",\"2.0%\"] -> \"A12:2\" is \"2.0%\".\n- candidates (assist mode only): differences already found by a rule-based algorithm. id \"F<n>\", class, severity, and for each side: line id, the differing characters (diff), the whole word, and the line text.\n\nWHAT COUNTS AS A DIFFERENCE (report every one)\n- any change of a letter, digit or letter case (D-Calcium vs D-calcium), spelling (Sulfate vs Sulphate), singular/plural (Breed vs Breeds), added or removed words or whole lines, units, decimal points (1.5 vs 15), %, ®, ©, ™, and punctuation that separates or changes content (a missing comma between address parts).\n\nWHAT IS NOT A DIFFERENCE (never report)\n- line breaks, wrapping, hyphenation at the end of a line, a table row split into pieces, a different order of lines or blocks. Compare the CONTENT of the two zones, not their line structure: a text that exists anywhere in the other zone is not missing.\n- whitespace only.\n\nKNOWN OCR NOISE OF GOOGLE VISION (use only together with what the data shows)\n- the number of leader dots or dashes (\"........\") varies between reads.\n- ® / Ⓡ, © / Ⓒ, • / ·, ½ / 1/2 are the same printed glyph.\n- the fraction ½ is read unstably as \"½\", \"1/2\", \"2\", \"1\" or dropped, and \"2\" can come with HIGH confidence. A difference that only involves a fraction is \"uncertain\" - never \"real\", never \"noise\".\n- stylised logo text, curved emblem text and lone symbols at the zone edge often have low word_conf.\n\nVERDICT of each difference\n- \"real\": the difference is in the content and the differing words are read clearly on both sides (word_conf >= 0.80).\n- \"noise\": the difference is explained by the known OCR noise above AND the data supports it (low word_conf, leader dots, glyph variants). Never call a change of a letter, digit or letter case \"noise\" when the differing words have word_conf >= 0.80 on both sides.\n- \"uncertain\": everything in between. When in doubt, choose \"uncertain\".\n\nREFERENCING (the app draws the boxes from your ids and rejects anything that does not match the data)\n- a_words / b_words: ids of the word(s) that contain the difference, all from ONE line per side, contiguous, as few as possible.\n- If a word is missing inside a line on one side, give on that side the neighbouring word(s) around the place where it would be, so the position is clear.\n- If the text is absent from the whole other zone, give [] for that side.\n- a_quote / b_quote: the exact text of the cited words joined with single spaces, copied character for character from the data (keep dots and punctuation). \"\" when the list is empty.\n- One item per separate difference. Two differences far apart in the same line are two items.\n- Never output any number for confidence or accuracy. The app computes confidence from Vision.\n\nMODE\n- assist: first review EVERY candidate in \"reviews\" (candidate id, verdict, reason, suggestion). Then put in \"items\" ONLY differences that no candidate covers. Do not repeat a candidate in items.\n- judge: candidates is empty. Find all differences yourself, put them in \"items\", and return \"reviews\": [].\n\nLANGUAGE AND STYLE\n- reason, suggestion, summary and suggestions are written in Thai. Keep label text in its original language inside quotes.\n- Do not decide which version is correct; describe it as A: \"...\" / B: \"...\".\n- reason: one or two sentences on why it is real / noise / uncertain, citing the evidence (word_conf, glyph variant, leader dots).\n- suggestion: what the inspector should do for this point.\n- summary: 2-6 Thai sentences: how many real differences, each one briefly A -> B, and what needs a human look.\n- suggestions: concrete Thai actions for the inspector (what to check on the file or the physical print, how to redraw a zone).\n- Respond with JSON only, matching the schema.`;\nconst SCHEMA = {\n  \"type\": \"OBJECT\",\n  \"properties\": {\n    \"summary\": {\n      \"type\": \"STRING\"\n    },\n    \"suggestions\": {\n      \"type\": \"ARRAY\",\n      \"items\": {\n        \"type\": \"STRING\"\n      }\n    },\n    \"reviews\": {\n      \"type\": \"ARRAY\",\n      \"items\": {\n        \"type\": \"OBJECT\",\n        \"properties\": {\n          \"candidate\": {\n            \"type\": \"STRING\"\n          },\n          \"verdict\": {\n            \"type\": \"STRING\",\n            \"enum\": [\n              \"real\",\n              \"noise\",\n              \"uncertain\"\n            ]\n          },\n          \"reason\": {\n            \"type\": \"STRING\"\n          },\n          \"suggestion\": {\n            \"type\": \"STRING\"\n          }\n        },\n        \"required\": [\n          \"candidate\",\n          \"verdict\",\n          \"reason\",\n          \"suggestion\"\n        ],\n        \"propertyOrdering\": [\n          \"candidate\",\n          \"verdict\",\n          \"reason\",\n          \"suggestion\"\n        ]\n      }\n    },\n    \"items\": {\n      \"type\": \"ARRAY\",\n      \"items\": {\n        \"type\": \"OBJECT\",\n        \"properties\": {\n          \"a_words\": {\n            \"type\": \"ARRAY\",\n            \"items\": {\n              \"type\": \"STRING\"\n            }\n          },\n          \"b_words\": {\n            \"type\": \"ARRAY\",\n            \"items\": {\n              \"type\": \"STRING\"\n            }\n          },\n          \"a_quote\": {\n            \"type\": \"STRING\"\n          },\n          \"b_quote\": {\n            \"type\": \"STRING\"\n          },\n          \"kind\": {\n            \"type\": \"STRING\",\n            \"enum\": [\n              \"text\",\n              \"number\",\n              \"case\",\n              \"punct\",\n              \"symbol\",\n              \"missing\",\n              \"extra\",\n              \"fraction\",\n              \"other\"\n            ]\n          },\n          \"verdict\": {\n            \"type\": \"STRING\",\n            \"enum\": [\n              \"real\",\n              \"noise\",\n              \"uncertain\"\n            ]\n          },\n          \"reason\": {\n            \"type\": \"STRING\"\n          },\n          \"suggestion\": {\n            \"type\": \"STRING\"\n          }\n        },\n        \"required\": [\n          \"a_words\",\n          \"b_words\",\n          \"a_quote\",\n          \"b_quote\",\n          \"kind\",\n          \"verdict\",\n          \"reason\",\n          \"suggestion\"\n        ],\n        \"propertyOrdering\": [\n          \"a_words\",\n          \"a_quote\",\n          \"b_words\",\n          \"b_quote\",\n          \"kind\",\n          \"verdict\",\n          \"reason\",\n          \"suggestion\"\n        ]\n      }\n    }\n  },\n  \"required\": [\n    \"reviews\",\n    \"items\",\n    \"summary\",\n    \"suggestions\"\n  ],\n  \"propertyOrdering\": [\n    \"reviews\",\n    \"items\",\n    \"summary\",\n    \"suggestions\"\n  ]\n};\nconst MODEL = 'gemini-2.5-flash';\n\nconst item = $input.first().json;\nconst body = (item && item.body && typeof item.body === 'object') ? item.body : (item || {});\nlet error = '';\nconst za = Array.isArray(body.zone_a) ? body.zone_a : null;\nconst zb = Array.isArray(body.zone_b) ? body.zone_b : null;\nif (!za || !zb) error = 'zone_a / zone_b ต้องเป็นรายการบรรทัด';\nelse if (!za.length && !zb.length) error = 'ไม่มีข้อความทั้งสองฝั่ง';\nconst mode = body.mode === 'judge' ? 'judge' : 'assist';\nconst cands = (mode === 'assist' && Array.isArray(body.candidates)) ? body.candidates : [];\nconst data = { mode, zone_a: za || [], zone_b: zb || [], candidates: cands };\n\nreturn [{ json: {\n  valid: !error, error, mode, model: MODEL,\n  gemini_request: {\n    systemInstruction: { parts: [{ text: PROMPT }] },\n    contents: [{ role: 'user', parts: [{ text: 'DATA (JSON):\\n' + JSON.stringify(data) }] }],\n    generationConfig: {\n      temperature: 0,\n      maxOutputTokens: 32768,\n      responseMimeType: 'application/json',\n      responseSchema: SCHEMA,\n      thinkingConfig: { thinkingBudget: 4096 },\n    },\n  },\n} }];\n"
+      },
+      "id": "44838b17-a086-451d-8fdf-782deb26fe59",
+      "name": "Build Gemini request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "cond-valid",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "fc3b344d-590b-474d-85ed-c4c26bb5913e",
+      "name": "If",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        440,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://asia-southeast1-aiplatform.googleapis.com/v1/projects/YOUR_GCP_PROJECT_ID/locations/asia-southeast1/publishers/google/models/gemini-2.5-flash:generateContent",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.gemini_request) }}",
+        "options": {
+          "timeout": 170000,
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "1268b32d-725b-4619-b4c7-a7288b469e19",
+      "name": "HTTP Request",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        660,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ===== Parse Gemini response → app contract (artwork-v2-review/1) =====\n// แอปคาดหวัง: {reviews: [...], items: [...], summary, suggestions: [...], engine, usage}\n// ล้มเหลว ⇒ คืน {error} เสมอ (แอปจะใช้ผลอัลกอริทึมแทน) — ห้ามคืนคำตอบว่างเงียบ ๆ\nconst MODEL = 'gemini-2.5-flash';\nconst r = $input.first().json || {};\nconst fail = (msg) => [{ json: { error: String(msg).slice(0, 500), engine: MODEL,\n                                 usage: r.usageMetadata || null } }];\nif (r.error) {\n  const e = r.error;\n  return fail('Gemini error: ' + (typeof e === 'object' ? (e.message || JSON.stringify(e)) : e));\n}\nconst cand = (r.candidates || [])[0];\nif (!cand) {\n  const br = r.promptFeedback && r.promptFeedback.blockReason;\n  return fail('Gemini ไม่ตอบ' + (br ? ' (blockReason=' + br + ')' : ''));\n}\nconst fr = cand.finishReason || '';\nif (fr && fr !== 'STOP') return fail('Gemini ตอบไม่จบ (finishReason=' + fr + ')');\nconst parts = ((cand.content || {}).parts || []).filter((p) => !p.thought && typeof p.text === 'string');\nlet txt = parts.map((p) => p.text).join('').trim();\ntxt = txt.replace(/^```(?:json)?\\s*/i, '').replace(/\\s*```\\s*$/, '').trim();\nif (!txt) return fail('Gemini ตอบว่าง');\nlet d;\ntry { d = JSON.parse(txt); } catch (e) { return fail('คำตอบไม่ใช่ JSON: ' + txt.slice(0, 200)); }\nif (!d || typeof d !== 'object' || Array.isArray(d)) return fail('คำตอบผิดรูป (ไม่ใช่ object)');\nconst arr = (x) => (Array.isArray(x) ? x : []);\nreturn [{ json: {\n  reviews: arr(d.reviews), items: arr(d.items),\n  summary: typeof d.summary === 'string' ? d.summary : '',\n  suggestions: arr(d.suggestions).filter((s) => typeof s === 'string'),\n  engine: MODEL, usage: r.usageMetadata || null, finish_reason: fr,\n} }];\n"
+      },
+      "id": "a675ebc0-5abe-4f61-9ea6-19695112db1e",
+      "name": "Parse Gemini response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "5702a5fe-965a-4f02-bfa6-d6b0911e79a4",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1100,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ error: $json.error || 'invalid request' }) }}",
+        "options": {
+          "responseCode": 400
+        }
+      },
+      "id": "26436cb6-9322-4f6d-b0e6-4ad1ca3e3ea8",
+      "name": "Respond to Webhook1",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        660,
+        420
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Build Gemini request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Gemini request": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond to Webhook1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Parse Gemini response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Gemini response": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}

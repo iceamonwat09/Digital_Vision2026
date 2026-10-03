@@ -39,9 +39,9 @@ def build_text(r: dict) -> str:
     for x in r["reasons"]:
         a("  - " + x)
     st = r["stage"]
-    a("time_ms: render=%s vision=%s compare=%s reread=%s total=%s" % (
+    a("time_ms: render=%s vision=%s compare=%s reread=%s ai=%s total=%s" % (
         st.get("render_ms"), st.get("vision_ms"), st.get("compare_ms"),
-        st.get("reread_ms"), st.get("total_ms")))
+        st.get("reread_ms"), st.get("ai_ms", "-"), st.get("total_ms")))
     a("sharpness=%s (ภาพที่ส่ง: %s)" % (
         r.get("sharpness", "standard"),
         "คมสูงสุด" if r.get("sharpness") == "max" else "มาตรฐาน 400 dpi"))
@@ -144,6 +144,15 @@ def build_text(r: dict) -> str:
                 a("%s     text=%s" % (ind, _q(f[s_]["text"])))
             for n in f.get("notes") or []:
                 a("%s   note: %s" % (ind, n))
+            ai = f.get("ai") or {}
+            if ai.get("verdict"):
+                a("%s   ai: verdict=%s confidence(vision)=%s words=%s/%s" % (
+                    ind, ai["verdict"], _f(f.get("confidence")), ai.get("a_words", "-"),
+                    ai.get("b_words", "-")))
+                if ai.get("reason"):
+                    a("%s   ai_reason: %s" % (ind, _q(ai["reason"], 300)))
+                if ai.get("suggestion"):
+                    a("%s   ai_suggestion: %s" % (ind, _q(ai["suggestion"], 300)))
             for m in f.get("members") or []:
                 finding(m, ind + "    · ")
 
@@ -153,6 +162,14 @@ def build_text(r: dict) -> str:
         a("  debris — เศษอักขระ / ขอบโซน ไม่นับในผลตัดสิน (%d):" % len(p.get("debris") or []))
         for f in p.get("debris") or []:
             finding(f)
+        if p.get("algo_only") is not None:
+            a("  algo_only — อัลกอริทึมพบแต่ AI ไม่ได้ระบุ ไม่นับ (%d):" % len(p["algo_only"]))
+            for f in p["algo_only"]:
+                finding(f)
+        if p.get("ai_dismissed") is not None:
+            a("  ai_dismissed — AI ตัดสินว่าเป็นสัญญาณรบกวน ไม่นับ (%d):" % len(p["ai_dismissed"]))
+            for f in p["ai_dismissed"]:
+                finding(f)
         for s in ("a", "b"):
             lines = (p.get("lines") or {}).get(s) or []
             a("  OCR lines %s (%d):" % (s.upper(), len(lines)))
@@ -179,6 +196,37 @@ def build_text(r: dict) -> str:
         if it.get("text_a") is not None:
             a("     crop A: %s" % _q(it.get("text_a"), 200))
             a("     crop B: %s" % _q(it.get("text_b"), 200))
+
+    ar = r.get("ai") or {}
+    a("")
+    a("[AI REVIEW] mode=%s url=%s pairs_ok=%s pairs_failed=%s" % (
+        ar.get("mode", "off"), ar.get("url") or "-", ar.get("pairs_ok", 0),
+        ar.get("pairs_failed", 0)))
+    for p in r["pairs"]:
+        x = p.get("ai") or {}
+        if not x or x.get("status") == "off":
+            continue
+        a("  pair %d: status=%s engine=%s http=%s ms=%s attempts=%s request_bytes=%s "
+          "candidates=%s%s" % (p["n"], x.get("status"), x.get("engine", "-"), x.get("http"),
+                               x.get("ms"), x.get("attempts"), x.get("request_bytes"),
+                               x.get("candidates"),
+                               (" ERROR=" + x["error"]) if x.get("error") else ""))
+        if x.get("status") != "ok":
+            continue
+        vc = x.get("vision_conf") or {}
+        a("     ref_accuracy=%s items=%s/%s reviews=%s/%s reviewed=%s/%s extra_added=%s "
+          "extra_duplicate=%s extra_noise=%s vision_conf A=%s B=%s usage=%s" % (
+              _f(x.get("ref_accuracy")), x.get("items_valid"), x.get("items_total"),
+              x.get("reviews_valid"), x.get("reviews_total"), x.get("reviewed", "-"),
+              x.get("reviewable", "-"), x.get("extra_added"), x.get("extra_duplicate"),
+              x.get("extra_noise"), _f(vc.get("a")), _f(vc.get("b")), x.get("usage")))
+        for bad in x.get("invalid") or []:
+            a("     invalid %s: %s %s" % (bad.get("what"), bad.get("reason"),
+                                         _q(bad.get("raw") or "", 200)))
+        if x.get("summary"):
+            a("     summary: %s" % _q(x["summary"], 1200))
+        for sg in x.get("suggestions") or []:
+            a("     suggestion: %s" % _q(sg, 400))
 
     a("")
     a("[WARNINGS] %d" % len(r.get("warnings") or []))
