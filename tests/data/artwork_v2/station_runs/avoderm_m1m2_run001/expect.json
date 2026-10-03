@@ -1,0 +1,50 @@
+{
+ "job": "20261003_004712_25d50a",
+ "run": "run_001",
+ "note": "A = LBL Avoderm_Master-1 (ผิด) · B = Master-2 (ถูก) · เฉลยต่างจริง 4 เรื่อง ยืนยันด้วยตาโดยผู้ใช้",
+ "pairs": {
+  "1": {
+   "must": [
+    [
+     "CASE",
+     "c",
+     "C"
+    ],
+    [
+     "TEXT",
+     "",
+     "s"
+    ],
+    [
+     "PUNCT",
+     ",",
+     ""
+    ],
+    [
+     "TEXT",
+     "Park",
+     ""
+    ],
+    [
+     "TEXT",
+     "",
+     "USA"
+    ],
+    [
+     "TEXT",
+     "phate Pentahydr",
+     "f"
+    ]
+   ],
+   "allow": [
+    [
+     "PUNCT",
+     "",
+     "."
+    ]
+   ],
+   "max_yellow": 1,
+   "max_debris": 0
+  }
+ }
+}

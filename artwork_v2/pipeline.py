@@ -194,9 +194,13 @@ def run(job_id: str, raw_pairs, poster: Optional[Callable] = None,
             pr["findings"] = []
             pr["coverage"] = None
             continue
-        cmp_ = compare.compare(parsed["a"]["lines"], parsed["b"]["lines"])
+        cmp_ = compare.compare(parsed["a"]["lines"], parsed["b"]["lines"],
+                               tuple(pr["sides"]["a"]["sent_px"]),
+                               tuple(pr["sides"]["b"]["sent_px"]))
         pr["_cmp"] = cmp_
         pr["findings"] = cmp_["findings"]
+        pr["debris"] = cmp_["debris"]
+        pr["curved_lines"] = cmp_["curved_lines"]
         pr["coverage"] = cmp_["coverage"]
         pr["coverage_a"] = cmp_["coverage_a"]
         pr["coverage_b"] = cmp_["coverage_b"]
@@ -220,7 +224,12 @@ def run(job_id: str, raw_pairs, poster: Optional[Callable] = None,
     # ── 5) ผลตัดสิน + บันทึก ─────────────────────────────────────────
     fid = 0
     for pr in pairs:
+        if config.CURVED_GROUP_ENABLED and pr.get("findings"):
+            pr["findings"] = compare.collapse_curved(pr["findings"])
         for f in pr.get("findings", []):
+            fid += 1
+            f["id"] = fid
+        for f in pr.get("debris", []):
             fid += 1
             f["id"] = fid
         pr.pop("_cmp", None)
@@ -265,7 +274,8 @@ def settings_snapshot() -> dict:
         "PDF_ZONE_DPI", "PDF_ZONE_DPI_MAX", "ZONE_MIN_LONG_SIDE",
         "CONF_FAIL", "CONF_LOW", "COVERAGE_MIN", "PAIR_MIN_SIM", "PAIR_MIN_RUN",
         "PAIR_MAX_DIST", "ROW_MERGE_ENABLED", "ROW_MAX_ANGLE",
-        "PUNCT_CAN_FAIL", "REREAD_ENABLED", "REREAD_MAX", "REREAD_SCALE", "REREAD_MAX_SIDE")}
+        "PUNCT_CAN_FAIL", "CURVED_GROUP_ENABLED", "TILT_ANGLE", "CURVED_NEIGHBOR_MAX_CHARS",
+        "DEBRIS_ENABLED", "DEBRIS_CONF", "REREAD_ENABLED", "REREAD_MAX", "REREAD_SCALE", "REREAD_MAX_SIDE")}
 
 
 def _reread(pairs, srcs, rd, poster, key, calls, warnings, say) -> dict:
@@ -283,6 +293,10 @@ def _reread(pairs, srcs, rd, poster, key, calls, warnings, say) -> dict:
                 # เครื่องหมายวรรคตอนเป็นแดงได้ **เฉพาะเมื่ออ่านซ้ำยืนยันแล้ว**
                 f["severity"] = "yellow"
                 f["notes"].append("เครื่องหมายวรรคตอนต้องยืนยันด้วยการอ่านซ้ำ (ปิดอยู่) — ยังไม่ยืนยัน")
+            elif f.get("curved"):
+                # ข้อความโค้ง/เอียง — กติกาเดียวกับเครื่องหมายวรรคตอน
+                f["severity"] = "yellow"
+                f["notes"].append("ข้อความโค้ง/เอียงต้องยืนยันด้วยการอ่านซ้ำ (ปิดอยู่) — ยังไม่ยืนยัน")
             else:
                 f["notes"].append("ไม่ได้อ่านซ้ำ (ปิดอยู่)")
         return log

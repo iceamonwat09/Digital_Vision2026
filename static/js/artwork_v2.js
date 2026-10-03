@@ -353,7 +353,26 @@
     NUMBER: "ตัวเลข", CASE: "ตัวพิมพ์ใหญ่-เล็ก", TEXT: "ข้อความ", PUNCT: "เครื่องหมาย",
     FILLER: "จุดไข่ปลา/เส้นตกแต่ง",
     MISSING_IN_B: "หายไปจาก 🅱", EXTRA_IN_B: "มีเฉพาะใน 🅱",
+    CURVED: "ข้อความโค้ง/เอียง",
   };
+
+  // การ์ด "ข้อความโค้ง/เอียง" รวมหลายจุด — แสดงคำของทุกสมาชิก (ไม่มีจุดไหนถูกลบ)
+  function cellText(f, side) {
+    if (f.class !== "CURVED") return marked(f[side].text, f[side].span);
+    return (f.members || []).map((m) =>
+      '<span class="v2-sev ' + m.severity + '" style="font-size:11px">' + (m.severity === "red" ? "ต่าง" : "?") +
+      "</span> " + marked(m[side].text, m[side].span)).join("<br>");
+  }
+
+  function findingRow(f) {
+    const sev = f.severity === "red" ? "ต่าง" : (f.severity === "debris" ? "เศษ" : "ไม่มั่นใจ");
+    return '<tr class="click" data-f="' + f.id + '"><td>' + f.id + '</td><td><span class="v2-sev ' + f.severity + '">' +
+      sev + "</span></td><td>" + esc(CLASS_TH[f.class] || f.class) +
+      "</td><td>" + cellText(f, "a") + "</td><td>" + cellText(f, "b") + "</td><td>" +
+      (f.a.conf != null ? f.a.conf.toFixed(2) : "-") + " / " + (f.b.conf != null ? f.b.conf.toFixed(2) : "-") +
+      "</td><td>" + (f.notes || []).map(esc).join("<br>") + "</td></tr>";
+  }
+  const TBL_HEAD = '<thead><tr><th>#</th><th>ระดับ</th><th>ชนิด</th><th>🅰</th><th>🅱</th><th>ความมั่นใจ A/B</th><th>หมายเหตุ</th></tr></thead>';
 
   function marked(text, span) {
     const s = span && span.length === 2 ? span : [0, 0];
@@ -426,20 +445,20 @@
     const r = S.result;
     if (!r) return;
     $("v2PairsRes").innerHTML = (r.pairs || []).map((p) => {
-      const rows = (p.findings || []).map((f) =>
-        '<tr class="click" data-f="' + f.id + '"><td>' + f.id + '</td><td><span class="v2-sev ' + f.severity + '">' +
-        (f.severity === "red" ? "ต่าง" : "ไม่มั่นใจ") + "</span></td><td>" + esc(CLASS_TH[f.class] || f.class) +
-        "</td><td>" + marked(f.a.text, f.a.span) + "</td><td>" + marked(f.b.text, f.b.span) + "</td><td>" +
-        (f.a.conf != null ? f.a.conf.toFixed(2) : "-") + " / " + (f.b.conf != null ? f.b.conf.toFixed(2) : "-") +
-        "</td><td>" + (f.notes || []).map(esc).join("<br>") + "</td></tr>").join("");
+      const rows = (p.findings || []).map(findingRow).join("");
+      const deb = p.debris || [];
+      const debHtml = deb.length
+        ? '<details class="v2-debris" style="margin-top:8px"><summary>เศษอักขระ / ขอบโซน (' + deb.length +
+          ') — ไม่นับในผลตัดสิน</summary><div class="v2-tbl-wrap"><table class="v2-tbl">' + TBL_HEAD + "<tbody>" +
+          deb.map(findingRow).join("") + "</tbody></table></div></details>" : "";
       return '<div class="v2-card" style="margin:12px 0"><b>คู่ ' + p.n + "</b> — " + esc(p.verdict || "") +
         (p.coverage != null ? " · จับคู่ข้อความได้ " + Math.round(p.coverage * 100) + "%" : "") +
         (p.reasons && p.reasons.length ? ' <span class="v2-muted">(' + p.reasons.map(esc).join(" · ") + ")</span>" : "") +
         '<div class="v2-panes" style="margin-top:8px"><div>🅰 ' + sideInfo(p.sides.a) + svgFor(p, "a", r) +
         "</div><div>🅱 " + sideInfo(p.sides.b) + svgFor(p, "b", r) + "</div></div>" +
-        (rows ? '<div class="v2-tbl-wrap"><table class="v2-tbl"><thead><tr><th>#</th><th>ระดับ</th><th>ชนิด</th><th>🅰</th><th>🅱</th><th>ความมั่นใจ A/B</th><th>หมายเหตุ</th></tr></thead><tbody>' +
+        (rows ? '<div class="v2-tbl-wrap"><table class="v2-tbl">' + TBL_HEAD + "<tbody>" +
           rows + "</tbody></table></div>" : (p.unreadable ? "" : '<div class="v2-muted" style="margin-top:6px">ไม่พบจุดต่าง</div>')) +
-        "</div>";
+        debHtml + "</div>";
     }).join("");
   }
 

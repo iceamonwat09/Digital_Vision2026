@@ -16,8 +16,21 @@ def _sym(ch, x, y, cw, ch_h, conf, brk=None):
     return s
 
 
+def _tilt(words, angle):
+    """ตั้งมุมของคำ (poly_angle อ่านจากจุดที่ 0→1 ของกรอบคำ) — กรอบตัวอักษรคงแนวแกน"""
+    if angle is None:
+        return
+    import math
+    for w in words:
+        vs = w["boundingBox"]["vertices"]
+        x0, y0 = vs[0]["x"], vs[0]["y"]
+        L = max(1.0, vs[1]["x"] - x0)
+        vs[1] = {"x": x0 + L * math.cos(math.radians(angle)),
+                 "y": y0 + L * math.sin(math.radians(angle))}
+
+
 def line_para(text, x, y, conf=0.98, cw=10, h=20, end="LINE_BREAK", confs=None,
-              drop_zero=False):
+              drop_zero=False, angle=None):
     words = []
     cx = x
     toks = text.split(" ")
@@ -41,6 +54,7 @@ def line_para(text, x, y, conf=0.98, cw=10, h=20, end="LINE_BREAK", confs=None,
                                                    {"x": xs[-1] + cw, "y": y},
                                                    {"x": xs[-1] + cw, "y": y + h},
                                                    {"x": xs[0], "y": y + h}]}})
+    _tilt(words, angle)
     para = {"words": words}
     if drop_zero:                     # JSON จริงละพิกัดที่เป็น 0
         for w in words:
@@ -68,7 +82,7 @@ def fta(lines, W=1000, H=1000, block_type="TEXT"):
 
 # ── ข้อมูล OCR จริง (บรรทัด + กรอบบรรทัด) → fullTextAnnotation ───────────
 
-def para_in_box(text, box, conf=0.98, end="LINE_BREAK"):
+def para_in_box(text, box, conf=0.98, end="LINE_BREAK", angle=None):
     """บรรทัดเดียวในกรอบ ``box`` — กระจายตัวอักษรเท่า ๆ กัน (ช่องว่าง = 1 ช่อง)"""
     x0, y0, x1, y1 = box
     n = max(1, len(text))
@@ -92,21 +106,25 @@ def para_in_box(text, box, conf=0.98, end="LINE_BREAK"):
         words.append({"confidence": conf, "symbols": syms,
                       "boundingBox": {"vertices": [{"x": xs0, "y": y0}, {"x": xs1, "y": y0},
                                                    {"x": xs1, "y": y1}, {"x": xs0, "y": y1}]}})
+    _tilt(words, angle)
     return {"words": words}
 
 
 def fta_from_lines(lines, W, H):
-    """``lines`` = [(text, box, conf)] → fta หนึ่งบรรทัดต่อหนึ่งย่อหน้า"""
-    paras = [para_in_box(t, b, c) for t, b, c in lines if t.strip()]
-    return {"text": "\n".join(t for t, _, _ in lines),
+    """``lines`` = [(text, box, conf)] หรือ [(text, box, conf, angle)]
+    → fta หนึ่งบรรทัดต่อหนึ่งย่อหน้า"""
+    paras = [para_in_box(it[0], it[1], it[2], angle=it[3] if len(it) > 3 else None)
+             for it in lines if it[0].strip()]
+    return {"text": "\n".join(it[0] for it in lines),
             "pages": [{"width": W, "height": H,
                        "blocks": [{"blockType": "TEXT", "paragraphs": paras}]}]}
 
 
-def load_real(path):
-    """อ่านไฟล์ ``tests/data/artwork_v2/*_lines.txt`` → {side: (W, H, [(text, box, conf)])}"""
+def load_real(path, with_angle=False):
+    """อ่านไฟล์ ``tests/data/artwork_v2/*_lines.txt`` → {side: (W, H, [(text, box, conf)])}
+    ``with_angle=True`` ⇒ [(text, box, conf, angle)] (มุมจริงจาก Vision)"""
     import re
-    rx = re.compile(r'^\s*([AB])\d+ conf=([0-9.]+) .*?box=\[([0-9,]+)\] "(.*)"\s*$')
+    rx = re.compile(r'^\s*([AB])\d+ conf=([0-9.]+) .*?ang=([0-9.-]+) box=\[([0-9,]+)\] "(.*)"\s*$')
     sizes, out = {}, {"A": [], "B": []}
     with open(path, encoding="utf-8") as f:
         for raw in f:
@@ -116,6 +134,80 @@ def load_real(path):
                 continue
             m = rx.match(raw)
             if m:
-                box = tuple(float(v) for v in m.group(3).split(","))
-                out[m.group(1)].append((m.group(4), box, float(m.group(2))))
+                box = tuple(float(v) for v in m.group(4).split(","))
+                item = (m.group(5), box, float(m.group(2)))
+                if with_angle:
+                    item += (float(m.group(3)),)
+                out[m.group(1)].append(item)
     return {s: (sizes[s][0], sizes[s][1], out[s]) for s in ("A", "B")}
+
+
+# ── ชุดข้อมูลจากสถานี (ชุดทดสอบชุดที่ 2, 3, …) ───────────────────────────
+# วางไว้ที่ tests/data/artwork_v2/station_runs/<ชื่อ>/ ได้ 2 แบบ (แบบแรกแม่นกว่า):
+#   ① ผลดิบของ Vision: p1_a.json p1_b.json … (คัดลอกจาก
+#      data/artwork_v2/jobs/<งาน>/runs/<รอบ>/raw/ บนสถานี) — มีความมั่นใจรายตัวอักษร + มุมจริง
+#   ② log.txt ที่กดปุ่ม "คัดลอก Log" — มีแค่ความมั่นใจรายบรรทัด และเป็นบรรทัดหลังต่อแถวแล้ว
+# + expect.json (ไม่บังคับ) — ดู tests/test_artwork_v2_runs.py
+
+def load_run_dir(path):
+    """→ {n: {"A": (W, H, lines), "B": (W, H, lines), "source": "raw"|"log"}}
+    ``lines`` = บรรทัดจาก ``textmodel.parse`` (พร้อมใช้กับ ``compare.compare``)"""
+    import json
+    import os
+    import re
+
+    from artwork_v2 import textmodel
+    out = {}
+    for name in sorted(os.listdir(path)):
+        m = re.match(r"^p(\d+)_([ab])\.json$", name)
+        if not m:
+            continue
+        with open(os.path.join(path, name), encoding="utf-8") as f:
+            data = json.load(f)
+        if "pages" not in data and "fullTextAnnotation" in data:
+            data = data["fullTextAnnotation"]
+        pg = (data.get("pages") or [{}])[0]
+        W, H = int(pg.get("width") or 0), int(pg.get("height") or 0)
+        lines = textmodel.parse(data, W, H)["lines"]
+        out.setdefault(int(m.group(1)), {"source": "raw"})[m.group(2).upper()] = (W, H, lines)
+    if out:
+        return out
+    log = os.path.join(path, "log.txt")
+    if os.path.isfile(log):
+        for n, sides in load_log(log).items():
+            out[n] = {"source": "log"}
+            for s, (W, H, items) in sides.items():
+                out[n][s] = (W, H, textmodel.parse(fta_from_lines(items, W, H), W, H)["lines"])
+    return out
+
+
+def load_log(path):
+    """อ่าน Log ที่กด "คัดลอก Log" → {n: {"A": (W, H, [(text, box, conf, angle)]), "B": …}}"""
+    import re
+    rx_pair = re.compile(r"^\[PAIR (\d+)\]")
+    rx_side = re.compile(r"^\s+([AB]): page=.*?sent_px=\[(\d+), (\d+)\]")
+    rx_line = re.compile(r'^\s+([AB])\d+ conf=([0-9.-]+) min=\S+ ang=([0-9.-]+) '
+                         r'box=\[([0-9,-]+)\] "(.*)"(?: \[soft-hyphen\])?\s*$')
+    out, n = {}, None
+    with open(path, encoding="utf-8") as f:
+        for raw in f:
+            m = rx_pair.match(raw)
+            if m:
+                n = int(m.group(1))
+                out[n] = {"A": [0, 0, []], "B": [0, 0, []]}
+                continue
+            if n is None:
+                continue
+            m = rx_side.match(raw)
+            if m:
+                out[n][m.group(1)][0] = int(m.group(2))
+                out[n][m.group(1)][1] = int(m.group(3))
+                continue
+            m = rx_line.match(raw)
+            if m:
+                conf = 0.98 if m.group(2) == "-" else float(m.group(2))
+                ang = None if m.group(3) == "-" else float(m.group(3))
+                box = tuple(float(v) for v in m.group(4).split(","))
+                out[n][m.group(1)][2].append((m.group(5), box, conf, ang))
+    return {k: {s: tuple(v) for s, v in d.items()} for k, d in out.items()
+            if d["A"][2] or d["B"][2]}

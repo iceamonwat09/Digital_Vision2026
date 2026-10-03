@@ -115,21 +115,30 @@ def build_text(r: dict) -> str:
         a("  row_merges (%d) — ต่อแถวที่ OCR ตัดตรงเส้นตกแต่ง:" % len(rm))
         for m in rm:
             a("     %s: %s + %s" % (m["side"], _q(m["left"], 80), _q(m["right"], 80)))
+        cl = p.get("curved_lines") or {}
+        a("  curved_lines (เอียง > %s° จากแนวหลัก + เศษติดกัน): A=%s B=%s" % (
+            _f(config.TILT_ANGLE, 0), cl.get("A"), cl.get("B")))
+
+        def finding(f, ind="   "):
+            a("%sF%s %s %s method=%s score=%s%s" % (
+                ind, f.get("id", "-"), f["severity"].upper(), f["class"], f.get("pair_method"),
+                _f(f.get("pair_score")), " curved" if f.get("curved") else ""))
+            for s_ in ("a", "b"):
+                a("%s   %s line=%s frag=%s word=%s conf=%s box=%s" % (
+                    ind, s_.upper(), f[s_]["line"], _q(f[s_]["frag"], 60),
+                    _q(f.get("word_" + s_), 60), _f(f[s_]["conf"]), _box(f[s_]["box"])))
+                a("%s     text=%s" % (ind, _q(f[s_]["text"])))
+            for n in f.get("notes") or []:
+                a("%s   note: %s" % (ind, n))
+            for m in f.get("members") or []:
+                finding(m, ind + "    · ")
+
         a("  findings (%d):" % len(p.get("findings") or []))
         for f in p.get("findings") or []:
-            a("   F%d %s %s method=%s score=%s" % (
-                f.get("id", 0), f["severity"].upper(), f["class"], f.get("pair_method"),
-                _f(f.get("pair_score"))))
-            a("      A line=%s frag=%s word=%s conf=%s box=%s" % (
-                f["a"]["line"], _q(f["a"]["frag"], 60), _q(f.get("word_a"), 60),
-                _f(f["a"]["conf"]), _box(f["a"]["box"])))
-            a("        text=%s" % _q(f["a"]["text"]))
-            a("      B line=%s frag=%s word=%s conf=%s box=%s" % (
-                f["b"]["line"], _q(f["b"]["frag"], 60), _q(f.get("word_b"), 60),
-                _f(f["b"]["conf"]), _box(f["b"]["box"])))
-            a("        text=%s" % _q(f["b"]["text"]))
-            for n in f.get("notes") or []:
-                a("      note: " + n)
+            finding(f)
+        a("  debris — เศษอักขระ / ขอบโซน ไม่นับในผลตัดสิน (%d):" % len(p.get("debris") or []))
+        for f in p.get("debris") or []:
+            finding(f)
         for s in ("a", "b"):
             lines = (p.get("lines") or {}).get(s) or []
             a("  OCR lines %s (%d):" % (s.upper(), len(lines)))

@@ -538,7 +538,120 @@ def severity(f: dict) -> str:
     return "red"
 
 
-def compare(lines_a: List[dict], lines_b: List[dict]) -> dict:
+# ── ข้อความโค้ง/เอียง (ตรา · โลโก้) ──────────────────────────────────────
+
+def _adist(a: float, b: float) -> float:
+    d = abs(a - b) % 360.0
+    return min(d, 360.0 - d)
+
+
+def dominant_angle(lines: List[dict]) -> float:
+    """แนวหลักของโซน (0/90/180/270) ถ่วงด้วยจำนวนตัวอักษร — โซนที่หมุนทั้งโซน
+    จึงไม่ถูกนับว่า "เอียง" ทั้งหมด"""
+    w: Dict[int, int] = {}
+    for ln in lines:
+        a = ln.get("angle")
+        if a is None:
+            continue
+        q = int(round(a / 90.0)) * 90 % 360
+        w[q] = w.get(q, 0) + max(1, len(ln.get("dk") or ln.get("text") or ""))
+    return float(max(w, key=lambda k: (w[k], -k))) if w else 0.0
+
+
+def _box_gap(a, b) -> float:
+    gx = max(0.0, b[0] - a[2], a[0] - b[2])
+    gy = max(0.0, b[1] - a[3], a[1] - b[3])
+    return max(gx, gy)
+
+
+def curved_lines(lines: List[dict]) -> set:
+    """ดัชนีบรรทัดที่เป็น "ข้อความโค้ง/เอียง"
+
+    * บรรทัดที่เอียงจากแนวหลักของโซนเกิน ``TILT_ANGLE``
+    * + บรรทัด **สั้น** (≤ ``CURVED_NEIGHBOR_MAX_CHARS`` ตัว) ที่ตั้งตรงแต่ติดกับบรรทัด
+      ที่เอียง (เช่น "&" บนตราเดียวกัน) — **ไม่ต่อทอด** (บรรทัดตั้งตรงไม่พาบรรทัดอื่นเข้ากลุ่ม)
+      และบรรทัดยาวไม่เข้ากลุ่ม (กันข้อความปกติข้างตราถูกยุบเป็น "ข้อความโค้ง")
+    """
+    dom = dominant_angle(lines)
+    tilted = {i for i, ln in enumerate(lines)
+              if ln.get("angle") is not None and _adist(ln["angle"], dom) > config.TILT_ANGLE}
+    out = set(tilted)
+    for i, ln in enumerate(lines):
+        if i in tilted or not ln.get("box"):
+            continue
+        dk = ln.get("dk")
+        if dk is None:
+            dk = diff_key_map(ln.get("text") or "")[0]
+        if len(dk) > config.CURVED_NEIGHBOR_MAX_CHARS:
+            continue
+        h = ln.get("height") or (ln["box"][3] - ln["box"][1])
+        for t in tilted:
+            tb = lines[t].get("box")
+            if not tb:
+                continue
+            ht = lines[t].get("height") or (tb[3] - tb[1])
+            if _box_gap(ln["box"], tb) <= max(h, ht):
+                out.add(i)
+                break
+    return out
+
+
+def collapse_curved(findings: List[dict]) -> List[dict]:
+    """ยุบจุดต่างที่ติดธง ``curved`` ของคู่หนึ่งเป็น **การ์ดเดียว** (class ``CURVED``)
+
+    ไม่มีจุดไหนถูกลบ — ทุกจุดอยู่ใน ``members`` ครบพร้อมระดับ/หมายเหตุของตัวเอง ·
+    การ์ดเป็นแดงเมื่อมีสมาชิกที่ยังแดงอยู่ (ซึ่งต้องผ่านการอ่านซ้ำยืนยันมาแล้ว)
+    """
+    members = [f for f in findings if f.get("curved")]
+    if not members:
+        return findings
+    rest = [f for f in findings if not f.get("curved")]
+
+    def side(s):
+        texts, seen = [], set()
+        for m in members:
+            t = (m.get("word_" + s) or m[s].get("frag") or m[s].get("text") or "").strip()
+            if t and t not in seen:
+                seen.add(t)
+                texts.append(t)
+        cs = [m[s]["conf"] for m in members if m[s].get("conf") is not None]
+        return {"line": None, "text": " · ".join(texts), "span": None, "frag": "",
+                "box": union(m[s].get("box") for m in members),
+                "conf": min(cs) if cs else None}
+
+    red = [m for m in members if m["severity"] == "red"]
+    notes = ["ข้อความโค้ง/เอียง — OCR อ่านไม่นิ่ง ดูด้วยตา (%d จุด)" % len(members)]
+    if red:
+        notes.append("มี %d จุดที่การอ่านซ้ำแบบซูมยืนยันว่าต่างจริง" % len(red))
+    card = {"class": "CURVED", "severity": "red" if red else "yellow",
+            "word_a": "", "word_b": "", "a": side("a"), "b": side("b"),
+            "pair_method": "group", "pair_score": None, "notes": notes,
+            "members": members}
+    return rest + [card]
+
+
+# ── เศษอักขระ / ขอบโซน ──────────────────────────────────────────────────
+
+def _at_edge(box, size) -> bool:
+    if not box or not size:
+        return False
+    W, H = size
+    tol = max(3.0, 0.25 * (box[3] - box[1]))
+    return box[0] <= tol or box[1] <= tol or box[2] >= W - tol or box[3] >= H - tol
+
+
+def is_debris(ln: dict, size=None) -> bool:
+    """บรรทัดที่ไม่มีตัวอักษรหรือตัวเลขเลย และ (ความมั่นใจต่ำ หรือ ชิดขอบโซน)"""
+    if any(c.isalnum() for c in ln.get("text") or ""):
+        return False
+    conf = ln.get("conf_mean")
+    return (conf is not None and conf < config.DEBRIS_CONF) or _at_edge(ln.get("box"), size)
+
+
+def compare(lines_a: List[dict], lines_b: List[dict],
+            size_a=None, size_b=None) -> dict:
+    """``size_a``/``size_b`` = ขนาดภาพที่ส่ง (W, H) — ใช้ตัดสิน "ชิดขอบโซน" ของเศษอักขระ
+    (ไม่ส่ง = ใช้แค่เกณฑ์ความมั่นใจ)"""
     merges: List[dict] = []
     A, B = _prep(lines_a, "A", merges), _prep(lines_b, "B", merges)
     pairs, ua, ub = pair_lines(A, B)
@@ -588,19 +701,50 @@ def compare(lines_a: List[dict], lines_b: List[dict]) -> dict:
         f["severity"] = sev
         f["notes"] = []
 
+    # เศษอักขระ: ทุกบรรทัดที่เกี่ยวข้องต้องเป็นเศษ ⇒ ย้ายไปรายการพับ (ไม่นับเป็นเหลือง)
+    debris: List[dict] = []
+    debris_lines = {"A": set(), "B": set()}
+    if config.DEBRIS_ENABLED:
+        keep = []
+        for f in findings:
+            involved = [(s, L, f[s.lower()]["line"], sz)
+                        for s, L, sz in (("A", A, size_a), ("B", B, size_b))
+                        if f[s.lower()]["line"] is not None]
+            if involved and all(is_debris(L[i], sz) for _, L, i, sz in involved):
+                f["severity"] = "debris"
+                f["notes"].append("เศษอักขระ / ขอบโซน — ไม่มีตัวอักษรหรือตัวเลข และ"
+                                  "ความมั่นใจต่ำหรือชิดขอบโซน (ไม่นับในผลตัดสิน)")
+                debris.append(f)
+                for s, _, i, _ in involved:
+                    debris_lines[s].add(i)
+            else:
+                keep.append(f)
+        findings = keep
+
+    # ข้อความโค้ง/เอียง: ติดธงไว้ · แดงได้เฉพาะเมื่ออ่านซ้ำยืนยัน (ดู pipeline._reread)
+    curved = {"A": set(), "B": set()}
+    if config.CURVED_GROUP_ENABLED:
+        curved = {"A": curved_lines(A), "B": curved_lines(B)}
+        for f in findings:
+            la, lb = f["a"]["line"], f["b"]["line"]
+            if (la is not None and la in curved["A"]) or (lb is not None and lb in curved["B"]):
+                f["curved"] = True
+
     def cov(lines, uns, refl):
         total = sum(len(l["dk"]) for l in lines)
         bad = sum(len(lines[i]["dk"]) for i in uns if i not in refl)
         return (1.0 - bad / float(total)) if total else None
 
-    cov_a = cov(A, ua, set(reflow_lines["A"]))
-    cov_b = cov(B, ub, set(reflow_lines["B"]))
+    cov_a = cov(A, ua, set(reflow_lines["A"]) | debris_lines["A"])
+    cov_b = cov(B, ub, set(reflow_lines["B"]) | debris_lines["B"])
     covs = [c for c in (cov_a, cov_b) if c is not None]
     methods: Dict[str, int] = {}
     for p in pairs:
         methods[p[2]] = methods.get(p[2], 0) + 1
     return {
         "findings": findings,
+        "debris": debris,
+        "curved_lines": {"A": sorted(curved["A"]), "B": sorted(curved["B"])},
         "lines_a": A, "lines_b": B,
         "pairs": [{"a": ia, "b": ib, "method": m, "score": s} for ia, ib, m, s in pairs],
         "unpaired_a": ua, "unpaired_b": ub,

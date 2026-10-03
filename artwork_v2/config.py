@@ -79,6 +79,17 @@ ROW_MAX_ANGLE = _f("ARTWORK_V2_ROW_MAX_ANGLE", "10")   # องศา — เก
 # เครื่องหมายวรรคตอนต่าง (ลูกน้ำ/จุดหาย) เป็นแดงได้ — ต้องผ่านการอ่านซ้ำแบบซูมเสมอ
 PUNCT_CAN_FAIL = _b("ARTWORK_V2_PUNCT_CAN_FAIL", "1")
 
+# ข้อความโค้ง/เอียง (ตรา/โลโก้) — จุดต่างบนบรรทัดที่เอียงจากแนวหลักของโซนเกิน
+# ``TILT_ANGLE`` องศา (+ เศษสั้น ๆ ที่ตั้งตรงแต่ติดกับบรรทัดนั้น เช่น "&" บนตราเดียวกัน)
+# ยุบเป็นการ์ดเดียว และแดงได้เฉพาะเมื่ออ่านซ้ำยืนยัน · 0 = พฤติกรรมเดิม
+CURVED_GROUP_ENABLED = _b("ARTWORK_V2_CURVED_GROUP", "1")
+TILT_ANGLE = _f("ARTWORK_V2_TILT_ANGLE", "10")
+CURVED_NEIGHBOR_MAX_CHARS = _i("ARTWORK_V2_CURVED_NEIGHBOR_MAX_CHARS", "8")
+# เศษอักขระ: บรรทัดที่ไม่มีตัวอักษร/ตัวเลขเลย และ (ความมั่นใจต่ำ หรือ ชิดขอบโซน)
+# ⇒ ย้ายไปรายการพับ "เศษอักขระ / ขอบโซน" ไม่นับเป็นเหลือง · 0 = พฤติกรรมเดิม
+DEBRIS_ENABLED = _b("ARTWORK_V2_DEBRIS", "1")
+DEBRIS_CONF = _f("ARTWORK_V2_DEBRIS_CONF", "0.60")
+
 # ── อ่านซ้ำแบบซูม ────────────────────────────────────────────────────
 REREAD_ENABLED = _b("ARTWORK_V2_REREAD", "1")
 REREAD_MAX = _i("ARTWORK_V2_REREAD_MAX", "12")
