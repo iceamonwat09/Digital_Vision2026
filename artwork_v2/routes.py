@@ -17,11 +17,15 @@ import time
 from flask import (Blueprint, abort, g, jsonify, render_template, request,
                    send_file)
 
-from . import VERSION, config, jobs, keystore, pipeline, vision_client
+from . import VERSION, config, jobs, keystore, pipeline, runguard, vision_client
 
 logger = logging.getLogger(__name__)
 
 artwork_v2_bp = Blueprint("artwork_v2", __name__)
+
+# กันการยิงคำขอรัว ๆ — ตัวเดียวต่อโปรเซส (Flask threaded=True ⇒ ทุกคำขอเห็นตัวเดียวกัน)
+_RUNS = runguard.RunGuard()
+_KEY_TESTS = runguard.RunGuard()
 
 _IMG_RE = re.compile(r"^(p[0-9]+|rr[0-9]+)_[ab]\.jpg$")
 _RAW_RE = re.compile(r"^p[0-9]+_[ab]\.json$")
@@ -128,8 +132,17 @@ def _test_image() -> bytes:
 def settings_test():
     if not _is_admin(_viewer()):
         return _err("ต้องเป็นผู้ดูแลระบบจึงจะทดสอบ API key ได้", 403)
+    if config.RUN_GUARD:
+        try:
+            _KEY_TESTS.acquire("key-test", 1, config.KEY_TEST_COOLDOWN_S)
+        except runguard.Busy as e:
+            return _busy(e)
     t0 = time.time()
-    res = vision_client.annotate([[{"id": "test", "jpeg": _test_image()}]])
+    try:
+        res = vision_client.annotate([[{"id": "test", "jpeg": _test_image()}]])
+    finally:
+        if config.RUN_GUARD:
+            _KEY_TESTS.release("key-test")
     r = res["results"].get("test") or {}
     text = ((r.get("fta") or {}).get("text") or "").strip()
     call = (res["calls"] or [{}])[0]
@@ -193,17 +206,37 @@ def job_preview(job_id, side, page):
     return send_file(path, mimetype="image/png", max_age=3600)
 
 
+def _busy(e: "runguard.Busy"):
+    resp = jsonify({"error": str(e), "busy": True, "retry_after": e.retry_after})
+    resp.status_code = e.status
+    if e.retry_after:
+        resp.headers["Retry-After"] = str(max(1, int(e.retry_after + 0.999)))
+    return resp
+
+
 @artwork_v2_bp.route("/api/artwork_v2/jobs/<job_id>/run", methods=["POST"])
 def job_run(job_id):
     body = request.get_json(silent=True) or {}
+    pairs = body.get("pairs")
+    if config.RUN_GUARD:
+        try:
+            _RUNS.acquire(job_id, config.RUN_MAX_CONCURRENT, config.RUN_COOLDOWN_S)
+        except runguard.Busy as e:
+            logger.info("[artwork_v2] %s ปฏิเสธคำขอซ้ำ: %s", job_id, e)
+            return _busy(e)
+    sent = True
     try:
-        res = pipeline.run(job_id, body.get("pairs"), sharpness=body.get("sharpness"),
+        res = pipeline.run(job_id, pairs, sharpness=body.get("sharpness"),
                            ai_mode=body.get("ai_mode"))
     except ValueError as e:
+        sent = False      # ข้อมูลไม่ถูกต้อง (parse_pairs โยนก่อนยิง Vision) ⇒ ไม่นับเวลาพัก
         return _err(str(e))
     except Exception as e:                       # noqa: BLE001
         logger.exception("[artwork_v2] ตรวจไม่สำเร็จ")
         return _err("ตรวจไม่สำเร็จ: %s: %s" % (type(e).__name__, e), 500)
+    finally:
+        if config.RUN_GUARD:
+            _RUNS.release(job_id, cooldown=sent)
     logger.info("[artwork_v2] %s %s verdict=%s total=%sms", job_id, res.get("run"),
                 res.get("verdict"), (res.get("stage") or {}).get("total_ms"))
     return jsonify(res)

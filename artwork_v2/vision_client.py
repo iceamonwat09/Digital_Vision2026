@@ -40,11 +40,20 @@ def _item_cost(jpeg: bytes) -> int:
     return (len(jpeg) + 2) // 3 * 4 + 400
 
 
+def fits_one_request(jpegs: List[bytes]) -> bool:
+    """ภาพชุดนี้ใส่คำขอเดียวได้ไหม — เกณฑ์เดียวกับ :func:`pack`"""
+    return (len(jpegs) <= config.MAX_IMAGES_PER_REQUEST
+            and sum(_item_cost(j) for j in jpegs) <= config.MAX_REQUEST_BYTES - 200)
+
+
 def pack(groups: List[List[dict]]) -> List[List[dict]]:
     """จัดภาพลงคำขอ · ``groups`` = ภาพที่อยากให้อยู่คำขอเดียวกัน (เช่นคู่ A/B)
 
     กลุ่มที่ใส่คำขอเดียวไม่ได้ (ใหญ่เกิน) จะถูกแยกเป็นรายภาพ — ผู้เรียกดูได้จาก
     ``request_index`` ของแต่ละภาพว่าคู่ไหนถูกแยก
+
+    ``ONE_REQUEST_PER_PAIR`` (ค่าเริ่มต้น) = แต่ละกลุ่มได้คำขอของตัวเองเสมอ ไม่รวมกับกลุ่มอื่น
+    (pipeline เข้ารหัสภาพให้คู่ใส่คำขอเดียวได้ก่อนส่งมาถึงนี่แล้ว)
     """
     limit = config.MAX_REQUEST_BYTES - 200
     reqs: List[List[dict]] = []
@@ -60,6 +69,12 @@ def pack(groups: List[List[dict]]) -> List[List[dict]]:
     for g in groups:
         g_bytes = sum(_item_cost(it["jpeg"]) for it in g)
         if g_bytes <= limit and len(g) <= config.MAX_IMAGES_PER_REQUEST:
+            if config.ONE_REQUEST_PER_PAIR:             # 1 คู่ = 1 คำขอ ไม่รวมกับคู่อื่น
+                flush()
+                cur.extend(g)
+                cur_bytes += g_bytes
+                flush()
+                continue
             if (cur_bytes + g_bytes > limit
                     or len(cur) + len(g) > config.MAX_IMAGES_PER_REQUEST):
                 flush()

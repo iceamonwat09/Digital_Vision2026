@@ -147,6 +147,7 @@ def run(job_id: str, raw_pairs, poster: Optional[Callable] = None,
     for n, p in enumerate(pairs_in, 1):
         pr = {"n": n, "sides": {}}
         grp = []
+        encoded = {}
         for s in ("a", "b"):
             z = p[s]
             got = None
@@ -162,6 +163,29 @@ def run(job_id: str, raw_pairs, poster: Optional[Callable] = None,
                 rinfo["sharpness"] = "standard" if sharp == "standard" else (
                     "max→standard" if srcs[s].is_pdf else "source_pixels")
                 jpeg, sent, einfo = imaging.fit_jpeg(img, config.MAX_IMAGE_BYTES)
+                einfo["_img"] = img
+            encoded[s] = [jpeg, sent, rinfo, einfo]
+        # 1 คู่ = 1 คำขอ: ภาพสองฝั่งรวมกันใหญ่เกินคำขอเดียว ⇒ เข้ารหัสใหม่ให้พอดีงบต่อภาพ
+        # (ลดคุณภาพก่อน แล้วค่อยย่อ — บอกในคำเตือนเสมอ) · คู่ที่พอดีอยู่แล้วไม่ถูกแตะแม้แต่ไบต์เดียว
+        if config.ONE_REQUEST_PER_PAIR and not vision_client.fits_one_request(
+                [encoded[s][0] for s in ("a", "b")]):
+            budget = imaging.pair_image_budget(2)
+            for s in ("a", "b"):
+                jpeg, sent, rinfo, einfo = encoded[s]
+                if len(jpeg) <= budget:
+                    continue
+                src_img = einfo.get("_img")
+                if src_img is None:
+                    src_img = sent
+                jpeg, sent, e2 = imaging.fit_jpeg(src_img, budget)
+                e2["warnings"].insert(0, "ภาพคู่นี้รวมกันใหญ่เกินคำขอเดียว — เข้ารหัสใหม่ให้ส่ง"
+                                         "คู่ A/B ในคำขอเดียวกัน (คุณภาพ %s)" % e2.get("quality"))
+                e2["pair_refit"] = True
+                encoded[s] = [jpeg, sent, rinfo, e2]
+        for s in ("a", "b"):
+            z = p[s]
+            jpeg, sent, rinfo, einfo = encoded[s]
+            einfo.pop("_img", None)
             fname = "p%d_%s.jpg" % (n, s)
             with open(os.path.join(rd, "img", fname), "wb") as f:
                 f.write(jpeg)
@@ -319,7 +343,8 @@ def settings_snapshot() -> dict:
         "PUNCT_CAN_FAIL", "CURVED_GROUP_ENABLED", "TILT_ANGLE", "CURVED_NEIGHBOR_MAX_CHARS",
         "DEBRIS_ENABLED", "DEBRIS_CONF", "SEAM_FILLER", "CROSS_ROW_JOIN", "SYMBOL_TOKEN",
         "FRACTION_YELLOW", "REREAD_ENABLED", "REREAD_MAX", "REREAD_SCALE", "REREAD_MAX_SIDE",
-        "AI_MODE", "AI_REVIEW_URL", "AI_TIMEOUT_S", "AI_RETRIES")}
+        "AI_MODE", "AI_REVIEW_URL", "AI_TIMEOUT_S", "AI_RETRIES",
+        "ONE_REQUEST_PER_PAIR", "RUN_GUARD", "RUN_MAX_CONCURRENT", "RUN_COOLDOWN_S")}
 
 
 def _reread(pairs, srcs, rd, poster, key, calls, warnings, say) -> dict:

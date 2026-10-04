@@ -58,6 +58,17 @@ MAX_IMAGE_MP = _f("ARTWORK_V2_MAX_IMAGE_MP", "40")                   # ขีด
 MAX_IMAGE_BYTES = int((MAX_REQUEST_BYTES - 4096) * 3 / 4)
 JPEG_QUALITIES = [92, 88, 84, 80, 75, 70]
 
+# 1 คู่โซน = 1 คำขอ Vision (ผู้ใช้สั่ง 4 ต.ค.) — ไม่รวมหลายคู่ในคำขอเดียว · คู่ที่ภาพรวมกัน
+# ใหญ่เกินคำขอเดียว ⇒ เข้ารหัสใหม่ให้พอดี (ลดคุณภาพก่อนย่อ + เตือนเสมอ) แทนการแยกเป็น 2 คำขอ
+# 0 = แบบเดิม (รวมหลายคู่ในคำขอเดียวได้ · คู่ใหญ่ถูกแยกรายภาพ)
+ONE_REQUEST_PER_PAIR = _b("ARTWORK_V2_ONE_REQUEST_PER_PAIR", "1")
+
+# กันการยิงคำขอรัว ๆ (runguard.py) — ทุกตัว 0 = ปิดด่านนั้น
+RUN_GUARD = _b("ARTWORK_V2_RUN_GUARD", "1")                       # งานเดียวกันวิ่งได้ทีละรอบ
+RUN_MAX_CONCURRENT = _i("ARTWORK_V2_RUN_MAX_CONCURRENT", "2")     # ทั้งเครื่องพร้อมกันไม่เกิน
+RUN_COOLDOWN_S = _f("ARTWORK_V2_RUN_COOLDOWN_S", "3")             # พักหลังจบรอบ (ต่องาน)
+KEY_TEST_COOLDOWN_S = _f("ARTWORK_V2_KEY_TEST_COOLDOWN_S", "5")   # ปุ่ม "ทดสอบกุญแจ"
+
 # ── การเรนเดอร์โซน ───────────────────────────────────────────────────
 PDF_ZONE_DPI = _i("ARTWORK_V2_PDF_ZONE_DPI", "400")
 PDF_ZONE_DPI_MAX = _i("ARTWORK_V2_PDF_ZONE_DPI_MAX", "1200")

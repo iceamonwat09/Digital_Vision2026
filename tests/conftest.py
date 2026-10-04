@@ -9,6 +9,7 @@ Artwork V2 รอบ 5 (3 ต.ค.) เปลี่ยนค่าเริ่�
 import pytest
 
 _NEW_DEFAULTS_TESTED_IN = {"test_artwork_v2_ai_review"}
+_GUARD_TESTED_IN = {"test_artwork_v2_zone_guard"}
 
 
 @pytest.fixture(autouse=True)
@@ -20,4 +21,10 @@ def _artwork_v2_legacy_defaults(request, monkeypatch):
     from artwork_v2 import config
     monkeypatch.setattr(config, "REREAD_ENABLED", True)
     monkeypatch.setattr(config, "AI_MODE", "off")
+    # 4 ต.ค.: 1 คู่ = 1 คำขอ + ด่านกันยิงรัว — เทสต์รุ่นก่อนยิง /run ติดกันบนงานเดียว
+    # และล็อกการรวมคู่ลงคำขอเดียว ⇒ ตรึงค่าเดิม (ค่าใหม่ทดสอบใน test_artwork_v2_zone_guard.py)
+    if name not in _GUARD_TESTED_IN:
+        monkeypatch.setattr(config, "ONE_REQUEST_PER_PAIR", False)
+        monkeypatch.setattr(config, "RUN_COOLDOWN_S", 0.0)
+        monkeypatch.setattr(config, "KEY_TEST_COOLDOWN_S", 0.0)
     yield

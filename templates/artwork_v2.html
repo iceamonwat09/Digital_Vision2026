@@ -26,12 +26,30 @@
   @media (max-width: 900px) { .v2-panes { grid-template-columns: minmax(0,1fr); } }
   .v2-pane-h { display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:6px; flex-wrap:wrap; }
   .v2-pane-h b { font-size:14px; }
-  .v2-stage { position:relative; border:1px solid #cbd5e1; border-radius:6px; overflow:hidden; background:#f1f5f9; user-select:none; touch-action:none; }
-  .v2-stage img { display:block; width:100%; height:auto; pointer-events:none; }
+  /* กล่องเลื่อนได้ (ซูม/เลื่อนภาพแบบหน้า Artwork เดิม) · ความกว้างของ .v2-stage = ภาพ × ซูม (JS ตั้งเป็น px) */
+  .v2-stage-box { position:relative; overflow:auto; max-height:72vh; border:1px solid #cbd5e1; border-radius:6px; background:#f1f5f9; overscroll-behavior:contain; }
+  .v2-stage { position:relative; width:100%; user-select:none; touch-action:none; }
+  .v2-stage img { display:block; width:100%; height:auto; pointer-events:none; -webkit-user-drag:none; }
   .v2-stage .v2-ov { position:absolute; inset:0; cursor:crosshair; }
-  .v2-zone { position:absolute; border:2px solid; box-sizing:border-box; pointer-events:none; }
-  .v2-zone span { position:absolute; left:-2px; top:-20px; font-size:12px; font-weight:600; color:#fff; padding:1px 5px; border-radius:3px; white-space:nowrap; }
-  .v2-zone.draft { border-style:dashed; }
+  .v2-mode-pan .v2-stage .v2-ov, .v2-space .v2-stage .v2-ov { cursor:grab; }
+  .v2-stage-box.panning, .v2-stage-box.panning .v2-ov { cursor:grabbing !important; }
+  .v2-zone { position:absolute; border:2px solid; box-sizing:border-box; cursor:move; }
+  .v2-mode-pan .v2-zone, .v2-space .v2-zone { pointer-events:none; }
+  .v2-zone.draft { border-style:dashed; pointer-events:none; }
+  .v2-zone.sel { box-shadow:0 0 0 1px #fff, 0 0 0 3px rgba(15,23,42,.35); }
+  .v2-zone span { position:absolute; left:-2px; top:-20px; font-size:12px; font-weight:600; color:#fff; padding:1px 5px; border-radius:3px; white-space:nowrap; pointer-events:none; }
+  .v2-h { position:absolute; width:10px; height:10px; background:#fff; border:2px solid #0f172a; border-radius:2px; box-sizing:border-box; }
+  .v2-h-nw { left:-6px; top:-6px; cursor:nwse-resize; } .v2-h-ne { right:-6px; top:-6px; cursor:nesw-resize; }
+  .v2-h-sw { left:-6px; bottom:-6px; cursor:nesw-resize; } .v2-h-se { right:-6px; bottom:-6px; cursor:nwse-resize; }
+  .v2-h-n { left:calc(50% - 5px); top:-6px; cursor:ns-resize; } .v2-h-s { left:calc(50% - 5px); bottom:-6px; cursor:ns-resize; }
+  .v2-h-w { top:calc(50% - 5px); left:-6px; cursor:ew-resize; } .v2-h-e { top:calc(50% - 5px); right:-6px; cursor:ew-resize; }
+  .v2-zbar { display:flex; flex-wrap:wrap; align-items:center; gap:4px; margin-bottom:6px; font-size:13px; }
+  .v2-zbar button, .v2-tools button { border:1px solid #cbd5e1; background:#fff; border-radius:5px; padding:3px 8px; cursor:pointer; font:inherit; font-size:13px; }
+  .v2-zbar button:hover, .v2-tools button:hover { background:#f8fafc; }
+  .v2-zbar button.on, .v2-tools button.on { background:#dbeafe; border-color:#93c5fd; }
+  .v2-zbar input[type=range] { width:110px; }
+  .v2-zpct { min-width:42px; text-align:right; color:#334155; font-variant-numeric:tabular-nums; }
+  .v2-tools { display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin-top:8px; font-size:13px; }
   .v2-pairs { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
   .v2-chip { display:inline-flex; gap:6px; align-items:center; border:1px solid #cbd5e1; border-radius:14px; padding:3px 4px 3px 10px; font-size:13px; }
   .v2-chip button { border:0; background:#f1f5f9; border-radius:10px; cursor:pointer; padding:1px 7px; }
@@ -133,14 +151,33 @@
   <section class="v2-card v2-hidden" id="v2DrawCard">
     <h3>③ วาดโซนคู่ <span class="v2-muted" id="v2JobLabel"></span></h3>
     <div class="v2-muted">ลากกรอบบน 🅰 แล้วลากกรอบที่ตรงกันบน 🅱 (1 คู่ = 1 โซนต่อฝั่ง · สูงสุด 8 คู่) — ส่งให้ Google เฉพาะภาพในกรอบเท่านั้น · ลากกรอบให้ครอบบรรทัดเต็ม ๆ ไม่ตัดผ่านตัวหนังสือ</div>
-    <div class="v2-panes" style="margin-top:10px">
+    <div class="v2-tools">
+      <button data-mode="draw" class="on" title="ลากที่ว่างเพื่อวาดโซน · ลากโซนเพื่อย้าย · ลากมุมเพื่อย่อขยาย">✏️ วาด/แก้โซน</button>
+      <button data-mode="pan" title="ลากเพื่อเลื่อนภาพ">✋ เลื่อนภาพ</button>
+      <span class="v2-muted">ล้อเมาส์ = ซูม · ลากด้วยปุ่มกลาง หรือกด Space ค้างแล้วลาก = เลื่อนภาพ · คลิกโซนแล้วกด Delete = ลบ</span>
+    </div>
+    <div class="v2-panes" style="margin-top:8px">
       <div>
         <div class="v2-pane-h"><b>🅰 <span id="v2NameA"></span></b><label class="v2-muted">หน้า <select id="v2PageA" class="v2-input"></select></label></div>
-        <div class="v2-stage" id="v2StageA"><img id="v2ImgA" alt="ภาพตัวอย่างไฟล์ A"><div class="v2-ov" data-side="a"></div></div>
+        <div class="v2-zbar" data-side="a">
+          <button data-z="out" title="ซูมออก">−</button><input type="range" data-z="range" min="10" max="400" value="100" aria-label="ซูม 🅰"><button data-z="in" title="ซูมเข้า">+</button>
+          <span class="v2-zpct">100%</span>
+          <button data-z="fitw" title="ย่อ/ขยายให้พอดีความกว้างกล่อง">⤢ พอดีความกว้าง</button>
+          <button data-z="fitp" title="เห็นทั้งหน้าในกล่องเดียว">⛶ ทั้งหน้า</button>
+          <button data-z="100">100%</button>
+        </div>
+        <div class="v2-stage-box" id="v2BoxA"><div class="v2-stage" id="v2StageA"><img id="v2ImgA" alt="ภาพตัวอย่างไฟล์ A" draggable="false"><div class="v2-ov" data-side="a"></div></div></div>
       </div>
       <div>
         <div class="v2-pane-h"><b>🅱 <span id="v2NameB"></span></b><label class="v2-muted">หน้า <select id="v2PageB" class="v2-input"></select></label></div>
-        <div class="v2-stage" id="v2StageB"><img id="v2ImgB" alt="ภาพตัวอย่างไฟล์ B"><div class="v2-ov" data-side="b"></div></div>
+        <div class="v2-zbar" data-side="b">
+          <button data-z="out" title="ซูมออก">−</button><input type="range" data-z="range" min="10" max="400" value="100" aria-label="ซูม 🅱"><button data-z="in" title="ซูมเข้า">+</button>
+          <span class="v2-zpct">100%</span>
+          <button data-z="fitw" title="ย่อ/ขยายให้พอดีความกว้างกล่อง">⤢ พอดีความกว้าง</button>
+          <button data-z="fitp" title="เห็นทั้งหน้าในกล่องเดียว">⛶ ทั้งหน้า</button>
+          <button data-z="100">100%</button>
+        </div>
+        <div class="v2-stage-box" id="v2BoxB"><div class="v2-stage" id="v2StageB"><img id="v2ImgB" alt="ภาพตัวอย่างไฟล์ B" draggable="false"><div class="v2-ov" data-side="b"></div></div></div>
       </div>
     </div>
     <div class="v2-pairs" id="v2Pairs"></div>

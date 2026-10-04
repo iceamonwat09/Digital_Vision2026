@@ -29,7 +29,10 @@
     }
     if (!resp.ok) {
       const msg = (data && data.error) || ("HTTP " + resp.status);
-      throw new Error(msg);
+      const err = new Error(msg);
+      err.busy = !!(data && data.busy);              // เซิร์ฟเวอร์ปฏิเสธคำขอซ้ำ (409/429) — ไม่ได้ยิง Vision
+      err.retryAfter = (data && data.retry_after) || 0;
+      throw err;
     }
     return data;
   }
@@ -183,6 +186,7 @@
     }
     S.job = m;
     S.pairs = Array.isArray(pairs) ? pairs : [];
+    sel = null;
     S.page = page || { a: 0, b: 0 };
     $("v2DrawCard").classList.remove("v2-hidden");
     $("v2JobLabel").textContent = "· งาน " + m.id;
@@ -211,7 +215,13 @@
 
   function loadPreview(side) {
     const img = $(side === "a" ? "v2ImgA" : "v2ImgB");
-    img.onload = renderZones;
+    img.onload = () => {
+      // ภาพใหม่ (เปิดงาน/เปลี่ยนหน้า) เริ่มที่ "พอดีความกว้าง" เสมอ
+      setZoom(side, fitPct(side, false), [0, 0], true);
+      boxOf(side).scrollLeft = 0;
+      boxOf(side).scrollTop = 0;
+      renderZones();
+    };
     img.src = "/api/artwork_v2/jobs/" + S.job.id + "/preview/" + side + "/" + S.page[side] + ".png";
   }
 
@@ -219,14 +229,165 @@
   $("v2PageB").addEventListener("change", (ev) => { S.page.b = +ev.target.value; loadPreview("b"); saveSession(); });
 
   // ── ③ วาดโซน ────────────────────────────────────────────────────
+  // ซูม/เลื่อนภาพ/ย้าย-ย่อขยายโซน แบบหน้า Artwork เดิม · พิกัดโซนเป็นสัดส่วน 0..1 ของหน้าเสมอ
+  // ⇒ ซูมเท่าไรก็ได้กรอบเดิม (ซูมเปลี่ยนแค่ขนาดที่แสดง ไม่แตะภาพที่ส่งให้ Vision)
+  const ZOOM_MIN = 10, ZOOM_MAX = 400, MIN_ZONE = 0.005;
+  const HANDLES = ["nw", "n", "ne", "e", "se", "s", "sw", "w"];
+  const Z = { a: { pct: 100, fit: true }, b: { pct: 100, fit: true } };
+  let mode = "draw";              // draw = ลากที่ว่างเพื่อวาด · pan = ลากเพื่อเลื่อนภาพ
+  let sel = null;                 // {pi, side} โซนที่เลือก (กด Delete เพื่อลบ)
+  let spaceDown = false;
+
+  const boxOf = (side) => $(side === "a" ? "v2BoxA" : "v2BoxB");
+  const stageOf = (side) => $(side === "a" ? "v2StageA" : "v2StageB");
+  const imgOf = (side) => $(side === "a" ? "v2ImgA" : "v2ImgB");
+  const ovOf = (side) => document.querySelector('.v2-ov[data-side="' + side + '"]');
+  const zbarOf = (side) => document.querySelector('.v2-zbar[data-side="' + side + '"]');
+
+  function natSize(side) {
+    const im = imgOf(side);
+    return [im.naturalWidth || 0, im.naturalHeight || 0];
+  }
+
+  function fitPct(side, whole) {
+    const [w, h] = natSize(side), box = boxOf(side);
+    if (!w || !h || !box) return 100;
+    let p = (box.clientWidth - 2) / w * 100;
+    if (whole) p = Math.min(p, (box.clientHeight - 2) / h * 100);
+    return Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, Math.floor(p)));   // ปัดลง ⇒ ไม่ล้นกล่อง
+  }
+
+  // anchor = จุดบนกล่อง (px) ที่ต้องอยู่ที่เดิมหลังซูม (ใต้เมาส์ / กลางกล่อง)
+  function setZoom(side, pct, anchor, keepFit) {
+    const [w] = natSize(side), box = boxOf(side), st = stageOf(side);
+    pct = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, Math.round(pct)));
+    const z = Z[side];
+    z.fit = !!keepFit;
+    if (!w || !box) { z.pct = pct; syncZbar(side); return; }
+    const oldW = st.offsetWidth || w * z.pct / 100;
+    const ax = anchor ? anchor[0] : box.clientWidth / 2, ay = anchor ? anchor[1] : box.clientHeight / 2;
+    const fx = (box.scrollLeft + ax) / oldW, fy = (box.scrollTop + ay) / (st.offsetHeight || 1);
+    z.pct = pct;
+    st.style.width = Math.round(w * pct / 100) + "px";
+    box.scrollLeft = fx * st.offsetWidth - ax;
+    box.scrollTop = fy * st.offsetHeight - ay;
+    syncZbar(side);
+  }
+
+  function syncZbar(side) {
+    const bar = zbarOf(side);
+    if (!bar) return;
+    bar.querySelector('[data-z="range"]').value = Z[side].pct;
+    bar.querySelector(".v2-zpct").textContent = Z[side].pct + "%";
+    bar.querySelector('[data-z="fitw"]').classList.toggle("on", Z[side].fit === true);
+  }
+
+  function refit(side) { if (Z[side].fit) setZoom(side, fitPct(side, false), null, true); }
+
+  document.querySelectorAll(".v2-zbar").forEach((bar) => {
+    const side = bar.dataset.side;
+    bar.addEventListener("click", (ev) => {
+      const k = ev.target && ev.target.dataset ? ev.target.dataset.z : null;
+      if (k === "in") setZoom(side, Z[side].pct * 1.25);
+      else if (k === "out") setZoom(side, Z[side].pct / 1.25);
+      else if (k === "fitw") setZoom(side, fitPct(side, false), null, true);
+      else if (k === "fitp") setZoom(side, fitPct(side, true));
+      else if (k === "100") setZoom(side, 100);
+    });
+    bar.querySelector('[data-z="range"]').addEventListener("input", (ev) => setZoom(side, +ev.target.value));
+  });
+
+  ["a", "b"].forEach((side) => {
+    const box = boxOf(side);
+    // ล้อเมาส์บนภาพ = ซูมรอบจุดใต้เมาส์ (เหมือนหน้า Artwork เดิม · ไม่ต้องกด Ctrl)
+    box.addEventListener("wheel", (ev) => {
+      if (!natSize(side)[0]) return;
+      ev.preventDefault();
+      const r = box.getBoundingClientRect();
+      const f = ev.deltaY < 0 ? 1.15 : 1 / 1.15;
+      setZoom(side, Z[side].pct * f, [ev.clientX - r.left, ev.clientY - r.top]);
+    }, { passive: false });
+    if (window.ResizeObserver) new ResizeObserver(() => refit(side)).observe(box);
+  });
+
+  // ── เลื่อนภาพ: โหมด ✋ · ปุ่มกลาง (ล้อ) ลาก · กด Space ค้างแล้วลาก ──
+  let pan = null;
+  function panStart(side, ev) {
+    const box = boxOf(side);
+    pan = { box: box, x: ev.clientX, y: ev.clientY, sl: box.scrollLeft, st: box.scrollTop, id: ev.pointerId };
+    box.setPointerCapture(ev.pointerId);
+    box.classList.add("panning");
+    ev.preventDefault();
+  }
+  ["a", "b"].forEach((side) => {
+    const box = boxOf(side);
+    box.addEventListener("pointerdown", (ev) => {
+      const want = ev.button === 1 || (ev.button === 0 && (mode === "pan" || spaceDown));
+      if (!want || !S.job) return;
+      ev.stopPropagation();
+      panStart(side, ev);
+    }, { capture: true });
+    box.addEventListener("pointermove", (ev) => {
+      if (!pan || pan.box !== box) return;
+      box.scrollLeft = pan.sl - (ev.clientX - pan.x);
+      box.scrollTop = pan.st - (ev.clientY - pan.y);
+    });
+    const end = () => { if (pan && pan.box === box) { pan = null; box.classList.remove("panning"); } };
+    box.addEventListener("pointerup", end);
+    box.addEventListener("pointercancel", end);
+    box.addEventListener("auxclick", (ev) => { if (ev.button === 1) ev.preventDefault(); });
+  });
+
+  function setMode(m) {
+    mode = m;
+    root.classList.toggle("v2-mode-pan", m === "pan");
+    document.querySelectorAll("[data-mode]").forEach((b) => b.classList.toggle("on", b.dataset.mode === m));
+  }
+  document.querySelectorAll("[data-mode]").forEach((b) => b.addEventListener("click", () => setMode(b.dataset.mode)));
+
+  function typing(ev) {
+    const t = ev.target;
+    return t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable);
+  }
+  document.addEventListener("keydown", (ev) => {
+    if (typing(ev) || $("v2DrawCard").classList.contains("v2-hidden")) return;
+    if (ev.code === "Space") {
+      if (!spaceDown) { spaceDown = true; root.classList.add("v2-space"); }
+      if (ev.target === document.body) ev.preventDefault();       // กันหน้าเลื่อนลง
+      return;
+    }
+    if ((ev.key === "Delete" || ev.key === "Backspace") && sel) {
+      ev.preventDefault();
+      removeZone(sel.pi, sel.side);
+    } else if (ev.key === "Escape" && sel) {
+      sel = null;
+      renderZones();
+    }
+  });
+  document.addEventListener("keyup", (ev) => {
+    if (ev.code === "Space") { spaceDown = false; root.classList.remove("v2-space"); }
+  });
+  window.addEventListener("blur", () => { spaceDown = false; root.classList.remove("v2-space"); });
+
+  function removeZone(pi, side) {
+    const p = S.pairs[pi];
+    if (!p) return;
+    p[side] = null;
+    if (!p.a && !p.b) S.pairs.splice(pi, 1);       // ลบทั้งสองฝั่ง = ลบคู่ (เลขคู่ถัดไปเลื่อนขึ้น)
+    sel = null;
+    renderZones();
+    saveSession();
+  }
+
   function renderZones(draft) {
     ["a", "b"].forEach((side) => {
-      const ov = document.querySelector('.v2-ov[data-side="' + side + '"]');
+      const ov = ovOf(side);
       ov.innerHTML = "";
       S.pairs.forEach((p, i) => {
         const z = p[side];
         if (!z || z.page !== S.page[side]) return;
-        ov.appendChild(zoneEl(z.bbox, COLORS[i % COLORS.length], "คู่ " + (i + 1), false));
+        const on = sel && sel.pi === i && sel.side === side;
+        ov.appendChild(zoneEl(z.bbox, COLORS[i % COLORS.length], "คู่ " + (i + 1), false, i, side, on));
       });
       if (draft && draft.side === side) ov.appendChild(zoneEl(draft.bbox, "#0f172a", "", true));
     });
@@ -238,22 +399,35 @@
         ' <button data-del="' + i + '" title="ลบคู่นี้">✕</button></span>';
     }).join("") || '<span class="v2-muted">ยังไม่มีโซน</span>';
     const pend = S.pairs.find((p) => !p.a || !p.b);
-    $("v2RunMsg").textContent = pend ? "คู่ที่ยังไม่ครบต้องวาดอีกฝั่งก่อนกดตรวจ" : "";
+    if (!S.busy) $("v2RunMsg").textContent = pend ? "คู่ที่ยังไม่ครบต้องวาดอีกฝั่งก่อนกดตรวจ" : "";
   }
 
-  function zoneEl(bb, color, label, draft) {
+  function zoneEl(bb, color, label, draft, pi, side, selected) {
     const d = document.createElement("div");
-    d.className = "v2-zone" + (draft ? " draft" : "");
+    d.className = "v2-zone" + (draft ? " draft" : "") + (selected ? " sel" : "");
     d.style.left = bb[0] * 100 + "%";
     d.style.top = bb[1] * 100 + "%";
     d.style.width = bb[2] * 100 + "%";
     d.style.height = bb[3] * 100 + "%";
     d.style.borderColor = color;
+    if (!draft) {
+      d.dataset.pi = String(pi);
+      d.dataset.side = side;
+      d.title = "ลากเพื่อย้าย · ลากมุม/ขอบเพื่อย่อขยาย · คลิกแล้วกด Delete เพื่อลบ";
+    }
     if (label) {
       const s = document.createElement("span");
       s.textContent = label;
       s.style.background = color;
       d.appendChild(s);
+    }
+    if (selected) {
+      HANDLES.forEach((h) => {
+        const k = document.createElement("i");
+        k.className = "v2-h v2-h-" + h;
+        k.dataset.h = h;
+        d.appendChild(k);
+      });
     }
     return d;
   }
@@ -262,6 +436,7 @@
     const i = ev.target && ev.target.dataset ? ev.target.dataset.del : undefined;
     if (i === undefined) return;
     S.pairs.splice(+i, 1);
+    sel = null;
     renderZones();
     saveSession();
   });
@@ -269,6 +444,7 @@
   $("v2Clear").addEventListener("click", () => {
     if (S.pairs.length && !confirm("ล้างโซนทั้งหมด?")) return;
     S.pairs = [];
+    sel = null;
     renderZones();
     saveSession();
   });
@@ -279,29 +455,72 @@
             Math.min(1, Math.max(0, (ev.clientY - r.top) / r.height))];
   }
 
+  const r5 = (v) => Math.round(v * 1e5) / 1e5;
+
+  // ย้าย/ย่อขยายกรอบ — คืนกรอบใหม่ที่อยู่ในหน้าเสมอและไม่เล็กกว่า MIN_ZONE
+  function editBox(b0, h, dx, dy) {
+    let [x0, y0, x1, y1] = [b0[0], b0[1], b0[0] + b0[2], b0[1] + b0[3]];
+    if (h === "move") {
+      const mx = Math.min(Math.max(dx, -x0), 1 - x1), my = Math.min(Math.max(dy, -y0), 1 - y1);
+      return [x0 + mx, y0 + my, b0[2], b0[3]];
+    }
+    if (h.indexOf("w") >= 0) x0 = Math.min(Math.max(0, x0 + dx), x1 - MIN_ZONE);
+    if (h.indexOf("e") >= 0) x1 = Math.max(Math.min(1, x1 + dx), x0 + MIN_ZONE);
+    if (h.indexOf("n") >= 0) y0 = Math.min(Math.max(0, y0 + dy), y1 - MIN_ZONE);
+    if (h.indexOf("s") >= 0) y1 = Math.max(Math.min(1, y1 + dy), y0 + MIN_ZONE);
+    return [x0, y0, x1 - x0, y1 - y0];
+  }
+
   document.querySelectorAll(".v2-ov").forEach((ov) => {
-    let start = null;
+    let act = null;        // {kind: "draw"|"edit", start, pi, h, b0, moved}
     const side = ov.dataset.side;
     ov.addEventListener("pointerdown", (ev) => {
-      if (ev.button !== 0 || !S.job) return;
+      if (ev.button !== 0 || !S.job || mode === "pan" || spaceDown) return;
+      const start = normPoint(ov, ev);
+      const t = ev.target;
+      const zEl = t && t.closest ? t.closest(".v2-zone[data-pi]") : null;
+      if (zEl) {
+        const pi = +zEl.dataset.pi;
+        const z = S.pairs[pi] && S.pairs[pi][side];
+        if (!z) return;
+        sel = { pi: pi, side: side };
+        act = { kind: "edit", start: start, pi: pi, h: (t.dataset && t.dataset.h) || "move",
+                b0: z.bbox.slice(), moved: false };
+        renderZones();
+      } else {
+        if (sel) { sel = null; renderZones(); }
+        act = { kind: "draw", start: start };
+      }
       ov.setPointerCapture(ev.pointerId);
-      start = normPoint(ov, ev);
       ev.preventDefault();
     });
     ov.addEventListener("pointermove", (ev) => {
-      if (!start) return;
+      if (!act) return;
       const p = normPoint(ov, ev);
-      renderZones({ side: side, bbox: rect(start, p) });
+      if (act.kind === "draw") { renderZones({ side: side, bbox: rect(act.start, p) }); return; }
+      const z = S.pairs[act.pi] && S.pairs[act.pi][side];
+      if (!z) return;
+      z.bbox = editBox(act.b0, act.h, p[0] - act.start[0], p[1] - act.start[1]).map(r5);
+      act.moved = true;
+      renderZones();
     });
     ov.addEventListener("pointerup", (ev) => {
-      if (!start) return;
-      const p = normPoint(ov, ev);
-      const bb = rect(start, p);
-      start = null;
+      if (!act) return;
+      const a = act;
+      act = null;
+      if (a.kind === "edit") { if (a.moved) saveSession(); return; }
+      const bb = rect(a.start, normPoint(ov, ev));
       if (bb[2] < 0.01 || bb[3] < 0.01) { renderZones(); return; }   // คลิกเปล่า
-      addZone(side, { page: S.page[side], bbox: bb.map((v) => Math.round(v * 1e5) / 1e5) });
+      addZone(side, { page: S.page[side], bbox: bb.map(r5) });
     });
-    ov.addEventListener("pointercancel", () => { start = null; renderZones(); });
+    ov.addEventListener("pointercancel", () => {
+      if (act && act.kind === "edit") {
+        const z = S.pairs[act.pi] && S.pairs[act.pi][side];
+        if (z) z.bbox = act.b0;                       // ยกเลิกกลางคัน = คืนกรอบเดิม
+      }
+      act = null;
+      renderZones();
+    });
   });
 
   function rect(a, b) {
@@ -317,6 +536,7 @@
       S.pairs.push(p);
     }
     p[side] = z;
+    sel = { pi: S.pairs.indexOf(p), side: side };
     renderZones();
     saveSession();
   }
@@ -329,6 +549,7 @@
     if (ready.length !== S.pairs.length && !confirm("มีคู่ที่ยังไม่ครบ — ตรวจเฉพาะคู่ที่ครบ " + ready.length + " คู่?")) return;
     S.busy = true;
     $("v2Run").disabled = true;
+    let holdMs = 0;
     const t0 = Date.now();
     const tick = setInterval(() => {
       $("v2RunMsg").innerHTML = '<span class="v2-spin"></span> กำลังตรวจ ' + ready.length + " คู่… " +
@@ -344,11 +565,21 @@
       showResult(r);
       loadRecent();
     } catch (e) {
-      $("v2RunMsg").innerHTML = '<span class="v2-bad">' + esc(e.message) + "</span>";
+      if (e.busy) {
+        // ไม่ใช่ความล้มเหลวของการตรวจ — คำขอนี้ไม่ถูกส่งไป Vision · ผลเดิมบนจอยังใช้ได้
+        $("v2RunMsg").innerHTML = '<span class="v2-warn">⏳ ' + esc(e.message) + "</span>";
+        holdMs = Math.min(30000, Math.ceil(e.retryAfter || 0) * 1000);
+      } else {
+        $("v2RunMsg").innerHTML = '<span class="v2-bad">' + esc(e.message) + "</span>";
+      }
     } finally {
       clearInterval(tick);
-      S.busy = false;
-      $("v2Run").disabled = false;
+      if (holdMs > 0) {
+        setTimeout(() => { S.busy = false; $("v2Run").disabled = false; }, holdMs);
+      } else {
+        S.busy = false;
+        $("v2Run").disabled = false;
+      }
     }
   });
 
