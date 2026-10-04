@@ -159,5 +159,12 @@ AI_RETRIES = _i("ARTWORK_V2_AI_RETRIES", "1")
 #   span = แบบเดิม (เส้น 3 px รอบเฉพาะตัวอักษรที่ต่าง เผื่อ 3 px ของภาพ — ย่อภาพแล้วเส้นทับตัวหนังสือ)
 BOX_STYLE = "span" if os.getenv("ARTWORK_V2_BOX_STYLE", "word").strip().lower() == "span" else "word"
 
+# เปิดหน้าแล้วพบงานที่ค้างไว้ (localStorage) — แบบเดียวกับโหมด Artwork เดิม:
+#   1 = ขึ้นแถบ "💾 พบงานที่ค้างไว้" ให้กด [เปิดต่อ]/[ทิ้ง] ก่อน (ไม่กู้คืนเงียบ ๆ)
+#   0 = เปิดงานล่าสุดเองทันที (พฤติกรรมก่อน 4 ต.ค. รอบ 4)
+RESTORE_CONFIRM = _b("ARTWORK_V2_RESTORE_CONFIRM", "1")
+# อายุของงานค้างที่ยังเสนอให้เปิดต่อ (วัน) — เท่าโหมดเดิม
+RESTORE_MAX_AGE_DAYS = _f("ARTWORK_V2_RESTORE_MAX_AGE_DAYS", "7")
+
 # จำนวนบรรทัด OCR ต่อฝั่งที่พิมพ์ลง Log (กัน Log ยาวเกินไปจนก๊อปไม่ได้)
 LOG_MAX_LINES = _i("ARTWORK_V2_LOG_MAX_LINES", "400")

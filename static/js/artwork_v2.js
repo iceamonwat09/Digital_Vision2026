@@ -37,14 +37,36 @@
     return data;
   }
 
+  // โซนของแต่ละงาน (จำแยกต่องาน) — เลือกงานเดิมจากรายการแล้วได้โซนที่วาดไว้กลับมา
+  const LS_ZONES = "artwork_v2.zones";
+  const ZONES_KEEP = 30;
+
   function saveSession() {
     try {
-      if (S.job) localStorage.setItem(LS_KEY, JSON.stringify({ job: S.job.id, pairs: S.pairs, page: S.page }));
+      if (!S.job) return;
+      const t = Date.now();
+      localStorage.setItem(LS_KEY, JSON.stringify({ job: S.job.id, pairs: S.pairs, page: S.page, t: t }));
+      const all = readJobZones();
+      all[S.job.id] = { pairs: S.pairs, page: S.page, t: t };
+      const ids = Object.keys(all).sort((x, y) => (all[y].t || 0) - (all[x].t || 0));
+      ids.slice(ZONES_KEEP).forEach((k) => { delete all[k]; });
+      localStorage.setItem(LS_ZONES, JSON.stringify(all));
     } catch (e) { /* โหมดส่วนตัว / ถูกบล็อก — ไม่เป็นไร */ }
   }
 
   function loadSession() {
     try { return JSON.parse(localStorage.getItem(LS_KEY) || "null"); } catch (e) { return null; }
+  }
+
+  function readJobZones() {
+    try {
+      const v = JSON.parse(localStorage.getItem(LS_ZONES) || "{}");
+      return v && typeof v === "object" && !Array.isArray(v) ? v : {};
+    } catch (e) { return {}; }
+  }
+
+  function clearSession() {
+    try { localStorage.removeItem(LS_KEY); } catch (e) { /* ไม่เป็นไร */ }
   }
 
   // ── ① API key ───────────────────────────────────────────────────
@@ -177,6 +199,7 @@
 
   async function openJob(id, pairs, page) {
     hideResult();
+    if ($("v2Restore")) $("v2Restore").style.display = "none";   // เปิดงานอื่นแล้ว แถบถามเรื่องงานค้างหมดความหมาย
     let m;
     try { m = await api("/api/artwork_v2/jobs/" + encodeURIComponent(id)); }
     catch (e) {
@@ -184,8 +207,21 @@
       try { localStorage.removeItem(LS_KEY); } catch (e2) { /* ไม่เป็นไร */ }
       return;
     }
+    if (!Array.isArray(pairs)) {
+      // เปิดจากรายการ "งานล่าสุด" — โซนที่แก้ล่าสุดในเบราว์เซอร์นี้ก่อน ไม่มีค่อยใช้โซนของรอบตรวจล่าสุด
+      const saved = readJobZones()[m.id];
+      if (saved && Array.isArray(saved.pairs) && saved.pairs.length) {
+        pairs = saved.pairs;
+        page = page || saved.page;
+      } else if (Array.isArray(m.last_pairs) && m.last_pairs.length) {
+        pairs = m.last_pairs;
+        page = page || { a: m.last_pairs[0].a.page || 0, b: m.last_pairs[0].b.page || 0 };
+      } else {
+        pairs = [];
+      }
+    }
     S.job = m;
-    S.pairs = Array.isArray(pairs) ? pairs : [];
+    S.pairs = pairs;
     sel = null;
     S.page = page || { a: 0, b: 0 };
     $("v2DrawCard").classList.remove("v2-hidden");
@@ -830,5 +866,34 @@
   loadKey();
   loadRecent();
   const sess = loadSession();
-  if (sess && sess.job) openJob(sess.job, sess.pairs || [], sess.page);
+  if (sess && sess.job) {
+    if ($("v2Root") && $("v2Root").dataset.restoreConfirm === "0") openJob(sess.job, sess.pairs || [], sess.page);
+    else offerRestore(sess);
+  }
+
+  // งานที่ค้างไว้ ⇒ ถามก่อนเสมอ (แบบโหมด Artwork เดิม) — เปิดเงียบ ๆ แล้วผู้ตรวจอาจเข้าใจว่าเป็นงานใหม่
+  async function offerRestore(s) {
+    const bar = $("v2Restore");
+    if (!bar) return;
+    const days = parseFloat(($("v2Root") && $("v2Root").dataset.restoreDays) || "7");
+    if (s.t && days > 0 && Date.now() - s.t > days * 864e5) { clearSession(); return; }
+    let m;
+    try { m = await api("/api/artwork_v2/jobs/" + encodeURIComponent(s.job)); }
+    catch (e) { clearSession(); return; }           // งานถูกลบ / ไม่มีสิทธิ์ — ไม่เสนอ
+    if (S.job) return;                              // ผู้ใช้เปิดงานอื่นไปแล้วระหว่างรอ
+    const n = Array.isArray(s.pairs) ? s.pairs.filter((p) => p && (p.a || p.b)).length : 0;
+    bar.innerHTML = "💾 พบงานที่ค้างไว้ — <b>" + esc(m.files.a.name) + " ↔ " + esc(m.files.b.name) +
+      "</b> · " + n + " คู่โซน" + (s.t ? " (บันทึกเมื่อ " + esc(new Date(s.t).toLocaleString("th-TH")) + ")" : "") +
+      ' <button class="v2-btn primary" id="v2RestoreYes">เปิดต่อ</button>' +
+      ' <button class="v2-btn" id="v2RestoreNo">ทิ้ง</button>';
+    bar.style.display = "";
+    $("v2RestoreYes").addEventListener("click", () => {
+      bar.style.display = "none";
+      openJob(s.job, Array.isArray(s.pairs) ? s.pairs : [], s.page);
+    });
+    $("v2RestoreNo").addEventListener("click", () => {
+      bar.style.display = "none";
+      clearSession();
+    });
+  }
 })();

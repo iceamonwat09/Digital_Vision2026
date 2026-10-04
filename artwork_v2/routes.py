@@ -78,7 +78,9 @@ def page():
                            can_manage_key=_is_admin(_viewer()),
                            v2_sharpness=config.SHARPNESS,
                            v2_ai_mode=config.AI_MODE,
-                           v2_box_style=config.BOX_STYLE)
+                           v2_box_style=config.BOX_STYLE,
+                           v2_restore_confirm=config.RESTORE_CONFIRM,
+                           v2_restore_days=config.RESTORE_MAX_AGE_DAYS)
 
 
 # ── API key ──────────────────────────────────────────────────────────
@@ -195,6 +197,7 @@ def job_get(job_id):
     m = jobs.meta(job_id)
     d = jobs.job_dir(job_id)
     m["runs"] = jobs.finished_runs(d)
+    m["last_pairs"] = jobs.last_pairs(d, m["runs"])
     return jsonify(m)
 
 

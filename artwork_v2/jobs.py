@@ -158,6 +158,29 @@ def finished_runs(d: str) -> list:
                   and os.path.isfile(os.path.join(d, x, "result.json")))
 
 
+def last_pairs(d: str, runs: Optional[list] = None) -> list:
+    """โซนคู่ที่ใช้ตรวจรอบล่าสุด (``[{a:{page,bbox}, b:{page,bbox}}]``) — เปิดงานเดิมจาก
+    รายการ "งานล่าสุด" แล้วได้โซนกลับมาแบบโหมด Artwork เดิม · อ่านไม่ได้ = ``[]`` (ไม่เดา)"""
+    runs = finished_runs(d) if runs is None else runs
+    if not runs:
+        return []
+    try:
+        r = read_json(os.path.join(d, runs[-1], "result.json"))
+        out = []
+        for pr in r.get("pairs") or []:
+            item = {}
+            for s in ("a", "b"):
+                sd = (pr.get("sides") or {}).get(s) or {}
+                bb = imaging.clamp_bbox(sd.get("bbox"))
+                if bb is None:
+                    raise ValueError("bbox")
+                item[s] = {"page": int(sd.get("page", 0)), "bbox": [round(v, 5) for v in bb]}
+            out.append(item)
+        return out
+    except (OSError, ValueError, TypeError, AttributeError):
+        return []
+
+
 def recent(limit: int = 20, can_view=None) -> list:
     out = []
     try:
