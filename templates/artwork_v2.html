@@ -91,6 +91,30 @@
   .v2-tag.red { background:#dc2626; }
   .v2-tag.yellow { background:#b45309; }
   .v2-tag.hot { outline:2px solid #0f172a; }
+  /* ซูมตามแถว (ARTWORK_V2_HOVER_ZOOM · แสดงผลล้วน) — ภาพขยายด้วย transform · กรอบขยายด้วย viewBox (เส้นบางเท่าเดิม)
+     · ป้ายเลขเลื่อนตามโดยไม่ขยาย · กรอบอื่นจางลงระหว่างซูม */
+  .v2-res-stage img { transform-origin:0 0; }
+  .v2-res-stage rect.f, .v2-res-stage rect.d, .v2-tag { transition:opacity .22s ease; }
+  .v2-res-stage.zoomed rect.f:not(.hov), .v2-res-stage.zoomed rect.d:not(.hov),
+  .v2-res-stage.zoomed .v2-tag:not(.hov) { opacity:.3; }
+  .v2-res-stage rect.f.hov { stroke-width:6; }
+  #v2Root[data-box-style="word"] .v2-res-stage rect.f.hov { stroke-width:2.5; }
+  .v2-res-stage rect.d.hov.red { fill:rgba(220,38,38,.32); }
+  .v2-res-stage rect.d.hov.yellow { fill:rgba(217,119,6,.34); }
+  .v2-tag.hov { outline:2px solid #0f172a; opacity:1; }
+  .v2-zbadge { position:absolute; right:6px; bottom:6px; padding:0 8px; border-radius:10px; background:rgba(15,23,42,.72);
+               color:#fff; font:600 11px/18px system-ui, sans-serif; opacity:0; transform:translateY(4px);
+               transition:opacity .2s ease, transform .2s ease; pointer-events:none; }
+  .v2-zbadge.on { opacity:1; transform:none; }
+  .v2-znote { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); max-width:86%; padding:6px 10px;
+              border-radius:8px; background:rgba(255,255,255,.95); border:1px solid #cbd5e1; color:#334155;
+              font-size:12px; text-align:center; box-shadow:0 2px 8px rgba(15,23,42,.12); opacity:0;
+              transition:opacity .2s ease; pointer-events:none; }
+  .v2-znote.on { opacity:1; }
+  .v2-tbl tr.hov { background:#f1f5f9; box-shadow:inset 3px 0 0 #2563eb; }
+  @media (prefers-reduced-motion: reduce) {
+    .v2-res-stage rect.f, .v2-res-stage rect.d, .v2-tag, .v2-zbadge, .v2-znote { transition:none; }
+  }
   .v2-tbl-wrap { overflow-x:auto; margin-top:10px; }
   table.v2-tbl { border-collapse:collapse; width:100%; font-size:13px; }
   .v2-tbl th, .v2-tbl td { border-bottom:1px solid #e2e8f0; padding:6px 8px; text-align:left; vertical-align:top; }
@@ -117,7 +141,7 @@
 {% endblock %}
 
 {% block content %}
-<div class="v2" id="v2Root" data-can-manage="{{ 1 if can_manage_key else 0 }}" data-version="{{ v2_version }}" data-box-style="{{ v2_box_style }}" data-restore-confirm="{{ 1 if v2_restore_confirm else 0 }}" data-restore-days="{{ v2_restore_days }}">
+<div class="v2" id="v2Root" data-can-manage="{{ 1 if can_manage_key else 0 }}" data-version="{{ v2_version }}" data-box-style="{{ v2_box_style }}" data-restore-confirm="{{ 1 if v2_restore_confirm else 0 }}" data-restore-days="{{ v2_restore_days }}" data-hover-zoom="{{ 1 if v2_hover_zoom else 0 }}">
   <div class="v2-head">
     <h2>Artwork V2 <span class="v2-sub">เทียบข้อความสองไฟล์ด้วย Google Cloud Vision OCR · PoC</span></h2>
     <span class="v2-sub">โมดูล {{ v2_version }}</span>
@@ -214,6 +238,7 @@
       <span><i style="border-color:#d97706;border-style:dashed"></i>ไม่มั่นใจ — ดูด้วยตา</span>
       <label><input type="checkbox" id="v2ShowOcr"> แสดงกรอบบรรทัดที่ OCR อ่านได้</label>
       <label><input type="checkbox" id="v2ShowSkip" checked> แสดงพื้นที่ที่ไม่ได้ตรวจ (ภาพ/บาร์โค้ด)</label>
+      {% if v2_hover_zoom %}<span class="v2-muted" id="v2ZoomHint">🔍 ชี้เมาส์ที่แถวในตาราง = ซูมภาพไปที่จุดนั้น · คลิกแถว = ค้างไว้ (คลิกซ้ำ/Esc = ปล่อย)</span>{% endif %}
     </div>
     <div id="v2PairsRes"></div>
   </section>

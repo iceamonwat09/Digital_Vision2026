@@ -180,6 +180,8 @@
   // วิธีวาดกรอบจุดต่าง: "word" = เส้นบางรอบคำ + แถบสีบนตัวอักษรที่ต่าง · "span" = แบบเดิม
   const BOX_STYLE = ($("v2Root") && $("v2Root").dataset.boxStyle) === "span" ? "span" : "word";
   const FRAME_PAD = 0.22;   // ระยะเผื่อจากตัวอักษรถึงเส้นกรอบ = สัดส่วนของความสูงคำ
+  // ชี้เมาส์ที่แถวในตาราง ⇒ ซูมภาพไปที่จุดนั้น (ARTWORK_V2_HOVER_ZOOM · ไม่มีค่า = ปิด = แบบเดิม)
+  const HOVER_ZOOM = ($("v2Root") && $("v2Root").dataset.hoverZoom) === "1";
 
   function hideResult() {
     S.result = null;
@@ -187,6 +189,7 @@
     $("v2LogCard").classList.add("v2-hidden");
     $("v2Verdict").innerHTML = "";
     $("v2Warn").innerHTML = "";
+    if (HOVER_ZOOM) { RZ.pin = null; zoomReset(); }
     $("v2PairsRes").innerHTML = "";
     $("v2Log").value = "";
     $("v2RunMsg").textContent = "";
@@ -736,9 +739,11 @@
       g += d.svg;
       tags += d.tag;
     });
-    return '<div class="v2-res-stage"><img alt="ภาพที่ส่งให้ Vision ฝั่ง ' + side.toUpperCase() + '" src="/api/artwork_v2/jobs/' +
+    return '<div class="v2-res-stage" data-side="' + side + '" data-w="' + W + '" data-h="' + H + '">' +
+      '<img alt="ภาพที่ส่งให้ Vision ฝั่ง ' + side.toUpperCase() + '" src="/api/artwork_v2/jobs/' +
       esc(run.job) + "/runs/" + esc(run.run) + "/img/" + esc(sd.image) + '">' +
-      '<svg viewBox="0 0 ' + W + " " + H + '" preserveAspectRatio="none">' + g + "</svg>" + tags + "</div>";
+      '<svg viewBox="0 0 ' + W + " " + H + '" preserveAspectRatio="none">' + g + "</svg>" + tags +
+      (HOVER_ZOOM ? '<div class="v2-zbadge" aria-hidden="true"></div><div class="v2-znote" role="status"></div>' : "") + "</div>";
   }
 
   // กรอบแบบเดิม (ARTWORK_V2_BOX_STYLE=span) — รอบตัวอักษรที่ต่าง เผื่อ 3 px ของภาพที่ส่ง
@@ -779,8 +784,10 @@
       }
     }
     const above = y0 / H > 0.04;
-    const tag = '<span class="v2-tag ' + f.severity + (above ? "" : " below") + '" data-f="' + f.id + '" style="left:' +
-      (x0 / W * 100).toFixed(3) + "%;top:" + ((above ? y0 : y1) / H * 100).toFixed(3) + '%">' + esc(f.id) + "</span>";
+    const fx = x0 / W, fy = (above ? y0 : y1) / H;          // ตำแหน่งป้ายเป็นสัดส่วน — ใช้ตอนซูมด้วย
+    const tag = '<span class="v2-tag ' + f.severity + (above ? "" : " below") + '" data-f="' + f.id +
+      '" data-fx="' + fx.toFixed(5) + '" data-fy="' + fy.toFixed(5) + '" style="left:' +
+      (fx * 100).toFixed(3) + "%;top:" + (fy * 100).toFixed(3) + '%">' + esc(f.id) + "</span>";
     return { svg: svg, tag: tag };
   }
 
@@ -806,6 +813,7 @@
       "</small></div>";
     $("v2Warn").innerHTML = (r.warnings && r.warnings.length)
       ? '<div class="v2-warnbox">⚠️ ' + r.warnings.map(esc).join("<br>⚠️ ") + "</div>" : "";
+    if (HOVER_ZOOM) RZ.pin = null;                 // ผลใหม่ = เลขจุดชุดใหม่ ⇒ ไม่ค้างการซูมของผลเดิม
     renderPairs();
     $("v2Log").value = r.log_text || "";
     const base = "/api/artwork_v2/jobs/" + r.job + "/runs/" + r.run;
@@ -819,12 +827,13 @@
   function renderPairs() {
     const r = S.result;
     if (!r) return;
+    if (HOVER_ZOOM) zoomReset();
     $("v2PairsRes").innerHTML = (r.pairs || []).map((p) => {
       const rows = (p.findings || []).map(findingRow).join("");
       const debHtml = folded("เศษอักขระ / ขอบโซน — ไม่นับในผลตัดสิน", p.debris) +
         folded("อัลกอริทึมพบ แต่ AI ไม่ได้ระบุ — ไม่นับในผลตัดสิน (โหมด AI ตัดสินหลัก)", p.algo_only) +
         folded("AI ตัดสินว่าเป็นสัญญาณรบกวนของ OCR — ไม่นับในผลตัดสิน", p.ai_dismissed);
-      return '<div class="v2-card" style="margin:12px 0"><b>คู่ ' + p.n + "</b> — " + esc(p.verdict || "") +
+      return '<div class="v2-card" data-pn="' + esc(p.n) + '" style="margin:12px 0"><b>คู่ ' + p.n + "</b> — " + esc(p.verdict || "") +
         (p.coverage != null ? " · จับคู่ข้อความได้ " + Math.round(p.coverage * 100) + "%" : "") +
         (p.reasons && p.reasons.length ? ' <span class="v2-muted">(' + p.reasons.map(esc).join(" · ") + ")</span>" : "") +
         '<div class="v2-panes" style="margin-top:8px"><div>🅰 ' + sideInfo(p.sides.a) + svgFor(p, "a", r) +
@@ -833,12 +842,14 @@
           rows + "</tbody></table></div>" : (p.unreadable ? "" : '<div class="v2-muted" style="margin-top:6px">ไม่พบจุดต่าง</div>')) +
         aiBox(p) + debHtml + "</div>";
     }).join("");
+    if (HOVER_ZOOM) zoomAfterRender();
   }
 
   $("v2PairsRes").addEventListener("click", (ev) => {
     const tr = ev.target.closest ? ev.target.closest("tr[data-f]") : null;
     if (!tr) return;
     const id = tr.dataset.f;
+    if (HOVER_ZOOM && RZ.ok.has(id)) { zoomClick(id); return; }
     document.querySelectorAll("#v2PairsRes tr.sel").forEach((x) => x.classList.remove("sel"));
     tr.classList.add("sel");
     document.querySelectorAll("#v2PairsRes rect.f, #v2PairsRes rect.d, #v2PairsRes .v2-tag")
@@ -849,6 +860,290 @@
 
   $("v2ShowOcr").addEventListener("change", renderPairs);
   $("v2ShowSkip").addEventListener("change", renderPairs);
+
+  // ── ซูมตามแถว (ARTWORK_V2_HOVER_ZOOM · แสดงผลล้วน — ไม่แตะผลตรวจ/Log/ผลตัดสิน) ─────────
+  // ชี้เมาส์ที่แถว ⇒ ภาพ 🅰 และ 🅱 ซูมเข้าหากรอบของจุดนั้นพร้อมกัน · เอาเมาส์ออก ⇒ ซูมกลับ · คลิก = ค้างไว้
+  //  · ภาพ: CSS transform (translate+scale) ของภาพที่ส่งให้ Vision (ความละเอียดเต็ม) ⇒ ขยายแล้วยังคม
+  //  · กรอบ: เปลี่ยน viewBox ของ SVG ⇒ เวกเตอร์คมทุกระดับ เส้นบางเท่าเดิม (non-scaling-stroke)
+  //  · ป้ายเลข: เลื่อนตามจุดบนภาพแต่ไม่ขยาย
+  //  · ไม่เคยเห็นพื้นที่นอกภาพ (บีบมุมมองให้อยู่ในภาพเสมอ) · ไม่ซูมเกินความละเอียดจริงของภาพ
+  const ZOOM = {
+    fillW: 0.55, fillH: 0.45,    // กรอบเป้าหมายกว้าง/สูงประมาณนี้ของกล่อง ⇒ เห็นคำข้างเคียงเป็นบริบท
+    fitW: 0.94, fitH: 0.8,       // กรอบกว้างมาก (เช่นทั้งบรรทัด) ⇒ ขยายแค่พอดีกล่อง
+    minGain: 1.25,
+    minCtx: 3,                   // จุดแทรก/คำสั้น ⇒ มุมมองกว้างอย่างน้อย 3 เท่าของความสูงคำ
+    maxAbs: 8, minCap: 2,        // เพดาน = ความละเอียดจริงของภาพ (อย่างน้อย 2 เท่า · ไม่เกิน 8 เท่า)
+    enterMs: 120,                // ชี้ค้างสั้น ๆ ก่อนซูม ⇒ ลากเมาส์ผ่านหลายแถวแล้วภาพไม่กระพือ
+    moveMs: 60, leaveMs: 160,
+    inMs: 460, outMs: 380,       // ระยะเวลาเคลื่อนไหว (ซูมเข้า/ออก)
+    minMs: 320, maxMs: 650, wijkMs: 420,
+  };
+  const RZ = { cur: new WeakMap(), anims: [], raf: 0, t0: 0, ms: 0, timer: 0,
+              hover: null, pin: null, shown: null, ok: new Set(), quietUntil: 0, lastEl: null, vw: 0 };
+
+  // กรอบเป้าหมาย (พิกัดภาพที่ส่ง) = กรอบที่วาดบนจอ (เผื่อเท่ากับ wordFrame) · ไม่มีกรอบ ⇒ null
+  function zoomRect(sd, W, H, padK, ctx) {
+    const wb = sd && (sd.word_box || sd.box);
+    if (!wb || !(wb[2] >= wb[0]) || !(wb[3] >= wb[1])) return null;
+    const h = Math.max(1, wb[3] - wb[1]);
+    const pad = Math.max(2, h * padK);
+    let x0 = wb[0] - pad, x1 = wb[2] + pad;
+    if (x1 - x0 < h * ctx) {
+      const c = (x0 + x1) / 2;
+      x0 = c - h * ctx / 2;
+      x1 = c + h * ctx / 2;
+    }
+    return [Math.max(0, x0), Math.max(0, wb[1] - pad), Math.min(W, x1), Math.min(H, wb[3] + pad)];
+  }
+
+  // มุมมองต้องคลุมกล่องเต็มเสมอ (ไม่มีขอบว่างนอกภาพ) · ขยาย < 1.001 = ภาพเต็มพอดี
+  function zoomClamp(v, sw, sh) {
+    if (!(v.s > 1.001)) return { s: 1, tx: 0, ty: 0 };
+    return { s: v.s, tx: Math.min(0, Math.max(sw - v.s * sw, v.tx)), ty: Math.min(0, Math.max(sh - v.s * sh, v.ty)) };
+  }
+
+  // มุมมองที่วางกรอบเป้าหมายกลางกล่อง: จุด p (px ของกล่องตอนไม่ซูม) ไปอยู่ที่ (tx + s·p) บนจอ
+  function zoomView(r, W, H, sw, sh, cap, cfg) {
+    const kx = sw / W, ky = sh / H;
+    const bw = Math.max(1, (r[2] - r[0]) * kx), bh = Math.max(1, (r[3] - r[1]) * ky);
+    let s = Math.min(cfg.fillW * sw / bw, cfg.fillH * sh / bh);
+    if (s < cfg.minGain) s = Math.min(cfg.fitW * sw / bw, cfg.fitH * sh / bh);
+    s = Math.min(s, cfg.maxAbs, Math.max(cfg.minCap, cap));
+    if (!(s > 1.05)) return { s: 1, tx: 0, ty: 0 };
+    const cx = (r[0] + r[2]) / 2 * kx, cy = (r[1] + r[3]) / 2 * ky;
+    return zoomClamp({ s: s, tx: sw / 2 - s * cx, ty: sh / 2 - s * cy }, sw, sh);
+  }
+
+  // เส้นทางจากมุมมอง a ไป b · คืน { at(e) → มุมมอง (e = 0..1 หลัง easing), ms }
+  //  · ฝั่งหนึ่งเป็นภาพเต็ม ⇒ ซูมรอบ "จุดนิ่ง" (จุดบนภาพที่ไม่ขยับบนจอ) ขนาดเปลี่ยนแบบลอการิทึม
+  //    (ตาเห็นความเร็วซูมสม่ำเสมอ) · จุดนิ่งอยู่ในกล่องเสมอ ⇒ ทุกเฟรมอยู่ในภาพโดยไม่ต้องบีบ
+  //  · ซูมอยู่ทั้งสองฝั่ง ⇒ เส้นทางของ van Wijk & Nuij (2003) — ถอยออกพอเห็นบริบทระหว่างเลื่อนแล้วเข้าใหม่
+  function zoomPath(a, b, sw, sh, cfg) {
+    if (Math.abs(a.s - b.s) < 1e-9 && Math.abs(a.tx - b.tx) < 0.01 && Math.abs(a.ty - b.ty) < 0.01) {
+      return { at: () => b, ms: 0 };
+    }
+    if (a.s <= 1 || b.s <= 1) {
+      const k = 1 / (b.s - a.s), px = (a.tx - b.tx) * k, py = (a.ty - b.ty) * k;
+      return {
+        at: (e) => {
+          if (e >= 1) return b;
+          const s = a.s * Math.pow(b.s / a.s, e);
+          return { s: s, tx: a.tx + (a.s - s) * px, ty: a.ty + (a.s - s) * py };
+        },
+        ms: b.s > a.s ? cfg.inMs : cfg.outMs,
+      };
+    }
+    const R = Math.SQRT2;
+    const ux0 = (sw / 2 - a.tx) / a.s, uy0 = (sh / 2 - a.ty) / a.s, w0 = sw / a.s;
+    const ux1 = (sw / 2 - b.tx) / b.s, uy1 = (sh / 2 - b.ty) / b.s, w1 = sw / b.s;
+    const dx = ux1 - ux0, dy = uy1 - uy0, d2 = dx * dx + dy * dy;
+    let f, S;
+    if (d2 < 1e-12) {
+      S = Math.log(w1 / w0) / R;
+      f = (t) => [ux0, uy0, w0 * Math.exp(R * t * S)];
+    } else {
+      const d1 = Math.sqrt(d2);
+      const b0 = (w1 * w1 - w0 * w0 + 4 * d2) / (4 * w0 * d1);
+      const b1 = (w1 * w1 - w0 * w0 - 4 * d2) / (4 * w1 * d1);
+      const r0 = Math.log(Math.sqrt(b0 * b0 + 1) - b0), r1 = Math.log(Math.sqrt(b1 * b1 + 1) - b1);
+      const c0 = Math.cosh(r0), s0 = Math.sinh(r0);
+      S = (r1 - r0) / R;
+      f = (t) => {
+        const q = R * t * S + r0;
+        const u = w0 / (2 * d1) * (c0 * Math.tanh(q) - s0);
+        return [ux0 + u * dx, uy0 + u * dy, w0 * c0 / Math.cosh(q)];
+      };
+    }
+    return {
+      at: (e) => {
+        if (e >= 1) return b;
+        const p = f(e), s = sw / p[2];
+        return zoomClamp({ s: s, tx: sw / 2 - s * p[0], ty: sh / 2 - s * p[1] }, sw, sh);
+      },
+      ms: Math.min(cfg.maxMs, Math.max(cfg.minMs, Math.abs(S) * cfg.wijkMs)),
+    };
+  }
+
+  // easeInOutCubic — ออกตัวนุ่ม หยุดนุ่ม
+  function zoomEase(t) {
+    if (t <= 0) return 0;
+    if (t >= 1) return 1;
+    return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+  }
+
+  // ขนาดกล่องต้องเป็นค่าทศนิยมจริง (ภาพสูง 362.45 px แต่ clientHeight ปัดเป็น 362 ⇒ กรอบเพี้ยน 1.6 px ที่ขอบล่าง)
+  // วัดจาก SVG ซึ่งไม่เคยถูก transform และทับพื้นที่ภาพพอดี
+  function zoomStage(st) {
+    const svg = st.querySelector("svg"), rb = svg ? svg.getBoundingClientRect() : { width: 0, height: 0 };
+    return { st: st, img: st.querySelector("img"), svg: svg,
+             tags: Array.from(st.querySelectorAll(".v2-tag")), W: +st.dataset.w, H: +st.dataset.h,
+             sw: rb.width, sh: rb.height };
+  }
+
+  // วาดมุมมอง v ลงกล่องเดียว — ภาพ (transform) กับกรอบ (viewBox) มาจากค่าชุดเดียวกัน ⇒ ทับกันพอดีทุกเฟรม
+  function zoomApply(z, v) {
+    const full = !(v.s > 1);
+    if (z.img) z.img.style.transform = full ? "" :
+      "translate(" + v.tx.toFixed(3) + "px," + v.ty.toFixed(3) + "px) scale(" + v.s.toFixed(5) + ")";
+    if (z.svg) z.svg.setAttribute("viewBox", full ? "0 0 " + z.W + " " + z.H :
+      (-v.tx / (v.s * z.sw) * z.W).toFixed(3) + " " + (-v.ty / (v.s * z.sh) * z.H).toFixed(3) + " " +
+      (z.W / v.s).toFixed(3) + " " + (z.H / v.s).toFixed(3));
+    z.tags.forEach((t) => {
+      if (full) { t.style.transform = ""; return; }
+      const dx = v.tx + (v.s - 1) * (+t.dataset.fx || 0) * z.sw, dy = v.ty + (v.s - 1) * (+t.dataset.fy || 0) * z.sh;
+      t.style.transform = "translate(" + dx.toFixed(2) + "px," + dy.toFixed(2) + "px)" +
+        (t.classList.contains("below") ? "" : " translateY(-100%)");
+    });
+    RZ.cur.set(z.st, v);
+  }
+
+  function zoomStep(now) {
+    RZ.raf = 0;
+    const t = RZ.ms > 0 ? Math.max(0, Math.min(1, (now - RZ.t0) / RZ.ms)) : 1;
+    const e = zoomEase(t);
+    RZ.anims.forEach((a) => zoomApply(a.z, t >= 1 ? a.to : a.path.at(e)));
+    if (t < 1) RZ.raf = requestAnimationFrame(zoomStep);
+    else RZ.anims = [];
+  }
+
+  // ซูมทุกกล่องไปที่จุด id (null = ภาพเต็ม) · คู่อื่นที่ซูมค้างอยู่กลับเป็นภาพเต็มพร้อมกัน
+  function zoomTo(id, instant) {
+    RZ.shown = id;
+    const hit = id != null ? document.querySelector('#v2PairsRes rect.f[data-f="' + id + '"]') : null;
+    const card = hit ? hit.closest(".v2-card") : null;
+    const r = S.result;
+    const p = card && r ? (r.pairs || []).find((x) => String(x.n) === card.dataset.pn) : null;
+    const f = p ? (p.findings || []).find((x) => String(x.id) === String(id)) : null;
+    const reduce = !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+    const plans = [];
+    document.querySelectorAll("#v2PairsRes .v2-res-stage").forEach((st) => {
+      const z = zoomStage(st);
+      const mine = !!f && card.contains(st);
+      let to = { s: 1, tx: 0, ty: 0 }, note = "";
+      if (mine) {
+        const sd = f[st.dataset.side];
+        const rect = zoomRect(sd, z.W, z.H, FRAME_PAD, ZOOM.minCtx);
+        if (!rect) note = sd && sd.text ? "จุดนี้ไม่มีตำแหน่งบนภาพฝั่งนี้" : "ฝั่งนี้ไม่พบบรรทัดที่ตรงกับอีกฝั่ง";
+        else if (z.sw > 0 && z.sh > 0 && z.W > 0 && z.H > 0 && z.img && z.img.naturalWidth) {
+          to = zoomView(rect, z.W, z.H, z.sw, z.sh, z.img.naturalWidth / z.sw, ZOOM);
+        }
+      }
+      st.classList.toggle("zoomed", mine);
+      st.querySelectorAll("[data-f]").forEach((el) => el.classList.toggle("hov", mine && el.dataset.f === String(id)));
+      const nt = st.querySelector(".v2-znote"), bd = st.querySelector(".v2-zbadge");
+      if (nt) { nt.textContent = note; nt.classList.toggle("on", !!note); }
+      if (bd) { bd.textContent = "🔍 ×" + to.s.toFixed(1); bd.classList.toggle("on", to.s > 1); }
+      plans.push({ z: z, to: to, path: zoomPath(RZ.cur.get(st) || { s: 1, tx: 0, ty: 0 }, to, z.sw, z.sh, ZOOM) });
+    });
+    document.querySelectorAll("#v2PairsRes tr[data-f]").forEach((tr) => tr.classList.toggle("hov", !!f && tr.dataset.f === String(id)));
+    if (RZ.raf) cancelAnimationFrame(RZ.raf);
+    RZ.raf = 0;
+    RZ.anims = plans;
+    RZ.ms = instant || reduce ? 0 : Math.max(0, ...plans.map((x) => x.path.ms));
+    RZ.t0 = performance.now();
+    if (RZ.ms) RZ.raf = requestAnimationFrame(zoomStep);
+    else zoomStep(RZ.t0);
+  }
+
+  // ชี้เมาส์เข้า/ออกแถว — หน่วงสั้น ๆ ก่อนซูม (ลากผ่านหลายแถวแล้วภาพไม่กระพือ)
+  function zoomHover(id) {
+    if (id === RZ.hover) return;
+    RZ.hover = id;
+    clearTimeout(RZ.timer);
+    const want = id != null ? id : RZ.pin;
+    if (want === RZ.shown) return;
+    const wait = id == null ? ZOOM.leaveMs : (RZ.shown != null ? ZOOM.moveMs : ZOOM.enterMs);
+    RZ.timer = setTimeout(() => zoomTo(want), wait);
+  }
+
+  // เลือกแถวแบบเดิม (แถวสีฟ้า + กรอบเส้นหนา) · id = null ⇒ ไม่เลือกอะไร
+  function zoomSelect(id) {
+    document.querySelectorAll("#v2PairsRes tr.sel").forEach((x) => x.classList.remove("sel"));
+    document.querySelectorAll("#v2PairsRes rect.f, #v2PairsRes rect.d, #v2PairsRes .v2-tag")
+      .forEach((x) => x.classList.toggle("hot", id != null && x.dataset.f === String(id)));
+    const tr = id != null ? document.querySelector('#v2PairsRes tr[data-f="' + id + '"]') : null;
+    if (tr) tr.classList.add("sel");
+  }
+
+  // คลิกแถว = ค้างการซูมไว้ (เมาส์ออกแล้วยังซูม) · คลิกแถวเดิมซ้ำ/Esc/คลิกที่อื่น = ปล่อย
+  function zoomClick(id) {
+    clearTimeout(RZ.timer);
+    if (RZ.pin === id) { zoomUnpin(); return; }
+    RZ.pin = id;
+    zoomSelect(id);
+    const hit = document.querySelector('#v2PairsRes rect.f[data-f="' + id + '"]');
+    const st = hit ? hit.closest(".v2-res-stage") : null;
+    if (st) {
+      const rc = st.getBoundingClientRect();
+      if (rc.top < 0 || rc.bottom > window.innerHeight) {   // ภาพไม่อยู่บนจอทั้งภาพ ⇒ เลื่อนจอไปที่ภาพ (แบบเดิม)
+        RZ.quietUntil = performance.now() + 800;              // ระหว่างจอเลื่อน แถวที่ผ่านใต้เมาส์ไม่นับเป็นการชี้
+        st.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
+    }
+    if (RZ.shown !== id) zoomTo(id);
+  }
+
+  function zoomUnpin() {
+    RZ.pin = null;
+    zoomSelect(null);
+    clearTimeout(RZ.timer);
+    if (RZ.shown !== RZ.hover) zoomTo(RZ.hover);
+  }
+
+  // ล้างสถานะก่อนวาดผลใหม่ (กล่องเดิมถูกแทนที่แล้ว) — ไม่ล้างการค้าง (ติ๊กตัวเลือกแสดงผลแล้วยังค้างอยู่)
+  function zoomReset() {
+    if (RZ.raf) cancelAnimationFrame(RZ.raf);
+    clearTimeout(RZ.timer);
+    RZ.raf = 0;
+    RZ.anims = [];
+    RZ.cur = new WeakMap();
+    RZ.hover = null;
+    RZ.shown = null;
+    RZ.lastEl = null;
+    RZ.ok = new Set();
+  }
+
+  function zoomAfterRender() {
+    RZ.ok = new Set(Array.from(document.querySelectorAll("#v2PairsRes rect.f[data-f]")).map((x) => x.dataset.f));
+    // ภาพโหลดเสร็จทีหลัง (ขนาดกล่องเพิ่งรู้) ⇒ วางมุมมองที่ค้าง/ชี้อยู่ใหม่ทันที
+    document.querySelectorAll("#v2PairsRes .v2-res-stage img").forEach((img) => {
+      img.addEventListener("load", () => { if (RZ.shown != null) zoomTo(RZ.shown, true); });
+    });
+    if (RZ.pin != null && RZ.ok.has(RZ.pin)) { zoomSelect(RZ.pin); zoomTo(RZ.pin, true); }
+    else RZ.pin = null;
+  }
+
+  if (HOVER_ZOOM) {
+    const res = $("v2PairsRes");
+    const zoomRowOf = (el) => {
+      const tr = el && el.closest ? el.closest("tr[data-f]") : null;
+      return tr && RZ.ok.has(tr.dataset.f) ? tr.dataset.f : null;
+    };
+    res.addEventListener("pointermove", (ev) => {
+      if (ev.pointerType === "touch" || ev.target === RZ.lastEl || performance.now() < RZ.quietUntil) return;
+      RZ.lastEl = ev.target;
+      zoomHover(zoomRowOf(ev.target));
+    });
+    res.addEventListener("pointerleave", (ev) => {
+      if (ev.pointerType === "touch") return;
+      RZ.lastEl = null;
+      zoomHover(null);
+    });
+    document.addEventListener("keydown", (ev) => {
+      if (ev.key === "Escape" && RZ.pin != null) zoomUnpin();
+    });
+    document.addEventListener("click", (ev) => {
+      // คลิกที่อื่น = ปล่อย · ยกเว้นแถวในตาราง (สลับค้างเอง) และตัวเลือกการแสดงผลเหนือภาพ
+      const t = ev.target && ev.target.closest ? ev.target : null;
+      if (RZ.pin != null && !(t && (t.closest("#v2PairsRes tr[data-f]") || t.closest(".v2-legend")))) zoomUnpin();
+    });
+    window.addEventListener("resize", () => {
+      if (window.innerWidth === RZ.vw) return;               // มือถือ: แถบที่อยู่ซ่อน/แสดง = ความสูงเปลี่ยนอย่างเดียว
+      RZ.vw = window.innerWidth;
+      if (RZ.shown != null) zoomTo(RZ.shown, true);
+    });
+    RZ.vw = window.innerWidth;
+  }
 
   // ── ⑤ Log ────────────────────────────────────────────────────────
   $("v2CopyLog").addEventListener("click", async () => {
