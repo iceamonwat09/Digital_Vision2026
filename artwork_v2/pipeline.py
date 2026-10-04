@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import time
 from difflib import SequenceMatcher
 from typing import Callable, Dict, List, Optional
@@ -120,6 +121,24 @@ def norm_sharpness(v) -> str:
 def run(job_id: str, raw_pairs, poster: Optional[Callable] = None,
         progress: Optional[Callable] = None, sharpness: Optional[str] = None,
         ai_mode: Optional[str] = None, ai_poster: Optional[Callable] = None) -> dict:
+    """ตรวจหนึ่งรอบ · ล้มก่อนยิง Vision ⇒ ลบโฟลเดอร์รอบที่เพิ่งสร้าง (ไม่ทิ้งรอบว่างค้าง
+    ให้หน้าเว็บเปิดแล้วไม่เห็นอะไร) · ล้มหลังยิงแล้ว ⇒ เก็บผลดิบใน ``raw/`` ไว้ไล่ปัญหา"""
+    made: Dict[str, str] = {}
+    try:
+        return _run(job_id, raw_pairs, poster, progress, sharpness, ai_mode, ai_poster, made)
+    except Exception:
+        rd = made.get("rd")
+        if rd and not os.path.isfile(os.path.join(rd, "result.json")):
+            try:
+                if not os.listdir(os.path.join(rd, "raw")):
+                    shutil.rmtree(rd, ignore_errors=True)
+            except OSError:
+                pass
+        raise
+
+
+def _run(job_id, raw_pairs, poster, progress, sharpness, ai_mode, ai_poster,
+         made: Dict[str, str]) -> dict:
     t_all = time.time()
     sharp = norm_sharpness(sharpness)
     ai_mode = ai_review.norm_mode(ai_mode)
@@ -128,6 +147,7 @@ def run(job_id: str, raw_pairs, poster: Optional[Callable] = None,
     pairs_in = parse_pairs(raw_pairs)
     meta = jobs.meta(job_id)
     rd = jobs.new_run_dir(job_id)
+    made["rd"] = rd
     run_name = os.path.basename(rd)
     key, key_src = keystore.get_key()
 
@@ -287,8 +307,9 @@ def run(job_id: str, raw_pairs, poster: Optional[Callable] = None,
     # ── 7) ผลตัดสิน + บันทึก ─────────────────────────────────────────
     for pr in pairs:
         pr.pop("_cmp", None)
-        for key in ("findings", "debris", "algo_only", "ai_dismissed"):
-            for f in pr.get(key) or []:
+        # ห้ามใช้ชื่อ ``key`` — ทับกุญแจ API ข้างบน แล้ว redact() ลบชื่อคีย์ทิ้งแทนกุญแจจริง
+        for lk in ("findings", "debris", "algo_only", "ai_dismissed"):
+            for f in pr.get(lk) or []:
                 if "confidence" not in f:
                     f["confidence"] = ai_review.confidence(f)
         v, rs = verdict_of([pr])

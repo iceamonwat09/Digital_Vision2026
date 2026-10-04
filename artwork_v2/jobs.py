@@ -45,8 +45,13 @@ def _ext(name: str) -> str:
     return ext
 
 
+def _tmp(path: str) -> str:
+    """ชื่อไฟล์ชั่วคราวไม่ซ้ำ — สองคำขอพร้อมกันเขียนไฟล์เดียวกันได้โดยไม่ทับกันกลางทาง"""
+    return "%s.%s.tmp" % (path, secrets.token_hex(4))
+
+
 def _write_json(path: str, data) -> None:
-    tmp = path + ".tmp"
+    tmp = _tmp(path)
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=1)
     os.replace(tmp, path)
@@ -107,9 +112,16 @@ def preview_path(job_id: str, side: str, page: int) -> str:
     path = os.path.join(d, "preview_%s_%d.png" % (side, page))
     if not os.path.isfile(path):
         img = source(job_id, side).preview(page)
-        with open(path + ".tmp", "wb") as f:
-            f.write(imaging.encode_png(img))
-        os.replace(path + ".tmp", path)
+        tmp = _tmp(path)
+        try:
+            with open(tmp, "wb") as f:
+                f.write(imaging.encode_png(img))
+            os.replace(tmp, path)
+        except OSError:
+            if os.path.exists(tmp):
+                os.remove(tmp)
+            if not os.path.isfile(path):         # อีกคำขอเขียนเสร็จก่อน = ใช้ไฟล์นั้น
+                raise
     return path
 
 
@@ -136,6 +148,16 @@ def run_dir(job_id: str, run: str) -> str:
     return rd
 
 
+def finished_runs(d: str) -> list:
+    """รอบที่ตรวจเสร็จ (มี ``result.json``) เรียงตามลำดับ — รอบที่ล้มกลางทางไม่ถูกนับ"""
+    try:
+        names = os.listdir(d)
+    except OSError:
+        return []
+    return sorted(x for x in names if _RUN_RE.match(x)
+                  and os.path.isfile(os.path.join(d, x, "result.json")))
+
+
 def recent(limit: int = 20, can_view=None) -> list:
     out = []
     try:
@@ -149,10 +171,17 @@ def recent(limit: int = 20, can_view=None) -> list:
             m = read_json(os.path.join(config.JOBS_DIR, n, "meta.json"))
         except (OSError, ValueError):
             continue
+        if not isinstance(m, dict):
+            continue
         if can_view is not None and not can_view(m):
             continue
-        runs = sorted(x for x in os.listdir(os.path.join(config.JOBS_DIR, n))
-                      if _RUN_RE.match(x))
+        try:
+            row = {"id": n, "created": m.get("created"),
+                   "a": m["files"]["a"]["name"], "b": m["files"]["b"]["name"],
+                   "owner": (m.get("owner") or {}).get("username", "")}
+        except (KeyError, TypeError, AttributeError):
+            continue                               # meta.json ผิดรูป ⇒ ข้ามงานนั้น ไม่ล้มทั้งรายการ
+        runs = finished_runs(os.path.join(config.JOBS_DIR, n))
         last = None
         if runs:
             try:
@@ -160,9 +189,8 @@ def recent(limit: int = 20, can_view=None) -> list:
                 last = {"run": runs[-1], "verdict": r.get("verdict")}
             except (OSError, ValueError):
                 last = {"run": runs[-1], "verdict": None}
-        out.append({"id": n, "created": m.get("created"),
-                    "a": m["files"]["a"]["name"], "b": m["files"]["b"]["name"],
-                    "owner": (m.get("owner") or {}).get("username", ""), "last": last})
+        row["last"] = last
+        out.append(row)
         if len(out) >= limit:
             break
     return out

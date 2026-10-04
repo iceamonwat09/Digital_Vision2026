@@ -17,6 +17,7 @@ Gemini ตอบด้วย **รหัสคำของ Vision** → แอ�
 
 from __future__ import annotations
 
+import copy
 import json
 import re
 import time
@@ -389,6 +390,9 @@ def _sugs(resp: dict) -> List[str]:
     return [_clip(x, 400) for x in s if str(x or "").strip()][:MAX_SUGGESTIONS]
 
 
+_MERGE_KEYS = ("findings", "ai_dismissed", "algo_only")
+
+
 def run_all(pairs: List[dict], mode: str, warnings: List[str], say: Callable,
             next_id: int, poster: Optional[Callable] = None) -> Tuple[dict, int]:
     """ทำทุกคู่โซน · คืน ``(สรุปทั้งรอบ, id ถัดไป)`` — ใช้ ``pr["_cmp"]`` (บรรทัดที่เทียบจริง)"""
@@ -418,15 +422,21 @@ def run_all(pairs: List[dict], mode: str, warnings: List[str], say: Callable,
                             % (pr["n"], info["error"]))
             pr["ai"] = ai
             continue
-        summary["pairs_ok"] += 1
+        # merge แก้รายการในที่ — ล้มกลางทาง ⇒ คืนผลอัลกอริทึมเดิมทุกตัวอักษร (ตามที่คำเตือนบอก)
+        saved = {k: copy.deepcopy(pr[k]) for k in _MERGE_KEYS if k in pr}
         try:
             st = merge(mode, pr, resp, A, B)
         except Exception as e:                       # noqa: BLE001 — คำตอบเพี้ยนต้องไม่ล้มทั้งรอบ
+            for k in _MERGE_KEYS:
+                pr.pop(k, None)
+            pr.update(saved)
+            summary["pairs_failed"] += 1
             ai["status"] = "failed"
             ai["error"] = "รวมผล AI ไม่ได้: %s" % _clip(e, 200)
             warnings.append("คู่ %d: %s — ใช้ผลของอัลกอริทึม" % (pr["n"], ai["error"]))
             pr["ai"] = ai
             continue
+        summary["pairs_ok"] += 1
         ai.update(st)
         ai["engine"] = _clip(resp.get("engine"), 60)
         ai["usage"] = resp.get("usage") if isinstance(resp.get("usage"), dict) else None

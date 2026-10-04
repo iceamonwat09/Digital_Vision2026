@@ -173,7 +173,10 @@ def job_create():
         owner = {"user_id": str(viewer.get("sub") or ""),
                  "username": viewer.get("username") or ""}
     try:
-        m = jobs.create((fa.filename, fa.read()), (fb.filename, fb.read()), owner)
+        # อ่านไม่เกินเพดาน +1 ไบต์ — ไฟล์ใหญ่ผิดปกติไม่ถูกโหลดเข้าหน่วยความจำทั้งก้อน
+        # (เกินแม้ไบต์เดียว ⇒ jobs.create ปฏิเสธพร้อมบอกขนาดสูงสุด)
+        cap = jobs.MAX_UPLOAD_BYTES + 1
+        m = jobs.create((fa.filename, fa.read(cap)), (fb.filename, fb.read(cap)), owner)
     except ValueError as e:
         return _err(str(e))
     except Exception as e:                       # noqa: BLE001
@@ -191,7 +194,7 @@ def job_list():
 def job_get(job_id):
     m = jobs.meta(job_id)
     d = jobs.job_dir(job_id)
-    m["runs"] = sorted(x for x in os.listdir(d) if jobs._RUN_RE.match(x))
+    m["runs"] = jobs.finished_runs(d)
     return jsonify(m)
 
 
