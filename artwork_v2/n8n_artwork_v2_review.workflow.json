@@ -90,7 +90,10 @@
       "position": [
         660,
         200
-      ]
+      ],
+      "onError": "continueRegularOutput",
+      "notes": "คัด URL + credential (googleApi) จาก node \"HTTP Request\" ของ workflow artwork-pair · Gemini ตอบ error/หมดเวลา ⇒ ส่งต่อให้ node ถัดไปแปลงเป็น {error} (แอปใช้ผลอัลกอริทึมแทน)",
+      "notesInFlow": true
     },
     {
       "parameters": {

@@ -51,6 +51,24 @@
   .v2-res-stage rect.skip { fill:rgba(100,116,139,.18); stroke:#64748b; stroke-width:1; vector-effect:non-scaling-stroke; }
   .v2-res-stage rect.f.hot { stroke-width:6; }
   .v2-res-stage text { font-size:14px; font-weight:700; paint-order:stroke; stroke:#fff; stroke-width:3px; }
+  /* กรอบแบบ "word" (ค่าเริ่มต้น): เส้นบาง 1.25 px ไม่ย่อ/ขยายตามภาพ · อยู่ในที่ว่างรอบคำ */
+  #v2Root[data-box-style="word"] .v2-res-stage rect.f { stroke-width:1.25; }
+  #v2Root[data-box-style="word"] .v2-res-stage rect.f.yellow { stroke-dasharray:4 2; }
+  #v2Root[data-box-style="word"] .v2-res-stage rect.f.hot { stroke-width:2.5; }
+  .v2-res-stage rect.d { stroke:none; }
+  .v2-res-stage rect.d.red { fill:rgba(220,38,38,.20); }
+  .v2-res-stage rect.d.yellow { fill:rgba(217,119,6,.22); }
+  .v2-res-stage rect.d.ins { fill-opacity:1; }
+  .v2-res-stage rect.d.red.ins { fill:rgba(220,38,38,.55); }
+  .v2-res-stage rect.d.yellow.ins { fill:rgba(217,119,6,.55); }
+  .v2-res-stage rect.d.hot.red { fill:rgba(220,38,38,.32); }
+  .v2-res-stage rect.d.hot.yellow { fill:rgba(217,119,6,.34); }
+  .v2-tag { position:absolute; transform:translateY(-100%); margin-top:-1px; padding:0 3px; border-radius:3px;
+            font:700 9px/11px system-ui, sans-serif; opacity:.92; color:#fff; pointer-events:none; white-space:nowrap; }
+  .v2-tag.below { transform:none; margin-top:1px; }
+  .v2-tag.red { background:#dc2626; }
+  .v2-tag.yellow { background:#b45309; }
+  .v2-tag.hot { outline:2px solid #0f172a; }
   .v2-tbl-wrap { overflow-x:auto; margin-top:10px; }
   table.v2-tbl { border-collapse:collapse; width:100%; font-size:13px; }
   .v2-tbl th, .v2-tbl td { border-bottom:1px solid #e2e8f0; padding:6px 8px; text-align:left; vertical-align:top; }
@@ -77,7 +95,7 @@
 {% endblock %}
 
 {% block content %}
-<div class="v2" id="v2Root" data-can-manage="{{ 1 if can_manage_key else 0 }}" data-version="{{ v2_version }}">
+<div class="v2" id="v2Root" data-can-manage="{{ 1 if can_manage_key else 0 }}" data-version="{{ v2_version }}" data-box-style="{{ v2_box_style }}">
   <div class="v2-head">
     <h2>Artwork V2 <span class="v2-sub">เทียบข้อความสองไฟล์ด้วย Google Cloud Vision OCR · PoC</span></h2>
     <span class="v2-sub">โมดูล {{ v2_version }}</span>

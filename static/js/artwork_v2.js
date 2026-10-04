@@ -152,6 +152,9 @@
 
   // ผลของงานก่อนหน้า/รุ่นโค้ดก่อนหน้าต้องไม่ค้างบนจอ — ผู้ตรวจจะเข้าใจว่าเป็นผลของงานที่เปิดอยู่
   const V2_VERSION = ($("v2Root") && $("v2Root").dataset.version) || "";
+  // วิธีวาดกรอบจุดต่าง: "word" = เส้นบางรอบคำ + แถบสีบนตัวอักษรที่ต่าง · "span" = แบบเดิม
+  const BOX_STYLE = ($("v2Root") && $("v2Root").dataset.boxStyle) === "span" ? "span" : "word";
+  const FRAME_PAD = 0.22;   // ระยะเผื่อจากตัวอักษรถึงเส้นกรอบ = สัดส่วนของความสูงคำ
 
   function hideResult() {
     S.result = null;
@@ -459,18 +462,59 @@
         g += '<rect class="ocr" x="' + l.box[0] + '" y="' + l.box[1] + '" width="' + (l.box[2] - l.box[0]) + '" height="' + (l.box[3] - l.box[1]) + '"/>';
       });
     }
+    let tags = "";
     (p.findings || []).forEach((f) => {
-      const b = f[side].box;
-      if (!b) return;
-      const pad = 3;
-      g += '<rect class="f ' + f.severity + '" data-f="' + f.id + '" x="' + (b[0] - pad) + '" y="' + (b[1] - pad) +
-        '" width="' + (b[2] - b[0] + 2 * pad) + '" height="' + (b[3] - b[1] + 2 * pad) + '"/>' +
-        '<text x="' + (b[0] - pad) + '" y="' + Math.max(12, b[1] - pad - 3) + '" fill="' +
-        (f.severity === "red" ? "#dc2626" : "#b45309") + '">' + f.id + "</text>";
+      if (BOX_STYLE === "span") { g += spanFrame(f, side); return; }
+      const d = wordFrame(f, side, W, H);
+      g += d.svg;
+      tags += d.tag;
     });
     return '<div class="v2-res-stage"><img alt="ภาพที่ส่งให้ Vision ฝั่ง ' + side.toUpperCase() + '" src="/api/artwork_v2/jobs/' +
       esc(run.job) + "/runs/" + esc(run.run) + "/img/" + esc(sd.image) + '">' +
-      '<svg viewBox="0 0 ' + W + " " + H + '" preserveAspectRatio="none">' + g + "</svg></div>";
+      '<svg viewBox="0 0 ' + W + " " + H + '" preserveAspectRatio="none">' + g + "</svg>" + tags + "</div>";
+  }
+
+  // กรอบแบบเดิม (ARTWORK_V2_BOX_STYLE=span) — รอบตัวอักษรที่ต่าง เผื่อ 3 px ของภาพที่ส่ง
+  function spanFrame(f, side) {
+    const b = f[side].box;
+    if (!b) return "";
+    const pad = 3;
+    return '<rect class="f ' + f.severity + '" data-f="' + f.id + '" x="' + (b[0] - pad) + '" y="' + (b[1] - pad) +
+      '" width="' + (b[2] - b[0] + 2 * pad) + '" height="' + (b[3] - b[1] + 2 * pad) + '"/>' +
+      '<text x="' + (b[0] - pad) + '" y="' + Math.max(12, b[1] - pad - 3) + '" fill="' +
+      (f.severity === "red" ? "#dc2626" : "#b45309") + '">' + f.id + "</text>";
+  }
+
+  // กรอบแบบใหม่ (ค่าเริ่มต้น) — แสดงผลล้วน ไม่แตะผลตรวจ
+  //  · กรอบเส้นบางรอบ "คำเต็ม" (word_box) เผื่อห่างจากตัวอักษรตามความสูงตัวอักษร ⇒ เส้นอยู่ในที่ว่าง ไม่ทับหมึก
+  //  · ตัวอักษรที่ต่างจริง (box) = แถบสีโปร่งใสสูงเท่าคำ ⇒ เห็นว่าต่างตรงไหนโดยตัวหนังสือยังอ่านออก
+  //  · เลขจุดต่างเป็นป้าย HTML นอกกรอบ (ขนาดตัวอักษรคงที่ ไม่ย่อตามภาพ)
+  function wordFrame(f, side, W, H) {
+    const sd = f[side];
+    const b = sd.box, wb = sd.word_box || b;
+    if (!wb) return { svg: "", tag: "" };
+    const h = Math.max(1, wb[3] - wb[1]);
+    const pad = Math.max(2, h * FRAME_PAD);
+    const x0 = Math.max(0, wb[0] - pad), y0 = Math.max(0, wb[1] - pad);
+    const x1 = Math.min(W, wb[2] + pad), y1 = Math.min(H, wb[3] + pad);
+    let svg = '<rect class="f ' + f.severity + '" data-f="' + f.id + '" x="' + x0 + '" y="' + y0 +
+      '" width="' + (x1 - x0) + '" height="' + (y1 - y0) + '" rx="' + (pad * 0.6) + '"/>';
+    if (b) {
+      const bw = b[2] - b[0];
+      const narrow = bw < (b[3] - b[1]) * 0.2;            // จุดแทรก (อีกฝั่งมีตัวอักษรที่ฝั่งนี้ไม่มี)
+      const w = narrow ? Math.max(2, h * 0.12) : bw;
+      const cx = (b[0] + b[2]) / 2;
+      // ต่างทั้งคำ/ทั้งบรรทัด ⇒ กรอบอย่างเดียวพอ · ไม่มี word_box (ผลรุ่นเก่า) ⇒ กรอบอย่างเดียว
+      const whole = !narrow && (!sd.word_box || bw >= (wb[2] - wb[0]) * 0.97);
+      if (!whole) {
+        svg += '<rect class="d ' + f.severity + (narrow ? " ins" : "") + '" data-f="' + f.id + '" x="' +
+          (narrow ? cx - w / 2 : b[0]) + '" y="' + wb[1] + '" width="' + w + '" height="' + h + '"/>';
+      }
+    }
+    const above = y0 / H > 0.04;
+    const tag = '<span class="v2-tag ' + f.severity + (above ? "" : " below") + '" data-f="' + f.id + '" style="left:' +
+      (x0 / W * 100).toFixed(3) + "%;top:" + ((above ? y0 : y1) / H * 100).toFixed(3) + '%">' + esc(f.id) + "</span>";
+    return { svg: svg, tag: tag };
   }
 
   function sideInfo(sd) {
@@ -530,7 +574,8 @@
     const id = tr.dataset.f;
     document.querySelectorAll("#v2PairsRes tr.sel").forEach((x) => x.classList.remove("sel"));
     tr.classList.add("sel");
-    document.querySelectorAll("#v2PairsRes rect.f").forEach((x) => x.classList.toggle("hot", x.dataset.f === id));
+    document.querySelectorAll("#v2PairsRes rect.f, #v2PairsRes rect.d, #v2PairsRes .v2-tag")
+      .forEach((x) => x.classList.toggle("hot", x.dataset.f === id));
     const hit = document.querySelector('#v2PairsRes rect.f[data-f="' + id + '"]');
     if (hit) hit.closest(".v2-res-stage").scrollIntoView({ behavior: "smooth", block: "center" });
   });

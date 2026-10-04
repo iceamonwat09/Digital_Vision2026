@@ -178,6 +178,7 @@ def test_box_is_the_differing_characters_not_the_whole_word():
     assert f["a"]["frag"] == "C" and f["b"]["frag"] == "c"
     # กรอบเท่ากับของอัลกอริทึม (ตัวอักษรเดียวกันของ Vision) — ไม่ใช่กรอบทั้งคำ
     assert f["a"]["box"] == algo["a"]["box"] and f["b"]["box"] == algo["b"]["box"]
+    assert f["a"]["word_box"] == algo["a"]["word_box"] and f["b"]["word_box"] == algo["b"]["word_box"]
     assert f["confidence"] == pytest.approx(0.91)        # ค่าต่ำสุดของ Vision ทั้งสองฝั่ง
 
 
@@ -475,6 +476,7 @@ def test_station_data_ai_boxes_match_algorithm_boxes():
         _item([wid(A, "A", "D-calcium")], "D-calcium", [wid(B, "B", "D-Calcium")], "D-Calcium"), A, B)
     assert why == ""
     assert f["a"]["box"] == algo["a"]["box"] and f["b"]["box"] == algo["b"]["box"]
+    assert f["a"]["word_box"] == algo["a"]["word_box"] and f["b"]["word_box"] == algo["b"]["word_box"]
     assert f["confidence"] == pytest.approx(min(algo["a"]["conf"], algo["b"]["conf"]), abs=1e-4)
     p = ai_review.build_payload(1, "assist", A, B, (Wa, Ha), (Wb, Hb), [])
     assert 20_000 < len(json.dumps(p, ensure_ascii=False)) < 200_000
@@ -563,6 +565,49 @@ def test_workflow_parse_ok_skips_thoughts_and_fences():
 def test_workflow_parse_failures_always_return_error(gem, needle):
     out = _wf(BODY, gem)["out"]
     assert needle in out["error"]
+
+
+@pytest.mark.parametrize("err", [
+    {"message": "timeout of 170000ms exceeded", "name": "AxiosError"},   # HTTP node onError=continue
+    "The connection to the server was closed unexpectedly",
+])
+def test_workflow_parse_turns_http_node_errors_into_error(err):
+    out = _wf(BODY, {"error": err})["out"]
+    assert out["error"].startswith("Gemini error:") and "reviews" not in out
+
+
+def test_workflow_is_importable_and_never_answers_silently():
+    """โครงที่ n8n ต้องการตอน import + ทุกทางจบที่ Respond (ไม่ค้าง/ไม่ 500 เงียบ)"""
+    w = json.load(open(WF, encoding="utf-8"))
+    names = [n["name"] for n in w["nodes"]]
+    assert len(names) == len(set(names))
+    ids = [n["id"] for n in w["nodes"]]
+    assert len(ids) == len(set(ids))
+    for n in w["nodes"]:
+        assert {"parameters", "id", "name", "type", "typeVersion", "position"} <= set(n)
+    for src, outs in w["connections"].items():
+        assert src in names
+        for branch in outs["main"]:
+            for c in branch:
+                assert c["node"] in names
+    hook = next(n for n in w["nodes"] if n["type"] == "n8n-nodes-base.webhook")
+    assert hook["parameters"]["responseMode"] == "responseNode" and hook.get("webhookId")
+    http = next(n for n in w["nodes"] if n["type"] == "n8n-nodes-base.httpRequest")
+    assert http.get("onError") == "continueRegularOutput"
+    assert http["parameters"]["options"]["response"]["response"]["neverError"] is True
+    # Gemini ต้องหมดเวลาก่อนแอป ไม่งั้นแอปตัดสายก่อนได้คำตอบ {error}
+    assert http["parameters"]["options"]["timeout"] < config.AI_TIMEOUT_S * 1000
+    assert http["parameters"]["nodeCredentialType"] == "googleApi"
+    # ทุกทางจาก Webhook ต้องไปจบที่ Respond to Webhook
+    nxt = {s: [c["node"] for br in o["main"] for c in br] for s, o in w["connections"].items()}
+    types = {n["name"]: n["type"] for n in w["nodes"]}
+    stack, ends = [hook["name"]], set()
+    while stack:
+        x = stack.pop()
+        if not nxt.get(x):
+            ends.add(types[x])
+        stack += nxt.get(x, [])
+    assert ends == {"n8n-nodes-base.respondToWebhook"}
 
 
 def test_doc_prompt_matches_workflow_prompt():

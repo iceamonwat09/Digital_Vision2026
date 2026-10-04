@@ -551,6 +551,30 @@ def _span_box(line: dict, s: int, e: int) -> Optional[tuple]:
     return (x - w / 2, ref[1], x + w / 2, ref[3])
 
 
+def _word_box(line: dict, s: int, e: int) -> Optional[tuple]:
+    """กรอบของ "คำเต็ม" ที่ครอบช่วง ``[s, e)`` — ใช้วาดกรอบบาง ๆ รอบคำบนหน้าเว็บ (แสดงผลล้วน)
+
+    ขยายไปถึงช่องว่างทั้งสองข้างแบบเดียวกับ :func:`_word_at` · ตัวอักษรที่ต่างจริงยังอยู่ใน
+    ``box`` (``_span_box``) · หาไม่ได้ (ข้อความกับตัวอักษรไม่ตรงกัน / ไม่มีกรอบ) ⇒ ``None``
+    · ช่วงว่าง (จุดแทรก) ⇒ ``None`` เสมอ — คำข้างจุดแทรกไม่ใช่สิ่งที่ต่าง (ครอบมันจะชี้ผิดคำ)
+    """
+    if s >= e:
+        return None
+    text = line.get("text") or ""
+    chars = line.get("chars") or []
+    if len(chars) != len(text):
+        return None
+    lo = s
+    while lo > 0 and not text[lo - 1].isspace():
+        lo -= 1
+    hi = max(e, s)
+    while hi < len(text) and not text[hi].isspace():
+        hi += 1
+    if lo >= hi:
+        return None
+    return union(c["box"] for c in chars[lo:hi])
+
+
 def _span_conf(line: dict, s: int, e: int) -> Optional[float]:
     chars = line["chars"]
     lo, hi = (s, e) if s < e else (max(0, s - 1), min(len(chars), s + 1))
@@ -643,9 +667,9 @@ def diff_pair(a: dict, b: dict, A: List[dict], B: List[dict],
             "word_a": _word_at(a["text"], *sa),
             "word_b": _word_at(b["text"], *sb),
             "a": {"line": ia, "text": a["text"], "span": list(sa), "frag": a_txt,
-                  "box": _span_box(a, *sa), "conf": ca},
+                  "box": _span_box(a, *sa), "word_box": _word_box(a, *sa), "conf": ca},
             "b": {"line": ib, "text": b["text"], "span": list(sb), "frag": b_txt,
-                  "box": _span_box(b, *sb), "conf": cb},
+                  "box": _span_box(b, *sb), "word_box": _word_box(b, *sb), "conf": cb},
         })
     return finds, reflow
 
@@ -773,6 +797,7 @@ def collapse_curved(findings: List[dict]) -> List[dict]:
         cs = [m[s]["conf"] for m in members if m[s].get("conf") is not None]
         return {"line": None, "text": " · ".join(texts), "span": None, "frag": "",
                 "box": union(m[s].get("box") for m in members),
+                "word_box": union(m[s].get("word_box") or m[s].get("box") for m in members),
                 "conf": min(cs) if cs else None}
 
     red = [m for m in members if m["severity"] == "red"]
@@ -842,9 +867,9 @@ def compare(lines_a: List[dict], lines_b: List[dict],
             box = ln["box"]
             conf = ln.get("conf_mean")
             empty = {"line": None, "text": "", "span": [0, 0], "frag": "", "box": None,
-                     "conf": None}
+                     "word_box": None, "conf": None}
             this = {"line": i, "text": ln["text"], "span": [0, len(ln["text"])],
-                    "frag": ln["text"], "box": box, "conf": conf}
+                    "frag": ln["text"], "box": box, "word_box": box, "conf": conf}
             f = {"class": "MISSING_IN_B" if side == "A" else "EXTRA_IN_B",
                  "a": this if side == "A" else empty,
                  "b": empty if side == "A" else this,

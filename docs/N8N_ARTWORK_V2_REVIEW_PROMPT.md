@@ -86,6 +86,16 @@
    (`artwork-pair`) — ค่าในไฟล์เป็นตัวอย่าง `YOUR_GCP_PROJECT_ID`
 3. กด **Activate** (path `artwork-v2-review` · ใช้ Production URL ไม่ใช่ `/webhook-test/`)
 4. ทดสอบ: ตรวจงานบนหน้า Artwork V2 → กล่อง "🤖 AI ตรวจทาน" ต้องขึ้นสถิติ ไม่ใช่ "ไม่สำเร็จ"
+5. ทดสอบตรงจาก PowerShell (ไม่ต้องเปิดหน้าเว็บ — ต้องได้ JSON ที่มี `reviews`/`items` หรือ `error` ที่อ่านออก):
+   ```powershell
+   $b = '{"mode":"judge","zone_a":[{"id":"A0","box":[0,0,1000,100],"conf":0.98,"words":["Sodium","20%"],"word_conf":[0.98,0.97]}],"zone_b":[{"id":"B0","box":[0,0,1000,100],"conf":0.98,"words":["Sodium","24%"],"word_conf":[0.98,0.96]}],"candidates":[]}'
+   Invoke-RestMethod -Method Post -Uri http://127.0.0.1:5678/webhook/artwork-v2-review -ContentType 'application/json; charset=utf-8' -Body $b | ConvertTo-Json -Depth 6
+   ```
+   คาดหวัง: `items` 1 ข้อ `a_words ["A0:1"]` · `b_words ["B0:1"]` · `verdict "real"`
+
+กันเงียบ: node HTTP Request ตั้ง **`neverError`** (HTTP ≠ 2xx ไม่ล้ม workflow) และ **On Error =
+Continue** (ต่อไม่ติด/หมดเวลา 170 วิ ไม่ล้ม workflow) ⇒ ทุกความล้มเหลวไปจบที่ node Parse ซึ่งคืน
+`{error}` เสมอ ⇒ แอปเห็นเหตุผลจริงใน Log และใช้ผลอัลกอริทึมแทน (หมดเวลาของ N8N 170 วิ < ของแอป 180 วิ)
 
 ค่าที่ใช้: `temperature 0` (ผลซ้ำได้) · `thinkingBudget 4096` (บทเรียนโหมดคู่: 1024 คิดไม่จบ) ·
 `maxOutputTokens 32768` · `responseMimeType application/json` + `responseSchema`

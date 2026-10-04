@@ -73,7 +73,8 @@ def page():
     return render_template("artwork_v2.html", v2_version=VERSION,
                            can_manage_key=_is_admin(_viewer()),
                            v2_sharpness=config.SHARPNESS,
-                           v2_ai_mode=config.AI_MODE)
+                           v2_ai_mode=config.AI_MODE,
+                           v2_box_style=config.BOX_STYLE)
 
 
 # ── API key ──────────────────────────────────────────────────────────

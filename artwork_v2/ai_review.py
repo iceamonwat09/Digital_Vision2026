@@ -198,10 +198,12 @@ def _diff_span(ta: str, tb: str) -> Optional[Tuple[int, int, int, int]]:
 def _side_dict(lines, li, s, e) -> dict:
     ln = lines[li]
     return {"line": li, "text": ln["text"], "span": [s, e], "frag": ln["text"][s:e],
-            "box": compare._span_box(ln, s, e), "conf": compare._span_conf(ln, s, e)}
+            "box": compare._span_box(ln, s, e), "word_box": compare._word_box(ln, s, e),
+            "conf": compare._span_conf(ln, s, e)}
 
 
-_EMPTY = {"line": None, "text": "", "span": [0, 0], "frag": "", "box": None, "conf": None}
+_EMPTY = {"line": None, "text": "", "span": [0, 0], "frag": "", "box": None, "word_box": None,
+          "conf": None}
 
 
 def item_to_finding(it: dict, A: List[dict], B: List[dict]) -> Tuple[Optional[dict], str]:

@@ -143,5 +143,10 @@ AI_REVIEW_URL = os.getenv("ARTWORK_V2_AI_REVIEW_URL",
 AI_TIMEOUT_S = _f("ARTWORK_V2_AI_TIMEOUT_S", "180")
 AI_RETRIES = _i("ARTWORK_V2_AI_RETRIES", "1")
 
+# วิธีวาดกรอบจุดต่างบนหน้าเว็บ (แสดงผลล้วน — ไม่แตะผลตรวจ/Log/ผลตัดสิน)
+#   word = เส้นบาง 1.25 px รอบ "คำเต็ม" เผื่อห่างตัวอักษร 22% ของความสูงคำ + แถบสีโปร่งบนตัวอักษรที่ต่าง
+#   span = แบบเดิม (เส้น 3 px รอบเฉพาะตัวอักษรที่ต่าง เผื่อ 3 px ของภาพ — ย่อภาพแล้วเส้นทับตัวหนังสือ)
+BOX_STYLE = "span" if os.getenv("ARTWORK_V2_BOX_STYLE", "word").strip().lower() == "span" else "word"
+
 # จำนวนบรรทัด OCR ต่อฝั่งที่พิมพ์ลง Log (กัน Log ยาวเกินไปจนก๊อปไม่ได้)
 LOG_MAX_LINES = _i("ARTWORK_V2_LOG_MAX_LINES", "400")
