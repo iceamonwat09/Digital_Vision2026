@@ -23,7 +23,7 @@
 
 ## 🆕 Artwork V2 — เทียบข้อความด้วย Google Cloud Vision (2 ต.ค. 2026 · PoC)
 
-**Branch: `claude/laughing-fermat-i9aise`** (ต่อจาก `claude/practical-franklin-a5p6zd`) · `CONFIG_VERSION` = **`2026.10.04-v2-hoverzoom`** ·
+**Branch: `claude/laughing-fermat-i9aise`** (ต่อจาก `claude/practical-franklin-a5p6zd`) · `CONFIG_VERSION` = **`2026.10.05-v2-judgepunct`** ·
 โมดูล `artwork_v2/` (VERSION `2026.10.04-v2restore`) · เมนู **"Artwork V2"** (`/artwork_v2`) ·
 เทสต์ `tests/test_artwork_v2.py` **73 ตัว** + `tests/test_artwork_v2_robust.py` **717 ตัว** (ข้อมูล OCR จริง · ~2.5 นาที)
 
@@ -275,7 +275,7 @@ blueprint ใน `app.py` · ลิงก์เมนูใน `base.html` · �
 | เครื่องหมายล้วน ความมั่นใจต่ำ = noise | ✅ **แบบแก้** | ต่ำ ⇒ `uncertain` ไม่ใช่ `noise` ("ไม่รู้" ≠ "ไม่มี" · judge พับ noise ทิ้ง) · ≥ 0.80 ⇒ `real` |
 
 * แก้ทั้ง `n8n_artwork_v2_review.workflow.json` และ `docs/N8N_ARTWORK_V2_REVIEW_PROMPT.md` (ตรงกันทุกตัวอักษร) · **ต้อง Import workflow ใหม่ใน N8N** · ไม่แตะโค้ดแอป · เทสต์ +2 (V2 ไม่รวม robust 296 ผ่าน)
-* ⚠️ ข้อสังเกตที่ยังไม่แก้: โหมด judge ให้ `real` + Vision ≥ 0.80 = **แดง** แม้เป็นเครื่องหมายล้วน — ขัดกับกติกาของอัลกอริทึม (PUNCT แดงได้เฉพาะเมื่ออ่านซ้ำยืนยัน) · ต้องถามผู้ใช้ก่อน
+* ✅ **แก้แล้ว (ผู้ใช้สั่ง):** โหมด judge เดิมให้ `real` + Vision ≥ 0.80 = **แดง** แม้ต่างแค่เครื่องหมายวรรคตอน — ขัดกติกาอัลกอริทึม (PUNCT แดงได้เฉพาะเมื่ออ่านซ้ำยืนยัน · คำตอบ AI ไม่ใช่การอ่านซ้ำ) ⇒ `ai_review.merge` ลดเป็น **เหลือง + หมายเหตุ** · ธง `ARTWORK_V2_AI_JUDGE_PUNCT_YELLOW` (`0` = แดงได้แบบเดิม · อยู่ใน `[SETTINGS]` ของ Log) · ของอื่น (ตัวเลข/ตัวอักษร/ตัวพิมพ์) ยังแดงตามเดิม · เทสต์ +2 · ย้อนโค้ดแล้วแดง · `CONFIG_VERSION` `2026.10.05-v2-judgepunct`
 
 **📚 เอกสาร Google Vision (อ่าน 4 ต.ค. — `docs.cloud.google.com` ถูก proxy บล็อก อ่านจาก proto ทางการบน GitHub + ข้อความค้นหา):**
 `DOCUMENT_TEXT_DETECTION` สำหรับข้อความหนาแน่น ✅ (ใช้อยู่) · `languageHints` *"ส่วนใหญ่ปล่อยว่างดีที่สุด · ใส่ผิดเป็นอุปสรรคมาก"* ✅ (ว่าง) ·
@@ -5948,7 +5948,7 @@ A, B, C, …) ⇒ ทุกกลุ่มมีสมาชิก 1 ตัว �
   `tests/test_artwork_ownership.py` 30 ตัว (สิทธิ์เห็นประวัติ + ชื่อผู้ตรวจ).
   ⚠️ `tests/test_inspection_golden.py` **fail 5 ตัวอยู่แล้ว** (pre-existing, `NameError: FieldResult`
   ในโมดูล Label Paper) — ไม่เกี่ยวกับ artwork. ยืนยันด้วย `git stash` ก่อนโทษการแก้ของตัวเอง.
-- CONFIG_VERSION ปัจจุบัน: **`2026.10.04-v2-hoverzoom`** (เช็คที่ footer ว่ารันโค้ดใหม่จริง).
+- CONFIG_VERSION ปัจจุบัน: **`2026.10.05-v2-judgepunct`** (เช็คที่ footer ว่ารันโค้ดใหม่จริง).
 - **ตาข่ายนิรภัยของชั้นเทียบ: `verify_compare.py`** — แก้อะไรที่ `panelmatch`/`confirm`
   **ต้องรันไฟล์นี้ก่อนและหลังเสมอ** (`--selftest` ใช้ได้โดยไม่ต้องมีไฟล์จริง)
 

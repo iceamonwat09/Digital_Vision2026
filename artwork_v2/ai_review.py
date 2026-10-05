@@ -358,7 +358,12 @@ def merge(mode: str, pr: dict, resp: dict, A: List[dict], B: List[dict]) -> dict
                 dismissed.append(f)
                 continue
             c = f["confidence"]
-            if v == "real" and c is not None and c >= config.CONF_FAIL:
+            if (v == "real" and config.AI_JUDGE_PUNCT_YELLOW and f["class"] == "PUNCT"
+                    and c is not None and c >= config.CONF_FAIL):
+                f["severity"] = "yellow"
+                f["notes"].append("ต่างแค่เครื่องหมายวรรคตอน — แดงได้เฉพาะเมื่อการอ่านซ้ำยืนยัน "
+                                  "(คำตอบของ AI ไม่ใช่การอ่านซ้ำ) โปรดดูด้วยตา")
+            elif v == "real" and c is not None and c >= config.CONF_FAIL:
                 f["severity"] = "red"
             else:
                 f["severity"] = "yellow"

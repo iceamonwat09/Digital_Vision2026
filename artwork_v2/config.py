@@ -153,6 +153,9 @@ AI_REVIEW_URL = os.getenv("ARTWORK_V2_AI_REVIEW_URL",
                           "http://127.0.0.1:5678/webhook/artwork-v2-review").strip()
 AI_TIMEOUT_S = _f("ARTWORK_V2_AI_TIMEOUT_S", "180")
 AI_RETRIES = _i("ARTWORK_V2_AI_RETRIES", "1")
+# โหมด judge: จุดที่ต่างแค่เครื่องหมายวรรคตอน ⇒ เหลืองเสมอ (กติกาเดียวกับอัลกอริทึม —
+# PUNCT แดงได้เฉพาะเมื่อการอ่านซ้ำยืนยัน · คำตอบของ AI ไม่ใช่การอ่านซ้ำ) · 0 = แดงได้แบบเดิม
+AI_JUDGE_PUNCT_YELLOW = _b("ARTWORK_V2_AI_JUDGE_PUNCT_YELLOW", "1")
 
 # วิธีวาดกรอบจุดต่างบนหน้าเว็บ (แสดงผลล้วน — ไม่แตะผลตรวจ/Log/ผลตัดสิน)
 #   word = เส้นบาง 1.25 px รอบ "คำเต็ม" เผื่อห่างตัวอักษร 22% ของความสูงคำ + แถบสีโปร่งบนตัวอักษรที่ต่าง

@@ -305,6 +305,29 @@ def test_judge_uses_vision_confidence_for_red():
     assert sev == {"0": "red", "5": "yellow"}
 
 
+def _judge_punct(monkeypatch, flag):
+    monkeypatch.setattr(config, "AI_JUDGE_PUNCT_YELLOW", flag)
+    pr, A, B = _pr(["Irwindale, CA 91706", "Fat 20%"], ["Irwindale CA 91706", "Fat 24%"])
+    ai_review.merge("judge", pr, {"items": [
+        _item([wid(A, "A", "Irwindale,")], "Irwindale,", [wid(B, "B", "Irwindale")], "Irwindale"),
+        _item([wid(A, "A", "20%")], "20%", [wid(B, "B", "24%")], "24%"),
+    ]}, A, B)
+    return {f["class"]: f for f in pr["findings"]}
+
+
+def test_judge_punctuation_only_is_yellow_even_when_vision_is_sure(monkeypatch):
+    by = _judge_punct(monkeypatch, True)
+    p = by["PUNCT"]
+    assert p["confidence"] is not None and p["confidence"] >= config.CONF_FAIL
+    assert p["severity"] == "yellow" and any("วรรคตอน" in n for n in p["notes"])
+    assert by["NUMBER"]["severity"] == "red"          # ของอื่นยังแดงตามเดิม
+
+
+def test_judge_punct_flag_off_is_old_behaviour(monkeypatch):
+    by = _judge_punct(monkeypatch, False)
+    assert by["PUNCT"]["severity"] == "red" and by["NUMBER"]["severity"] == "red"
+
+
 def test_judge_noise_is_folded_and_algorithm_only_points_are_kept_visible():
     pr, A, B = _pr(["Fat 20%", "Net 85 g"], ["Fat 24%", "Net 86 g"])
     ai_review.merge("judge", pr, {"items": [
