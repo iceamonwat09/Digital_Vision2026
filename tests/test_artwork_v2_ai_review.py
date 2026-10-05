@@ -635,3 +635,33 @@ def test_page_has_ai_selector_and_js_sends_mode():
         assert 'value="%s"' % v in html
     assert 'id="v2Ai"' in html and 'ai_mode: $("v2Ai")' in js
     assert "ความมั่นใจ (Vision)" in js and "ไม่ใช่จาก AI" in js
+
+
+# ── prompt: คำข้างเคียงของคำที่หาย ต้องอ้างทั้งสองฝั่ง ─────────────────
+
+def test_missing_word_anchor_on_both_sides_marks_the_gap_not_the_neighbour():
+    """กติกาใน prompt: คำที่หายกลางบรรทัด ⇒ อ้างคำข้างเคียง 1 คำที่มีทั้งสองฝั่ง ทั้งสองฝั่ง
+    (อ้างคำข้างเคียงเฉพาะฝั่งที่ขาด = แอปกรอบคำข้างเคียงว่าเป็นคำที่เปลี่ยน)"""
+    _, A, B = _cmp(["Biotin, Pantothenate, D-Calcium Thiamine"], ["Biotin, Pantothenate, Thiamine"])
+    good, why = ai_review.item_to_finding(
+        _item([wid(A, "A", "Pantothenate,"), wid(A, "A", "D-Calcium")], "Pantothenate, D-Calcium",
+              [wid(B, "B", "Pantothenate,")], "Pantothenate,"), A, B)
+    assert why == ""
+    assert good["a"]["frag"].strip() == "D-Calcium"
+    assert good["b"]["frag"] == "" and good["b"]["word_box"] is None     # จุดแทรก ไม่ใช่คำ
+    bad, _ = ai_review.item_to_finding(
+        _item([wid(A, "A", "D-Calcium")], "D-Calcium",
+              [wid(B, "B", "Pantothenate,")], "Pantothenate,"), A, B)
+    assert bad["b"]["frag"] == "Pantothenate,"      # ⇐ เหตุที่ prompt ห้ามอ้างแบบนี้
+
+
+def test_prompt_rules_from_review_are_present():
+    w = json.load(open(os.path.join(ROOT, "artwork_v2", "n8n_artwork_v2_review.workflow.json"),
+                       encoding="utf-8"))
+    code = next(n for n in w["nodes"] if n["name"] == "Build Gemini request")["parameters"]["jsCode"]
+    p = re.search(r"const PROMPT = `(.*?)`;", code, re.S).group(1)
+    assert "exactly ONE neighbouring word that exists on BOTH sides" in p
+    assert 'take it from the field "mode"' in p
+    assert "low word_conf alone is not enough" in p
+    assert "No Markdown, no code fences" in p
+    assert '"type": "OBJECT"' not in p and "SCHEMA" not in p    # ไม่ใส่ schema ซ้ำใน prompt

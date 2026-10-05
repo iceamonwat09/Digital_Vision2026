@@ -130,18 +130,19 @@ VERDICT of each difference
 - "real": the difference is in the content and the differing words are read clearly on both sides (word_conf >= 0.80).
 - "noise": the difference is explained by the known OCR noise above AND the data supports it (low word_conf, leader dots, glyph variants). Never call a change of a letter, digit or letter case "noise" when the differing words have word_conf >= 0.80 on both sides.
 - "uncertain": everything in between. When in doubt, choose "uncertain".
+- punctuation only (a period, comma, colon, semicolon or hyphen added or removed, every letter and digit the same): "real" when the words that carry it have word_conf >= 0.80 on both sides, otherwise "uncertain". It is "noise" only when it is one of the known OCR noises above (leader dots, glyph variants, stylised logo text) - low word_conf alone is not enough.
 
 REFERENCING (the app draws the boxes from your ids and rejects anything that does not match the data)
 - a_words / b_words: ids of the word(s) that contain the difference, all from ONE line per side, contiguous, as few as possible.
-- If a word is missing inside a line on one side, give on that side the neighbouring word(s) around the place where it would be, so the position is clear.
+- If a word is missing inside a line on one side, anchor it with exactly ONE neighbouring word that exists on BOTH sides: the word right before the gap (the word right after it only when there is none before). On the side that HAS the text, cite that neighbour together with the differing word(s); on the side that lacks it, cite only that neighbour. Example: A "Pantothenate, D-Calcium Thiamine" and B "Pantothenate, Thiamine" -> a_words = the ids of "Pantothenate," and "D-Calcium", b_words = the id of "Pantothenate,". Never cite the neighbour alone on one side and the differing word alone on the other: the app would then frame the neighbour as if it were the changed word.
 - If the text is absent from the whole other zone, give [] for that side.
 - a_quote / b_quote: the exact text of the cited words joined with single spaces, copied character for character from the data (keep dots and punctuation). "" when the list is empty.
 - One item per separate difference. Two differences far apart in the same line are two items.
 - Never output any number for confidence or accuracy. The app computes confidence from Vision.
 
-MODE
-- assist: first review EVERY candidate in "reviews" (candidate id, verdict, reason, suggestion). Then put in "items" ONLY differences that no candidate covers. Do not repeat a candidate in items.
-- judge: candidates is empty. Find all differences yourself, put them in "items", and return "reviews": [].
+MODE (take it from the field "mode" of the data, never infer it from anything else)
+- assist: first review EVERY candidate in "reviews" (candidate id, verdict, reason, suggestion). Then put in "items" ONLY differences that no candidate covers. Do not repeat a candidate in items. If candidates is empty, return "reviews": [] and put every difference you find in "items".
+- judge: candidates is always empty. Find all differences yourself, put them in "items", and return "reviews": [].
 
 LANGUAGE AND STYLE
 - reason, suggestion, summary and suggestions are written in Thai. Keep label text in its original language inside quotes.
@@ -150,7 +151,7 @@ LANGUAGE AND STYLE
 - suggestion: what the inspector should do for this point.
 - summary: 2-6 Thai sentences: how many real differences, each one briefly A -> B, and what needs a human look.
 - suggestions: concrete Thai actions for the inspector (what to check on the file or the physical print, how to redraw a zone).
-- Respond with JSON only, matching the schema.
+- Respond with the raw JSON object only, matching the schema. No Markdown, no code fences, no text before or after it.
 ```
 <!-- PROMPT END -->
 
@@ -166,3 +167,11 @@ LANGUAGE AND STYLE
 | อ้างด้วยรหัสคำ + ยกข้อความมาตรงตัว | แอปตรวจได้ว่า AI อ้างถูกคำ · กรอบมาจาก Vision ไม่ใช่จาก AI |
 | ห้ามตอบตัวเลขความมั่นใจ | ผู้ใช้กำหนด: % ต้องมาจาก Vision |
 | ไม่ตัดสินว่าฝั่งไหนถูก | V2 ไม่รู้ว่าไฟล์ไหนเป็นต้นแบบ — บอก A/B ตรง ๆ |
+| คำหายกลางบรรทัด: อ้าง **คำข้างเคียง 1 คำที่มีทั้งสองฝั่ง** ทั้งสองฝั่ง | แอปหาจุดต่างเองทีละตัวอักษร — อ้างคำข้างเคียงฝั่งเดียว (ฝั่งที่ขาด) แอปจะกรอบ **คำข้างเคียงว่าเป็นคำที่เปลี่ยน** (วัดแล้ว: กรอบ `Pantothenate,` แทนจุดแทรก) · อ้างคำเดียวกันทั้งสองฝั่ง ⇒ ได้จุดแทรกที่ถูกตำแหน่ง (มีเทสต์) |
+| เครื่องหมายล้วน: มั่นใจ ≥ 0.80 = `real` · ต่ำกว่า = `uncertain` (ไม่ใช่ `noise`) | ความมั่นใจต่ำแปลว่า "ไม่รู้" ไม่ใช่ "ไม่มี" — `noise` ในโหมด judge จะพับรายการทิ้ง |
+| โหมดอ่านจากช่อง `mode` ไม่เดาจาก `candidates` | assist ที่อัลกอริทึมไม่พบอะไรเลยก็มี `candidates` ว่าง — สองโหมดใช้ผลต่างกันในแอป |
+| ห้าม Markdown/รั้วโค้ด | `responseMimeType` บังคับ JSON อยู่แล้ว · node Parse ถอดรั้วให้อีกชั้น — ประโยคนี้เป็นชั้นที่สาม |
+
+**คำแนะนำที่พิจารณาแล้วไม่ทำ:** ใส่ตัวอย่าง JSON schema ท้าย prompt — Google ระบุว่าเมื่อใช้
+`responseSchema` แล้ว **ไม่ควรใส่ schema ซ้ำใน prompt เพราะอาจทำให้คุณภาพคำตอบลดลง** และ
+`responseSchema` บังคับชื่อ key/ชนิด/enum/required ที่ฝั่ง Gemini อยู่แล้ว (เดาชื่อ key ผิดไม่ได้)
