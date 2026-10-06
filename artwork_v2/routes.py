@@ -81,7 +81,8 @@ def page():
                            v2_box_style=config.BOX_STYLE,
                            v2_restore_confirm=config.RESTORE_CONFIRM,
                            v2_restore_days=config.RESTORE_MAX_AGE_DAYS,
-                           v2_hover_zoom=config.HOVER_ZOOM)
+                           v2_hover_zoom=config.HOVER_ZOOM,
+                           v2_line_group=config.LINE_GROUP)
 
 
 # ── API key ──────────────────────────────────────────────────────────

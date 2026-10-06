@@ -668,6 +668,103 @@
       "</td><td>" + cellText(f, "a") + "</td><td>" + cellText(f, "b") + "</td><td>" + confCell(f) +
       "</td><td>" + notes + aiNote(f) + "</td></tr>";
   }
+  // ── รวมจุดต่างในคู่บรรทัดเดียวกันเป็นแถวเดียว (ARTWORK_V2_LINE_GROUP · แสดงผลล้วน) ──────────
+  //  · ไม่แตะผลตรวจ/ผลตัดสิน/Log — ทุกจุดยังอยู่ครบพร้อมเลขจุด กรอบบนภาพ ระดับ หมายเหตุ และคำตอบ AI ของตัวเอง
+  //  · จับกลุ่มเฉพาะจุดที่ชี้ "บรรทัดเดียวกันทั้งสองฝั่ง" (เลขบรรทัด + ข้อความ A/B ตรงกัน) และมาจากแหล่งเดียวกัน
+  //    (อัลกอริทึม/AI) · จุดหาย/เกินฝั่งเดียว การ์ดโค้ง และจุดที่ไม่มีเลข ไม่ถูกจับกลุ่ม
+  //  · ระดับของแถว = สมาชิกที่หนักที่สุด · แถวอยู่ตำแหน่งของสมาชิกตัวแรก
+  const LINE_GROUP = root.dataset.lineGroup === "1";
+  const SEV_RANK = { red: 4, yellow: 3, debris: 2, dismissed: 1 };
+  let GRP = {};                 // id ของแถวกลุ่ม ("g<id แรก>") → [id สมาชิก] — ใช้กับการซูม/เลือกแถว
+  function lineGroups(list) {
+    const out = [], at = {};
+    (list || []).forEach((f) => {
+      const a = f.a || {}, b = f.b || {};
+      const k = (f.id != null && !f.members && a.line != null && b.line != null)
+        ? [f.source === "ai" ? "ai" : "algo", a.line, b.line, a.text || "", b.text || ""].join("\u0001") : null;
+      if (k != null && at[k] != null) { out[at[k]].push(f); return; }
+      if (k != null) at[k] = out.length;
+      out.push([f]);
+    });
+    return out.map((g) => g.length === 1 ? g[0] : {
+      group: true, id: "g" + g[0].id, members: g,
+      severity: g.reduce((s, m) => ((SEV_RANK[m.severity] || 0) > (SEV_RANK[s] || 0) ? m.severity : s), g[0].severity),
+    });
+  }
+
+  // ข้อความทั้งบรรทัด + ไฮไลต์ทุกช่วงที่ต่าง (ช่วงว่าง = จุดแทรก ▏)
+  function markedMulti(text, spans) {
+    if (!text) return '<span class="v2-muted">—</span>';
+    const ss = (spans || []).filter((x) => x && x.length === 2)
+      .map((x) => [Math.max(0, Math.min(text.length, x[0])), Math.max(0, Math.min(text.length, Math.max(x[0], x[1])))])
+      .sort((x, y) => x[0] - y[0] || x[1] - y[1]);
+    let out = "", pos = 0;
+    ss.forEach((x) => {
+      if (x[0] < pos && x[1] <= pos) return;          // อยู่ในช่วงที่ไฮไลต์ไปแล้ว
+      const st = Math.max(x[0], pos);
+      out += esc(text.slice(pos, st));
+      out += x[1] > st ? '<mark class="v2-d">' + esc(text.slice(st, x[1])) + "</mark>" : '<mark class="v2-d">▏</mark>';
+      pos = Math.max(pos, x[1]);
+    });
+    return out + esc(text.slice(pos));
+  }
+
+  function groupRow(g) {
+    const ms = g.members, f0 = ms[0];
+    const ids = ms.map((m) => String(m.id));
+    const cls = [];
+    ms.forEach((m) => { const t = CLASS_TH[m.class] || m.class; if (cls.indexOf(t) < 0) cls.push(t); });
+    const lo = (vals) => { const v = vals.filter((x) => x != null); return v.length ? Math.min.apply(null, v) : null; };
+    const conf = confCell({ confidence: lo(ms.map((m) => m.confidence)),
+                            a: { conf: lo(ms.map((m) => m.a.conf)) }, b: { conf: lo(ms.map((m) => m.b.conf)) } });
+    const frag = (t) => (t ? "<code>" + esc(t) + "</code>" : '<span class="v2-muted">(ไม่มี)</span>');
+    const per = ms.map((m) => {
+      const notes = (m.notes || []).filter((n) => !/^AI: /.test(n)).map(esc).join("<br>");
+      return '<div class="v2-gm"><b>#' + esc(m.id) + '</b> <span class="v2-sev ' + m.severity + '" style="font-size:11px">' +
+        esc(SEV_TH[m.severity] || m.severity) + "</span> " + esc(CLASS_TH[m.class] || m.class) + ": " +
+        frag(m.a.frag) + " → " + frag(m.b.frag) + ' <span class="v2-muted">· ' + pct(m.confidence) + "</span>" +
+        (notes ? "<br>" + notes : "") + aiNote(m) + "</div>";
+    }).join("");
+    return '<tr class="click v2-grp" data-f="' + g.id + '" data-members="' + ids.join(",") + '"><td>' + ids.join("·") +
+      '</td><td><span class="v2-sev ' + g.severity + '">' + (SEV_TH[g.severity] || g.severity) + "</span></td><td>" +
+      ms.length + " จุดในบรรทัดเดียวกัน" + (f0.source === "ai" ? '<span class="v2-ai-tag">AI</span>' : "") +
+      '<br><span class="v2-muted">' + esc(cls.join(" · ")) + "</span></td><td>" +
+      markedMulti(f0.a.text, ms.map((m) => m.a.span)) + "</td><td>" + markedMulti(f0.b.text, ms.map((m) => m.b.span)) +
+      "</td><td>" + conf + "</td><td>" + per + "</td></tr>";
+  }
+
+  function rowsHtml(list) {
+    if (!LINE_GROUP) return (list || []).map(findingRow).join("");
+    return lineGroups(list).map((x) => {
+      if (!x.group) return findingRow(x);
+      GRP[x.id] = x.members.map((m) => String(m.id));
+      return groupRow(x);
+    }).join("");
+  }
+  // id ของแถว → ชุด id ของจุดบนภาพ (แถวเดี่ยว = ตัวเอง)
+  function idsOf(id) { return new Set(id == null ? [] : (GRP[id] || [String(id)])); }
+  // กรอบบนภาพของแถว (แถวกลุ่ม = กรอบของสมาชิกตัวแรกที่มีกรอบ)
+  function hitOf(id) {
+    for (const x of idsOf(id)) {
+      const el = document.querySelector('#v2PairsRes rect.f[data-f="' + x + '"]');
+      if (el) return el;
+    }
+    return null;
+  }
+  // แถวกลุ่ม ⇒ เป้าซูม = กรอบที่ครอบคำของทุกสมาชิก (ฝั่งที่ไม่มีกรอบเลย ⇒ ไม่มีเป้า เหมือนแถวเดี่ยว)
+  function groupTarget(members) {
+    const side = (s) => {
+      let bx = null;
+      members.forEach((m) => {
+        const b = m[s] && (m[s].word_box || m[s].box);
+        if (!b) return;
+        bx = bx ? [Math.min(bx[0], b[0]), Math.min(bx[1], b[1]), Math.max(bx[2], b[2]), Math.max(bx[3], b[3])] : b.slice();
+      });
+      return { text: members[0][s] && members[0][s].text, word_box: bx, box: bx };
+    };
+    return { a: side("a"), b: side("b") };
+  }
+
   const TBL_HEAD = '<thead><tr><th>#</th><th>ระดับ</th><th>ชนิด</th><th>🅰</th><th>🅱</th><th>ความมั่นใจ (Vision)</th><th>หมายเหตุ</th></tr></thead>';
 
   const AI_MODE_TH = { assist: "อัลกอริทึมตัดสิน + AI เสริม", judge: "AI ตัดสินหลัก", raw: "AI ตัดสินจากข้อมูลดิบ", off: "ปิด AI" };
@@ -675,7 +772,7 @@
     if (!list || !list.length) return "";
     return '<details class="v2-debris" style="margin-top:8px"><summary>' + esc(title) + " (" + list.length +
       ')</summary><div class="v2-tbl-wrap"><table class="v2-tbl">' + TBL_HEAD + "<tbody>" +
-      list.map(findingRow).join("") + "</tbody></table></div></details>";
+      rowsHtml(list) + "</tbody></table></div></details>";
   }
 
   function aiBox(p) {
@@ -834,8 +931,9 @@
     const r = S.result;
     if (!r) return;
     if (HOVER_ZOOM) zoomReset();
+    GRP = {};
     $("v2PairsRes").innerHTML = (r.pairs || []).map((p) => {
-      const rows = (p.findings || []).map(findingRow).join("");
+      const rows = rowsHtml(p.findings);
       const debHtml = folded("เศษอักขระ / ขอบโซน — ไม่นับในผลตัดสิน", p.debris) +
         folded(p.raw_lines && p.ai && p.ai.mode === "raw"
           ? "ผลของอัลกอริทึม — ไว้เทียบกับ AI เท่านั้น ไม่นับในผลตัดสิน (โหมด AI ตัดสินจากข้อมูลดิบ)"
@@ -861,9 +959,10 @@
     if (HOVER_ZOOM && RZ.ok.has(id)) { zoomClick(id); return; }
     document.querySelectorAll("#v2PairsRes tr.sel").forEach((x) => x.classList.remove("sel"));
     tr.classList.add("sel");
+    const ids = idsOf(id);
     document.querySelectorAll("#v2PairsRes rect.f, #v2PairsRes rect.d, #v2PairsRes .v2-tag")
-      .forEach((x) => x.classList.toggle("hot", x.dataset.f === id));
-    const hit = document.querySelector('#v2PairsRes rect.f[data-f="' + id + '"]');
+      .forEach((x) => x.classList.toggle("hot", ids.has(x.dataset.f)));
+    const hit = hitOf(id);
     if (hit) hit.closest(".v2-res-stage").scrollIntoView({ behavior: "smooth", block: "center" });
   });
 
@@ -1018,11 +1117,13 @@
   // ซูมทุกกล่องไปที่จุด id (null = ภาพเต็ม) · คู่อื่นที่ซูมค้างอยู่กลับเป็นภาพเต็มพร้อมกัน
   function zoomTo(id, instant) {
     RZ.shown = id;
-    const hit = id != null ? document.querySelector('#v2PairsRes rect.f[data-f="' + id + '"]') : null;
+    const ids = idsOf(id);
+    const hit = hitOf(id);
     const card = hit ? hit.closest(".v2-card") : null;
     const r = S.result;
     const p = card && r ? (r.pairs || []).find((x) => String(x.n) === card.dataset.pn) : null;
-    const f = p ? (p.findings || []).find((x) => String(x.id) === String(id)) : null;
+    const mem = p ? (p.findings || []).filter((x) => ids.has(String(x.id))) : [];
+    const f = !mem.length ? null : (GRP[id] ? groupTarget(mem) : mem[0]);
     const reduce = !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
     const plans = [];
     document.querySelectorAll("#v2PairsRes .v2-res-stage").forEach((st) => {
@@ -1038,7 +1139,7 @@
         }
       }
       st.classList.toggle("zoomed", mine);
-      st.querySelectorAll("[data-f]").forEach((el) => el.classList.toggle("hov", mine && el.dataset.f === String(id)));
+      st.querySelectorAll("[data-f]").forEach((el) => el.classList.toggle("hov", mine && ids.has(el.dataset.f)));
       const nt = st.querySelector(".v2-znote"), bd = st.querySelector(".v2-zbadge");
       if (nt) { nt.textContent = note; nt.classList.toggle("on", !!note); }
       if (bd) { bd.textContent = "🔍 ×" + to.s.toFixed(1); bd.classList.toggle("on", to.s > 1); }
@@ -1068,8 +1169,9 @@
   // เลือกแถวแบบเดิม (แถวสีฟ้า + กรอบเส้นหนา) · id = null ⇒ ไม่เลือกอะไร
   function zoomSelect(id) {
     document.querySelectorAll("#v2PairsRes tr.sel").forEach((x) => x.classList.remove("sel"));
+    const ids = idsOf(id);
     document.querySelectorAll("#v2PairsRes rect.f, #v2PairsRes rect.d, #v2PairsRes .v2-tag")
-      .forEach((x) => x.classList.toggle("hot", id != null && x.dataset.f === String(id)));
+      .forEach((x) => x.classList.toggle("hot", ids.has(x.dataset.f)));
     const tr = id != null ? document.querySelector('#v2PairsRes tr[data-f="' + id + '"]') : null;
     if (tr) tr.classList.add("sel");
   }
@@ -1080,7 +1182,7 @@
     if (RZ.pin === id) { zoomUnpin(); return; }
     RZ.pin = id;
     zoomSelect(id);
-    const hit = document.querySelector('#v2PairsRes rect.f[data-f="' + id + '"]');
+    const hit = hitOf(id);
     const st = hit ? hit.closest(".v2-res-stage") : null;
     if (st) {
       const rc = st.getBoundingClientRect();
@@ -1114,6 +1216,7 @@
 
   function zoomAfterRender() {
     RZ.ok = new Set(Array.from(document.querySelectorAll("#v2PairsRes rect.f[data-f]")).map((x) => x.dataset.f));
+    Object.keys(GRP).forEach((g) => { if (GRP[g].some((x) => RZ.ok.has(x))) RZ.ok.add(g); });   // แถวกลุ่ม
     // ภาพโหลดเสร็จทีหลัง (ขนาดกล่องเพิ่งรู้) ⇒ วางมุมมองที่ค้าง/ชี้อยู่ใหม่ทันที
     document.querySelectorAll("#v2PairsRes .v2-res-stage img").forEach((img) => {
       img.addEventListener("load", () => { if (RZ.shown != null) zoomTo(RZ.shown, true); });
