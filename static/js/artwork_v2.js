@@ -670,7 +670,7 @@
   }
   const TBL_HEAD = '<thead><tr><th>#</th><th>ระดับ</th><th>ชนิด</th><th>🅰</th><th>🅱</th><th>ความมั่นใจ (Vision)</th><th>หมายเหตุ</th></tr></thead>';
 
-  const AI_MODE_TH = { assist: "อัลกอริทึมตัดสิน + AI เสริม", judge: "AI ตัดสินหลัก", off: "ปิด AI" };
+  const AI_MODE_TH = { assist: "อัลกอริทึมตัดสิน + AI เสริม", judge: "AI ตัดสินหลัก", raw: "AI ตัดสินจากข้อมูลดิบ", off: "ปิด AI" };
   function folded(title, list) {
     if (!list || !list.length) return "";
     return '<details class="v2-debris" style="margin-top:8px"><summary>' + esc(title) + " (" + list.length +
@@ -696,6 +696,7 @@
       if (ai.recovered) stat += " · แก้รหัสคำที่ AI นับคลาดจากข้อความที่ยกมา " + ai.recovered + " ข้อ";
       if (ai.items_equivalent) stat += " · ข้อที่สองฝั่งเท่ากันตามกติกาเทียบ (นับเป็นสัญญาณรบกวน) " + ai.items_equivalent + " ข้อ";
     }
+    if (ai.mode === "raw") stat += " · AI เทียบจากบรรทัดดิบของ Vision (ไม่ผ่านอัลกอริทึม) · ผลอัลกอริทึม " + (ai.algo_compare || 0) + " จุดอยู่ในรายการพับไว้เทียบ";
     if (ai.algo_red_kept) stat += " · จุดแดงของอัลกอริทึมที่ AI ไม่ได้ระบุ คงไว้เป็นเหลือง " + ai.algo_red_kept + " จุด";
     if (ai.mode === "assist" && ai.reviewable) stat += " · ตอบครบ " + ai.reviewed + "/" + ai.reviewable + " จุด";
     if (ai.extra_added) stat += " · พบเพิ่ม " + ai.extra_added + " จุด";
@@ -729,8 +730,10 @@
         g += '<rect class="skip" x="' + b[0] + '" y="' + b[1] + '" width="' + (b[2] - b[0]) + '" height="' + (b[3] - b[1]) + '"/>';
       });
     }
-    if ($("v2ShowOcr").checked && p.lines) {
-      (p.lines[side] || []).forEach((l) => {
+    // โหมด raw: แสดงบรรทัดดิบที่ส่งให้ AI (ชุดเดียวกับที่ AI ตอบ)
+    const ocrLines = (p.raw_lines && p.ai && p.ai.mode === "raw") ? p.raw_lines : p.lines;
+    if ($("v2ShowOcr").checked && ocrLines) {
+      (ocrLines[side] || []).forEach((l) => {
         if (!l.box) return;
         g += '<rect class="ocr" x="' + l.box[0] + '" y="' + l.box[1] + '" width="' + (l.box[2] - l.box[0]) + '" height="' + (l.box[3] - l.box[1]) + '"/>';
       });
@@ -834,10 +837,13 @@
     $("v2PairsRes").innerHTML = (r.pairs || []).map((p) => {
       const rows = (p.findings || []).map(findingRow).join("");
       const debHtml = folded("เศษอักขระ / ขอบโซน — ไม่นับในผลตัดสิน", p.debris) +
-        folded("อัลกอริทึมพบ แต่ AI ไม่ได้ระบุ — ไม่นับในผลตัดสิน (โหมด AI ตัดสินหลัก)", p.algo_only) +
+        folded(p.raw_lines && p.ai && p.ai.mode === "raw"
+          ? "ผลของอัลกอริทึม — ไว้เทียบกับ AI เท่านั้น ไม่นับในผลตัดสิน (โหมด AI ตัดสินจากข้อมูลดิบ)"
+          : "อัลกอริทึมพบ แต่ AI ไม่ได้ระบุ — ไม่นับในผลตัดสิน (โหมด AI ตัดสินหลัก)", p.algo_only) +
         folded("AI ตัดสินว่าเป็นสัญญาณรบกวนของ OCR — ไม่นับในผลตัดสิน", p.ai_dismissed);
       return '<div class="v2-card" data-pn="' + esc(p.n) + '" style="margin:12px 0"><b>คู่ ' + p.n + "</b> — " + esc(p.verdict || "") +
-        (p.coverage != null ? " · จับคู่ข้อความได้ " + Math.round(p.coverage * 100) + "%" : "") +
+        (p.coverage != null ? " · จับคู่ข้อความได้ " + Math.round(p.coverage * 100) + "%" +
+          (p.coverage_ignored ? " (อัลกอริทึม — ไม่ใช้ตัดสินในโหมดข้อมูลดิบ)" : "") : "") +
         (p.reasons && p.reasons.length ? ' <span class="v2-muted">(' + p.reasons.map(esc).join(" · ") + ")</span>" : "") +
         '<div class="v2-panes" style="margin-top:8px"><div>🅰 ' + sideInfo(p.sides.a) + svgFor(p, "a", r) +
         "</div><div>🅱 " + sideInfo(p.sides.b) + svgFor(p, "b", r) + "</div></div>" +

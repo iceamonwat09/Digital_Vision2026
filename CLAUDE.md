@@ -23,7 +23,7 @@
 
 ## 🆕 Artwork V2 — เทียบข้อความด้วย Google Cloud Vision (2 ต.ค. 2026 · PoC)
 
-**Branch: `claude/laughing-fermat-i9aise`** (ต่อจาก `claude/practical-franklin-a5p6zd`) · `CONFIG_VERSION` = **`2026.10.06-v2-onesided`** ·
+**Branch: `claude/laughing-fermat-i9aise`** (ต่อจาก `claude/practical-franklin-a5p6zd`) · `CONFIG_VERSION` = **`2026.10.06-v2-rawai`** ·
 โมดูล `artwork_v2/` (VERSION `2026.10.04-v2restore`) · เมนู **"Artwork V2"** (`/artwork_v2`) ·
 เทสต์ `tests/test_artwork_v2.py` **73 ตัว** + `tests/test_artwork_v2_robust.py` **717 ตัว** (ข้อมูล OCR จริง · ~2.5 นาที)
 
@@ -324,6 +324,27 @@ blueprint ใน `app.py` · ลิงก์เมนูใน `base.html` · �
 * เทสต์ `test_artwork_v2_ai_rules.py` +7 (รวม 34) · ย้อนโค้ด 5 จุด แดงทุกจุด · assist ไม่ได้รับผลกระทบ (เทสต์ล็อกไว้)
 * ⚠️ ยังเหลือ: `|` ที่ขอบขวาของโซน B (ห่างขอบ 12 px, conf 0.67-0.72) ไม่ถูกนับเป็นเศษ เพราะเกณฑ์ขอบคือ `max(3, 0.25×สูงบรรทัด)` จึงขึ้นเป็นเหลือง ยังไม่ได้แก้ ·
   เหตุผลของ AI ยังเขียนตัวเลขความมั่นใจเอง (เช่น "A: 0.55" ทั้งที่ Vision ได้ 0.62) ขัดกับ prompt
+
+#### 🧪 6 ต.ค. (รอบ 3) — โหมดที่ 3 "AI ตัดสินจากข้อมูลดิบ" (`raw` · ทดลอง · opt-in)
+
+ผู้ใช้สั่ง: *"ส่งข้อมูลดิบจริง ๆ ไม่ผ่านอัลกอริทึมเลย ให้ Gemini ตรวจ · ห้ามเดา ค่อย ๆ คิด · มาพร้อมตำแหน่งและ % เหมือนเดิม"*
+⇒ ตัวเลือกใหม่ในช่อง "AI ตรวจทาน" · **ค่าเริ่มต้นของเครื่องยังเป็น `assist`** (ต้องเลือกเองต่อรอบ)
+
+| ส่วน | ทำอะไร |
+|---|---|
+| ข้อมูลที่ส่ง | `pr["_raw"]` = บรรทัดของ `textmodel.parse` (ประกอบจาก `detectedBreak` เท่านั้น) — **ไม่ผ่าน `compare._prep`** (ไม่ต่อแถว/ต่อคำ) · ไม่มี `candidates` · ไม่มีธง `curved` |
+| จุดต่าง | `check_item` ตัวเดิม (รหัสคำ/ข้อความที่ยก/สมมูล) กับ **บรรทัดดิบ** ⇒ `line` ของจุดต่าง AI อ้างบรรทัดดิบ · กรอบ/% จาก Vision เหมือนเดิม · `f["raw"]=True` |
+| ระดับ (`_merge_raw`) | real + Vision ≥ 80% = แดง · ต่ำกว่า/uncertain = เหลือง · noise = พับ `ai_dismissed` · ไม่ใช้กติกา judge ที่อิงผลอัลกอริทึม (reflow · โค้ง · KEEP_ALGO_RED) |
+| `ARTWORK_V2_AI_RAW_SAFETY` (default 1) | อิงหลักฐาน Vision ล้วน: เครื่องหมายวรรคตอน ⇒ เหลือง · หาย/เกินฝั่งเดียวที่ < 2 ตัวหรือเครื่องหมายล้วน ⇒ เหลือง · AI บอก noise แต่ Vision อ่านตัวอักษร/ตัวเลขชัด ⇒ เหลือง · `0` = AI ล้วน |
+| ผลอัลกอริทึม | **ทุกจุด** ⇒ `algo_only` (รายการพับ "ไว้เทียบ" · ไม่นับ · ไม่จับคู่กับจุดของ AI เพราะอ้างบรรทัดคนละชุด) · `pr["coverage_ignored"]` ⇒ ความครอบคลุมไม่ใช้ตัดสิน |
+| เวลา | Build node: `PROMPT_RAW` + `thinkingBudget 24576` + `maxOutputTokens 65536` · node HTTP **170 → 290 วิ** · แอปรอ `ARTWORK_V2_AI_RAW_TIMEOUT_S` (300) เฉพาะ raw · assist/judge ยังรอ 180 วิ (N8N คำขอเดิมทุกตัวอักษร — มีเทสต์) |
+| Log/หน้าเว็บ | `pr["raw_lines"]` · Log `RAW lines A ที่ส่งให้ AI` ขึ้นต้น **`rA000`** (ตัวโหลด Log ของชุดทดสอบอ่านเฉพาะ `A000 conf=` — มีเทสต์) · `raw: algo_compare= coverage_ignored=` · ติ๊ก "กรอบบรรทัด OCR" ในโหมดนี้ = บรรทัดดิบ |
+| N8N ล่ม | ผลอัลกอริทึมทุกรายการ + คำเตือน (เหมือนทุกโหมด · ความครอบคลุมกลับมาใช้ตัดสิน) |
+
+* เทสต์ `tests/test_artwork_v2_ai_raw.py` **22** · ย้อนโค้ด 13 จุด แดง 12 (จุดที่เขียว = ด่านธงโค้งซ้อนสองชั้น — `_merge_raw` ลบ `curved` อีกที) · V2 ไม่รวม robust 1052 + 22 ผ่าน
+* บนข้อมูลสถานี: payload ~25-27 KB/คู่ (เท่าโหมด judge) · บรรทัดดิบ 82/78 vs ต่อแถวแล้ว 73/70
+* ⚠️ **ต้อง Import workflow ใหม่ หรือวางโค้ด node "Build Gemini request" ทับ + ตั้ง timeout ของ node HTTP Request เป็น 290000**
+* ⚠️ AI ตอบว่าง = PASS (ไม่มีความครอบคลุมมาค้ำ) — ผลอัลกอริทึมยังเห็นในรายการพับ · ⏳ ยังไม่เคยยิง Gemini จริงในโหมดนี้ (ดู `thoughtsTokenCount` / `ms` ใน Log)
 
 **📚 เอกสาร Google Vision (อ่าน 4 ต.ค. — `docs.cloud.google.com` ถูก proxy บล็อก อ่านจาก proto ทางการบน GitHub + ข้อความค้นหา):**
 `DOCUMENT_TEXT_DETECTION` สำหรับข้อความหนาแน่น ✅ (ใช้อยู่) · `languageHints` *"ส่วนใหญ่ปล่อยว่างดีที่สุด · ใส่ผิดเป็นอุปสรรคมาก"* ✅ (ว่าง) ·
@@ -5996,7 +6017,7 @@ A, B, C, …) ⇒ ทุกกลุ่มมีสมาชิก 1 ตัว �
   `tests/test_artwork_ownership.py` 30 ตัว (สิทธิ์เห็นประวัติ + ชื่อผู้ตรวจ).
   ⚠️ `tests/test_inspection_golden.py` **fail 5 ตัวอยู่แล้ว** (pre-existing, `NameError: FieldResult`
   ในโมดูล Label Paper) — ไม่เกี่ยวกับ artwork. ยืนยันด้วย `git stash` ก่อนโทษการแก้ของตัวเอง.
-- CONFIG_VERSION ปัจจุบัน: **`2026.10.06-v2-onesided`** (เช็คที่ footer ว่ารันโค้ดใหม่จริง).
+- CONFIG_VERSION ปัจจุบัน: **`2026.10.06-v2-rawai`** (เช็คที่ footer ว่ารันโค้ดใหม่จริง).
 - **ตาข่ายนิรภัยของชั้นเทียบ: `verify_compare.py`** — แก้อะไรที่ `panelmatch`/`confirm`
   **ต้องรันไฟล์นี้ก่อนและหลังเสมอ** (`--selftest` ใช้ได้โดยไม่ต้องมีไฟล์จริง)
 

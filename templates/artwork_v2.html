@@ -222,6 +222,7 @@
         <select id="v2Ai" class="v2-input">
           <option value="assist"{% if v2_ai_mode == "assist" %} selected{% endif %}>อัลกอริทึมตัดสิน + AI เสริม</option>
           <option value="judge"{% if v2_ai_mode == "judge" %} selected{% endif %}>AI ตัดสินหลัก (ทดลอง)</option>
+          <option value="raw"{% if v2_ai_mode == "raw" %} selected{% endif %} title="ส่งบรรทัดตามที่ Vision อ่านได้ตรง ๆ (ไม่ผ่านอัลกอริทึม) ให้ Gemini เทียบเองแบบคิดนาน · กรอบ/% ยังมาจาก Vision · ใช้เวลานานขึ้น">AI ตัดสินจากข้อมูลดิบ (ทดลอง)</option>
           <option value="off"{% if v2_ai_mode == "off" %} selected{% endif %}>ปิด AI</option>
         </select></label>
       <span id="v2RunMsg" class="v2-muted"></span>

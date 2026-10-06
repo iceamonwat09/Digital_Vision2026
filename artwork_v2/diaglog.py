@@ -163,7 +163,11 @@ def build_text(r: dict) -> str:
         for f in p.get("debris") or []:
             finding(f)
         if p.get("algo_only") is not None:
-            a("  algo_only — อัลกอริทึมพบแต่ AI ไม่ได้ระบุ ไม่นับ (%d):" % len(p["algo_only"]))
+            if p.get("raw_lines"):
+                a("  algo_only — ผลของอัลกอริทึม ไว้เทียบ ไม่นับ (โหมด raw · line= อ้างบรรทัด OCR lines) (%d):"
+                  % len(p["algo_only"]))
+            else:
+                a("  algo_only — อัลกอริทึมพบแต่ AI ไม่ได้ระบุ ไม่นับ (%d):" % len(p["algo_only"]))
             for f in p["algo_only"]:
                 finding(f)
         if p.get("ai_dismissed") is not None:
@@ -178,6 +182,19 @@ def build_text(r: dict) -> str:
                     s.upper(), i, _f(ln["conf"], 2), _f(ln["conf_min"], 2),
                     _f(ln.get("angle"), 0), _box(ln["box"]), _q(ln["text"], 200),
                     " [soft-hyphen]" if ln.get("soft_hyphen") else ""))
+            if len(lines) > config.LOG_MAX_LINES:
+                a("   … ตัดเหลือ %d บรรทัด (ทั้งหมด %d)" % (config.LOG_MAX_LINES, len(lines)))
+        for s in ("a", "b"):
+            # โหมด raw: บรรทัดดิบที่ส่งให้ AI — findings/ai_dismissed (line=) อ้างชุดนี้
+            # ขึ้นต้น "r" โดยตั้งใจ — ตัวโหลด Log ของชุดทดสอบอ่านเฉพาะบรรทัด "A000 conf=…"
+            lines = (p.get("raw_lines") or {}).get(s) or []
+            if not lines:
+                continue
+            a("  RAW lines %s ที่ส่งให้ AI (%d):" % (s.upper(), len(lines)))
+            for i, ln in enumerate(lines[:config.LOG_MAX_LINES]):
+                a("   r%s%03d conf=%s min=%s ang=%s box=%s %s" % (
+                    s.upper(), i, _f(ln["conf"], 2), _f(ln["conf_min"], 2),
+                    _f(ln.get("angle"), 0), _box(ln["box"]), _q(ln["text"], 200)))
             if len(lines) > config.LOG_MAX_LINES:
                 a("   … ตัดเหลือ %d บรรทัด (ทั้งหมด %d)" % (config.LOG_MAX_LINES, len(lines)))
 
@@ -222,6 +239,9 @@ def build_text(r: dict) -> str:
               x.get("extra_noise"), _f(vc.get("a")), _f(vc.get("b")), x.get("usage")))
         a("     recovered=%s equivalent=%s algo_red_kept=%s" % (
             x.get("recovered", "-"), x.get("items_equivalent", "-"), x.get("algo_red_kept", "-")))
+        if x.get("mode") == "raw":
+            a("     raw: algo_compare=%s coverage_ignored=%s (ผลของอัลกอริทึมพับไว้เทียบ · ความครอบคลุมไม่ใช้ตัดสิน)"
+              % (x.get("algo_compare", "-"), p.get("coverage_ignored", False)))
         for eq in x.get("equivalent") or []:
             a("     equivalent %s (AI=%s): %s" % (eq.get("what"), eq.get("verdict"), eq.get("reason")))
         for bad in x.get("invalid") or []:

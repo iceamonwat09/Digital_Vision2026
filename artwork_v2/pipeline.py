@@ -65,7 +65,8 @@ def verdict_of(pairs: List[dict]) -> tuple:
     red = sum(1 for p in pairs for f in p.get("findings", []) if f["severity"] == "red")
     yellow = sum(1 for p in pairs for f in p.get("findings", []) if f["severity"] == "yellow")
     unread = [p["n"] for p in pairs if p.get("unreadable")]
-    lowcov = [p["n"] for p in pairs if not p.get("unreadable")
+    # ``coverage_ignored`` (โหมด AI raw) — AI เทียบทั้งโซนเอง "ความครอบคลุม" เป็นของอัลกอริทึม
+    lowcov = [p["n"] for p in pairs if not p.get("coverage_ignored") and not p.get("unreadable")
               and (p.get("coverage") is None or p["coverage"] < config.COVERAGE_MIN)]
     if red:
         reasons.append("พบจุดต่างที่มั่นใจ %d จุด" % red)
@@ -263,6 +264,11 @@ def _run(job_id, raw_pairs, poster, progress, sharpness, ai_mode, ai_poster,
                                tuple(pr["sides"]["a"]["sent_px"]),
                                tuple(pr["sides"]["b"]["sent_px"]))
         pr["_cmp"] = cmp_
+        pr["_raw"] = {"a": parsed["a"]["lines"], "b": parsed["b"]["lines"]}
+        if ai_mode == "raw":
+            # บรรทัดดิบที่ส่งให้ AI (ดัชนีบรรทัดของจุดต่างที่ AI ตอบ อ้างชุดนี้)
+            pr["raw_lines"] = {"a": _compact_lines(parsed["a"]["lines"]),
+                               "b": _compact_lines(parsed["b"]["lines"])}
         pr["findings"] = cmp_["findings"]
         pr["debris"] = cmp_["debris"]
         pr["curved_lines"] = cmp_["curved_lines"]
@@ -307,13 +313,20 @@ def _run(job_id, raw_pairs, poster, progress, sharpness, ai_mode, ai_poster,
     # ── 7) ผลตัดสิน + บันทึก ─────────────────────────────────────────
     for pr in pairs:
         pr.pop("_cmp", None)
+        pr.pop("_raw", None)
         # ห้ามใช้ชื่อ ``key`` — ทับกุญแจ API ข้างบน แล้ว redact() ลบชื่อคีย์ทิ้งแทนกุญแจจริง
         for lk in ("findings", "debris", "algo_only", "ai_dismissed"):
             for f in pr.get(lk) or []:
                 if "confidence" not in f:
                     f["confidence"] = ai_review.confidence(f)
+        raw_ok = (pr.get("ai") or {}).get("mode") == "raw" and (pr.get("ai") or {}).get("status") == "ok"
+        if raw_ok:
+            # raw: AI เทียบข้อความทั้งโซนเอง — "ความครอบคลุม" เป็นตัวชี้วัดของอัลกอริทึม ไม่ใช้ตัดสิน
+            pr["coverage_ignored"] = True
         v, rs = verdict_of([pr])
-        if pr.get("algo_only"):
+        if pr.get("algo_only") and raw_ok:
+            rs.append("ผลของอัลกอริทึม %d จุด อยู่ในรายการพับไว้เทียบ (ไม่นับ)" % len(pr["algo_only"]))
+        elif pr.get("algo_only"):
             rs.append("อัลกอริทึมพบอีก %d จุดที่ AI ไม่ได้ระบุ (รายการพับ — ไม่นับ)"
                       % len(pr["algo_only"]))
         pr["verdict"] = v
@@ -364,7 +377,7 @@ def settings_snapshot() -> dict:
         "PUNCT_CAN_FAIL", "CURVED_GROUP_ENABLED", "TILT_ANGLE", "CURVED_NEIGHBOR_MAX_CHARS",
         "DEBRIS_ENABLED", "DEBRIS_CONF", "SEAM_FILLER", "CROSS_ROW_JOIN", "SYMBOL_TOKEN",
         "FRACTION_YELLOW", "REREAD_ENABLED", "REREAD_MAX", "REREAD_SCALE", "REREAD_MAX_SIDE",
-        "AI_MODE", "AI_REVIEW_URL", "AI_TIMEOUT_S", "AI_RETRIES", "AI_JUDGE_PUNCT_YELLOW",
+        "AI_MODE", "AI_REVIEW_URL", "AI_TIMEOUT_S", "AI_RAW_TIMEOUT_S", "AI_RAW_SAFETY", "AI_RETRIES", "AI_JUDGE_PUNCT_YELLOW",
         "AI_QUOTE_RECOVER", "AI_QUOTE_RECOVER_MAX_SHIFT", "AI_EQUIV_NOISE", "AI_SEND_CURVED",
         "AI_JUDGE_KEEP_ALGO_RED", "AI_JUDGE_NOISE_GUARD", "AI_JUDGE_CURVED_YELLOW",
         "AI_JUDGE_ONESIDED_GUARD",

@@ -12,6 +12,8 @@ Gemini ตอบด้วย **รหัสคำของ Vision** → แอ�
   ⇒ **ไม่ใช้** และบันทึกเหตุผล (นับเป็น "ความถูกต้องของการอ้างอิง")
 * โหมด ``assist``: AI ลบหรือลดระดับจุดของอัลกอริทึมไม่ได้ · จุดที่ AI พบเพิ่ม = เหลือง
 * โหมด ``judge``: AI ตัดสินหลัก · จุดของอัลกอริทึมที่ AI ไม่ระบุ ⇒ รายการพับ ``algo_only``
+* โหมด ``raw`` (ทดลอง): ส่ง **บรรทัดดิบตามที่ Vision ส่ง** (ไม่ผ่านชั้นต่อแถว/ต่อคำ ไม่มีธงหรือผล
+  ของอัลกอริทึม) · AI ตัดสินเอง · กรอบ/% ยังมาจาก Vision · ผลอัลกอริทึมทั้งหมด ⇒ รายการพับ "ไว้เทียบ"
 * N8N ล่ม/ตอบผิดรูป ⇒ ใช้ผลอัลกอริทึมทุกรายการ + คำเตือน (ไม่มีทางได้ผลว่างเพราะ AI พัง)
 """
 
@@ -108,12 +110,13 @@ def build_payload(n: int, mode: str, A: List[dict], B: List[dict], size_a, size_
     p = {"contract": "artwork-v2-review/1", "pair": n, "mode": mode,
          "zone_a": _side_payload(A, "A", size_a, curved.get("A")),
          "zone_b": _side_payload(B, "B", size_b, curved.get("B"))}
-    # โหมด judge ไม่ส่งผลของอัลกอริทึม — ให้ AI หาเองอย่างอิสระ (ใช้ A/B เทียบสองแนวทางได้จริง)
+    # โหมด judge/raw ไม่ส่งผลของอัลกอริทึม — ให้ AI หาเองอย่างอิสระ (ใช้ A/B เทียบสองแนวทางได้จริง)
     p["candidates"] = _candidates(findings) if mode == "assist" else []
     return p
 
 
-def call(url: str, payload: dict, poster: Optional[Callable] = None) -> Tuple[Optional[dict], dict]:
+def call(url: str, payload: dict, poster: Optional[Callable] = None,
+         timeout: Optional[float] = None) -> Tuple[Optional[dict], dict]:
     """ยิง N8N · ลองซ้ำเฉพาะความล้มเหลวชั่วคราว (ต่อไม่ติด/หมดเวลา/5xx)"""
     info = {"http": None, "ms": None, "attempts": 0, "error": "", "bytes": 0}
     if not url:
@@ -131,7 +134,7 @@ def call(url: str, payload: dict, poster: Optional[Callable] = None) -> Tuple[Op
         try:
             r = poster(url, data=body.encode("utf-8"),
                        headers={"Content-Type": "application/json; charset=utf-8"},
-                       timeout=config.AI_TIMEOUT_S)
+                       timeout=timeout or config.AI_TIMEOUT_S)
         except Exception as e:                       # noqa: BLE001 — ต่อไม่ติด/หมดเวลา/URL ผิด
             info["error"] = "ต่อ N8N ไม่ได้: %s" % _clip(e, 200)
             if isinstance(e, transient):
@@ -427,7 +430,9 @@ def merge(mode: str, pr: dict, resp: dict, A: List[dict], B: List[dict]) -> dict
         st["items_valid"] += 1
         if f["ai"].get("recovered"):
             st["recovered"] += 1
-        if any(f[s]["line"] in curved[s] for s in ("a", "b") if f[s]["line"] is not None):
+        # raw: ดัชนีบรรทัดเป็นของบรรทัดดิบ (ธงโค้งเป็นของบรรทัดที่อัลกอริทึมต่อแล้ว) ⇒ ไม่ใช้
+        if mode != "raw" and any(f[s]["line"] in curved[s] for s in ("a", "b")
+                                 if f[s]["line"] is not None):
             f["curved"] = True
         ai_finds.append(f)
 
@@ -455,6 +460,8 @@ def merge(mode: str, pr: dict, resp: dict, A: List[dict], B: List[dict]) -> dict
         pr["findings"] = findings
         st["reviewed"] = sum(1 for f in findings if f["ai"].get("verdict"))
         st["reviewable"] = len(findings)
+    elif mode == "raw":
+        _merge_raw(pr, ai_finds, findings, st)
     else:   # judge
         kept, dismissed = [], []
         for f in ai_finds:
@@ -520,6 +527,71 @@ def merge(mode: str, pr: dict, resp: dict, A: List[dict], B: List[dict]) -> dict
 _HARD_CLASSES = ("TEXT", "NUMBER", "CASE", "MISSING_IN_B", "EXTRA_IN_B")
 
 
+def _short_onesided(f: dict) -> str:
+    """หายไป/เกินมาฝั่งเดียว ที่ข้อความสั้นมาก (< 2 ตัว) หรือเครื่องหมายล้วน — วัดจากข้อความของ
+    Vision ล้วน (ไม่ใช้ผลของอัลกอริทึม) · คืนหมายเหตุ (ว่าง = ไม่เข้าเกณฑ์)"""
+    if f["class"] not in ("MISSING_IN_B", "EXTRA_IN_B"):
+        return ""
+    side = f["a" if f["class"] == "MISSING_IN_B" else "b"]
+    if side.get("line") is None:
+        return ""
+    k = compare.diff_key_map(side.get("frag") or "")[0]
+    if len(k) < 2 or compare._is_punct(k):
+        return ("ข้อความสั้นมาก/เครื่องหมายล้วนที่มีอยู่ฝั่งเดียว — OCR อ่านไม่นิ่ง โปรดดูด้วยตา")
+    return ""
+
+
+def _merge_raw(pr: dict, ai_finds: List[dict], findings: List[dict], st: dict) -> None:
+    """โหมด raw — AI ตัดสินจากข้อมูลดิบของ Vision · แอปตัดสินระดับด้วย % ของ Vision เท่านั้น
+
+    * ``real`` + Vision ≥ ``CONF_FAIL`` = แดง · ต่ำกว่า/ไม่ทราบ = เหลือง · ``uncertain`` = เหลือง
+    * ``noise`` ⇒ รายการพับ ``ai_dismissed`` (ไม่นับ)
+    * ``AI_RAW_SAFETY`` — กติกาที่อิงหลักฐานของ Vision ล้วน (ดู config)
+    * ผลของอัลกอริทึม **ทุกจุด** ⇒ ``algo_only`` "ไว้เทียบ" (ไม่นับ · ไม่จับคู่กับจุดของ AI เพราะ
+      อ้างบรรทัดคนละชุด — อัลกอริทึมใช้บรรทัดที่ต่อแถวแล้ว, AI ใช้บรรทัดดิบ)
+    """
+    kept, dismissed = [], []
+    safe = config.AI_RAW_SAFETY
+    for f in ai_finds:
+        f.pop("curved", None)          # ไม่มีธงโค้งในโหมดนี้ (เป็นผลของอัลกอริทึม)
+        f["raw"] = True
+        v = f["ai"]["verdict"]
+        c = f["confidence"]
+        sure = c is not None and c >= config.CONF_FAIL
+        if v == "noise":
+            if safe and _hard_evidence(f):
+                f["severity"] = "yellow"
+                f["notes"].append("AI บอกว่าเป็นสัญญาณรบกวน แต่ Vision อ่านตัวอักษร/ตัวเลขที่ต่างได้ชัด "
+                                  "(≥ %d%% ทั้งสองฝั่ง) — คงไว้ให้คนดู" % round(config.CONF_FAIL * 100))
+                kept.append(f)
+                continue
+            f["severity"] = "dismissed"
+            f["notes"].append("AI ตัดสินว่าเป็นสัญญาณรบกวนของ OCR — ไม่นับในผลตัดสิน")
+            dismissed.append(f)
+            continue
+        if v == "real" and sure and safe and f["class"] == "PUNCT":
+            f["severity"] = "yellow"
+            f["notes"].append("ต่างแค่เครื่องหมายวรรคตอน — คำตอบของ AI ไม่ใช่การอ่านซ้ำ โปรดดูด้วยตา")
+        elif v == "real" and sure and safe and _short_onesided(f):
+            f["severity"] = "yellow"
+            f["notes"].append(_short_onesided(f))
+        elif v == "real" and sure:
+            f["severity"] = "red"
+        else:
+            f["severity"] = "yellow"
+            if v == "real":
+                f["notes"].append("AI บอกว่าต่างจริง แต่ Vision มั่นใจในตัวอักษรนี้ต่ำกว่า %d%%"
+                                  % round(config.CONF_FAIL * 100))
+        kept.append(f)
+    for g in findings:
+        g["notes"].append("ผลของอัลกอริทึม — ไว้เทียบกับ AI เท่านั้น ไม่นับในผลตัดสิน "
+                          "(โหมด AI ตัดสินจากข้อมูลดิบ)")
+    pr["findings"] = kept
+    pr["ai_dismissed"] = dismissed
+    pr["algo_only"] = list(findings)
+    st["algo_compare"] = len(findings)
+
+
 def _weak_onesided(f: dict, pr: dict) -> str:
     """จุด "หายไป/เกินมา" ที่หลักฐานไม่พอเป็นแดง — กติกาเดียวกับบรรทัดเดี่ยวของอัลกอริทึม
     คืนหมายเหตุ (ว่าง = หลักฐานพอ)
@@ -583,15 +655,23 @@ def run_all(pairs: List[dict], mode: str, warnings: List[str], say: Callable,
             continue
         cmp_ = pr.get("_cmp")
         vc = {s: ((pr["sides"][s].get("stats") or {}).get("conf_mean")) for s in ("a", "b")}
-        if pr.get("unreadable") or not cmp_:
+        raw = pr.get("_raw") if mode == "raw" else None
+        if pr.get("unreadable") or not cmp_ or (mode == "raw" and not raw):
             pr["ai"] = {"mode": mode, "status": "skipped", "reason": "คู่นี้อ่านไม่ได้", "vision_conf": vc}
             continue
         say("กำลังให้ AI ตรวจทานคู่ %d" % pr["n"])
-        A, B = cmp_["lines_a"], cmp_["lines_b"]
+        if mode == "raw":
+            # บรรทัดตามที่ Vision ส่ง (textmodel) — ไม่ผ่านชั้นต่อแถว/ต่อคำ · ไม่ส่งธงโค้ง
+            A, B = raw["a"], raw["b"]
+            curved = None
+        else:
+            A, B = cmp_["lines_a"], cmp_["lines_b"]
+            curved = pr.get("curved_lines")
         payload = build_payload(pr["n"], mode, A, B, tuple(pr["sides"]["a"]["sent_px"]),
                                 tuple(pr["sides"]["b"]["sent_px"]), pr.get("findings") or [],
-                                curved=pr.get("curved_lines"))
-        resp, info = call(config.AI_REVIEW_URL, payload, poster)
+                                curved=curved)
+        resp, info = call(config.AI_REVIEW_URL, payload, poster,
+                          timeout=config.AI_RAW_TIMEOUT_S if mode == "raw" else None)
         ai = {"mode": mode, "status": "ok" if resp is not None else "failed",
               "http": info["http"], "ms": info["ms"], "attempts": info["attempts"],
               "request_bytes": info["bytes"], "error": info["error"], "vision_conf": vc,
