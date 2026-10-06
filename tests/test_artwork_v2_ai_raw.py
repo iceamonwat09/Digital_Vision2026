@@ -500,10 +500,12 @@ def test_raw_workflow_is_a_separate_importable_flow():
             return n.startswith("Respond to Webhook")
         return all(ends(t, seen + (n,)) for t in nxt[n])
     assert ends("Webhook")
-    # node Parse ตัวเดียวกับ workflow เดิม (คำตอบรูปเดียวกัน — แอปรวมผลด้วยโค้ดชุดเดียว)
+    # node Parse = ตัวเดิมของ workflow review (ตรวจคำตอบของ Gemini ชุดเดียวกัน ถึงบรรทัดแปลงผล)
+    # + ชั้นตรวจคำตอบซ้ำของ raw ต่อท้าย (6 ต.ค. รอบ 4)
     parse = lambda wf: next(n for n in wf["nodes"] if n["name"] == "Parse Gemini response")[
         "parameters"]["jsCode"].split("\n", 1)[1]
-    assert parse(w) == parse(old)
+    head = parse(old).split("const arr = (x) =>")[0]
+    assert parse(w).startswith(head) and "fixAnswer" in parse(w) and "fixAnswer" not in parse(old)
 
 
 def test_review_workflow_is_untouched_by_raw_mode():
@@ -541,3 +543,131 @@ def test_raw_url_not_set_says_which_setting(monkeypatch):
     ai_review.run_all([pr], "raw", warns, lambda *_: None, 0, _poster({}))
     assert pr["ai"]["status"] == "failed" and "ARTWORK_V2_AI_RAW_URL" in pr["ai"]["error"]
     assert warns and "ARTWORK_V2_AI_RAW_URL" in warns[0]
+
+
+# ── ⑦ 6 ต.ค. (รอบ 4): ชั้นตรวจคำตอบซ้ำใน node Parse ของ workflow raw ─────────
+# ผลสถานี: แดงปลอม 0 แต่ยังเหลือเหลืองปลอม "(calculated).." กับ "(calculated)." (จุดไข่ปลา
+# นับต่าง — แอปยุบเฉพาะช่วงจุด ≥ 2) และข้อที่ถูกปฏิเสธเพราะยก "Acid *" ทั้งที่คำคือ "Acid*"
+
+PARSE_HARNESS = r"""
+const fs = require('fs');
+const w = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+const cfg = JSON.parse(fs.readFileSync(0, 'utf8'));
+const code = (n) => w.nodes.find((x) => x.name === n).parameters.jsCode;
+const built = new Function('$input', code('Build Gemini request'))(
+  { first: () => ({ json: { body: cfg.body } }) })[0];
+const dollar = cfg.no_dollar ? undefined : ((name) => {
+  if (name !== 'Build Gemini request') throw new Error('unknown node ' + name);
+  return { first: () => built };
+});
+const out = new Function('$input', '$', code('Parse Gemini response'))(
+  { first: () => ({ json: cfg.gemini }) }, dollar)[0].json;
+console.log(JSON.stringify(out));
+"""
+
+
+def _parse(body, items, summary="พบความต่าง", no_dollar=False):
+    if not shutil.which("node"):
+        pytest.skip("ไม่มี node")
+    gem = {"candidates": [{"content": {"parts": [{"text": json.dumps(
+        {"reviews": [], "items": items, "summary": summary, "suggestions": []})}]},
+        "finishReason": "STOP"}], "usageMetadata": {"promptTokenCount": 1}}
+    cfg = {"body": body, "gemini": gem, "no_dollar": no_dollar}
+    r = subprocess.run(["node", "-e", PARSE_HARNESS, "x", WF], input=json.dumps(cfg),
+                       capture_output=True, text=True, timeout=30)
+    assert r.returncode == 0, r.stderr
+    return json.loads(r.stdout)
+
+
+def _zone(side, rows):
+    return [{"id": "%s%d" % (side, i), "words": ws, "word_conf": [0.95] * len(ws)}
+            for i, ws in enumerate(rows)]
+
+
+def _it(aw, aq, bw, bq, verdict="uncertain", kind="punct"):
+    return {"a_words": aw, "a_quote": aq, "b_words": bw, "b_quote": bq, "kind": kind,
+            "verdict": verdict, "reason": "เหตุผลเดิม", "suggestion": "ดูด้วยตา"}
+
+
+LEAD_BODY = {"zone_a": _zone("A", [["(calculated).."], ["1.5g.."], ["Ash", "(max)....4.0%"],
+                                   ["Choice."], ["Choice…"], ["D-calcium"]]),
+             "zone_b": _zone("B", [["(calculated)."], ["15g.."], ["Ash", "(max)....40%"],
+                                   ["Choice"], ["Choice."], ["D-Calcium"]])}
+
+
+def test_parse_dismisses_station_leader_dot_noise():
+    out = _parse(LEAD_BODY, [_it(["A0:0"], "(calculated)..", ["B0:0"], "(calculated).",
+                                 verdict="real")])
+    it = out["items"][0]
+    assert it["verdict"] == "noise" and it["reason"].startswith("[N8N]")
+    assert "เหตุผลเดิม" in it["reason"]                      # เหตุผลของ AI ไม่หาย
+    assert out["n8n_check"] == {"leader_noise": 1, "quote_ws_fixed": 0}
+    assert "N8N ตรวจซ้ำ" in out["summary"] and out["summary"].startswith("พบความต่าง")
+    # ไม่ไปยุ่งกับรหัสคำ/ข้อความที่ยกมา (แอปยังตรวจกับ Vision ตามเดิม)
+    assert it["a_words"] == ["A0:0"] and it["a_quote"] == "(calculated).."
+
+
+@pytest.mark.parametrize("item", [
+    _it(["A1:0"], "1.5g..", ["B1:0"], "15g..", verdict="real", kind="number"),     # จุดทศนิยม
+    _it(["A2:1"], "(max)....4.0%", ["B2:1"], "(max)....40%", verdict="real", kind="number"),
+    _it(["A3:0"], "Choice.", ["B3:0"], "Choice", verdict="uncertain"),             # ไม่มีจุดไข่ปลา
+    _it(["A4:0"], "Choice…", ["B4:0"], "Choice.", verdict="uncertain"),            # … ตัวเดียว
+    _it(["A5:0"], "D-calcium", ["B5:0"], "D-Calcium", verdict="real", kind="case"),
+    _it(["A0:0"], "(calculated)..", [], "", verdict="real", kind="missing"),        # ฝั่งเดียว
+])
+def test_parse_keeps_everything_that_is_not_only_leader_dots(item):
+    out = _parse(LEAD_BODY, [item])
+    assert out["items"] == [item]
+    assert out["n8n_check"] == {"leader_noise": 0, "quote_ws_fixed": 0}
+    assert out["summary"] == "พบความต่าง"
+
+
+QUOTE_BODY = {"zone_a": _zone("A", [["Omega-6", "Fatty", "Acid*", "Content"]]),
+              "zone_b": _zone("B", [["Omega-6", "Fatty", "Acid", "Content"]])}
+
+
+def test_parse_fixes_whitespace_only_quote_mismatch():
+    out = _parse(QUOTE_BODY, [_it(["A0:1", "A0:2"], "Fatty Acid *", ["B0:1", "B0:2"],
+                                  "Fatty Acid", verdict="uncertain", kind="symbol")])
+    it = out["items"][0]
+    assert it["a_quote"] == "Fatty Acid*" and it["b_quote"] == "Fatty Acid"
+    assert out["n8n_check"]["quote_ws_fixed"] == 1
+    # ข้อความที่แก้แล้ว = ข้อความที่แอปเห็นจากรหัสเดียวกัน (กติกา _ws ของแอป)
+    assert ai_review._ws(it["a_quote"]) == ai_review._ws("Fatty Acid*")
+
+
+@pytest.mark.parametrize("aw,aq", [
+    (["A0:1"], "Acid *"),              # รหัสชี้ "Fatty" — รหัสผิด ห้ามกลบด้วยการแก้ข้อความ
+    (["A0:2"], "Acid +"),              # ตัวอักษรไม่ตรง
+    (["A0:2", "B0:1"], "Acid *"),      # รหัสคนละฝั่ง/บรรทัด
+    (["A0:9"], "Acid *"),              # ไม่มีคำนี้
+])
+def test_parse_never_launders_a_wrong_reference(aw, aq):
+    item = _it(aw, aq, ["B0:2"], "Acid", kind="symbol")
+    out = _parse(QUOTE_BODY, [item])
+    assert out["items"] == [item] and out["n8n_check"]["quote_ws_fixed"] == 0
+
+
+def test_parse_check_never_breaks_the_answer():
+    # ไม่มี $ (เช่น N8N รุ่นอื่น) ⇒ แก้ข้อความที่ยกมาไม่ได้ แต่กติกาจุดไข่ปลายังทำงาน · ไม่ล้ม
+    out = _parse(LEAD_BODY, [_it(["A0:0"], "(calculated)..", ["B0:0"], "(calculated).")],
+                 no_dollar=True)
+    assert "error" not in out and out["items"][0]["verdict"] == "noise"
+    out = _parse(QUOTE_BODY, [_it(["A0:2"], "Acid *", ["B0:2"], "Acid")], no_dollar=True)
+    assert out["items"][0]["a_quote"] == "Acid *"
+    # ข้อที่ไม่ใช่ object / ไม่มีข้อความ ⇒ ส่งต่อเดิม
+    out = _parse(LEAD_BODY, ["x", {}, None])
+    assert out["items"] == ["x", {}, None]
+
+
+def test_parse_leader_noise_is_dismissed_by_the_app():
+    """ปลายทางจริง: ข้อที่ N8N เปลี่ยนเป็น noise ⇒ แอปพับลงรายการ ai_dismissed (ไม่หายเงียบ)"""
+    A = _lines([("(calculated)..", 100, 100)])
+    B = _lines([("(calculated).", 100, 100)])
+    it = _parse(LEAD_BODY, [_it(["A0:0"], "(calculated)..", ["B0:0"], "(calculated).",
+                                verdict="real")])["items"][0]
+    f, why, kind = ai_review.check_item(it, A, B)
+    assert kind == "ok", why
+    pr, st = {"findings": []}, {}
+    ai_review._merge_raw(pr, [f], [], st)
+    assert pr["findings"] == [] and len(pr["ai_dismissed"]) == 1
