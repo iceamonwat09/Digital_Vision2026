@@ -131,6 +131,9 @@ def test_key_info_describes_the_real_key(monkeypatch):
 
 def test_judge_dismissed_list_survives_to_the_result(monkeypatch):
     """เดิม redact() ลบชื่อคีย์ ``ai_dismissed`` ⇒ รายการพับของ judge หายจากหน้าเว็บเงียบ ๆ"""
+    # 6 ต.ค.: ด่านกันพับ (ตัวเลขที่ Vision อ่านชัด) จะคง 20%/24% ไว้เป็นเหลือง — เทสต์นี้ทดสอบ
+    # ว่ารายการพับรอดถึงผล จึงปิดด่านนั้น (ด่านเองทดสอบใน test_artwork_v2_ai_rules.py)
+    monkeypatch.setattr(config, "AI_JUDGE_NOISE_GUARD", False)
     r = _run(monkeypatch, "judge", _noise_answer)
     pr = r["pairs"][0]
     assert "***" not in pr

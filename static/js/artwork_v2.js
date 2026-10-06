@@ -691,9 +691,12 @@
     let stat = "ข้อมูลที่ AI ใช้ตอบ: Vision มั่นใจเฉลี่ย A " + pct(vc.a) + " · B " + pct(vc.b);
     if (ai.ref_accuracy != null) {
       const tot = (ai.items_total || 0) + (ai.reviews_total || 0);
-      const ok = (ai.items_valid || 0) + (ai.reviews_valid || 0);
+      const ok = (ai.items_valid || 0) + (ai.items_equivalent || 0) + (ai.reviews_valid || 0);
       stat += " · AI อ้างอิงข้อมูล Vision ถูกต้อง " + ok + "/" + tot + " ข้อ (" + pct(ai.ref_accuracy) + ")";
+      if (ai.recovered) stat += " · แก้รหัสคำที่ AI นับคลาดจากข้อความที่ยกมา " + ai.recovered + " ข้อ";
+      if (ai.items_equivalent) stat += " · ข้อที่สองฝั่งเท่ากันตามกติกาเทียบ (นับเป็นสัญญาณรบกวน) " + ai.items_equivalent + " ข้อ";
     }
+    if (ai.algo_red_kept) stat += " · จุดแดงของอัลกอริทึมที่ AI ไม่ได้ระบุ คงไว้เป็นเหลือง " + ai.algo_red_kept + " จุด";
     if (ai.mode === "assist" && ai.reviewable) stat += " · ตอบครบ " + ai.reviewed + "/" + ai.reviewable + " จุด";
     if (ai.extra_added) stat += " · พบเพิ่ม " + ai.extra_added + " จุด";
     stat += (ai.ms != null ? " · " + (ai.ms / 1000).toFixed(1) + " วินาที" : "");

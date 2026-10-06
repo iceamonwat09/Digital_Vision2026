@@ -220,6 +220,10 @@ def build_text(r: dict) -> str:
               x.get("reviews_valid"), x.get("reviews_total"), x.get("reviewed", "-"),
               x.get("reviewable", "-"), x.get("extra_added"), x.get("extra_duplicate"),
               x.get("extra_noise"), _f(vc.get("a")), _f(vc.get("b")), x.get("usage")))
+        a("     recovered=%s equivalent=%s algo_red_kept=%s" % (
+            x.get("recovered", "-"), x.get("items_equivalent", "-"), x.get("algo_red_kept", "-")))
+        for eq in x.get("equivalent") or []:
+            a("     equivalent %s (AI=%s): %s" % (eq.get("what"), eq.get("verdict"), eq.get("reason")))
         for bad in x.get("invalid") or []:
             a("     invalid %s: %s %s" % (bad.get("what"), bad.get("reason"),
                                          _q(bad.get("raw") or "", 200)))

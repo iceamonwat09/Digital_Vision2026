@@ -23,7 +23,7 @@
 
 ## 🆕 Artwork V2 — เทียบข้อความด้วย Google Cloud Vision (2 ต.ค. 2026 · PoC)
 
-**Branch: `claude/laughing-fermat-i9aise`** (ต่อจาก `claude/practical-franklin-a5p6zd`) · `CONFIG_VERSION` = **`2026.10.05-v2-judgepunct`** ·
+**Branch: `claude/laughing-fermat-i9aise`** (ต่อจาก `claude/practical-franklin-a5p6zd`) · `CONFIG_VERSION` = **`2026.10.06-v2-aiguard`** ·
 โมดูล `artwork_v2/` (VERSION `2026.10.04-v2restore`) · เมนู **"Artwork V2"** (`/artwork_v2`) ·
 เทสต์ `tests/test_artwork_v2.py` **73 ตัว** + `tests/test_artwork_v2_robust.py` **717 ตัว** (ข้อมูล OCR จริง · ~2.5 นาที)
 
@@ -276,6 +276,36 @@ blueprint ใน `app.py` · ลิงก์เมนูใน `base.html` · �
 
 * แก้ทั้ง `n8n_artwork_v2_review.workflow.json` และ `docs/N8N_ARTWORK_V2_REVIEW_PROMPT.md` (ตรงกันทุกตัวอักษร) · **ต้อง Import workflow ใหม่ใน N8N** · ไม่แตะโค้ดแอป · เทสต์ +2 (V2 ไม่รวม robust 296 ผ่าน)
 * ✅ **แก้แล้ว (ผู้ใช้สั่ง):** โหมด judge เดิมให้ `real` + Vision ≥ 0.80 = **แดง** แม้ต่างแค่เครื่องหมายวรรคตอน — ขัดกติกาอัลกอริทึม (PUNCT แดงได้เฉพาะเมื่ออ่านซ้ำยืนยัน · คำตอบ AI ไม่ใช่การอ่านซ้ำ) ⇒ `ai_review.merge` ลดเป็น **เหลือง + หมายเหตุ** · ธง `ARTWORK_V2_AI_JUDGE_PUNCT_YELLOW` (`0` = แดงได้แบบเดิม · อยู่ใน `[SETTINGS]` ของ Log) · ของอื่น (ตัวเลข/ตัวอักษร/ตัวพิมพ์) ยังแดงตามเดิม · เทสต์ +2 · ย้อนโค้ดแล้วแดง · `CONFIG_VERSION` `2026.10.05-v2-judgepunct`
+
+#### 🛡️ 6 ต.ค. — ผลสถานีโหมด assist/judge (AvoDerm M1↔M2) → ชั้นตรวจคำตอบ AI + workflow ใหม่
+
+**ของจริงในไฟล์ (ดูด้วยตาบน PDF):** 4 บรรทัด 7 จุด — `D-calcium`→`D-Calcium` · `Copper Sulphate Pentahydrate.`→`Copper Sulfate.` ·
+`Hwy, Irwindale Park, CA 91706`→`Hwy Irwindale, CA 91706 USA` (คอมมา · Park · USA) · `Breed`→`Breeds` ·
+บาร์โค้ด/`•`/`½`/ตราโค้ง/จุดไข่ปลา **เหมือนกันทั้งสองไฟล์** (`0` เดี่ยวข้างบาร์โค้ดของ B = เศษ OCR)
+* **assist:** จับครบ 7/7 (แดง 6 · คอมมาเหลือง) · แดงปลอม 0 · AI อ้างอิงถูกแค่ 55% — ทุกข้อที่ถูกปฏิเสธคือ **ยกจุดไข่ปลาครึ่งคำ**
+* **judge:** พลาด **Sulphate/Pentahydrate + Park** (พับลง algo_only) เพราะ **Gemini นับรหัสคำคลาด 1 คำในบรรทัดยาว**
+  (`Copper Sulphate` อ้าง `A32:7,8` แทน `6,7` · อ้าง `A32:9` ที่ไม่มีจริง) ทั้งที่ยกข้อความมาถูก · งบคิด 4092/4095 เต็ม
+  · AI ตอบ `real` + "มั่นใจสูง" ให้ `-3 FATTY` (0.51) / บาร์โค้ด (0.415) — ชั้น % จาก Vision กันไว้เป็นเหลืองแล้ว
+
+| ธง (`0` = เดิมเป๊ะ) | ทำอะไร |
+|---|---|
+| `ARTWORK_V2_AI_QUOTE_RECOVER` (+`_MAX_SHIFT` 2) | รหัสคลาดแต่ข้อความที่ยกมาถูก ⇒ หาคำจากข้อความที่ยก **ในบรรทัดที่อ้างเท่านั้น** (ตรงทั้งคำ · ห่าง ≤ 2 · ตำแหน่งเดียว) หรือเป็นส่วนของคำที่อ้าง (เจอครั้งเดียว) · กำกวม/ข้ามบรรทัด ⇒ ปฏิเสธเหมือนเดิม · Log `recovered=` · `f.ai.recovered` |
+| `ARTWORK_V2_AI_EQUIV_NOISE` | ข้อความสองฝั่งเท่ากันตาม `compare.diff_key_map` (ช่องว่าง/จุดไข่ปลา/®Ⓡ/½) ⇒ สัญญาณรบกวน **ไม่ใช่การอ้างผิด** (ไม่หักความถูกต้องของการอ้างอิง · ไม่เป็นจุด) · `check_item()` คืนชนิด `ok/invalid/equivalent` |
+| `ARTWORK_V2_AI_SEND_CURVED` | บรรทัดโค้ง/เอียงได้ `"curved": true` ใน payload (จาก `pr["curved_lines"]`) |
+| `ARTWORK_V2_AI_JUDGE_KEEP_ALGO_RED` | judge: จุด **แดง** ของอัลกอริทึมที่ AI ไม่ระบุ ⇒ คงในตารางเป็นเหลือง (เหลืองยังพับ algo_only) |
+| `ARTWORK_V2_AI_JUDGE_NOISE_GUARD` | judge: AI บอก noise กับตัวอักษร/ตัวเลข/ตัวพิมพ์ที่ Vision ≥ 80% ทุกฝั่ง (ไม่โค้ง) ⇒ เหลือง ไม่พับ |
+| `ARTWORK_V2_AI_JUDGE_CURVED_YELLOW` | judge: AI บอก real บนข้อความโค้ง ⇒ เหลือง (กติกาเดียวกับอัลกอริทึม) |
+
+* **workflow N8N (node "Build Gemini request" — ต้อง Import ใหม่หรือวางโค้ด node นี้ทับ):** แปลงทุกบรรทัดเป็น
+  `w: [[รหัสคำ, ข้อความ, word_conf]]` ⇒ Gemini **คัดรหัส ไม่นับเอง** · prompt: จุดไข่ปลา/ช่องว่าง/อักษรสมมูล = ไม่ใช่ความต่างเลย ·
+  `real` ต้อง **ทุกคำที่อ้าง** ≥ 0.80 · บรรทัด `curved` อย่างมาก `uncertain` · ยกทั้งคำ · ไล่บรรทัดยาวจนจบ · ห้ามเขียนตัวเลขความมั่นใจในเหตุผล
+  · `thinkingBudget` **8192** · แอปยังส่ง `words/word_conf` เดิม (node แปลงเอง)
+* **เล่นซ้ำคำตอบจริงจาก Log สถานี** (`tests/data/artwork_v2/ai_replay/*.log` + `tests/artwork_v2_ai_replay_items.py`):
+  ปิดทุกธง ⇒ ได้ผลเท่าสถานีเป๊ะ (12 ใช้ได้ · 7 ปฏิเสธ · ref 0.632) · เปิด ⇒ judge แดงครบ D-Calcium/Sulphate/Pentahydrate/Park/USA/Breeds ·
+  ref 1.000 (กู้ 3 · สมมูล 10) · assist: จุดไข่ปลา 9/9 เป็นสมมูล (ไม่ใช่การอ้างผิด) · ⚠️ Log มีแค่ความมั่นใจเฉลี่ยของบรรทัด ⇒ บาร์โค้ดใน replay เป็นแดง (สถานีจริง 0.415 = เหลือง)
+* เทสต์ `test_artwork_v2_ai_rules.py` **27** + `test_artwork_v2_ai_review.py` +3 (node จริง: รหัสใน `w` = รหัสที่แอป resolve ได้ทุกคำ) ·
+  ย้อนโค้ด **19 จุด แดงทุกจุด** · V2 ทั้งชุด **1045 ผ่าน** · ทั้ง repo fail 8 = baseline เดิม · เทสต์รุ่นก่อน 4 ตัวที่ล็อกพฤติกรรมเดิมถูกตรึงธงปิด
+* ⏳ **ยังไม่ได้ยิง Gemini จริงกับ prompt ใหม่** — ต้องรันซ้ำบนสถานีทั้ง 2 โหมด (ดู Log: `recovered=` ควรเหลือ ~0 เพราะ AI คัดรหัสเอง · `equivalent=` · usage `thoughtsTokenCount`)
 
 **📚 เอกสาร Google Vision (อ่าน 4 ต.ค. — `docs.cloud.google.com` ถูก proxy บล็อก อ่านจาก proto ทางการบน GitHub + ข้อความค้นหา):**
 `DOCUMENT_TEXT_DETECTION` สำหรับข้อความหนาแน่น ✅ (ใช้อยู่) · `languageHints` *"ส่วนใหญ่ปล่อยว่างดีที่สุด · ใส่ผิดเป็นอุปสรรคมาก"* ✅ (ว่าง) ·
@@ -5948,7 +5978,7 @@ A, B, C, …) ⇒ ทุกกลุ่มมีสมาชิก 1 ตัว �
   `tests/test_artwork_ownership.py` 30 ตัว (สิทธิ์เห็นประวัติ + ชื่อผู้ตรวจ).
   ⚠️ `tests/test_inspection_golden.py` **fail 5 ตัวอยู่แล้ว** (pre-existing, `NameError: FieldResult`
   ในโมดูล Label Paper) — ไม่เกี่ยวกับ artwork. ยืนยันด้วย `git stash` ก่อนโทษการแก้ของตัวเอง.
-- CONFIG_VERSION ปัจจุบัน: **`2026.10.05-v2-judgepunct`** (เช็คที่ footer ว่ารันโค้ดใหม่จริง).
+- CONFIG_VERSION ปัจจุบัน: **`2026.10.06-v2-aiguard`** (เช็คที่ footer ว่ารันโค้ดใหม่จริง).
 - **ตาข่ายนิรภัยของชั้นเทียบ: `verify_compare.py`** — แก้อะไรที่ `panelmatch`/`confirm`
   **ต้องรันไฟล์นี้ก่อนและหลังเสมอ** (`--selftest` ใช้ได้โดยไม่ต้องมีไฟล์จริง)
 

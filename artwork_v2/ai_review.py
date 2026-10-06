@@ -48,8 +48,9 @@ def _words(text: str) -> List[Tuple[int, int, str]]:
     return [(m.start(), m.end(), m.group()) for m in WORD_RE.finditer(text or "")]
 
 
-def _side_payload(lines: List[dict], side: str, size) -> List[dict]:
+def _side_payload(lines: List[dict], side: str, size, curved=None) -> List[dict]:
     W, H = (size or (0, 0))
+    curved = set(curved or ()) if config.AI_SEND_CURVED else set()
     out = []
     for i, ln in enumerate(lines):
         ws = _words(ln.get("text") or "")
@@ -65,9 +66,12 @@ def _side_payload(lines: List[dict], side: str, size) -> List[dict]:
             c = compare._span_conf(ln, s, e)
             wc.append(None if c is None else round(c, 2))
         cm = ln.get("conf_mean")
-        out.append({"id": "%s%d" % (side, i), "box": box,
-                    "conf": None if cm is None else round(cm, 2),
-                    "words": [w for _, _, w in ws], "word_conf": wc})
+        row = {"id": "%s%d" % (side, i), "box": box,
+               "conf": None if cm is None else round(cm, 2),
+               "words": [w for _, _, w in ws], "word_conf": wc}
+        if i in curved:
+            row["curved"] = True        # ข้อความโค้ง/เอียง — OCR อ่านไม่นิ่ง (แอปตัดสินจากมุมของ Vision)
+        out.append(row)
     return out
 
 
@@ -94,10 +98,16 @@ def _candidates(findings: List[dict]) -> List[dict]:
 
 
 def build_payload(n: int, mode: str, A: List[dict], B: List[dict], size_a, size_b,
-                  findings: List[dict]) -> dict:
-    """ข้อมูลที่ส่งให้ N8N — มีแต่สิ่งที่ Vision อ่านได้ (+ รายการของอัลกอริทึมในโหมด assist)"""
+                  findings: List[dict], curved: Optional[dict] = None) -> dict:
+    """ข้อมูลที่ส่งให้ N8N — มีแต่สิ่งที่ Vision อ่านได้ (+ รายการของอัลกอริทึมในโหมด assist)
+
+    ``curved`` = ``{"A": [ดัชนีบรรทัด], "B": [...]}`` จาก ``compare.curved_lines`` ⇒ บรรทัดนั้น
+    ได้ธง ``"curved": true`` (ไม่ส่ง = ไม่มีธง = รูปแบบเดิม)
+    """
+    curved = curved or {}
     p = {"contract": "artwork-v2-review/1", "pair": n, "mode": mode,
-         "zone_a": _side_payload(A, "A", size_a), "zone_b": _side_payload(B, "B", size_b)}
+         "zone_a": _side_payload(A, "A", size_a, curved.get("A")),
+         "zone_b": _side_payload(B, "B", size_b, curved.get("B"))}
     # โหมด judge ไม่ส่งผลของอัลกอริทึม — ให้ AI หาเองอย่างอิสระ (ใช้ A/B เทียบสองแนวทางได้จริง)
     p["candidates"] = _candidates(findings) if mode == "assist" else []
     return p
@@ -207,33 +217,105 @@ _EMPTY = {"line": None, "text": "", "span": [0, 0], "frag": "", "box": None, "wo
           "conf": None}
 
 
-def item_to_finding(it: dict, A: List[dict], B: List[dict]) -> Tuple[Optional[dict], str]:
-    """คำตอบหนึ่งข้อของ AI → จุดต่างรูปแบบเดียวกับของอัลกอริทึม · ใช้ไม่ได้ ⇒ ``(None, เหตุผล)``"""
+def _parse_ids(ids, side: str, lines: List[dict]) -> Optional[Tuple[int, int]]:
+    """รหัสคำ → ``(บรรทัด, ดัชนีคำแรกที่อ้าง)`` โดย **ไม่เช็คว่าคำมีจริง** (ใช้ตอนกู้เท่านั้น)"""
+    if not isinstance(ids, list) or not ids:
+        return None
+    line, idx = None, []
+    for wid in ids:
+        m = re.fullmatch(r"([AB])(\d+):(\d+)", str(wid).strip())
+        if not m or m.group(1) != side:
+            return None
+        li = int(m.group(2))
+        if li >= len(lines) or (line is not None and li != line):
+            return None
+        line = li
+        idx.append(int(m.group(3)))
+    return line, min(idx)
+
+
+def _recover(ids, side: str, lines: List[dict], quote) -> Tuple[Optional[tuple], str]:
+    """AI อ้างรหัสคำคลาด แต่ยกข้อความมาถูก ⇒ หาคำจากข้อความที่ยกมา **ในบรรทัดที่อ้างเท่านั้น**
+
+    1) ``shift`` — ข้อความที่ยกมาตรงกับคำที่ติดกัน **ทั้งคำ** และห่างจากคำที่อ้างไม่เกิน
+       ``AI_QUOTE_RECOVER_MAX_SHIFT`` คำ · ระยะใกล้สุดต้องมีตำแหน่งเดียว (กำกวม = ไม่กู้)
+    2) ``substr`` — ข้อความที่ยกมาเป็นส่วนหนึ่งของคำที่อ้าง และเจอได้ตำแหน่งเดียว
+       (เช่นยกแค่จุดไข่ปลาจาก ``(min)......``)
+
+    ไม่เดา: หาไม่เจอ/เจอหลายที่ ⇒ ``(None, "")`` และใช้เหตุผลปฏิเสธเดิม
+    """
+    p = _parse_ids(ids, side, lines)
+    q = _ws(quote)
+    if p is None or not q:
+        return None, ""
+    li, w0 = p
+    text = lines[li].get("text") or ""
+    ws = _words(text)
+    toks = q.split()
+    n = len(toks)
+    hits = [k for k in range(len(ws) - n + 1) if [w for _, _, w in ws[k:k + n]] == toks]
+    near = [k for k in hits if abs(k - w0) <= max(0, int(config.AI_QUOTE_RECOVER_MAX_SHIFT))]
+    if near:
+        best = min(abs(k - w0) for k in near)
+        at = [k for k in near if abs(k - w0) == best]
+        if len(at) != 1:
+            return None, ""
+        k = at[0]
+        return (li, ws[k][0], ws[k + n - 1][1]), "shift"
+    r, err = _resolve(ids, side, lines)
+    if r is None or err:
+        return None, ""
+    span = text[r[1]:r[2]]
+    occ = [m.start() for m in re.finditer("(?=%s)" % re.escape(q), span)]
+    if len(occ) != 1:
+        return None, ""
+    s0 = r[1] + occ[0]
+    return (li, s0, s0 + len(q)), "substr"
+
+
+def _side_ref(ids, quote, side: str, lines: List[dict]) -> Tuple[Optional[tuple], str, str]:
+    """อ้างอิงของฝั่งหนึ่ง → ``(line, start, end)`` · ``(None, "", "")`` = ไม่ได้อ้าง ·
+    ``(None, เหตุผล, "")`` = ใช้ไม่ได้ · คืน "วิธีกู้" ที่สามเมื่อกู้จากข้อความที่ยกมา"""
+    r, err = _resolve(ids, side, lines)
+    if r is not None and not err:
+        real = lines[r[0]]["text"][r[1]:r[2]]
+        if _ws(quote) == _ws(real):
+            return r, "", ""
+        err = "ข้อความที่ยกมาฝั่ง %s ไม่ตรงกับ Vision (%r ≠ %r)" % (
+            side, _clip(quote, 60), _clip(real, 60))
+    if err and config.AI_QUOTE_RECOVER:
+        rr, how = _recover(ids, side, lines, quote)
+        if rr is not None:
+            return rr, "", how
+    return None, err, ""
+
+
+def check_item(it: dict, A: List[dict], B: List[dict]) -> Tuple[Optional[dict], str, str]:
+    """คำตอบหนึ่งข้อของ AI → ``(จุดต่าง, เหตุผล, ชนิด)``
+
+    ชนิด: ``ok`` (ใช้ได้) · ``invalid`` (อ้างไม่ตรงข้อมูล Vision) · ``equivalent`` (อ้างถูก
+    แต่สองฝั่ง **เท่ากันตามกติกาเทียบของระบบ** — ช่องว่าง/จุดไข่ปลา/อักษรสมมูล ⇒ สัญญาณรบกวน)
+    """
     if not isinstance(it, dict):
-        return None, "ไม่ใช่ object"
+        return None, "ไม่ใช่ object", "invalid"
     verdict = str(it.get("verdict") or "").strip().lower()
     if verdict not in VERDICTS:
-        return None, "verdict ไม่รู้จัก: %r" % it.get("verdict")
-    ra, ea = _resolve(it.get("a_words"), "A", A)
-    rb, eb = _resolve(it.get("b_words"), "B", B)
+        return None, "verdict ไม่รู้จัก: %r" % it.get("verdict"), "invalid"
+    ra, ea, ha = _side_ref(it.get("a_words"), it.get("a_quote"), "A", A)
+    rb, eb, hb = _side_ref(it.get("b_words"), it.get("b_quote"), "B", B)
     if ea or eb:
-        return None, ea or eb
+        return None, ea or eb, "invalid"
     if ra is None and rb is None:
-        return None, "ไม่ได้อ้างคำของฝั่งไหนเลย"
-    # ข้อความที่ AI ยกมาต้องตรงกับที่ Vision อ่านได้ทุกตัวอักษร (ไม่นับช่องว่าง)
-    for r, q, L, s in ((ra, it.get("a_quote"), A, "A"), (rb, it.get("b_quote"), B, "B")):
-        if r is None:
-            continue
-        real = L[r[0]]["text"][r[1]:r[2]]
-        if _ws(q) != _ws(real):
-            return None, "ข้อความที่ยกมาฝั่ง %s ไม่ตรงกับ Vision (%r ≠ %r)" % (
-                s, _clip(q, 60), _clip(real, 60))
+        return None, "ไม่ได้อ้างคำของฝั่งไหนเลย", "invalid"
     if ra and rb:
         ta = A[ra[0]]["text"][ra[1]:ra[2]]
         tb = B[rb[0]]["text"][rb[1]:rb[2]]
+        if config.AI_EQUIV_NOISE and compare.diff_key_map(ta)[0] == compare.diff_key_map(tb)[0]:
+            return None, ("ข้อความสองฝั่งเท่ากันตามกติกาเทียบของระบบ (ช่องว่าง/จุดไข่ปลา/"
+                          "อักษรสมมูล) %r ≈ %r" % (_clip(ta, 40), _clip(tb, 40))), "equivalent"
         d = _diff_span(ta, tb)
         if d is None:
-            return None, "ข้อความที่อ้างเท่ากันทุกตัวอักษร (ต่างแค่ช่องว่าง)"
+            return None, "ข้อความที่อ้างเท่ากันทุกตัวอักษร (ต่างแค่ช่องว่าง)", "invalid"
         i1, i2, j1, j2 = d
         a = _side_dict(A, ra[0], ra[1] + i1, ra[1] + i2)
         b = _side_dict(B, rb[0], rb[1] + j1, rb[1] + j2)
@@ -251,8 +333,18 @@ def item_to_finding(it: dict, A: List[dict], B: List[dict]) -> Tuple[Optional[di
          "ai": {"verdict": verdict, "reason": _clip(it.get("reason")),
                 "suggestion": _clip(it.get("suggestion")), "kind": _clip(it.get("kind"), 40),
                 "a_words": it.get("a_words") or [], "b_words": it.get("b_words") or []}}
+    rec = {k: v for k, v in (("a", ha), ("b", hb)) if v}
+    if rec:
+        # รหัสที่ AI อ้างคลาด แต่ข้อความที่ยกมาตรงกับ Vision — แอปหาคำเองในบรรทัดเดียวกัน
+        f["ai"]["recovered"] = rec
     f["confidence"] = confidence(f)
-    return f, ""
+    return f, "", "ok"
+
+
+def item_to_finding(it: dict, A: List[dict], B: List[dict]) -> Tuple[Optional[dict], str]:
+    """คำตอบหนึ่งข้อของ AI → จุดต่างรูปแบบเดียวกับของอัลกอริทึม · ใช้ไม่ได้ ⇒ ``(None, เหตุผล)``"""
+    f, why, _ = check_item(it, A, B)
+    return f, why
 
 
 def confidence(f: dict) -> Optional[float]:
@@ -293,8 +385,11 @@ def _ai_note(ai: dict) -> str:
 def merge(mode: str, pr: dict, resp: dict, A: List[dict], B: List[dict]) -> dict:
     """รวมคำตอบของ AI เข้ากับคู่โซน ``pr`` (แก้ ``pr`` ตรง ๆ) · คืนสถิติ"""
     st = {"items_total": 0, "items_valid": 0, "reviews_total": 0, "reviews_valid": 0,
-          "invalid": [], "extra_added": 0, "extra_duplicate": 0, "extra_noise": 0}
+          "invalid": [], "extra_added": 0, "extra_duplicate": 0, "extra_noise": 0,
+          "items_equivalent": 0, "equivalent": [], "recovered": 0}
     findings = pr.get("findings") or []
+    cl = pr.get("curved_lines") or {}
+    curved = {"a": set(cl.get("A") or ()), "b": set(cl.get("B") or ())}
     by_id = {"F%d" % f["id"]: f for f in findings if f.get("id") is not None}
 
     if mode == "assist":
@@ -316,12 +411,24 @@ def merge(mode: str, pr: dict, resp: dict, A: List[dict], B: List[dict]) -> dict
     ai_finds: List[dict] = []
     for it in _as_list(resp.get("items")):
         st["items_total"] += 1
-        f, why = item_to_finding(it, A, B)
+        f, why, kind = check_item(it, A, B)
+        if kind == "equivalent":
+            # อ้างถูก แต่สองฝั่งเท่ากันตามกติกาเทียบ ⇒ สัญญาณรบกวน (ไม่ใช่การอ้างผิด · ไม่เป็นจุด)
+            st["items_equivalent"] += 1
+            st["equivalent"].append({"what": "item", "reason": why,
+                                     "verdict": str((it or {}).get("verdict") or "")})
+            if mode == "assist":
+                st["extra_noise"] += 1
+            continue
         if f is None:
             st["invalid"].append({"what": "item", "reason": why,
                                   "raw": _clip(json.dumps(it, ensure_ascii=False), 300)})
             continue
         st["items_valid"] += 1
+        if f["ai"].get("recovered"):
+            st["recovered"] += 1
+        if any(f[s]["line"] in curved[s] for s in ("a", "b") if f[s]["line"] is not None):
+            f["curved"] = True
         ai_finds.append(f)
 
     if mode == "assist":
@@ -352,13 +459,26 @@ def merge(mode: str, pr: dict, resp: dict, A: List[dict], B: List[dict]) -> dict
         kept, dismissed = [], []
         for f in ai_finds:
             v = f["ai"]["verdict"]
+            c = f["confidence"]
+            if v == "noise" and config.AI_JUDGE_NOISE_GUARD and _hard_evidence(f):
+                # Vision อ่านตัวอักษร/ตัวเลขที่ต่างได้ชัดทั้งสองฝั่ง — คำว่า "noise" ของ AI
+                # ไม่มีหลักฐานรองรับ ⇒ ห้ามพับทิ้ง (ผู้ตรวจต้องเห็น)
+                f["severity"] = "yellow"
+                f["notes"].append("AI บอกว่าเป็นสัญญาณรบกวน แต่ Vision อ่านตัวอักษร/ตัวเลขที่ต่างได้ชัด "
+                                  "(≥ %d%% ทั้งสองฝั่ง) — คงไว้ให้คนดู" % round(config.CONF_FAIL * 100))
+                kept.append(f)
+                continue
             if v == "noise":
                 f["severity"] = "dismissed"
                 f["notes"].append("AI ตัดสินว่าเป็นสัญญาณรบกวนของ OCR — ไม่นับในผลตัดสิน")
                 dismissed.append(f)
                 continue
-            c = f["confidence"]
-            if (v == "real" and config.AI_JUDGE_PUNCT_YELLOW and f["class"] == "PUNCT"
+            if (v == "real" and config.AI_JUDGE_CURVED_YELLOW and f.get("curved")
+                    and c is not None and c >= config.CONF_FAIL):
+                f["severity"] = "yellow"
+                f["notes"].append("ข้อความโค้ง/เอียง — แดงได้เฉพาะเมื่อการอ่านซ้ำยืนยัน "
+                                  "(คำตอบของ AI ไม่ใช่การอ่านซ้ำ) โปรดดูด้วยตา")
+            elif (v == "real" and config.AI_JUDGE_PUNCT_YELLOW and f["class"] == "PUNCT"
                     and c is not None and c >= config.CONF_FAIL):
                 f["severity"] = "yellow"
                 f["notes"].append("ต่างแค่เครื่องหมายวรรคตอน — แดงได้เฉพาะเมื่อการอ่านซ้ำยืนยัน "
@@ -372,15 +492,40 @@ def merge(mode: str, pr: dict, resp: dict, A: List[dict], B: List[dict]) -> dict
                                       % round(config.CONF_FAIL * 100))
             kept.append(f)
         algo_only = [g for g in findings if not any(overlaps(f, g) for f in ai_finds)]
+        if config.AI_JUDGE_KEEP_ALGO_RED:
+            # จุดแดงของอัลกอริทึม = Vision อ่านชัดทั้งสองฝั่ง · AI ไม่พูดถึง ≠ AI ยืนยันว่าไม่ต่าง
+            keep = [g for g in algo_only if g.get("severity") == "red"]
+            for g in keep:
+                g["severity"] = "yellow"
+                g["notes"].append("อัลกอริทึมพบ (Vision อ่านชัด) แต่ AI ไม่ได้ระบุ — คงไว้เป็นเหลือง "
+                                  "ให้คนดู (โหมด AI ตัดสินหลัก)")
+            kept.extend(keep)
+            st["algo_red_kept"] = len(keep)
+            algo_only = [g for g in algo_only if g not in keep]
         for g in algo_only:
             g["notes"].append("อัลกอริทึมพบ แต่ AI ไม่ได้ระบุ — ไม่นับในผลตัดสิน (โหมด AI ตัดสินหลัก)")
         pr["findings"] = kept
         pr["ai_dismissed"] = dismissed
         pr["algo_only"] = algo_only
     tot = st["items_total"] + st["reviews_total"]
-    ok = st["items_valid"] + st["reviews_valid"]
+    ok = st["items_valid"] + st["items_equivalent"] + st["reviews_valid"]
     st["ref_accuracy"] = round(ok / float(tot), 4) if tot else None
     return st
+
+
+_HARD_CLASSES = ("TEXT", "NUMBER", "CASE", "MISSING_IN_B", "EXTRA_IN_B")
+
+
+def _hard_evidence(f: dict) -> bool:
+    """ความต่างเป็นตัวอักษร/ตัวเลข/ตัวพิมพ์ และ Vision มั่นใจทุกฝั่งที่มีข้อความ ≥ ``CONF_FAIL``
+    (ไม่ใช่ข้อความโค้ง · ไม่ใช่เศษส่วน/เครื่องหมายล้วน) — ใช้กัน AI พับของจริงทิ้งว่า "noise" """
+    if f.get("curved") or f["class"] not in _HARD_CLASSES:
+        return False
+    frag = (f["a"].get("frag") or "") + (f["b"].get("frag") or "")
+    if not any(ch.isalnum() for ch in frag):
+        return False
+    cs = [f[s].get("conf") for s in ("a", "b") if f[s].get("line") is not None]
+    return bool(cs) and all(c is not None and c >= config.CONF_FAIL for c in cs)
 
 
 def _as_list(v) -> list:
@@ -415,7 +560,8 @@ def run_all(pairs: List[dict], mode: str, warnings: List[str], say: Callable,
         say("กำลังให้ AI ตรวจทานคู่ %d" % pr["n"])
         A, B = cmp_["lines_a"], cmp_["lines_b"]
         payload = build_payload(pr["n"], mode, A, B, tuple(pr["sides"]["a"]["sent_px"]),
-                                tuple(pr["sides"]["b"]["sent_px"]), pr.get("findings") or [])
+                                tuple(pr["sides"]["b"]["sent_px"]), pr.get("findings") or [],
+                                curved=pr.get("curved_lines"))
         resp, info = call(config.AI_REVIEW_URL, payload, poster)
         ai = {"mode": mode, "status": "ok" if resp is not None else "failed",
               "http": info["http"], "ms": info["ms"], "attempts": info["attempts"],

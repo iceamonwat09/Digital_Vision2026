@@ -196,7 +196,7 @@ def test_confidence_is_from_vision_even_if_ai_sends_a_number():
     (_item(["B0:0"], "Fat", ["B0:0"], "Fat"), "ไม่ใช่ของฝั่ง"),
     (_item(["A0:7"], "x", ["B0:0"], "Fat"), "ไม่มีคำ"),
     (_item(["A0:0"], "Fit", ["B0:0"], "Fat"), "ไม่ตรงกับ Vision"),
-    (_item(["A0:0"], "Fat", ["B0:0"], "Fat"), "เท่ากันทุกตัวอักษร"),
+    (_item(["A0:0"], "Fat", ["B0:0"], "Fat"), "เท่ากัน"),
     (_item(["A0:0"], "Fat", ["B0:0"], "Fat", verdict="maybe"), "verdict"),
     (_item([], "", [], ""), "ไม่ได้อ้าง"),
     (_item(["A0:0", "A1:0"], "Fat Net", ["B0:0"], "Fat"), "หลายบรรทัด"),
@@ -263,7 +263,18 @@ def test_assist_extra_item_is_added_as_yellow_only():
     assert extra[0]["b"]["frag"] == "s"
 
 
-def test_assist_duplicate_item_attaches_to_existing_and_noise_extra_is_dropped():
+_NEW_RULES = ("AI_QUOTE_RECOVER", "AI_EQUIV_NOISE", "AI_SEND_CURVED", "AI_JUDGE_KEEP_ALGO_RED",
+              "AI_JUDGE_NOISE_GUARD", "AI_JUDGE_CURVED_YELLOW")
+
+
+def _old_rules(monkeypatch):
+    """ปิดชั้นตรวจคำตอบของ 6 ต.ค. ทั้งหมด = พฤติกรรมเดิมเป๊ะ (เทสต์รุ่นก่อนล็อกพฤติกรรมนี้)"""
+    for k in _NEW_RULES:
+        monkeypatch.setattr(config, k, False)
+
+
+def test_assist_duplicate_item_attaches_to_existing_and_noise_extra_is_dropped(monkeypatch):
+    _old_rules(monkeypatch)
     pr, A, B = _pr(["Fat 20%", "Net 85 g"], ["Fat 24%", "Net 85g"])
     pr["findings"] = [f for f in pr["findings"] if "Fat" in f["a"]["text"]]
     st = ai_review.merge("assist", pr, {"items": [
@@ -328,7 +339,8 @@ def test_judge_punct_flag_off_is_old_behaviour(monkeypatch):
     assert by["PUNCT"]["severity"] == "red" and by["NUMBER"]["severity"] == "red"
 
 
-def test_judge_noise_is_folded_and_algorithm_only_points_are_kept_visible():
+def test_judge_noise_is_folded_and_algorithm_only_points_are_kept_visible(monkeypatch):
+    _old_rules(monkeypatch)
     pr, A, B = _pr(["Fat 20%", "Net 85 g"], ["Fat 24%", "Net 86 g"])
     ai_review.merge("judge", pr, {"items": [
         _item([wid(A, "A", "20%")], "20%", [wid(B, "B", "24%")], "24%", verdict="noise")]}, A, B)
@@ -452,6 +464,7 @@ def test_run_judge_end_to_end(monkeypatch):
 
 
 def test_run_judge_pass_keeps_algorithm_points_visible(monkeypatch):
+    _old_rules(monkeypatch)
     r = _run(monkeypatch, "judge", {"reviews": [], "items": [], "summary": "ไม่พบ",
                                     "suggestions": []})
     pr = r["pairs"][0]
@@ -688,3 +701,49 @@ def test_prompt_rules_from_review_are_present():
     assert "low word_conf alone is not enough" in p
     assert "No Markdown, no code fences" in p
     assert '"type": "OBJECT"' not in p and "SCHEMA" not in p    # ไม่ใส่ schema ซ้ำใน prompt
+
+
+# ── 6 ต.ค.: รหัสคำสำเร็จรูปใน node Build (Gemini คัดรหัส ไม่นับเอง) ─────────
+
+def test_workflow_gives_gemini_ready_made_word_ids():
+    body = {"mode": "judge",
+            "zone_a": [{"id": "A32", "box": [1, 2, 3, 4], "conf": 0.97,
+                        "words": ["Copper", "Sulphate", "Pentahydrate."], "word_conf": [0.99, 0.96]}],
+            "zone_b": [{"id": "B27", "words": ["OMEGA-62"], "word_conf": [0.5], "curved": True}],
+            "candidates": [{"id": "F1"}]}
+    b = _wf(body)["built"]
+    data = json.loads(b["gemini_request"]["contents"][0]["parts"][0]["text"].split("\n", 1)[1])
+    a = data["zone_a"][0]
+    assert a["w"] == [["A32:0", "Copper", 0.99], ["A32:1", "Sulphate", 0.96],
+                      ["A32:2", "Pentahydrate.", None]]          # word_conf ขาด = null ไม่เดา
+    assert "words" not in a and "word_conf" not in a and "curved" not in a
+    assert (a["id"], a["box"], a["conf"]) == ("A32", [1, 2, 3, 4], 0.97)
+    assert data["zone_b"][0]["curved"] is True and data["zone_b"][0]["box"] is None
+    assert data["candidates"] == []                               # judge ไม่ส่งผลอัลกอริทึม
+    assert b["gemini_request"]["generationConfig"]["thinkingConfig"]["thinkingBudget"] == 8192
+
+
+def test_workflow_ids_match_what_the_app_resolves():
+    """รหัสที่ node สร้าง = รหัสที่ ai_review._resolve เข้าใจ (ทุกคำของทุกบรรทัด)"""
+    _, A, B = _cmp(["Potassium Iodide), Copper Sulphate Pentahydrate.", "Fat 20%"],
+                   ["Potassium Iodide), Copper Sulfate.", "Fat 24%"])
+    p = ai_review.build_payload(1, "judge", A, B, (1000, 1000), (1000, 1000), [])
+    data = json.loads(_wf(p)["built"]["gemini_request"]["contents"][0]["parts"][0]["text"]
+                      .split("\n", 1)[1])
+    for side, L, S in (("zone_a", A, "A"), ("zone_b", B, "B")):
+        for ln in data[side]:
+            for wid_, text, _ in ln["w"]:
+                r, err = ai_review._resolve([wid_], S, L)
+                assert err == "" and L[r[0]]["text"][r[1]:r[2]] == text
+
+
+def test_prompt_rules_from_station_run_20261006():
+    w = json.load(open(WF, encoding="utf-8"))
+    code = next(n for n in w["nodes"] if n["name"] == BUILD)["parameters"]["jsCode"]
+    p = re.search(r"const PROMPT = `(.*?)`;", code, re.S).group(1)
+    for rule in ("copy the wordId of each cited word from w", "Never count word positions yourself",
+                 "never quote only a part of a word", "EVERY cited word on both sides",
+                 '"curved": true is at most "uncertain"', "never report it, not even as noise",
+                 "leader dots", "Do not write confidence numbers"):
+        assert rule in p, rule
+    assert "word_conf (Vision lowest" not in p        # รูปแบบข้อมูลเก่า (words/word_conf) ไม่อยู่ใน prompt
