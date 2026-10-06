@@ -155,6 +155,10 @@ if AI_MODE not in AI_MODES:
 AI_REVIEW_URL = os.getenv("ARTWORK_V2_AI_REVIEW_URL",
                           "http://127.0.0.1:5678/webhook/artwork-v2-review").strip()
 AI_TIMEOUT_S = _f("ARTWORK_V2_AI_TIMEOUT_S", "180")
+# โหมด raw ใช้ **workflow แยก** (artwork_v2/n8n_artwork_v2_raw.workflow.json · path artwork-v2-raw)
+# — workflow artwork-v2-review เดิมไม่ถูกแตะ · ยังไม่ได้ Import ⇒ N8N ตอบ 404 ⇒ ใช้ผลอัลกอริทึม + คำเตือน
+AI_RAW_URL = os.getenv("ARTWORK_V2_AI_RAW_URL",
+                       "http://127.0.0.1:5678/webhook/artwork-v2-raw").strip()
 # โหมด raw ให้ Gemini คิดนานขึ้น (thinkingBudget สูงสุด) ⇒ รอนานกว่า (node HTTP ของ N8N ตั้ง 290 วิ)
 AI_RAW_TIMEOUT_S = _f("ARTWORK_V2_AI_RAW_TIMEOUT_S", "300")
 AI_RETRIES = _i("ARTWORK_V2_AI_RETRIES", "1")

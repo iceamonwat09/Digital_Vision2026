@@ -631,10 +631,8 @@ def test_workflow_is_importable_and_never_answers_silently():
     http = next(n for n in w["nodes"] if n["type"] == "n8n-nodes-base.httpRequest")
     assert http.get("onError") == "continueRegularOutput"
     assert http["parameters"]["options"]["response"]["response"]["neverError"] is True
-    # Gemini ต้องหมดเวลาก่อนแอป ไม่งั้นแอปตัดสายก่อนได้คำตอบ {error} — โหมดที่รอนานสุด (raw)
-    # assist/judge แอปเลิกรอที่ AI_TIMEOUT_S เหมือนเดิม (N8N รอนานกว่าได้ แค่ไม่มีใครรอคำตอบ)
-    assert http["parameters"]["options"]["timeout"] < config.AI_RAW_TIMEOUT_S * 1000
-    assert config.AI_TIMEOUT_S <= config.AI_RAW_TIMEOUT_S
+    # Gemini ต้องหมดเวลาก่อนแอป ไม่งั้นแอปตัดสายก่อนได้คำตอบ {error}
+    assert http["parameters"]["options"]["timeout"] < config.AI_TIMEOUT_S * 1000
     assert http["parameters"]["nodeCredentialType"] == "googleApi"
     # ทุกทางจาก Webhook ต้องไปจบที่ Respond to Webhook
     nxt = {s: [c["node"] for br in o["main"] for c in br] for s, o in w["connections"].items()}

@@ -10,7 +10,8 @@
 * กติกาความปลอดภัยที่อิงหลักฐานของ Vision ล้วน (ปิดได้ด้วย ``AI_RAW_SAFETY``)
 * ผลของอัลกอริทึม **ทุกจุด** ⇒ รายการพับ "ไว้เทียบ" · ความครอบคลุมไม่ใช้ตัดสิน
 * N8N ล่ม ⇒ ผลอัลกอริทึมทุกรายการเหมือนทุกโหมด
-* workflow: mode raw ใช้ PROMPT_RAW + คิดนานขึ้น · โหมดเดิมได้คำขอเดิม · เอกสารตรงกับ workflow
+* workflow **แยก** (artwork-v2-raw): prompt ข้อมูลดิบ + คิดนานขึ้น · เอกสารตรงกับ workflow ·
+  workflow artwork-v2-review เดิมไม่ถูกแตะ · แอปยิง raw ไปที่ ``AI_RAW_URL`` เท่านั้น
 """
 
 from __future__ import annotations
@@ -33,8 +34,9 @@ from artwork_v2 import (ai_review, compare, config, diaglog, jobs, keystore,  # 
                         pipeline, textmodel, vision_client)
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-WF = os.path.join(ROOT, "artwork_v2", "n8n_artwork_v2_review.workflow.json")
-DOC = os.path.join(ROOT, "docs", "N8N_ARTWORK_V2_REVIEW_PROMPT.md")
+WF = os.path.join(ROOT, "artwork_v2", "n8n_artwork_v2_raw.workflow.json")
+DOC = os.path.join(ROOT, "docs", "N8N_ARTWORK_V2_RAW_PROMPT.md")
+WF_REVIEW = os.path.join(ROOT, "artwork_v2", "n8n_artwork_v2_review.workflow.json")
 KEY = "AIza" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r"
 
 
@@ -50,6 +52,7 @@ def _isolated(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "REREAD_ENABLED", False)
     monkeypatch.setattr(config, "AI_RAW_SAFETY", True)
     monkeypatch.setattr(config, "AI_REVIEW_URL", "http://127.0.0.1:9/webhook/artwork-v2-review")
+    monkeypatch.setattr(config, "AI_RAW_URL", "http://127.0.0.1:9/webhook/artwork-v2-raw")
     os.makedirs(config.JOBS_DIR)
     yield
 
@@ -109,9 +112,11 @@ class _Resp:
         return self._d
 
 
-def _poster(answer, seen=None, status=200, timeouts=None):
+def _poster(answer, seen=None, status=200, timeouts=None, urls=None):
     def post(url, data=None, headers=None, timeout=None):
         body = json.loads(data.decode("utf-8"))
+        if urls is not None:
+            urls.append(url)
         if seen is not None:
             seen.append(body)
         if timeouts is not None:
@@ -402,50 +407,53 @@ console.log(JSON.stringify(out[0].json));
 """
 
 
-def _build(body):
+def _build(body, wf=WF):
     if not shutil.which("node"):
         pytest.skip("ไม่มี node")
-    r = subprocess.run(["node", "-e", HARNESS, "x", WF], input=json.dumps(body),
+    r = subprocess.run(["node", "-e", HARNESS, "x", wf], input=json.dumps(body),
                        capture_output=True, text=True, timeout=30)
     assert r.returncode == 0, r.stderr
     return json.loads(r.stdout)
 
 
-def _code():
-    w = json.load(open(WF, encoding="utf-8"))
-    return next(n for n in w["nodes"] if n["name"] == "Build Gemini request")["parameters"]["jsCode"]
+def _wfjson(path=WF):
+    return json.load(open(path, encoding="utf-8"))
 
 
-BODY = {"zone_a": [{"id": "A0", "words": ["Fat", "20%"], "word_conf": [1, 1]}],
+def _code(path=WF):
+    return next(n for n in _wfjson(path)["nodes"]
+                if n["name"] == "Build Gemini request")["parameters"]["jsCode"]
+
+
+def _prompt(path=WF):
+    return re.search(r"const PROMPT = `(.*?)`;", _code(path), re.S).group(1)
+
+
+BODY = {"zone_a": [{"id": "A0", "words": ["Fat", "20%"], "word_conf": [1, 1], "curved": True}],
         "zone_b": [{"id": "B0", "words": ["Fat", "24%"], "word_conf": [1, 1]}],
         "candidates": [{"id": "F1"}]}
 
 
-def test_workflow_raw_uses_raw_prompt_and_thinks_longer():
-    code = _code()
-    p_old = re.search(r"const PROMPT = `(.*?)`;", code, re.S).group(1)
-    p_raw = re.search(r"const PROMPT_RAW = `(.*?)`;", code, re.S).group(1)
-    b = _build(dict(BODY, mode="raw"))
-    req = b["gemini_request"]
-    assert b["valid"] and b["mode"] == "raw"
-    assert req["systemInstruction"]["parts"][0]["text"] == p_raw
-    gc = req["generationConfig"]
-    assert gc["thinkingConfig"]["thinkingBudget"] == 24576 and gc["maxOutputTokens"] == 65536
-    assert gc["temperature"] == 0 and "confidence" not in json.dumps(gc["responseSchema"])
-    data = json.loads(req["contents"][0]["parts"][0]["text"].split("\n", 1)[1])
-    assert data["mode"] == "raw" and data["candidates"] == []
-    assert data["zone_a"][0]["w"] == [["A0:0", "Fat", 1], ["A0:1", "20%", 1]]
-    # โหมดเดิมได้คำขอเดิม
-    for mode, budget in (("assist", 8192), ("judge", 8192)):
-        r = _build(dict(BODY, mode=mode))["gemini_request"]
-        assert r["systemInstruction"]["parts"][0]["text"] == p_old
-        assert r["generationConfig"]["thinkingConfig"]["thinkingBudget"] == budget
-        assert r["generationConfig"]["maxOutputTokens"] == 32768
-    assert _build(dict(BODY, mode="weird"))["mode"] == "assist"
+def test_raw_workflow_builds_raw_request_whatever_the_body_says():
+    for mode in ("raw", "assist", "judge", None):
+        b = _build(dict(BODY, mode=mode))
+        req = b["gemini_request"]
+        assert b["valid"] and b["mode"] == "raw"
+        assert req["systemInstruction"]["parts"][0]["text"] == _prompt()
+        gc = req["generationConfig"]
+        assert gc["thinkingConfig"]["thinkingBudget"] == 24576 and gc["maxOutputTokens"] == 65536
+        assert gc["temperature"] == 0 and "confidence" not in json.dumps(gc["responseSchema"])
+        data = json.loads(req["contents"][0]["parts"][0]["text"].split("\n", 1)[1])
+        # ไม่ส่งต่อผลอัลกอริทึม/ธงโค้ง แม้ body จะมีมา
+        assert data["mode"] == "raw" and data["candidates"] == []
+        assert "curved" not in json.dumps(data)
+        assert data["zone_a"][0]["w"] == [["A0:0", "Fat", 1], ["A0:1", "20%", 1]]
+    bad = _build({"mode": "raw"})
+    assert bad["valid"] is False and bad["error"]
 
 
 def test_raw_prompt_rules():
-    p = re.search(r"const PROMPT_RAW = `(.*?)`;", _code(), re.S).group(1)
+    p = _prompt()
     for must in ("RAW OCR output", "Nothing has been pre-processed", "work slowly",
                  "Then do the reverse", "searched the whole other zone",
                  "re-read a_quote and b_quote character by character", "Never guess",
@@ -457,16 +465,79 @@ def test_raw_prompt_rules():
     assert "candidates" not in p and '"curved": true' not in p
 
 
-def test_doc_raw_prompt_matches_workflow():
-    p_raw = re.search(r"const PROMPT_RAW = `(.*?)`;", _code(), re.S).group(1)
+def test_raw_doc_prompt_matches_raw_workflow():
     doc = open(DOC, encoding="utf-8").read()
     d = re.search(r"<!-- PROMPT_RAW START -->\n```text\n(.*?)\n```\n<!-- PROMPT_RAW END -->",
                   doc, re.S).group(1)
-    assert d == p_raw
+    assert d == _prompt()
+    assert "artwork-v2-raw" in doc and "ARTWORK_V2_AI_RAW_URL" in doc
 
 
-def test_http_timeout_fits_raw_wait():
-    w = json.load(open(WF, encoding="utf-8"))
+def test_raw_workflow_is_a_separate_importable_flow():
+    w, old = _wfjson(), _wfjson(WF_REVIEW)
+    hook = next(n for n in w["nodes"] if n["type"] == "n8n-nodes-base.webhook")
+    assert hook["parameters"]["path"] == "artwork-v2-raw"
+    assert config.AI_RAW_URL.endswith("/webhook/artwork-v2-raw") or "artwork-v2-raw" in config.AI_RAW_URL
+    assert w["name"] != old["name"]
+    ids = [n["id"] for n in w["nodes"]]
+    assert len(set(ids)) == len(ids) and not set(ids) & {n["id"] for n in old["nodes"]}
+    old_hook = next(n for n in old["nodes"] if n["type"] == "n8n-nodes-base.webhook")
+    assert hook["webhookId"] != old_hook["webhookId"]
     http = next(n for n in w["nodes"] if n["type"] == "n8n-nodes-base.httpRequest")
+    assert http.get("onError") == "continueRegularOutput"
+    assert http["parameters"]["options"]["response"]["response"]["neverError"] is True
     assert http["parameters"]["options"]["timeout"] == 290000
     assert http["parameters"]["options"]["timeout"] < config.AI_RAW_TIMEOUT_S * 1000
+    assert http["parameters"]["nodeCredentialType"] == "googleApi"
+    names = {n["name"] for n in w["nodes"]}
+    nxt = {s: [c["node"] for br in o["main"] for c in br] for s, o in w["connections"].items()}
+    assert set(nxt) <= names and all(t in names for v in nxt.values() for t in v)
+    # ทุกทางจาก Webhook ต้องไปจบที่ Respond to Webhook
+    def ends(n, seen=()):
+        if n in seen:
+            return False
+        if not nxt.get(n):
+            return n.startswith("Respond to Webhook")
+        return all(ends(t, seen + (n,)) for t in nxt[n])
+    assert ends("Webhook")
+    # node Parse ตัวเดียวกับ workflow เดิม (คำตอบรูปเดียวกัน — แอปรวมผลด้วยโค้ดชุดเดียว)
+    parse = lambda wf: next(n for n in wf["nodes"] if n["name"] == "Parse Gemini response")[
+        "parameters"]["jsCode"].split("\n", 1)[1]
+    assert parse(w) == parse(old)
+
+
+def test_review_workflow_is_untouched_by_raw_mode():
+    """workflow เดิม (artwork-v2-review) ต้องไม่รู้จักโหมด raw เลย — ผู้ใช้ไม่ต้องแตะของเดิม"""
+    code, old = _code(WF_REVIEW), _wfjson(WF_REVIEW)
+    assert "PROMPT_RAW" not in code and "THINKING_BUDGET_RAW" not in code and "'raw'" not in code
+    http = next(n for n in old["nodes"] if n["type"] == "n8n-nodes-base.httpRequest")
+    assert http["parameters"]["options"]["timeout"] == 170000
+    hook = next(n for n in old["nodes"] if n["type"] == "n8n-nodes-base.webhook")
+    assert hook["parameters"]["path"] == "artwork-v2-review"
+    review_doc = open(os.path.join(ROOT, "docs", "N8N_ARTWORK_V2_REVIEW_PROMPT.md"),
+                      encoding="utf-8").read()
+    assert "PROMPT_RAW" not in review_doc
+    # body ที่บอก mode raw ⇒ workflow เดิมถือเป็น assist (ไม่ใช่คำขอแบบข้อมูลดิบ)
+    assert _build(dict(BODY, mode="raw"), WF_REVIEW)["mode"] == "assist"
+
+
+def test_raw_posts_to_raw_url_and_other_modes_keep_review_url():
+    A, B = _simple(["Fat 20%"]), _simple(["Fat 24%"])
+    ans = {"reviews": [], "items": [], "summary": "", "suggestions": []}
+    for mode, want in (("raw", config.AI_RAW_URL), ("judge", config.AI_REVIEW_URL),
+                       ("assist", config.AI_REVIEW_URL)):
+        urls = []
+        st, _ = ai_review.run_all([_pr(A, B)], mode, [], lambda *_: None, 0,
+                                  _poster(ans, urls=urls))
+        assert urls == [want] and st["url"] == want, mode
+    assert config.AI_RAW_URL != config.AI_REVIEW_URL
+
+
+def test_raw_url_not_set_says_which_setting(monkeypatch):
+    monkeypatch.setattr(config, "AI_RAW_URL", "")
+    A, B = _simple(["Fat 20%"]), _simple(["Fat 24%"])
+    warns = []
+    pr = _pr(A, B)
+    ai_review.run_all([pr], "raw", warns, lambda *_: None, 0, _poster({}))
+    assert pr["ai"]["status"] == "failed" and "ARTWORK_V2_AI_RAW_URL" in pr["ai"]["error"]
+    assert warns and "ARTWORK_V2_AI_RAW_URL" in warns[0]

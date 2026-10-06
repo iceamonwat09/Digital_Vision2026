@@ -116,11 +116,12 @@ def build_payload(n: int, mode: str, A: List[dict], B: List[dict], size_a, size_
 
 
 def call(url: str, payload: dict, poster: Optional[Callable] = None,
-         timeout: Optional[float] = None) -> Tuple[Optional[dict], dict]:
+         timeout: Optional[float] = None,
+         url_env: str = "ARTWORK_V2_AI_REVIEW_URL") -> Tuple[Optional[dict], dict]:
     """ยิง N8N · ลองซ้ำเฉพาะความล้มเหลวชั่วคราว (ต่อไม่ติด/หมดเวลา/5xx)"""
     info = {"http": None, "ms": None, "attempts": 0, "error": "", "bytes": 0}
     if not url:
-        info["error"] = "ไม่ได้ตั้ง ARTWORK_V2_AI_REVIEW_URL"
+        info["error"] = "ไม่ได้ตั้ง %s" % url_env
         return None, info
     import requests
     transient = (requests.ConnectionError, requests.Timeout)
@@ -644,10 +645,16 @@ def _sugs(resp: dict) -> List[str]:
 _MERGE_KEYS = ("findings", "ai_dismissed", "algo_only")
 
 
+def _url_of(mode: str) -> str:
+    """โหมด raw ยิง workflow แยก (artwork-v2-raw) · assist/judge ยิง workflow เดิม (artwork-v2-review)"""
+    return config.AI_RAW_URL if mode == "raw" else config.AI_REVIEW_URL
+
+
 def run_all(pairs: List[dict], mode: str, warnings: List[str], say: Callable,
             next_id: int, poster: Optional[Callable] = None) -> Tuple[dict, int]:
     """ทำทุกคู่โซน · คืน ``(สรุปทั้งรอบ, id ถัดไป)`` — ใช้ ``pr["_cmp"]`` (บรรทัดที่เทียบจริง)"""
-    summary = {"mode": mode, "url": config.AI_REVIEW_URL if mode != "off" else "",
+    url = _url_of(mode)
+    summary = {"mode": mode, "url": url if mode != "off" else "",
                "pairs_ok": 0, "pairs_failed": 0}
     for pr in pairs:
         if mode == "off":
@@ -670,8 +677,10 @@ def run_all(pairs: List[dict], mode: str, warnings: List[str], say: Callable,
         payload = build_payload(pr["n"], mode, A, B, tuple(pr["sides"]["a"]["sent_px"]),
                                 tuple(pr["sides"]["b"]["sent_px"]), pr.get("findings") or [],
                                 curved=curved)
-        resp, info = call(config.AI_REVIEW_URL, payload, poster,
-                          timeout=config.AI_RAW_TIMEOUT_S if mode == "raw" else None)
+        resp, info = call(url, payload, poster,
+                          timeout=config.AI_RAW_TIMEOUT_S if mode == "raw" else None,
+                          url_env=("ARTWORK_V2_AI_RAW_URL" if mode == "raw"
+                                   else "ARTWORK_V2_AI_REVIEW_URL"))
         ai = {"mode": mode, "status": "ok" if resp is not None else "failed",
               "http": info["http"], "ms": info["ms"], "attempts": info["attempts"],
               "request_bytes": info["bytes"], "error": info["error"], "vision_conf": vc,

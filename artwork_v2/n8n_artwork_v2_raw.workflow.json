@@ -1,0 +1,215 @@
+{
+  "name": "Artwork V2 — AI raw (Vision raw → Gemini)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "artwork-v2-raw",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "0d98e963-6e5c-5c9b-83d1-17a4a6b45a00",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        300
+      ],
+      "webhookId": "1dee734d-8aa6-5087-9df6-49df03f66382"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ===== Build Gemini request : Artwork V2 RAW (ข้อมูลดิบจาก Google Vision → Gemini) =====\n// workflow แยกของโหมด \"AI ตัดสินจากข้อมูลดิบ (ทดลอง)\" — ไม่แตะ workflow artwork-v2-review เดิม\n// แอป (artwork_v2/ai_review.py) ส่ง POST JSON:\n//   {contract, pair, mode: \"raw\", zone_a: [line], zone_b: [line], candidates: []}\n//   line = {id: \"A12\", box: [x0,y0,x1,y1] (0-1000), conf, words: [...], word_conf: [...]}\n//   = บรรทัดตามที่ Vision ส่ง (แอปไม่ต่อแถว/ไม่ต่อคำ/ไม่ส่งผลของอัลกอริทึม)\n// node นี้แปลงแต่ละบรรทัดเป็น w: [[รหัสคำ, ข้อความ, word_conf], ...] — ให้ Gemini \"คัดรหัส\"\n// แทนการนับลำดับคำเอง · ไม่มีภาพ · ไม่มีกุญแจ API\n// ⚠️ แก้ prompt ที่นี่แล้ว ให้แก้ docs/N8N_ARTWORK_V2_RAW_PROMPT.md ให้ตรงกันด้วย (มีเทสต์เทียบ)\nconst PROMPT = `You are a meticulous packaging-artwork proofreader (QC). You receive the RAW OCR output of Google Cloud Vision for the SAME region of two versions of a label: zone_a (version A) and zone_b (version B). Nothing has been pre-processed: no line was joined, merged, re-ordered or compared for you. You never see the images. Your ONLY source of truth is the JSON data given. Do not guess what the label \"should\" say, do not correct spelling, do not use outside knowledge to fill in or fix text. Accuracy matters more than speed: work slowly and verify every claim against the data before you write it.\n\nDATA\n- zone_a / zone_b: lines exactly as Vision returned them, in Vision's reading order. Each line has: id (e.g. \"A12\"), box [x0,y0,x1,y1] in 0-1000 of the zone image, conf (Vision mean confidence 0-1) and w (the words of the line).\n- Each entry of w is [wordId, text, word_conf]: wordId is the ready-made reference of that word, text is the word exactly as Vision read it, word_conf is Vision's lowest character confidence in that word (0-1, null = unknown). Example: line \"A12\" with w [[\"A12:0\",\"Crude\",0.99],[\"A12:1\",\"Fat\",0.98],[\"A12:2\",\"2.0%\",0.97]] -> the word \"2.0%\" is \"A12:2\".\n- Because the data is raw, the SAME printed text is often split differently in the two zones: a table row may be one line in A and two or three pieces in B (label, leader dots and value as separate lines), a long sentence may wrap at a different word, a word may be hyphenated at the end of a line, and blocks may come in a different order. None of this is a difference.\n\nMETHOD (follow every step, in this order)\n1. Read all of zone_a and all of zone_b first.\n2. For every line of zone_a, find where the same content is in zone_b: on any line, in any order, possibly spread over several lines or sharing a line with other text. Use box positions only as a hint for what sits on the same row or column.\n3. Compare the matched content word by word, character by character, from the first word to the last. A changed or missing word in the middle or at the end of a long line (an ingredient list, an address) is the easiest one to miss.\n4. Then do the reverse: every line of zone_b must be found in zone_a the same way. Text that exists in only one zone is a difference only after you have searched the whole other zone for it.\n5. Before writing an item, re-read a_quote and b_quote character by character and confirm they really differ in something other than the cases in WHAT IS NOT A DIFFERENCE. If you cannot confirm it from the data, do not write it as \"real\".\n\nWHAT COUNTS AS A DIFFERENCE (report every one)\n- any change of a letter, digit or letter case (D-Calcium vs D-calcium), spelling (Sulfate vs Sulphate), singular/plural (Breed vs Breeds), added or removed words or whole lines, units, decimal points (1.5 vs 15), %, ®, ©, ™, and punctuation that separates or changes content (a missing comma between address parts).\n\nWHAT IS NOT A DIFFERENCE (never report it, not even as noise)\n- line breaks, wrapping, hyphenation at the end of a line, a table row split into pieces, a different order of lines or blocks. Compare the CONTENT of the two zones, not their line structure: a text that exists anywhere in the other zone is not missing.\n- whitespace only, including a space before or after a symbol (\"Acid*\" vs \"Acid *\").\n- the number of leader dots or dashes between a label and its value (\"(min)...... ..7.0%\" vs \"(min).. ..7.0%\"), and leader dots that are a separate line in one zone. Vision never counts them the same way twice.\n- ® / Ⓡ, © / Ⓒ, • / ·, ½ / 1/2: the same printed glyph.\n\nKNOWN OCR NOISE OF GOOGLE VISION (use only together with what the data shows)\n- the fraction ½ is read unstably as \"½\", \"1/2\", \"2\", \"1\" or dropped, and \"2\" can come with HIGH confidence. A difference that only involves a fraction is \"uncertain\" - never \"real\", never \"noise\".\n- stylised logo text, curved or tilted emblem text, barcode digits and lone symbols or digits near the zone edge often have low word_conf and are read differently each time. A line whose words are much lower in confidence than its neighbours, or whose box is tilted or out of the reading flow, is a warning sign.\n\nVERDICT of each difference\n- Before choosing, look up the word_conf of EVERY cited word on both sides.\n- \"real\": the difference is in the content, you confirmed it in step 5, and EVERY cited word on both sides has word_conf >= 0.80. If even one cited word is below 0.80 or null, the verdict cannot be \"real\".\n- \"noise\": the difference is explained by the known OCR noise above AND the data supports it (low word_conf, glyph variants). Never call a change of a letter, digit or letter case \"noise\" when the differing words have word_conf >= 0.80 on both sides.\n- \"uncertain\": everything in between. When in doubt, choose \"uncertain\". Never guess.\n- punctuation only (a period, comma, colon, semicolon or hyphen added or removed, every letter and digit the same): \"real\" when the words that carry it have word_conf >= 0.80 on both sides, otherwise \"uncertain\". It is \"noise\" only when it is one of the known OCR noises above - low word_conf alone is not enough.\n\nREFERENCING (the app draws the boxes from your ids and rejects anything that does not match the data)\n- a_words / b_words: copy the wordId of each cited word from w exactly as it is written. Never count word positions yourself and never build an id. All ids of one side come from ONE line, contiguous, as few as possible. When the content is split over several lines, cite only the line that holds the differing word.\n- a_quote / b_quote: the text values of exactly those w entries joined with single spaces, copied character for character (keep dots and punctuation). A wordId always means the whole word: never quote only a part of a word. \"\" when the list is empty.\n- If a word is missing inside a line on one side, anchor it with exactly ONE neighbouring word that exists on BOTH sides: the word right before the gap (the word right after it only when there is none before). On the side that HAS the text, cite that neighbour together with the differing word(s); on the side that lacks it, cite only that neighbour. Example: A \"Pantothenate, D-Calcium Thiamine\" and B \"Pantothenate, Thiamine\" -> a_words = the ids of \"Pantothenate,\" and \"D-Calcium\", b_words = the id of \"Pantothenate,\". Never cite the neighbour alone on one side and the differing word alone on the other: the app would then frame the neighbour as if it were the changed word.\n- If the text is absent from the whole other zone, give [] for that side.\n- One item per separate difference. Two differences far apart in the same line are two items. Never report the same difference twice.\n- Never output any number for confidence or accuracy. The app computes confidence from Vision.\n\nOUTPUT\n- Put every difference in \"items\" and return \"reviews\": [].\n- If you find no difference, return \"items\": [] and say so in the summary. An empty answer is correct when the zones match; never invent an item to have something to report.\n\nLANGUAGE AND STYLE\n- reason, suggestion, summary and suggestions are written in Thai. Keep label text in its original language inside quotes.\n- Do not decide which version is correct; describe it as A: \"...\" / B: \"...\".\n- reason: one or two sentences on why it is real / noise / uncertain, citing the evidence in words (clear or low Vision confidence, glyph variant, split line). Do not write confidence numbers, and never call a reading clear or highly confident when a cited word is below 0.80.\n- suggestion: what the inspector should do for this point.\n- summary: 2-6 Thai sentences: how many real differences, each one briefly A -> B, and what needs a human look.\n- suggestions: concrete Thai actions for the inspector (what to check on the file or the physical print, how to redraw a zone).\n- Respond with the raw JSON object only, matching the schema. No Markdown, no code fences, no text before or after it.`;\nconst SCHEMA = {\n  \"type\": \"OBJECT\",\n  \"properties\": {\n    \"summary\": {\n      \"type\": \"STRING\"\n    },\n    \"suggestions\": {\n      \"type\": \"ARRAY\",\n      \"items\": {\n        \"type\": \"STRING\"\n      }\n    },\n    \"reviews\": {\n      \"type\": \"ARRAY\",\n      \"items\": {\n        \"type\": \"OBJECT\",\n        \"properties\": {\n          \"candidate\": {\n            \"type\": \"STRING\"\n          },\n          \"verdict\": {\n            \"type\": \"STRING\",\n            \"enum\": [\n              \"real\",\n              \"noise\",\n              \"uncertain\"\n            ]\n          },\n          \"reason\": {\n            \"type\": \"STRING\"\n          },\n          \"suggestion\": {\n            \"type\": \"STRING\"\n          }\n        },\n        \"required\": [\n          \"candidate\",\n          \"verdict\",\n          \"reason\",\n          \"suggestion\"\n        ],\n        \"propertyOrdering\": [\n          \"candidate\",\n          \"verdict\",\n          \"reason\",\n          \"suggestion\"\n        ]\n      }\n    },\n    \"items\": {\n      \"type\": \"ARRAY\",\n      \"items\": {\n        \"type\": \"OBJECT\",\n        \"properties\": {\n          \"a_words\": {\n            \"type\": \"ARRAY\",\n            \"items\": {\n              \"type\": \"STRING\"\n            }\n          },\n          \"b_words\": {\n            \"type\": \"ARRAY\",\n            \"items\": {\n              \"type\": \"STRING\"\n            }\n          },\n          \"a_quote\": {\n            \"type\": \"STRING\"\n          },\n          \"b_quote\": {\n            \"type\": \"STRING\"\n          },\n          \"kind\": {\n            \"type\": \"STRING\",\n            \"enum\": [\n              \"text\",\n              \"number\",\n              \"case\",\n              \"punct\",\n              \"symbol\",\n              \"missing\",\n              \"extra\",\n              \"fraction\",\n              \"other\"\n            ]\n          },\n          \"verdict\": {\n            \"type\": \"STRING\",\n            \"enum\": [\n              \"real\",\n              \"noise\",\n              \"uncertain\"\n            ]\n          },\n          \"reason\": {\n            \"type\": \"STRING\"\n          },\n          \"suggestion\": {\n            \"type\": \"STRING\"\n          }\n        },\n        \"required\": [\n          \"a_words\",\n          \"b_words\",\n          \"a_quote\",\n          \"b_quote\",\n          \"kind\",\n          \"verdict\",\n          \"reason\",\n          \"suggestion\"\n        ],\n        \"propertyOrdering\": [\n          \"a_words\",\n          \"a_quote\",\n          \"b_words\",\n          \"b_quote\",\n          \"kind\",\n          \"verdict\",\n          \"reason\",\n          \"suggestion\"\n        ]\n      }\n    }\n  },\n  \"required\": [\n    \"reviews\",\n    \"items\",\n    \"summary\",\n    \"suggestions\"\n  ],\n  \"propertyOrdering\": [\n    \"reviews\",\n    \"items\",\n    \"summary\",\n    \"suggestions\"\n  ]\n};\nconst MODEL = 'gemini-2.5-flash';\nconst THINKING_BUDGET = 24576;   // สูงสุดของ 2.5 Flash — ให้คิดช้า ๆ ตรวจทุกบรรทัดสองทาง\nconst MAX_OUTPUT = 65536;\n\nconst item = $input.first().json;\nconst body = (item && item.body && typeof item.body === 'object') ? item.body : (item || {});\nlet error = '';\nconst za = Array.isArray(body.zone_a) ? body.zone_a : null;\nconst zb = Array.isArray(body.zone_b) ? body.zone_b : null;\nif (!za || !zb) error = 'zone_a / zone_b ต้องเป็นรายการบรรทัด';\nelse if (!za.length && !zb.length) error = 'ไม่มีข้อความทั้งสองฝั่ง';\nconst mode = 'raw';   // workflow นี้มีโหมดเดียว — ไม่อ่าน/ไม่ส่งต่อ candidates และธงโค้ง\n\n// บรรทัด → {id, box, conf, w: [[รหัสคำ, ข้อความ, word_conf]]}\nconst toLine = (ln) => {\n  ln = (ln && typeof ln === 'object') ? ln : {};\n  const id = String(ln.id == null ? '' : ln.id);\n  let w;\n  if (Array.isArray(ln.w)) {\n    w = ln.w;\n  } else {\n    const ws = Array.isArray(ln.words) ? ln.words : [];\n    const wc = Array.isArray(ln.word_conf) ? ln.word_conf : [];\n    w = ws.map((t, i) => [id + ':' + i, String(t), (wc[i] === undefined ? null : wc[i])]);\n  }\n  return { id, box: ln.box === undefined ? null : ln.box,\n           conf: ln.conf === undefined ? null : ln.conf, w };\n};\nconst data = { mode, zone_a: (za || []).map(toLine), zone_b: (zb || []).map(toLine),\n               candidates: [] };\n\nreturn [{ json: {\n  valid: !error, error, mode, model: MODEL,\n  gemini_request: {\n    systemInstruction: { parts: [{ text: PROMPT }] },\n    contents: [{ role: 'user', parts: [{ text: 'DATA (JSON):\\n' + JSON.stringify(data) }] }],\n    generationConfig: {\n      temperature: 0,\n      maxOutputTokens: MAX_OUTPUT,\n      responseMimeType: 'application/json',\n      responseSchema: SCHEMA,\n      thinkingConfig: { thinkingBudget: THINKING_BUDGET },\n    },\n  },\n} }];\n"
+      },
+      "id": "ae25f276-b9ab-522d-a096-ac415cb4d464",
+      "name": "Build Gemini request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "cond-valid",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "da7dda68-c47d-545c-85b8-b5217564a18c",
+      "name": "If",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        440,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://asia-southeast1-aiplatform.googleapis.com/v1/projects/YOUR_GCP_PROJECT_ID/locations/asia-southeast1/publishers/google/models/gemini-2.5-flash:generateContent",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.gemini_request) }}",
+        "options": {
+          "timeout": 290000,
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "9ebf7e6f-90be-54f3-bcfd-881268f19afd",
+      "name": "HTTP Request",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        660,
+        200
+      ],
+      "onError": "continueRegularOutput",
+      "notes": "คัด URL + credential (googleApi) จาก node \"HTTP Request\" ของ workflow artwork-v2-review (หรือ artwork-pair) · timeout 290 วิ (Gemini คิดนาน) · Gemini ตอบ error/หมดเวลา ⇒ ส่งต่อให้ node ถัดไปแปลงเป็น {error} (แอปใช้ผลอัลกอริทึมแทน)",
+      "notesInFlow": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// ===== Parse Gemini response → app contract (artwork-v2-review/1 · โหมด raw) =====\n// แอปคาดหวัง: {reviews: [...], items: [...], summary, suggestions: [...], engine, usage}\n// ล้มเหลว ⇒ คืน {error} เสมอ (แอปจะใช้ผลอัลกอริทึมแทน) — ห้ามคืนคำตอบว่างเงียบ ๆ\nconst MODEL = 'gemini-2.5-flash';\nconst r = $input.first().json || {};\nconst fail = (msg) => [{ json: { error: String(msg).slice(0, 500), engine: MODEL,\n                                 usage: r.usageMetadata || null } }];\nif (r.error) {\n  const e = r.error;\n  return fail('Gemini error: ' + (typeof e === 'object' ? (e.message || JSON.stringify(e)) : e));\n}\nconst cand = (r.candidates || [])[0];\nif (!cand) {\n  const br = r.promptFeedback && r.promptFeedback.blockReason;\n  return fail('Gemini ไม่ตอบ' + (br ? ' (blockReason=' + br + ')' : ''));\n}\nconst fr = cand.finishReason || '';\nif (fr && fr !== 'STOP') return fail('Gemini ตอบไม่จบ (finishReason=' + fr + ')');\nconst parts = ((cand.content || {}).parts || []).filter((p) => !p.thought && typeof p.text === 'string');\nlet txt = parts.map((p) => p.text).join('').trim();\ntxt = txt.replace(/^```(?:json)?\\s*/i, '').replace(/\\s*```\\s*$/, '').trim();\nif (!txt) return fail('Gemini ตอบว่าง');\nlet d;\ntry { d = JSON.parse(txt); } catch (e) { return fail('คำตอบไม่ใช่ JSON: ' + txt.slice(0, 200)); }\nif (!d || typeof d !== 'object' || Array.isArray(d)) return fail('คำตอบผิดรูป (ไม่ใช่ object)');\nconst arr = (x) => (Array.isArray(x) ? x : []);\nreturn [{ json: {\n  reviews: arr(d.reviews), items: arr(d.items),\n  summary: typeof d.summary === 'string' ? d.summary : '',\n  suggestions: arr(d.suggestions).filter((s) => typeof s === 'string'),\n  engine: MODEL, usage: r.usageMetadata || null, finish_reason: fr,\n} }];\n"
+      },
+      "id": "8e1a4333-1f40-57c1-bbce-3ed447739f6e",
+      "name": "Parse Gemini response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "558ac50e-46b7-5ef7-b556-f78152c5898a",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1100,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ error: $json.error || 'invalid request' }) }}",
+        "options": {
+          "responseCode": 400
+        }
+      },
+      "id": "69f72751-d7c5-5e20-8a6e-c195c0b7757c",
+      "name": "Respond to Webhook1",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        660,
+        420
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Build Gemini request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Gemini request": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond to Webhook1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Parse Gemini response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Gemini response": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}
