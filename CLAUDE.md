@@ -23,7 +23,7 @@
 
 ## 🆕 Artwork V2 — เทียบข้อความด้วย Google Cloud Vision (2 ต.ค. 2026 · PoC)
 
-**Branch: `claude/laughing-fermat-i9aise`** (ต่อจาก `claude/practical-franklin-a5p6zd`) · `CONFIG_VERSION` = **`2026.10.06-v2-aiguard`** ·
+**Branch: `claude/laughing-fermat-i9aise`** (ต่อจาก `claude/practical-franklin-a5p6zd`) · `CONFIG_VERSION` = **`2026.10.06-v2-onesided`** ·
 โมดูล `artwork_v2/` (VERSION `2026.10.04-v2restore`) · เมนู **"Artwork V2"** (`/artwork_v2`) ·
 เทสต์ `tests/test_artwork_v2.py` **73 ตัว** + `tests/test_artwork_v2_robust.py` **717 ตัว** (ข้อมูล OCR จริง · ~2.5 นาที)
 
@@ -306,6 +306,24 @@ blueprint ใน `app.py` · ลิงก์เมนูใน `base.html` · �
 * เทสต์ `test_artwork_v2_ai_rules.py` **27** + `test_artwork_v2_ai_review.py` +3 (node จริง: รหัสใน `w` = รหัสที่แอป resolve ได้ทุกคำ) ·
   ย้อนโค้ด **19 จุด แดงทุกจุด** · V2 ทั้งชุด **1045 ผ่าน** · ทั้ง repo fail 8 = baseline เดิม · เทสต์รุ่นก่อน 4 ตัวที่ล็อกพฤติกรรมเดิมถูกตรึงธงปิด
 * ⏳ **ยังไม่ได้ยิง Gemini จริงกับ prompt ใหม่** — ต้องรันซ้ำบนสถานีทั้ง 2 โหมด (ดู Log: `recovered=` ควรเหลือ ~0 เพราะ AI คัดรหัสเอง · `equivalent=` · usage `thoughtsTokenCount`)
+
+#### 🧾 6 ต.ค. (รอบ 2) — ผลสถานีกับ prompt ใหม่ + ด่าน "หายไป/เกินมาฝั่งเดียว" ของ judge
+
+**ผลบนสถานี (AvoDerm M1↔M2 · Build node ใหม่ · thinking 8192):** ทั้งสองโหมดจับของจริง **7/7** ·
+`recovered=0` (Gemini คัดรหัสคำเองได้ตามที่ตั้งใจ) · `equivalent=0` (เลิกยกจุดไข่ปลา) · การอ้างอิงถูก assist **100%** / judge **90%**
+(1 ข้อที่ถูกปฏิเสธคือการอ้างคร่อมสองบรรทัดของตราโค้ง) · `thoughtsTokenCount` เต็ม 8192 ทั้งสองรอบ แต่คำตอบครบ
+* assist: แดง 5 จุด = ของจริงทั้งหมด · คอมมาเหลือง · `½`, ตราโค้ง และ `•` เป็นเหลือง/พับ · **แดงปลอม 0**
+* judge: **แดงปลอม 1 จุด** คือ `0` หน้าบาร์โค้ด เพราะ Vision ฝั่ง B รวม `0` ไว้ท้าย `5290700241 0`
+  อัลกอริทึมจัดเป็น reflow (ไม่ฟ้อง) แต่ AI บอกว่า "หายไปจริง" โดยอิงความมั่นใจของ Vision ฝั่ง A (0.88)
+  ส่วนฝั่ง "ไม่มี" ไม่มีความมั่นใจให้วัด
+
+| ธง (`0` = เดิมเป๊ะ) | ทำอะไร |
+|---|---|
+| `ARTWORK_V2_AI_JUDGE_ONESIDED_GUARD` | judge: AI ตอบ "real" กับจุด `MISSING_IN_B`/`EXTRA_IN_B` ⇒ ใช้กติกาเดียวกับบรรทัดเดี่ยวของอัลกอริทึม · บรรทัดที่อ้างอยู่ใน `reflow_lines` (มีในอีกฝั่งแล้ว) **หรือ** ข้อความสั้นกว่า 2 ตัว/เป็นเครื่องหมายล้วน ⇒ **เหลือง + หมายเหตุ** (`ai_review._weak_onesided`) · ไม่แตะจุดที่มีข้อความทั้งสองฝั่ง (`Breed`→`Breeds` ยังแดง) · `USA` ยังแดง |
+
+* เทสต์ `test_artwork_v2_ai_rules.py` +7 (รวม 34) · ย้อนโค้ด 5 จุด แดงทุกจุด · assist ไม่ได้รับผลกระทบ (เทสต์ล็อกไว้)
+* ⚠️ ยังเหลือ: `|` ที่ขอบขวาของโซน B (ห่างขอบ 12 px, conf 0.67-0.72) ไม่ถูกนับเป็นเศษ เพราะเกณฑ์ขอบคือ `max(3, 0.25×สูงบรรทัด)` จึงขึ้นเป็นเหลือง ยังไม่ได้แก้ ·
+  เหตุผลของ AI ยังเขียนตัวเลขความมั่นใจเอง (เช่น "A: 0.55" ทั้งที่ Vision ได้ 0.62) ขัดกับ prompt
 
 **📚 เอกสาร Google Vision (อ่าน 4 ต.ค. — `docs.cloud.google.com` ถูก proxy บล็อก อ่านจาก proto ทางการบน GitHub + ข้อความค้นหา):**
 `DOCUMENT_TEXT_DETECTION` สำหรับข้อความหนาแน่น ✅ (ใช้อยู่) · `languageHints` *"ส่วนใหญ่ปล่อยว่างดีที่สุด · ใส่ผิดเป็นอุปสรรคมาก"* ✅ (ว่าง) ·
@@ -5978,7 +5996,7 @@ A, B, C, …) ⇒ ทุกกลุ่มมีสมาชิก 1 ตัว �
   `tests/test_artwork_ownership.py` 30 ตัว (สิทธิ์เห็นประวัติ + ชื่อผู้ตรวจ).
   ⚠️ `tests/test_inspection_golden.py` **fail 5 ตัวอยู่แล้ว** (pre-existing, `NameError: FieldResult`
   ในโมดูล Label Paper) — ไม่เกี่ยวกับ artwork. ยืนยันด้วย `git stash` ก่อนโทษการแก้ของตัวเอง.
-- CONFIG_VERSION ปัจจุบัน: **`2026.10.06-v2-aiguard`** (เช็คที่ footer ว่ารันโค้ดใหม่จริง).
+- CONFIG_VERSION ปัจจุบัน: **`2026.10.06-v2-onesided`** (เช็คที่ footer ว่ารันโค้ดใหม่จริง).
 - **ตาข่ายนิรภัยของชั้นเทียบ: `verify_compare.py`** — แก้อะไรที่ `panelmatch`/`confirm`
   **ต้องรันไฟล์นี้ก่อนและหลังเสมอ** (`--selftest` ใช้ได้โดยไม่ต้องมีไฟล์จริง)
 

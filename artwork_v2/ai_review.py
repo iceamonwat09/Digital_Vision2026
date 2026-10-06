@@ -478,6 +478,10 @@ def merge(mode: str, pr: dict, resp: dict, A: List[dict], B: List[dict]) -> dict
                 f["severity"] = "yellow"
                 f["notes"].append("ข้อความโค้ง/เอียง — แดงได้เฉพาะเมื่อการอ่านซ้ำยืนยัน "
                                   "(คำตอบของ AI ไม่ใช่การอ่านซ้ำ) โปรดดูด้วยตา")
+            elif (v == "real" and config.AI_JUDGE_ONESIDED_GUARD
+                    and c is not None and c >= config.CONF_FAIL and _weak_onesided(f, pr)):
+                f["severity"] = "yellow"
+                f["notes"].append(_weak_onesided(f, pr))
             elif (v == "real" and config.AI_JUDGE_PUNCT_YELLOW and f["class"] == "PUNCT"
                     and c is not None and c >= config.CONF_FAIL):
                 f["severity"] = "yellow"
@@ -514,6 +518,31 @@ def merge(mode: str, pr: dict, resp: dict, A: List[dict], B: List[dict]) -> dict
 
 
 _HARD_CLASSES = ("TEXT", "NUMBER", "CASE", "MISSING_IN_B", "EXTRA_IN_B")
+
+
+def _weak_onesided(f: dict, pr: dict) -> str:
+    """จุด "หายไป/เกินมา" ที่หลักฐานไม่พอเป็นแดง — กติกาเดียวกับบรรทัดเดี่ยวของอัลกอริทึม
+    คืนหมายเหตุ (ว่าง = หลักฐานพอ)
+
+    * บรรทัดที่อ้างอยู่ใน ``reflow_lines`` ⇒ อัลกอริทึมพบข้อความนี้ในอีกฝั่งแล้ว (แค่ตัดบรรทัด/
+      OCR เรียงคนละที่) — เช่น ``0`` หน้าบาร์โค้ดที่ Vision ไปรวมไว้ท้ายบรรทัดตัวเลขของอีกฝั่ง
+    * ข้อความสั้นมาก (< 2 ตัว) หรือเครื่องหมายล้วน ⇒ OCR อ่านไม่นิ่ง
+    """
+    if f["class"] not in ("MISSING_IN_B", "EXTRA_IN_B"):
+        return ""
+    s = "a" if f["class"] == "MISSING_IN_B" else "b"
+    side = f[s]
+    if side.get("line") is None:
+        return ""
+    rl = (pr.get("reflow_lines") or {}).get(s.upper()) or ()
+    if side["line"] in rl:
+        return ("ข้อความนี้มีอยู่ในอีกฝั่ง (อัลกอริทึมพบว่าแค่ตัดบรรทัด/เรียงคนละที่) — "
+                "คำว่า \"หายไป\" ของ AI ไม่มีหลักฐานจาก Vision โปรดดูด้วยตา")
+    k = compare.diff_key_map(side.get("frag") or "")[0]
+    if len(k) < 2 or compare._is_punct(k):
+        return ("ข้อความสั้นมาก/เครื่องหมายล้วนที่มีอยู่ฝั่งเดียว — OCR อ่านไม่นิ่ง "
+                "(กติกาเดียวกับอัลกอริทึม) โปรดดูด้วยตา")
+    return ""
 
 
 def _hard_evidence(f: dict) -> bool:

@@ -29,7 +29,7 @@ from artwork_v2 import ai_review, compare, config, pipeline, textmodel  # noqa: 
 
 REPLAY = os.path.join(os.path.dirname(__file__), "data", "artwork_v2", "ai_replay")
 RULES = ("AI_QUOTE_RECOVER", "AI_EQUIV_NOISE", "AI_SEND_CURVED", "AI_JUDGE_KEEP_ALGO_RED",
-         "AI_JUDGE_NOISE_GUARD", "AI_JUDGE_CURVED_YELLOW")
+         "AI_JUDGE_NOISE_GUARD", "AI_JUDGE_CURVED_YELLOW", "AI_JUDGE_ONESIDED_GUARD")
 
 
 @pytest.fixture(autouse=True)
@@ -63,7 +63,8 @@ def _pr(ta, tb, ca=None, cb=None, curved=None):
     r = compare.compare(_lines(ta, ca), _lines(tb, cb), (1000, 1000), (1000, 1000))
     for i, f in enumerate(r["findings"], 1):
         f["id"] = i
-    pr = {"n": 1, "findings": r["findings"], "curved_lines": curved or {"A": [], "B": []}}
+    pr = {"n": 1, "findings": r["findings"], "curved_lines": curved or {"A": [], "B": []},
+          "reflow_lines": r["reflow_lines"]}     # เหมือน pipeline
     return pr, r["lines_a"], r["lines_b"]
 
 
@@ -237,6 +238,68 @@ def test_judge_real_on_curved_text_is_yellow(monkeypatch):
     pr, A, B = _pr(["OMEGA-6"], ["OMEGA-62"], curved={"A": [0], "B": [0]})
     ai_review.merge("judge", pr, {"items": [copy.deepcopy(item)]}, A, B)
     assert next(f for f in pr["findings"] if f.get("source") == "ai")["severity"] == "red"
+
+
+# ── judge: "หายไป/เกินมา" ฝั่งเดียว ใช้กติกาเดียวกับอัลกอริทึม (สถานี 6 ต.ค. รอบ 2) ─────
+# ของจริง: ทั้งสองไฟล์พิมพ์ "0 52907 00241 0" · Vision ฝั่ง B รวม "0" ไว้ท้ายบรรทัดตัวเลข
+# แล้วไม่เห็น "0" ตัวหน้า ⇒ อัลกอริทึมจัดเป็น reflow (ไม่ฟ้อง) แต่ AI บอก "หายไปจริง"
+# ด้วย Vision ฝั่ง A 0.88 ⇒ เคยเป็น **แดงปลอม**
+
+BAR_A, BAR_B = ["NET WT 13 OZ", "5290700241", "0"], ["NET WT 13 OZ", "5290700241 0"]
+
+
+def test_judge_missing_text_that_reflowed_into_other_side_is_yellow(monkeypatch):
+    pr, A, B = _pr(BAR_A, BAR_B)
+    assert pr["reflow_lines"]["A"] == [2] and not pr["findings"]     # อัลกอริทึมไม่ฟ้อง
+    item = _it(["A2:0"], "0", [], "")
+    ai_review.merge("judge", pr, {"items": [copy.deepcopy(item)]}, A, B)
+    (f,) = [f for f in pr["findings"] if f.get("source") == "ai"]
+    assert f["class"] == "MISSING_IN_B" and f["confidence"] >= config.CONF_FAIL
+    assert f["severity"] == "yellow" and any("มีอยู่ในอีกฝั่ง" in n for n in f["notes"])
+    _off(monkeypatch, "AI_JUDGE_ONESIDED_GUARD")
+    pr, A, B = _pr(BAR_A, BAR_B)
+    ai_review.merge("judge", pr, {"items": [copy.deepcopy(item)]}, A, B)
+    assert next(f for f in pr["findings"] if f.get("source") == "ai")["severity"] == "red"
+
+
+@pytest.mark.parametrize("extra", ["X", "&", "|"])
+def test_judge_onesided_short_or_symbol_is_yellow(extra):
+    pr, A, B = _pr(["CHICKEN & VEGGIES", "RECIPE"], ["CHICKEN & VEGGIES", "RECIPE", extra])
+    assert pr["reflow_lines"]["B"] == []
+    item = _it([], "", ["B2:0"], extra)
+    ai_review.merge("judge", pr, {"items": [copy.deepcopy(item)]}, A, B)
+    f = next(f for f in pr["findings"] if f.get("source") == "ai")
+    assert f["severity"] == "yellow" and any("ฝั่งเดียว" in n for n in f["notes"])
+
+
+def test_judge_onesided_real_word_stays_red():
+    # "USA" เพิ่มท้ายที่อยู่ = ของจริง · Vision อ่านชัด · ไม่มีในอีกฝั่ง ⇒ แดงเหมือนเดิม
+    pr, A, B = _pr([ADR_A], [ADR_B])
+    item = _it([], "", ["B0:6"], "USA")
+    ai_review.merge("judge", pr, {"items": [copy.deepcopy(item)]}, A, B)
+    f = next(f for f in pr["findings"] if f.get("source") == "ai")
+    assert f["class"] == "EXTRA_IN_B" and f["severity"] == "red"
+    assert not any("ฝั่งเดียว" in n or "อีกฝั่ง" in n for n in f["notes"])
+
+
+def test_judge_guard_only_touches_onesided_classes():
+    # Breed → Breeds ต่างแค่ "s" ตัวเดียว แต่มีทั้งสองฝั่ง (TEXT) ⇒ ไม่ใช่เรื่องของด่านนี้
+    pr, A, B = _pr(["for All Breed & Lifestages"], ["for All Breeds & Lifestages"])
+    item = _it(["A0:2"], "Breed", ["B0:2"], "Breeds")
+    ai_review.merge("judge", pr, {"items": [copy.deepcopy(item)]}, A, B)
+    f = next(f for f in pr["findings"] if f.get("source") == "ai")
+    assert f["class"] == "TEXT" and f["severity"] == "red"
+
+
+def test_assist_unchanged_by_onesided_guard(monkeypatch):
+    def run():
+        pr, A, B = _pr(BAR_A, BAR_B)
+        ai_review.merge("assist", pr, {"items": [_it(["A2:0"], "0", [], "")], "reviews": []},
+                        A, B)
+        return [(f["class"], f["severity"]) for f in pr["findings"]]
+    on = run()
+    _off(monkeypatch, "AI_JUDGE_ONESIDED_GUARD")
+    assert on == run() == [("MISSING_IN_B", "yellow")]
 
 
 # ── ④ ข้อมูลที่ส่ง: ธงข้อความโค้ง ─────────────────────────────────────
