@@ -87,6 +87,15 @@ def _lines(fta: dict, img_path: str):
         return None
 
 
+def _same_by_app_rules(ta: str, tb: str) -> bool:
+    """ข้อความทั้งภาพเท่ากันตามกติกาเทียบของแอป (compare.diff_key_map) หรือไม่"""
+    try:
+        from artwork_v2 import compare as cmp
+        return cmp.diff_key_map(ta)[0] == cmp.diff_key_map(tb)[0]
+    except Exception:
+        return False
+
+
 def compare(ref: dict, other: dict) -> dict:
     """เทียบผลดิบสองรอบของภาพเดียวกัน"""
     a = json.load(open(ref["raw"], encoding="utf-8"))
@@ -103,6 +112,10 @@ def compare(ref: dict, other: dict) -> dict:
         diffs = [abs((x or 0) - (y or 0)) for (_, x), (_, y) in zip(wa, wb)]
         res["max_conf_delta"] = round(max(diffs), 4) if diffs else 0.0
         res["kind"] = "confidence_only"     # ข้อความเหมือนกันทุกคำ ต่างแค่ความมั่นใจ/พิกัด
+    elif _same_by_app_rules(ta, tb):
+        # ต่างแค่อักษรที่แอปถือว่าเป็นตัวเดียวกัน (®/Ⓡ · ½/1/2 · จุดไข่ปลา · ช่องว่าง)
+        # ⇒ ชั้นเทียบมองไม่เห็นความต่างนี้อยู่แล้ว ไม่ใช่หลักฐานว่าการอ่านซ้ำมีประโยชน์
+        res["kind"] = "equivalent"
     else:
         res["kind"] = "text"
     la, lb = _lines(a, ref["img"]), _lines(b, other["img"])
@@ -138,7 +151,7 @@ def main(argv=None) -> int:
         print("   ⇒ ข้อมูลที่มีตอบไม่ได้ว่า Vision อ่านคงที่ไหม")
         return 2
 
-    n_same = n_conf = n_text = 0
+    n_same = n_conf = n_equiv = n_text = 0
     for h, items in sorted(dup.items(), key=lambda kv: kv[1][0]["job"]):
         ref = items[0]
         print("\n━━ sha1 %s · %d รอบ · %s" % (h[:12], len(items), ref["side"]))
@@ -154,6 +167,10 @@ def main(argv=None) -> int:
                 n_conf += 1
                 print("   🟡 %s — ข้อความเหมือนกันทุกคำ (%d คำ) ต่างแค่ความมั่นใจ/พิกัด "
                       "(ความมั่นใจต่างสูงสุด %.4f)" % (where, r["words"][0], r["max_conf_delta"]))
+            elif r["kind"] == "equivalent":
+                n_equiv += 1
+                print("   🟢 %s — ต่างแค่อักษรที่แอปถือว่าเป็นตัวเดียวกัน (®/Ⓡ · ½ · จุดไข่ปลา) "
+                      "· ผลตรวจไม่เปลี่ยน" % where)
             else:
                 n_text += 1
                 print("   🔴 %s — ข้อความต่าง · คำ %d vs %d" % (where, r["words"][0], r["words"][1]))
@@ -166,8 +183,8 @@ def main(argv=None) -> int:
                     print("        - %s" % t)
                 for t in only_b[:lim]:
                     print("        + %s" % t)
-    print("\nสรุป: เหมือนทุกไบต์ %d · ข้อความเหมือนแต่ความมั่นใจต่าง %d · ข้อความต่าง %d"
-          % (n_same, n_conf, n_text))
+    print("\nสรุป: เหมือนทุกไบต์ %d · ข้อความเหมือนแต่ความมั่นใจต่าง %d · "
+          "ต่างแค่อักษรสมมูล %d · ข้อความต่างจริง %d" % (n_same, n_conf, n_equiv, n_text))
     if n_text:
         print("⇒ Vision อ่านภาพเดียวกันได้ข้อความไม่เหมือนเดิม — การอ่าน 2 รอบแล้วโหวตมีประโยชน์")
     else:
