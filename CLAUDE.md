@@ -23,7 +23,7 @@
 
 ## 🆕 Artwork V2 — เทียบข้อความด้วย Google Cloud Vision (2 ต.ค. 2026 · PoC)
 
-**Branch: `claude/laughing-fermat-i9aise`** (ต่อจาก `claude/practical-franklin-a5p6zd`) · `CONFIG_VERSION` = **`2026.10.07-v2-pixel`** ·
+**Branch: `claude/laughing-fermat-i9aise`** (ต่อจาก `claude/practical-franklin-a5p6zd`) · `CONFIG_VERSION` = **`2026.10.07-v2-color`** ·
 โมดูล `artwork_v2/` (VERSION `2026.10.07-v2pixel`) · เมนู **"Artwork V2"** (`/artwork_v2`) ·
 เทสต์ `tests/test_artwork_v2.py` **73 ตัว** + `tests/test_artwork_v2_robust.py` **717 ตัว** (ข้อมูล OCR จริง · ~2.5 นาที)
 
@@ -443,6 +443,24 @@ AI ที่เห็นแค่ข้อความตอบ "ต่างจ
   `ARTWORK_V2_TEST_NEW_RULES=1` = รันเทสต์รุ่นก่อนด้วยค่าใหม่ (robust/runs ผ่าน · 2 เทสต์ล็อกโครงเดิมโดยตั้งใจ) · V2 ทั้งชุด **1161 ผ่าน** · ทั้ง repo fail 8 = baseline
 * ⏳ ต้องทำบนสถานี: `git pull` → `py -3.9 app.py` (footer `2026.10.07-v2-pixel`) → ตรวจคู่ John West / AvoDerm เดิม (AI ปิด) → ดู `[PIXEL]` ใน Log + รายการพับ "ภาพเหมือน" ·
   ส่ง Log กลับมาเทียบกับผลจำลองข้างบน
+
+#### 🎨 7 ต.ค. (รอบ 3) — เลือกสีของภาพที่ส่งให้ Vision: สี / เทา / ขาวดำ (ทดลอง A/B)
+
+ผู้ใช้ถาม *"ส่งเป็นขาวดำจะดีกว่าไหม · ให้เลือกได้"* ⇒ ช่อง **"สีของภาพ"** ข้าง "ภาพที่ส่ง" · ธง `ARTWORK_V2_COLOR_MODE`
+(`color` ค่าเริ่มต้น = ภาพเดิม **ทุกไบต์** มีเทสต์ sha1 · ค่าแปลก = `color`) · API ที่ไม่ส่ง `color_mode` = ค่าของเครื่อง
+
+| โหมด | ทำอะไร (`imaging.to_color_mode` → `fit_jpeg(..., mono=True)` = JPEG ช่องเดียว) |
+|---|---|
+| `gray` | ความสว่างล้วน (BGR→GRAY ของ OpenCV) ไม่ตัดเกณฑ์ |
+| `bw` | ตัดเกณฑ์เฉพาะที่ (Gaussian adaptive) · หน้าต่าง `BW_BLOCK_MM` (3.0 mm ที่ dpi จริง = 47 px ที่ 400 dpi · ภาพถ่าย 1/30 ด้านสั้น · ขั้นต่ำ 15 · คี่เสมอ) · `BW_C` (12) |
+
+* **อ่านซ้ำใช้สีเดียวกับรอบหลัก** · **"คมสูงสุด" + เทา/ขาวดำ ⇒ 400 dpi** (`render.sharpness = "max→standard(mono)"` — งบของโหมดคมคิดจากภาพสี)
+* **หลักฐานภาพ (`pixverify`) ไม่ได้รับผล** — เรนเดอร์จากไฟล์ต้นฉบับเอง · ชั้นเทียบข้อความไม่รู้จักสี
+* Log: `color_mode=` ใน `[SETTINGS]` + บรรทัด `color: mode=bw block=47px C=12 ink=..%` ต่อฝั่ง · หัวผลบนหน้าเว็บบอกเมื่อไม่ใช่สี
+* **วัดออฟไลน์บน PDF จริง (ไม่ยิง Vision):** JPEG สี 0.8-1.3 MB → เทา 0.44-0.89 → ขาวดำ 0.70-1.25 · ขาวดำ: ตัวหนังสือเล็กสีเข้มคม
+  แต่ **หัวเรื่องตัวใหญ่สีขาว/เหลืองบนพื้นเขียวกลายเป็นเส้นขอบ/ก้อนดำ** · ภาพถ่ายเป็นจุดรบกวน · จุดเล็กหาย 1.7-3.7% ·
+  ⇒ คาดว่า **เทาปลอดภัยสุด · ขาวดำเสี่ยง** — ตัดสินได้จาก A/B บนสถานีเท่านั้น (คู่เดิม โซนเดิม AI ปิด · 1 คำขอ Vision ต่อรอบ)
+* เทสต์ `tests/test_artwork_v2_color.py` **15** · ย้อนโค้ด 4 จุด แดงทุกจุด · Chromium 1366/400: ตัวเลือกขึ้น · body ส่ง `color_mode` ถูก · ไม่เลื่อนแนวนอน · ไม่มี JS error
 
 **📚 เอกสาร Google Vision (อ่าน 4 ต.ค. — `docs.cloud.google.com` ถูก proxy บล็อก อ่านจาก proto ทางการบน GitHub + ข้อความค้นหา):**
 `DOCUMENT_TEXT_DETECTION` สำหรับข้อความหนาแน่น ✅ (ใช้อยู่) · `languageHints` *"ส่วนใหญ่ปล่อยว่างดีที่สุด · ใส่ผิดเป็นอุปสรรคมาก"* ✅ (ว่าง) ·
@@ -6115,7 +6133,7 @@ A, B, C, …) ⇒ ทุกกลุ่มมีสมาชิก 1 ตัว �
   `tests/test_artwork_ownership.py` 30 ตัว (สิทธิ์เห็นประวัติ + ชื่อผู้ตรวจ).
   ⚠️ `tests/test_inspection_golden.py` **fail 5 ตัวอยู่แล้ว** (pre-existing, `NameError: FieldResult`
   ในโมดูล Label Paper) — ไม่เกี่ยวกับ artwork. ยืนยันด้วย `git stash` ก่อนโทษการแก้ของตัวเอง.
-- CONFIG_VERSION ปัจจุบัน: **`2026.10.07-v2-pixel`** (เช็คที่ footer ว่ารันโค้ดใหม่จริง).
+- CONFIG_VERSION ปัจจุบัน: **`2026.10.07-v2-color`** (เช็คที่ footer ว่ารันโค้ดใหม่จริง).
 - **ตาข่ายนิรภัยของชั้นเทียบ: `verify_compare.py`** — แก้อะไรที่ `panelmatch`/`confirm`
   **ต้องรันไฟล์นี้ก่อนและหลังเสมอ** (`--selftest` ใช้ได้โดยไม่ต้องมีไฟล์จริง)
 

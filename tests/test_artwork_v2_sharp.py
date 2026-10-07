@@ -282,7 +282,7 @@ def test_route_passes_mode_and_page_has_selector(monkeypatch):
     c = app.test_client()
     got = {}
 
-    def fake_run(job_id, pairs, poster=None, progress=None, sharpness=None, ai_mode=None):
+    def fake_run(job_id, pairs, poster=None, progress=None, sharpness=None, ai_mode=None, **kw):
         got["s"] = sharpness
         return {"run": "run_001", "verdict": "PASS", "stage": {}}
     monkeypatch.setattr(pipeline, "run", fake_run)

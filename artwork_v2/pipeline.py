@@ -119,14 +119,22 @@ def norm_sharpness(v) -> str:
     return v if v in config.SHARPNESS_MODES else config.SHARPNESS
 
 
+def norm_color(v) -> str:
+    """ค่าที่ไม่รู้จัก/ไม่ส่งมา = ค่าตั้งของเครื่อง (``config.COLOR_MODE``)"""
+    v = str(v or "").strip().lower()
+    return v if v in config.COLOR_MODES else config.COLOR_MODE
+
+
 def run(job_id: str, raw_pairs, poster: Optional[Callable] = None,
         progress: Optional[Callable] = None, sharpness: Optional[str] = None,
-        ai_mode: Optional[str] = None, ai_poster: Optional[Callable] = None) -> dict:
+        ai_mode: Optional[str] = None, ai_poster: Optional[Callable] = None,
+        color_mode: Optional[str] = None) -> dict:
     """ตรวจหนึ่งรอบ · ล้มก่อนยิง Vision ⇒ ลบโฟลเดอร์รอบที่เพิ่งสร้าง (ไม่ทิ้งรอบว่างค้าง
     ให้หน้าเว็บเปิดแล้วไม่เห็นอะไร) · ล้มหลังยิงแล้ว ⇒ เก็บผลดิบใน ``raw/`` ไว้ไล่ปัญหา"""
     made: Dict[str, str] = {}
     try:
-        return _run(job_id, raw_pairs, poster, progress, sharpness, ai_mode, ai_poster, made)
+        return _run(job_id, raw_pairs, poster, progress, sharpness, ai_mode, ai_poster, made,
+                    color_mode)
     except Exception:
         rd = made.get("rd")
         if rd and not os.path.isfile(os.path.join(rd, "result.json")):
@@ -139,9 +147,11 @@ def run(job_id: str, raw_pairs, poster: Optional[Callable] = None,
 
 
 def _run(job_id, raw_pairs, poster, progress, sharpness, ai_mode, ai_poster,
-         made: Dict[str, str]) -> dict:
+         made: Dict[str, str], color_mode: Optional[str] = None) -> dict:
     t_all = time.time()
     sharp = norm_sharpness(sharpness)
+    color = norm_color(color_mode)
+    mono = color != "color"
     ai_mode = ai_review.norm_mode(ai_mode)
     stage: Dict[str, int] = {}
     warnings: List[str] = []
@@ -172,7 +182,7 @@ def _run(job_id, raw_pairs, poster, progress, sharpness, ai_mode, ai_poster,
         for s in ("a", "b"):
             z = p[s]
             got = None
-            if sharp == "max":
+            if sharp == "max" and not mono:     # คมสูงสุดวัดงบจากภาพสี ⇒ เทา/ขาวดำใช้ 400 dpi
                 got = imaging.render_zone_sharp(srcs[s], z["page"], z["bbox"],
                                                 imaging.pair_image_budget(2))
             if got is not None:
@@ -183,7 +193,12 @@ def _run(job_id, raw_pairs, poster, progress, sharpness, ai_mode, ai_poster,
                 img, rinfo = srcs[s].render_zone(z["page"], z["bbox"])
                 rinfo["sharpness"] = "standard" if sharp == "standard" else (
                     "max→standard" if srcs[s].is_pdf else "source_pixels")
-                jpeg, sent, einfo = imaging.fit_jpeg(img, config.MAX_IMAGE_BYTES)
+                if mono:
+                    img, cinfo = imaging.to_color_mode(img, color, rinfo.get("dpi"))
+                    rinfo.update(cinfo)
+                    if sharp == "max" and srcs[s].is_pdf:
+                        rinfo["sharpness"] = "max→standard(mono)"
+                jpeg, sent, einfo = imaging.fit_jpeg(img, config.MAX_IMAGE_BYTES, mono)
                 einfo["_img"] = img
             encoded[s] = [jpeg, sent, rinfo, einfo]
         # 1 คู่ = 1 คำขอ: ภาพสองฝั่งรวมกันใหญ่เกินคำขอเดียว ⇒ เข้ารหัสใหม่ให้พอดีงบต่อภาพ
@@ -198,7 +213,7 @@ def _run(job_id, raw_pairs, poster, progress, sharpness, ai_mode, ai_poster,
                 src_img = einfo.get("_img")
                 if src_img is None:
                     src_img = sent
-                jpeg, sent, e2 = imaging.fit_jpeg(src_img, budget)
+                jpeg, sent, e2 = imaging.fit_jpeg(src_img, budget, mono)
                 e2["warnings"].insert(0, "ภาพคู่นี้รวมกันใหญ่เกินคำขอเดียว — เข้ารหัสใหม่ให้ส่ง"
                                          "คู่ A/B ในคำขอเดียวกัน (คุณภาพ %s)" % e2.get("quality"))
                 e2["pair_refit"] = True
@@ -355,7 +370,7 @@ def _run(job_id, raw_pairs, poster, progress, sharpness, ai_mode, ai_poster,
         "version": VERSION, "job": job_id, "run": run_name,
         "at": time.strftime("%Y-%m-%d %H:%M:%S"),
         "verdict": verdict, "verdict_th": VERDICT_TH[verdict], "reasons": reasons,
-        "sharpness": sharp,
+        "sharpness": sharp, "color_mode": color,
         "pairs": pairs, "calls": calls, "reread": reread_log, "ai": ai_sum, "pixel": pixel_log,
         "warnings": warnings, "stage": stage,
         "key": {"source": key_src, "masked": keystore.mask(key), "length": len(key)},
@@ -386,7 +401,7 @@ def settings_snapshot() -> dict:
         "ENDPOINT", "MODEL", "LANGUAGE_HINTS", "TIMEOUT_S", "RETRIES",
         "MAX_REQUEST_BYTES", "MAX_IMAGE_BYTES", "MAX_IMAGE_MP", "JPEG_QUALITIES",
         "PDF_ZONE_DPI", "PDF_ZONE_DPI_MAX", "ZONE_MIN_LONG_SIDE",
-        "SHARPNESS", "SHARP_FILL", "SHARP_MAX_RENDERS",
+        "SHARPNESS", "SHARP_FILL", "SHARP_MAX_RENDERS", "COLOR_MODE", "BW_BLOCK_MM", "BW_C",
         "CONF_FAIL", "CONF_LOW", "COVERAGE_MIN", "PAIR_MIN_SIM", "PAIR_MIN_RUN",
         "PAIR_MAX_DIST", "ROW_MERGE_ENABLED", "ROW_MAX_ANGLE",
         "PUNCT_CAN_FAIL", "CURVED_GROUP_ENABLED", "TILT_ANGLE", "CURVED_NEIGHBOR_MAX_CHARS",
@@ -497,7 +512,10 @@ def _reread(pairs, srcs, rd, poster, key, calls, warnings, say) -> dict:
                 img, info = srcs[s].render_zone(side["page"], crops[s],
                                                 scale=config.REREAD_SCALE,
                                                 max_side=config.REREAD_MAX_SIDE)
-            jpeg, sent, einfo = imaging.fit_jpeg(img, config.MAX_IMAGE_BYTES)
+            mono_rr = rnd.get("color_mode") in ("gray", "bw")   # อ่านซ้ำด้วยสีเดียวกับรอบหลัก
+            if mono_rr:
+                img, cinfo = imaging.to_color_mode(img, rnd["color_mode"], info.get("dpi"))
+            jpeg, sent, einfo = imaging.fit_jpeg(img, config.MAX_IMAGE_BYTES, mono_rr)
             fname = "%s_%s.jpg" % (rid, s)
             with open(os.path.join(rd, "img", fname), "wb") as fh:
                 fh.write(jpeg)

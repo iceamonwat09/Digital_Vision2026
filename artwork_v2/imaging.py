@@ -15,6 +15,7 @@ import math
 import os
 from typing import List, Optional, Tuple
 
+import cv2
 import numpy as np
 
 try:
@@ -268,9 +269,45 @@ def _resize(img: np.ndarray, s: float) -> np.ndarray:
     return np.asarray(im)[:, :, ::-1].copy()
 
 
-def encode_jpeg(img: np.ndarray, quality: int) -> bytes:
-    """JPEG แบบไม่ลดความละเอียดสี (4:4:4) — ตัวหนังสือสีเล็ก ๆ ไม่เลือนขอบ"""
+def to_color_mode(img: np.ndarray, mode: str, dpi: Optional[float] = None) -> Tuple[np.ndarray, dict]:
+    """แปลงภาพที่จะส่งให้ Vision ตาม ``mode`` (``config.COLOR_MODES``)
+
+    * ``color`` ⇒ คืนภาพเดิม (อ็อบเจกต์เดิม ไม่คัดลอก) = ไบต์เดิมเป๊ะ
+    * ``gray``  ⇒ ความสว่างล้วน (ITU-R 601 แบบเดียวกับ OpenCV)
+    * ``bw``    ⇒ ตัดเกณฑ์เฉพาะที่ (Gaussian adaptive) — หน้าต่าง ``BW_BLOCK_MM`` คิดจาก dpi
+      ที่เรนเดอร์จริง · ภาพถ่าย (ไม่รู้ dpi) ใช้ 1/30 ของด้านสั้น
+
+    คืน 3 ช่องเท่ากันเสมอ (ผู้เรียกเดิมทุกตัวคาดภาพ BGR) · ส่ง ``mono=True`` ให้
+    ``encode_jpeg``/``fit_jpeg`` เพื่อเข้ารหัสเป็นช่องเดียว
+    """
+    if mode not in ("gray", "bw"):
+        return img, {"color_mode": "color"}
+    g = cv2.cvtColor(np.ascontiguousarray(img[:, :, :3]), cv2.COLOR_BGR2GRAY)
+    info = {"color_mode": mode}
+    if mode == "bw":
+        if dpi:
+            blk = float(config.BW_BLOCK_MM) / 25.4 * float(dpi)
+        else:
+            blk = min(g.shape[:2]) / 30.0
+        blk = int(max(15, round(blk)))
+        blk += 1 - blk % 2
+        g = cv2.adaptiveThreshold(g, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY,
+                                  blk, float(config.BW_C))
+        info.update({"bw_block_px": blk, "bw_c": float(config.BW_C),
+                     "ink_frac": round(float((g == 0).mean()), 4)})
+    return np.repeat(g[:, :, None], 3, axis=2), info
+
+
+def encode_jpeg(img: np.ndarray, quality: int, mono: bool = False) -> bytes:
+    """JPEG แบบไม่ลดความละเอียดสี (4:4:4) — ตัวหนังสือสีเล็ก ๆ ไม่เลือนขอบ
+
+    ``mono`` (ภาพจาก ``to_color_mode`` แบบเทา/ขาวดำ) ⇒ JPEG ช่องเดียว · ไม่ส่ง = เส้นทางเดิมเป๊ะ
+    """
     buf = io.BytesIO()
+    if mono:
+        Image.fromarray(np.ascontiguousarray(img[:, :, 0])).save(buf, format="JPEG",
+                                                                 quality=int(quality))
+        return buf.getvalue()
     Image.fromarray(img[:, :, ::-1]).save(buf, format="JPEG", quality=int(quality),
                                           subsampling=0)
     return buf.getvalue()
@@ -282,7 +319,7 @@ def encode_png(img: np.ndarray) -> bytes:
     return buf.getvalue()
 
 
-def fit_jpeg(img: np.ndarray, max_bytes: int) -> Tuple[bytes, np.ndarray, dict]:
+def fit_jpeg(img: np.ndarray, max_bytes: int, mono: bool = False) -> Tuple[bytes, np.ndarray, dict]:
     """เข้ารหัสให้ไม่เกิน ``max_bytes`` — ลดคุณภาพก่อน แล้วค่อยย่อ (และบอกเสมอ)
 
     คืน ``(jpeg, ภาพที่เข้ารหัสจริง, ข้อมูล)`` — ภาพที่คืนคือภาพที่ Vision เห็น
@@ -290,7 +327,7 @@ def fit_jpeg(img: np.ndarray, max_bytes: int) -> Tuple[bytes, np.ndarray, dict]:
     """
     info = {"warnings": [], "downscale": 1.0}
     for q in config.JPEG_QUALITIES:
-        data = encode_jpeg(img, q)
+        data = encode_jpeg(img, q, mono)
         if len(data) <= max_bytes:
             info["quality"] = q
             return data, img, info
@@ -300,7 +337,7 @@ def fit_jpeg(img: np.ndarray, max_bytes: int) -> Tuple[bytes, np.ndarray, dict]:
         s = max(0.3, math.sqrt(max_bytes / float(len(data))) * 0.95)
         cur = _resize(cur, s)
         info["downscale"] = round(info["downscale"] * s, 4)
-        data = encode_jpeg(cur, q)
+        data = encode_jpeg(cur, q, mono)
         if len(data) <= max_bytes:
             break
     info["quality"] = q

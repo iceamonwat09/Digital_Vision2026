@@ -598,7 +598,8 @@
       const r = await api("/api/artwork_v2/jobs/" + S.job.id + "/run", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ pairs: ready, sharpness: $("v2Sharp") ? $("v2Sharp").value : undefined,
-          ai_mode: $("v2Ai") ? $("v2Ai").value : undefined }),
+          ai_mode: $("v2Ai") ? $("v2Ai").value : undefined,
+          color_mode: $("v2Color") ? $("v2Color").value : undefined }),
       });
       $("v2RunMsg").textContent = "เสร็จใน " + ((Date.now() - t0) / 1000).toFixed(1) + " วินาที";
       showResult(r);
@@ -933,6 +934,7 @@
       esc(r.verdict_th) + "<small>" + (r.reasons || []).map(esc).join(" · ") + " · รอบ " + esc(r.run) +
       " · " + esc(r.at) + (r.version ? " · รุ่น " + esc(r.version) : "") +
       (r.sharpness ? " · ภาพที่ส่ง: " + (r.sharpness === "max" ? "คมสูงสุด" : "มาตรฐาน 400 dpi") : "") +
+      (r.color_mode && r.color_mode !== "color" ? " · สีของภาพ: " + (r.color_mode === "bw" ? "ขาวดำ" : "เทา") : "") +
       (r.ai && r.ai.mode ? " · AI: " + esc(AI_MODE_TH[r.ai.mode] || r.ai.mode) : "") +
       "</small></div>";
     $("v2Warn").innerHTML = (r.warnings && r.warnings.length)

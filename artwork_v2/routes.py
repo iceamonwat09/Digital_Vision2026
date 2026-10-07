@@ -77,6 +77,7 @@ def page():
     return render_template("artwork_v2.html", v2_version=VERSION,
                            can_manage_key=_is_admin(_viewer()),
                            v2_sharpness=config.SHARPNESS,
+                           v2_color_mode=config.COLOR_MODE,
                            v2_ai_mode=config.AI_MODE,
                            v2_ai_experimental=config.AI_EXPERIMENTAL_MODES,
                            v2_box_style=config.BOX_STYLE,
@@ -238,7 +239,7 @@ def job_run(job_id):
     sent = True
     try:
         res = pipeline.run(job_id, pairs, sharpness=body.get("sharpness"),
-                           ai_mode=body.get("ai_mode"))
+                           ai_mode=body.get("ai_mode"), color_mode=body.get("color_mode"))
     except ValueError as e:
         sent = False      # ข้อมูลไม่ถูกต้อง (parse_pairs โยนก่อนยิง Vision) ⇒ ไม่นับเวลาพัก
         return _err(str(e))

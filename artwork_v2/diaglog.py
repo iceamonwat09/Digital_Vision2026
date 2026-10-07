@@ -45,6 +45,9 @@ def build_text(r: dict) -> str:
     a("sharpness=%s (ภาพที่ส่ง: %s)" % (
         r.get("sharpness", "standard"),
         "คมสูงสุด" if r.get("sharpness") == "max" else "มาตรฐาน 400 dpi"))
+    a("color_mode=%s (สีของภาพที่ส่ง: %s)" % (
+        r.get("color_mode", "color"),
+        {"gray": "เทา", "bw": "ขาวดำ (ตัดเกณฑ์)"}.get(r.get("color_mode"), "สี")))
     k = r["key"]
     a("api_key: source=%s masked=%s length=%s" % (k["source"] or "NONE", k["masked"] or "-",
                                                   k["length"]))
@@ -94,6 +97,10 @@ def build_text(r: dict) -> str:
                   sd["sent_px"], en.get("quality"), en.get("downscale"), sd["jpeg_bytes"],
                   sd["sha1"], sd.get("request_index"), sd.get("ok"),
                   (" ERROR=" + sd["error"]) if sd.get("error") else ""))
+            if rd.get("color_mode") in ("gray", "bw"):
+                a("     color: mode=%s%s" % (rd["color_mode"], (" block=%spx C=%s ink=%.1f%%" % (
+                    rd.get("bw_block_px"), rd.get("bw_c"), 100.0 * (rd.get("ink_frac") or 0)))
+                    if rd["color_mode"] == "bw" else ""))
             if rd.get("sharpness"):
                 tries = " ".join("%.0f:%dk%s" % (t["dpi"], t["bytes"] // 1000,
                                                  "" if t["fit"] else "(เกินงบ)")
