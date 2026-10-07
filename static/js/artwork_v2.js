@@ -733,9 +733,19 @@
       "</td><td>" + conf + "</td><td>" + per + "</td></tr>";
   }
 
+  // เรียงแดง (ต่าง) ก่อน แล้วเหลือง (ไม่มั่นใจ) — ลำดับเดิมภายในระดับเดียวกัน (ARTWORK_V2_SORT_SEVERITY · แสดงผลล้วน)
+  const SORT_SEVERITY = root.dataset.sortSeverity === "1";
+  function bySeverity(list) {
+    const xs = (list || []).slice();
+    if (!SORT_SEVERITY) return xs;
+    return xs.map((f, i) => [f, i])
+      .sort((p, q) => ((SEV_RANK[q[0].severity] || 0) - (SEV_RANK[p[0].severity] || 0)) || (p[1] - q[1]))
+      .map((p) => p[0]);
+  }
+
   function rowsHtml(list) {
-    if (!LINE_GROUP) return (list || []).map(findingRow).join("");
-    return lineGroups(list).map((x) => {
+    if (!LINE_GROUP) return bySeverity(list).map(findingRow).join("");
+    return bySeverity(lineGroups(list)).map((x) => {
       if (!x.group) return findingRow(x);
       GRP[x.id] = x.members.map((m) => String(m.id));
       return groupRow(x);
@@ -945,11 +955,49 @@
         (p.reasons && p.reasons.length ? ' <span class="v2-muted">(' + p.reasons.map(esc).join(" · ") + ")</span>" : "") +
         '<div class="v2-panes" style="margin-top:8px"><div>🅰 ' + sideInfo(p.sides.a) + svgFor(p, "a", r) +
         "</div><div>🅱 " + sideInfo(p.sides.b) + svgFor(p, "b", r) + "</div></div>" +
-        (rows ? '<div class="v2-tbl-wrap"><table class="v2-tbl">' + TBL_HEAD + "<tbody>" +
-          rows + "</tbody></table></div>" : (p.unreadable ? "" : '<div class="v2-muted" style="margin-top:6px">ไม่พบจุดต่าง</div>')) +
+        (rows ? '<div class="v2-tbl-wrap v2-main"><table class="v2-tbl">' + TBL_HEAD + "<tbody>" +
+          rows + '</tbody></table></div><div class="v2-tbl-more v2-muted" hidden></div>' : (p.unreadable ? "" : '<div class="v2-muted" style="margin-top:6px">ไม่พบจุดต่าง</div>')) +
         aiBox(p) + debHtml + "</div>";
     }).join("");
     if (HOVER_ZOOM) zoomAfterRender();
+    fitRows();
+  }
+
+  // ตารางจุดต่างหลักแสดง TABLE_ROWS แถวแล้วเลื่อนในตาราง ⇒ ภาพที่ซูมยังอยู่บนจอ (ARTWORK_V2_TABLE_ROWS · 0 = แบบเดิม)
+  //  · วัดความสูงจริงของหัวตาราง + N แถวแรก (แถวสูงไม่เท่ากัน) · เพดาน 60% ของความสูงจอ แต่ไม่ต่ำกว่า 1 แถว
+  //  · ยังไม่ได้จัดวาง (ซ่อนอยู่ = สูง 0) ⇒ ไม่จำกัด แล้ววัดใหม่เมื่อขนาดเปลี่ยน
+  const TABLE_ROWS = Math.max(0, parseInt(root.dataset.tableRows || "0", 10) || 0);
+  function fitRows() {
+    if (!TABLE_ROWS) return;
+    document.querySelectorAll("#v2PairsRes .v2-tbl-wrap.v2-main").forEach((w) => {
+      const trs = w.querySelectorAll("tbody > tr");
+      const head = w.querySelector("thead");
+      const more = w.nextElementSibling && w.nextElementSibling.classList.contains("v2-tbl-more") ? w.nextElementSibling : null;
+      const hh = head ? head.offsetHeight : 0;
+      let h = hh;
+      for (let i = 0; i < Math.min(TABLE_ROWS, trs.length); i++) h += trs[i].offsetHeight;
+      const capped = trs.length > TABLE_ROWS && h > hh;
+      const lim = Math.max(hh + (trs.length ? trs[0].offsetHeight : 0), window.innerHeight * 0.6);
+      const mh = capped ? Math.ceil(Math.min(h, lim)) + 2 + "px" : "";
+      if (w.style.maxHeight !== mh) w.style.maxHeight = mh;
+      w.classList.toggle("v2-capped", capped);
+      if (more) {
+        more.hidden = !capped;
+        // แถวสูงจนชนเพดานจอ ⇒ เห็นไม่ถึง N แถว — ห้ามบอกว่า "แสดง N"
+        more.textContent = capped ? (h > lim ? "ตารางมี " + trs.length + " แถว" : "แสดง " + TABLE_ROWS + " จาก " + trs.length + " แถว") +
+          " — เลื่อนในตารางเพื่อดูที่เหลือ" + (SORT_SEVERITY ? " (จุดต่างขึ้นก่อน ไม่มั่นใจอยู่ด้านล่าง)" : "") : "";
+      }
+    });
+  }
+  if (TABLE_ROWS && window.ResizeObserver) {
+    let fitQ = 0;
+    new ResizeObserver(() => {
+      if (fitQ) return;
+      fitQ = requestAnimationFrame(() => { fitQ = 0; fitRows(); });
+    }).observe($("v2PairsRes"));
+    window.addEventListener("resize", () => {          // เพดาน 60% ของความสูงจอ — จอเปลี่ยนสูงแต่กว้างเท่าเดิม
+      if (!fitQ) fitQ = requestAnimationFrame(() => { fitQ = 0; fitRows(); });
+    });
   }
 
   $("v2PairsRes").addEventListener("click", (ev) => {

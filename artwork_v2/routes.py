@@ -82,7 +82,9 @@ def page():
                            v2_restore_confirm=config.RESTORE_CONFIRM,
                            v2_restore_days=config.RESTORE_MAX_AGE_DAYS,
                            v2_hover_zoom=config.HOVER_ZOOM,
-                           v2_line_group=config.LINE_GROUP)
+                           v2_line_group=config.LINE_GROUP,
+                           v2_sort_severity=config.SORT_SEVERITY,
+                           v2_table_rows=config.TABLE_ROWS)
 
 
 # ── API key ──────────────────────────────────────────────────────────

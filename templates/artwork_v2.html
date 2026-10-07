@@ -127,6 +127,10 @@
   /* แถวที่รวมหลายจุดในบรรทัดเดียว (ARTWORK_V2_LINE_GROUP · แสดงผลล้วน) — รายการสมาชิกในช่องหมายเหตุ */
   .v2-gm { padding:3px 0; border-top:1px dashed #e2e8f0; }
   .v2-gm:first-child { border-top:0; padding-top:0; }
+  /* ตารางจุดต่างแสดง N แถวแล้วเลื่อนในตาราง (ARTWORK_V2_TABLE_ROWS · แสดงผลล้วน) — หัวตารางค้างไว้ */
+  .v2-tbl-wrap.v2-capped { overflow-y:auto; border:1px solid #e2e8f0; border-radius:6px; }
+  .v2-tbl-wrap.v2-capped thead th { position:sticky; top:0; z-index:1; background:#f8fafc; box-shadow:inset 0 -1px 0 #e2e8f0; }
+  .v2-tbl-more { font-size:12px; margin-top:4px; }
   .v2-gm code { background:#f1f5f9; border-radius:3px; padding:0 3px; font-size:12px; }
   .v2-conf { font-weight:600; white-space:nowrap; } .v2-conf.lo { color:#b45309; }
   .v2-ai { background:#f5f3ff; border:1px solid #ddd6fe; border-radius:6px; padding:8px 10px; font-size:13px; margin-top:10px; }
@@ -145,7 +149,7 @@
 {% endblock %}
 
 {% block content %}
-<div class="v2" id="v2Root" data-can-manage="{{ 1 if can_manage_key else 0 }}" data-version="{{ v2_version }}" data-box-style="{{ v2_box_style }}" data-restore-confirm="{{ 1 if v2_restore_confirm else 0 }}" data-restore-days="{{ v2_restore_days }}" data-hover-zoom="{{ 1 if v2_hover_zoom else 0 }}" data-line-group="{{ 1 if v2_line_group else 0 }}">
+<div class="v2" id="v2Root" data-can-manage="{{ 1 if can_manage_key else 0 }}" data-version="{{ v2_version }}" data-box-style="{{ v2_box_style }}" data-restore-confirm="{{ 1 if v2_restore_confirm else 0 }}" data-restore-days="{{ v2_restore_days }}" data-hover-zoom="{{ 1 if v2_hover_zoom else 0 }}" data-line-group="{{ 1 if v2_line_group else 0 }}" data-sort-severity="{{ 1 if v2_sort_severity else 0 }}" data-table-rows="{{ v2_table_rows }}">
   <div class="v2-head">
     <h2>Artwork V2 <span class="v2-sub">เทียบข้อความสองไฟล์ด้วย Google Cloud Vision OCR · PoC</span></h2>
     <span class="v2-sub">โมดูล {{ v2_version }}</span>

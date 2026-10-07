@@ -230,7 +230,7 @@ def test_flag_default_on_and_reaches_the_page():
 def test_flag_off_renders_exactly_one_row_per_point():
     js = _read(JS)
     assert 'const LINE_GROUP = root.dataset.lineGroup === "1";' in js
-    assert 'if (!LINE_GROUP) return (list || []).map(findingRow).join("");' in js
+    assert 'if (!LINE_GROUP) return bySeverity(list).map(findingRow).join("");' in js
     # ทุกตารางผ่าน rowsHtml (ไม่มีที่ไหนวาดแถวเองอีก)
     assert js.count(".map(findingRow)") == 1
 
