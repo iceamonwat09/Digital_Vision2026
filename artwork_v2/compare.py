@@ -1019,6 +1019,31 @@ def compare(lines_a: List[dict], lines_b: List[dict],
             if (la is not None and la in curved["A"]) or (lb is not None and lb in curved["B"]):
                 f["curved"] = True
 
+    # ตำแหน่งประมาณบนฝั่งที่ไม่พบข้อความ (หายไป/เกินมาฝั่งเดียว) — ซูมไปดูได้ · ไม่ใช้ตัดสินอะไรเลย
+    if config.EST_BOX and findings:
+        if S is None:
+            from . import structure as S
+        if g is None:
+            g, gi = S.build_geo(A, B)
+        if g is not None:
+            for f in findings:
+                for src, dst, gm, sz in (("a", "b", g, size_b), ("b", "a", gi, size_a)):
+                    b = f[src].get("box")
+                    if not b or f[dst].get("box") or f[dst].get("text"):
+                        continue
+                    e = gm.estimate(b, b[3] - b[1])
+                    if e is None:
+                        continue
+                    eb = e["box"]
+                    if sz:              # ต้องอยู่บนภาพอีกฝั่งอย่างน้อยครึ่งกรอบ
+                        iw = min(eb[2], sz[0]) - max(eb[0], 0)
+                        ih = min(eb[3], sz[1]) - max(eb[1], 0)
+                        area = max(1e-6, (eb[2] - eb[0]) * (eb[3] - eb[1]))
+                        if iw <= 0 or ih <= 0 or iw * ih < 0.5 * area:
+                            continue
+                    f[dst]["est_box"] = eb
+                    f[dst]["est"] = {"spread": e["spread"], "anchors": e["anchors"]}
+
     def cov(lines, uns, refl):
         total = sum(len(l["dk"]) for l in lines)
         bad = sum(len(lines[i]["dk"]) for i in uns if i not in refl)

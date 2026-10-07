@@ -182,6 +182,8 @@
   const FRAME_PAD = 0.22;   // ระยะเผื่อจากตัวอักษรถึงเส้นกรอบ = สัดส่วนของความสูงคำ
   // ชี้เมาส์ที่แถวในตาราง ⇒ ซูมภาพไปที่จุดนั้น (ARTWORK_V2_HOVER_ZOOM · ไม่มีค่า = ปิด = แบบเดิม)
   const HOVER_ZOOM = ($("v2Root") && $("v2Root").dataset.hoverZoom) === "1";
+  // ตำแหน่งประมาณบนฝั่งที่ไม่พบข้อความ (ARTWORK_V2_EST_BOX) — แสดงผลล้วน
+  const EST_BOX = ($("v2Root") && $("v2Root").dataset.estBox) === "1";
 
   function hideResult() {
     S.result = null;
@@ -672,14 +674,14 @@
       return z && z.page === S.page[side] && cx >= z.bbox[0] && cx <= z.bbox[0] + z.bbox[2] &&
         cy >= z.bbox[1] && cy <= z.bbox[1] + z.bbox[3];
     });
-    if (pi < 0) { $("v2RunMsg").textContent = "วาดพื้นที่ยกเว้นภายในโซน (จุดกลางของกรอบต้องอยู่ในโซน)"; return false; }
+    if (pi < 0) return "วาดพื้นที่ยกเว้นภายในโซน (จุดกลางของกรอบต้องอยู่ในโซน)";
     const z = S.pairs[pi][side];
-    if ((z.ignore || []).length >= IGNORE_MAX) { $("v2RunMsg").textContent = "พื้นที่ยกเว้นได้สูงสุด " + IGNORE_MAX + " กรอบต่อโซน"; return false; }
+    if ((z.ignore || []).length >= IGNORE_MAX) return "พื้นที่ยกเว้นได้สูงสุด " + IGNORE_MAX + " กรอบต่อโซน";
     const x0 = Math.max(bb[0], z.bbox[0]), y0 = Math.max(bb[1], z.bbox[1]);
     const x1 = Math.min(bb[0] + bb[2], z.bbox[0] + z.bbox[2]), y1 = Math.min(bb[1] + bb[3], z.bbox[1] + z.bbox[3]);
     z.ignore = (z.ignore || []).concat([[x0, y0, x1 - x0, y1 - y0].map(r5)]);
     sel = { pi: pi, side: side };
-    return true;
+    return "";
   }
   function delIgnore(side, tag) {
     const [pi, k] = String(tag).split(":").map(Number);
@@ -836,10 +838,11 @@
       const bb = rect(a.start, normPoint(ov, ev));
       if (a.kind === "ign") {
         if (bb[2] < 0.003 || bb[3] < 0.003) { setMode("pan"); renderZones(); return; }   // คลิกเปล่า = เลิกวาด
-        const ok = addIgnore(side, bb);
-        if (ok && !($("v2DrawCont") && $("v2DrawCont").checked)) setMode("pan");
+        const err = addIgnore(side, bb);
+        if (!err && !($("v2DrawCont") && $("v2DrawCont").checked)) setMode("pan");
         renderZones();
-        if (ok) saveSession();
+        if (err) $("v2RunMsg").innerHTML = '<span class="v2-warn">' + esc(err) + "</span>";   // หลัง renderZones (ซึ่งล้างข้อความ)
+        else saveSession();
         return;
       }
       if (bb[2] < 0.01 || bb[3] < 0.01) { setMode("pan"); renderZones(); return; }   // คลิกเปล่า = เลิกวาด
@@ -1208,6 +1211,15 @@
       const r = ignSentBox(sd, b);
       if (r) g += '<rect class="ign" x="' + r[0] + '" y="' + r[1] + '" width="' + (r[2] - r[0]) + '" height="' + (r[3] - r[1]) + '"><title>พื้นที่ยกเว้น — จุดต่างในนี้ไม่นับ</title></rect>';
     });
+    if (EST_BOX) {
+      (p.findings || []).forEach((f) => {
+        const e = f[side] && !f[side].text && f[side].est_box;
+        if (e && f.id != null) {
+          g += '<rect class="est" data-f="' + esc(f.id) + '" x="' + e[0] + '" y="' + e[1] + '" width="' + (e[2] - e[0]) +
+            '" height="' + (e[3] - e[1]) + '"><title>ตำแหน่งประมาณ (ฝั่งนี้ไม่พบข้อความ)</title></rect>';
+        }
+      });
+    }
     let tags = "";
     (p.findings || []).forEach((f) => {
       if (BOX_STYLE === "span") { g += spanFrame(f, side); return; }
@@ -1603,10 +1615,15 @@
     document.querySelectorAll("#v2PairsRes .v2-res-stage").forEach((st) => {
       const z = zoomStage(st);
       const mine = !!f && card.contains(st);
-      let to = { s: 1, tx: 0, ty: 0 }, note = "";
+      let to = { s: 1, tx: 0, ty: 0 }, note = "", estNote = false;
       if (mine) {
         const sd = f[st.dataset.side];
-        const rect = zoomRect(sd, z.W, z.H, FRAME_PAD, ZOOM.minCtx);
+        let rect = zoomRect(sd, z.W, z.H, FRAME_PAD, ZOOM.minCtx);
+        if (!rect && EST_BOX && sd && !sd.text && sd.est_box) {
+          // ไม่มีข้อความฝั่งนี้ — ซูมไปที่ "ตำแหน่งประมาณ" จากบรรทัดที่ตรงกันข้างเคียง (เห็นบริบทกว้างกว่าปกติ)
+          rect = zoomRect({ box: sd.est_box }, z.W, z.H, FRAME_PAD * 2, ZOOM.minCtx * 1.5);
+          if (rect) { note = "ฝั่งนี้ไม่พบข้อความนี้ — กรอบประสีส้ม = ตำแหน่งประมาณจากบรรทัดข้างเคียง (ไม่ใช่ตำแหน่งที่วัดได้)"; estNote = true; }
+        }
         if (!rect) note = sd && sd.text ? "จุดนี้ไม่มีตำแหน่งบนภาพฝั่งนี้" : "ฝั่งนี้ไม่พบบรรทัดที่ตรงกับอีกฝั่ง";
         else if (z.sw > 0 && z.sh > 0 && z.W > 0 && z.H > 0 && z.img && z.img.naturalWidth) {
           to = zoomView(rect, z.W, z.H, z.sw, z.sh, z.img.naturalWidth / z.sw, ZOOM);
@@ -1615,7 +1632,7 @@
       st.classList.toggle("zoomed", mine);
       st.querySelectorAll("[data-f]").forEach((el) => el.classList.toggle("hov", mine && ids.has(el.dataset.f)));
       const nt = st.querySelector(".v2-znote"), bd = st.querySelector(".v2-zbadge");
-      if (nt) { nt.textContent = note; nt.classList.toggle("on", !!note); }
+      if (nt) { nt.textContent = note; nt.classList.toggle("on", !!note); nt.classList.toggle("est", estNote); }
       if (bd) { bd.textContent = "🔍 ×" + to.s.toFixed(1); bd.classList.toggle("on", to.s > 1); }
       plans.push({ z: z, to: to, path: zoomPath(RZ.cur.get(st) || { s: 1, tx: 0, ty: 0 }, to, z.sw, z.sh, ZOOM) });
     });

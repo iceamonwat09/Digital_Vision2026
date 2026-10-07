@@ -89,7 +89,8 @@ def page():
                            v2_table_rows=config.TABLE_ROWS,
                            v2_side_table=config.SIDE_TABLE,
                            v2_zone_ignore=config.ZONE_IGNORE,
-                           v2_ignore_max=config.IGNORE_MAX)
+                           v2_ignore_max=config.IGNORE_MAX,
+                           v2_est_box=config.EST_BOX)
 
 
 # ── API key ──────────────────────────────────────────────────────────

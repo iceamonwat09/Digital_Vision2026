@@ -98,6 +98,23 @@ class Geo:
         return (self.sx * b[0] + self.tx + lx, self.sy * b[1] + self.ty + ly,
                 self.sx * b[2] + self.tx + lx, self.sy * b[3] + self.ty + ly)
 
+    def estimate(self, b, h: float) -> Optional[dict]:
+        """ตำแหน่งที่น่าจะเป็นของกรอบ ``b`` บนอีกฝั่ง — **แสดงผลล้วน** (ซูมไปดูฝั่งที่ไม่พบข้อความ)
+
+        ให้ค่าเฉพาะเมื่อเชื่อได้: คู่ยึด ≥ 3 · สเกลสมเหตุสมผล · คู่ยึดใกล้สุด 4 คู่ให้การเลื่อน
+        เฉพาะที่ไปทางเดียวกัน (ต่างจากค่ากลางไม่เกิน ``G`` เท่าความสูงบรรทัด) — ไม่งั้น ``None`` (ไม่เดา)"""
+        if len(self.anchors) < 3 or not (0.3 <= self.sx <= 3.0 and 0.3 <= self.sy <= 3.0):
+            return None
+        c = _ctr(b)
+        near = sorted(self.anchors,
+                      key=lambda a: (a[0][0] - c[0]) ** 2 + (a[0][1] - c[1]) ** 2)[:4]
+        lx, ly = self._local(c)
+        ht = max(4.0, h * self.sy)
+        spread = max(((a[1][0] - lx) ** 2 + (a[1][1] - ly) ** 2) ** .5 for a in near) / ht
+        if spread > G:
+            return None
+        return {"box": [round(v, 1) for v in self.box(b)], "spread": round(spread, 2), "anchors": len(near)}
+
     def res(self, la: dict, lb: dict) -> float:
         """ระยะ (เท่าความสูงบรรทัดของ A) ระหว่างจุดกลางที่ทำนายกับจุดกลางจริงของ B"""
         if not (la.get("box") and lb.get("box")):

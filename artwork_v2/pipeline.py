@@ -516,7 +516,7 @@ def settings_snapshot() -> dict:
         "GEO_PAIRING", "RECOMPOSE", "MOVED_TEXT", "RELOCATE", "BALANCED_MOVE",
         "VERTICAL_UPRIGHT", "QUOTE_PUNCT", "SPLIT_MERGED", "AI_EXPERIMENTAL_MODES",
         "PIXEL_VERIFY", "PIXEL_LINE_MODE", "PIXEL_TIME_BUDGET_S", "PIXEL_RASTER",
-        "ZONE_IGNORE", "IGNORE_COVER")}
+        "ZONE_IGNORE", "IGNORE_COVER", "EST_BOX")}
 
 
 def _reread(pairs, srcs, rd, poster, key, calls, warnings, say) -> dict:
