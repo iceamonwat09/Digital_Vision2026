@@ -3,7 +3,7 @@
 
 {% block extra_css %}
 <style>
-  .main-content { max-width: none; }
+  .main-content { max-width: none; overflow: visible; }   /* overflow:auto ทำให้ sticky (ตารางข้างภาพ) ไม่ทำงาน */
   .v2 { max-width: 1600px; margin: 20px auto; padding: 0 16px; }
   .v2-head { display:flex; align-items:baseline; justify-content:space-between; flex-wrap:wrap; gap:8px; }
   .v2-head h2 { margin:0; }
@@ -22,6 +22,7 @@
   .v2-btn:disabled { opacity:.5; cursor:not-allowed; }
   .v2-input { border:1px solid #cbd5e1; border-radius:6px; padding:7px 10px; font:inherit; font-size:14px; min-width:0; }
   .v2-key { width:min(420px,100%); font-family:monospace; }
+  #v2Recent { max-width:calc(100vw - 72px); }   /* ชื่องานยาว ⇒ ไม่ดันหน้าให้เลื่อนแนวนอนบนจอแคบ */
   .v2-panes { display:grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap:14px; }
   @media (max-width: 900px) { .v2-panes { grid-template-columns: minmax(0,1fr); } }
   .v2-pane-h { display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:6px; flex-wrap:wrap; }
@@ -32,9 +33,25 @@
   .v2-stage img { display:block; width:100%; height:auto; pointer-events:none; -webkit-user-drag:none; }
   .v2-stage .v2-ov { position:absolute; inset:0; cursor:crosshair; }
   .v2-mode-pan .v2-stage .v2-ov, .v2-space .v2-stage .v2-ov { cursor:grab; }
+  /* หมุนจอ (ต่อไฟล์) — .v2-rot มีขนาดหลังหมุน · .v2-stage หมุนด้วย transform (โซนหมุนตามเอง พิกัดยังเป็นของหน้าที่ไม่หมุน) */
+  .v2-rot { position:relative; }
+  .v2-rot.on > .v2-stage { position:absolute; left:0; top:0; transform-origin:0 0; }
+  .v2-zone .v2-zrot { position:absolute; right:-2px; top:-20px; font-size:11px; font-weight:700; line-height:16px; padding:0 5px;
+                      border-radius:3px; background:#fff; border:1px solid currentColor; cursor:pointer; white-space:nowrap; }
+  .v2-zone .v2-zrot.on { background:#0f172a; color:#fff !important; border-color:#0f172a; }
+  /* จอหมุน: ป้ายคู่/ชิปมุมย้ายไปชั้นที่ไม่หมุน (.v2-rlab) ⇒ ตัวหนังสือตั้งตรง อยู่มุมซ้ายบน/ขวาบนของกรอบบนจอ */
+  .v2-rot.on .v2-zone > span, .v2-rot.on .v2-zone .v2-zrot { display:none; }
+  .v2-rlab { position:absolute; z-index:2; font-size:12px; font-weight:600; color:#fff; padding:1px 5px; border-radius:3px;
+             white-space:nowrap; pointer-events:none; transform:translateY(-100%); margin-top:-2px; }
+  .v2-rlab.in { transform:none; margin-top:2px; margin-left:2px; }
+  .v2-rlab.v2-zrot { position:absolute; color:inherit; pointer-events:auto; font-size:11px; font-weight:700; line-height:16px;
+                     padding:0 5px; background:#fff; border:1px solid currentColor; cursor:pointer; }
+  .v2-rlab.v2-zrot.on { background:#0f172a; color:#fff !important; border-color:#0f172a; }
+  .v2-thumb { margin-top:10px; display:flex; flex-direction:column; gap:4px; align-items:flex-start; }
+  .v2-thumb canvas { max-width:min(420px,100%); max-height:240px; border:1px solid #cbd5e1; border-radius:6px; background:#fff; }
   .v2-stage-box.panning, .v2-stage-box.panning .v2-ov { cursor:grabbing !important; }
   .v2-zone { position:absolute; border:2px solid; box-sizing:border-box; cursor:move; }
-  .v2-mode-pan .v2-zone, .v2-space .v2-zone { pointer-events:none; }
+  .v2-space .v2-zone { pointer-events:none; }
   .v2-zone.draft { border-style:dashed; pointer-events:none; }
   .v2-zone.sel { box-shadow:0 0 0 1px #fff, 0 0 0 3px rgba(15,23,42,.35); }
   .v2-zone span { position:absolute; left:-2px; top:-20px; font-size:12px; font-weight:600; color:#fff; padding:1px 5px; border-radius:3px; white-space:nowrap; pointer-events:none; }
@@ -145,13 +162,42 @@
   @keyframes v2s { to { transform:rotate(360deg); } }
   .v2-warnbox { background:#fffbeb; border:1px solid #fde68a; border-radius:6px; padding:8px 10px; font-size:13px; margin-top:8px; }
   .v2-hidden { display:none !important; }
+  /* ผลตรวจ: ภาพ 🅰 | ภาพ 🅱 | ตารางจุดต่าง (ARTWORK_V2_SIDE_TABLE · แสดงผลล้วน) */
+  .v2-resgrid { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(380px,0.95fr); gap:14px; margin-top:8px; align-items:start; }
+  .v2-rescol { min-width:0; }
+  .v2-side { min-width:0; position:sticky; top:64px; display:flex; flex-direction:column; gap:6px; }   /* ใต้แถบเมนูบน (sticky ~56 px) */
+  .v2-side-h { display:flex; flex-wrap:wrap; align-items:center; gap:6px; font-size:13px; }
+  .v2-side-tip { margin-left:auto; font-size:12px; }
+  .v2-side-empty { border:1px dashed #cbd5e1; border-radius:8px; padding:24px 12px; text-align:center; font-size:13px; }
+  .v2-tbl-wrap.v2-side-in { margin-top:0; overflow:auto; border:1px solid #e2e8f0; border-radius:8px; background:#fff; }
+  .v2-tbl-side { font-size:12.5px; }
+  .v2-tbl-side thead th { position:sticky; top:0; z-index:1; background:#f8fafc; box-shadow:inset 0 -1px 0 #e2e8f0;
+                          font-size:12px; color:#475569; font-weight:600; padding:6px; white-space:nowrap; }
+  .v2-tbl-side td { padding:6px; word-break:break-word; line-height:1.35; }
+  .v2-tbl-side td:nth-child(1) { color:#64748b; font-variant-numeric:tabular-nums; white-space:nowrap; width:1%; }
+  .v2-tbl-side td:nth-child(2) { width:1%; white-space:nowrap; }
+  .v2-tbl-side td:nth-child(5), .v2-tbl-side td:nth-child(6) { width:1%; white-space:nowrap; text-align:center; }
+  .v2-tbl-side .v2-cls { color:#64748b; font-size:11px; margin-top:2px; white-space:normal; max-width:9em; }
+  .v2-tbl-side tr.v2-s-red > td:first-child { box-shadow:inset 3px 0 0 #dc2626; }
+  .v2-tbl-side tr.v2-s-yellow > td:first-child { box-shadow:inset 3px 0 0 #d97706; }
+  .v2-tbl-side tr.v2-note > td { background:#f8fafc; color:#334155; font-size:12px; border-bottom:1px solid #e2e8f0; padding-top:4px; }
+  .v2-tbl-side tr.v2-note + tr > td { border-top:0; }
+  .v2-nbtn { border:1px solid #cbd5e1; background:#fff; color:#475569; border-radius:999px; width:22px; height:22px; padding:0;
+             font:600 12px/20px system-ui, sans-serif; cursor:pointer; }
+  .v2-nbtn:hover { background:#f1f5f9; }
+  .v2-nbtn.on { background:#1d4ed8; border-color:#1d4ed8; color:#fff; }
+  @media (max-width: 1199px) {
+    .v2-resgrid { grid-template-columns:minmax(0,1fr) minmax(0,1fr); }
+    .v2-side { grid-column:1 / -1; position:static; }
+  }
+  @media (max-width: 700px) { .v2-resgrid { grid-template-columns:minmax(0,1fr); } }
   .v2-legend span { display:inline-flex; align-items:center; gap:4px; margin-right:12px; font-size:12px; color:#475569; }
   .v2-legend i { display:inline-block; width:14px; height:10px; border:2px solid; }
 </style>
 {% endblock %}
 
 {% block content %}
-<div class="v2" id="v2Root" data-can-manage="{{ 1 if can_manage_key else 0 }}" data-version="{{ v2_version }}" data-box-style="{{ v2_box_style }}" data-restore-confirm="{{ 1 if v2_restore_confirm else 0 }}" data-restore-days="{{ v2_restore_days }}" data-hover-zoom="{{ 1 if v2_hover_zoom else 0 }}" data-line-group="{{ 1 if v2_line_group else 0 }}" data-sort-severity="{{ 1 if v2_sort_severity else 0 }}" data-table-rows="{{ v2_table_rows }}">
+<div class="v2" id="v2Root" data-can-manage="{{ 1 if can_manage_key else 0 }}" data-version="{{ v2_version }}" data-box-style="{{ v2_box_style }}" data-restore-confirm="{{ 1 if v2_restore_confirm else 0 }}" data-restore-days="{{ v2_restore_days }}" data-hover-zoom="{{ 1 if v2_hover_zoom else 0 }}" data-line-group="{{ 1 if v2_line_group else 0 }}" data-sort-severity="{{ 1 if v2_sort_severity else 0 }}" data-table-rows="{{ v2_table_rows }}" data-side-table="{{ 1 if v2_side_table else 0 }}">
   <div class="v2-head">
     <h2>Artwork V2 <span class="v2-sub">เทียบข้อความสองไฟล์ด้วย Google Cloud Vision OCR · PoC</span></h2>
     <span class="v2-sub">โมดูล {{ v2_version }}</span>
@@ -191,9 +237,10 @@
     <h3>③ วาดโซนคู่ <span class="v2-muted" id="v2JobLabel"></span></h3>
     <div class="v2-muted">ลากกรอบบน 🅰 แล้วลากกรอบที่ตรงกันบน 🅱 (1 คู่ = 1 โซนต่อฝั่ง · สูงสุด 8 คู่) — ส่งให้ Google เฉพาะภาพในกรอบเท่านั้น · ลากกรอบให้ครอบบรรทัดเต็ม ๆ ไม่ตัดผ่านตัวหนังสือ</div>
     <div class="v2-tools">
-      <button data-mode="draw" class="on" title="ลากที่ว่างเพื่อวาดโซน · ลากโซนเพื่อย้าย · ลากมุมเพื่อย่อขยาย">✏️ วาด/แก้โซน</button>
-      <button data-mode="pan" title="ลากเพื่อเลื่อนภาพ">✋ เลื่อนภาพ</button>
-      <span class="v2-muted">ล้อเมาส์ = ซูม · ลากด้วยปุ่มกลาง หรือกด Space ค้างแล้วลาก = เลื่อนภาพ · คลิกโซนแล้วกด Delete = ลบ</span>
+      <button data-mode="pan" class="on" title="ลากที่ว่าง = เลื่อนภาพ · คลิกโซน = เลือก · ลากโซน = ย้าย · ลากจุดจับ = ย่อขยาย">🖐 เลือก / เลื่อนภาพ</button>
+      <button data-mode="draw" title="ลากบนภาพเพื่อวาดโซนใหม่ (Esc = ยกเลิก)">✏️ วาดโซน</button>
+      <label class="v2-muted" title="ติ๊กไว้ = วาดได้หลายโซนติดกันโดยไม่ต้องกดปุ่มวาดใหม่ · คลิกเปล่า/Esc = เลิกวาด"><input type="checkbox" id="v2DrawCont"> วาดต่อเนื่อง</label>
+      <span class="v2-muted">ล้อเมาส์ = ซูม · ปุ่มกลางลาก / Space ค้างแล้วลาก = เลื่อนภาพทุกโหมด · ลูกศร = ขยับโซนที่เลือก (Shift = ×10) · Delete = ลบ · ↻ ที่มุมโซน = มุมที่ส่งให้ Vision</span>
     </div>
     <div class="v2-panes" style="margin-top:8px">
       <div>
@@ -204,8 +251,9 @@
           <button data-z="fitw" title="ย่อ/ขยายให้พอดีความกว้างกล่อง">⤢ พอดีความกว้าง</button>
           <button data-z="fitp" title="เห็นทั้งหน้าในกล่องเดียว">⛶ ทั้งหน้า</button>
           <button data-z="100">100%</button>
+          <button data-z="rot" class="v2-rotbtn" title="หมุนจอของไฟล์นี้ 90° ตามเข็ม — หมุนให้อ่านตัวหนังสือได้ตรง · โซนของไฟล์นี้จะส่งภาพให้ Vision ในแนวที่เห็นบนจอ (เปลี่ยนรายโซนได้ที่ ↻ มุมโซน)">↻ <span class="v2-rotdeg">0°</span></button>
         </div>
-        <div class="v2-stage-box" id="v2BoxA"><div class="v2-stage" id="v2StageA"><img id="v2ImgA" alt="ภาพตัวอย่างไฟล์ A" draggable="false"><div class="v2-ov" data-side="a"></div></div></div>
+        <div class="v2-stage-box" id="v2BoxA"><div class="v2-rot" id="v2RotA"><div class="v2-stage" id="v2StageA"><img id="v2ImgA" alt="ภาพตัวอย่างไฟล์ A" draggable="false"><div class="v2-ov" data-side="a"></div></div></div></div>
       </div>
       <div>
         <div class="v2-pane-h"><b>🅱 <span id="v2NameB"></span></b><label class="v2-muted">หน้า <select id="v2PageB" class="v2-input"></select></label></div>
@@ -215,11 +263,13 @@
           <button data-z="fitw" title="ย่อ/ขยายให้พอดีความกว้างกล่อง">⤢ พอดีความกว้าง</button>
           <button data-z="fitp" title="เห็นทั้งหน้าในกล่องเดียว">⛶ ทั้งหน้า</button>
           <button data-z="100">100%</button>
+          <button data-z="rot" class="v2-rotbtn" title="หมุนจอของไฟล์นี้ 90° ตามเข็ม — หมุนให้อ่านตัวหนังสือได้ตรง · โซนของไฟล์นี้จะส่งภาพให้ Vision ในแนวที่เห็นบนจอ (เปลี่ยนรายโซนได้ที่ ↻ มุมโซน)">↻ <span class="v2-rotdeg">0°</span></button>
         </div>
-        <div class="v2-stage-box" id="v2BoxB"><div class="v2-stage" id="v2StageB"><img id="v2ImgB" alt="ภาพตัวอย่างไฟล์ B" draggable="false"><div class="v2-ov" data-side="b"></div></div></div>
+        <div class="v2-stage-box" id="v2BoxB"><div class="v2-rot" id="v2RotB"><div class="v2-stage" id="v2StageB"><img id="v2ImgB" alt="ภาพตัวอย่างไฟล์ B" draggable="false"><div class="v2-ov" data-side="b"></div></div></div></div>
       </div>
     </div>
     <div class="v2-pairs" id="v2Pairs"></div>
+    <div class="v2-thumb v2-hidden" id="v2Thumb"><div class="v2-muted" id="v2ThumbCap"></div><canvas id="v2ThumbCv"></canvas></div>
     <div class="v2-row" style="margin-top:10px">
       <button class="v2-btn primary" id="v2Run">ตรวจ</button>
       <button class="v2-btn" id="v2Clear">ล้างโซนทั้งหมด</button>

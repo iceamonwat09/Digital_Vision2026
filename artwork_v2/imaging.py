@@ -252,6 +252,46 @@ def render_zone_sharp(src: "Source", page: int, bbox: List[float],
     return img, jpg, info
 
 
+ROTATIONS = (0, 90, 180, 270)
+
+
+def norm_rot(v) -> int:
+    """มุมหมุนของโซน (องศาตามเข็ม) · ค่าแปลก/ไม่มี = 0"""
+    try:
+        r = int(round(float(v))) % 360
+    except (TypeError, ValueError):
+        return 0
+    return r if r in ROTATIONS else 0
+
+
+def rotate_img(img: np.ndarray, rot: int) -> np.ndarray:
+    """หมุนภาพตามเข็ม ``rot`` องศา (ทิศเดียวกับ CSS ``rotate()`` บนหน้าวาดโซน) · 0 = ภาพเดิม (ไม่คัดลอก)"""
+    if rot == 90:
+        return cv2.rotate(img, cv2.ROTATE_90_CLOCKWISE)
+    if rot == 180:
+        return cv2.rotate(img, cv2.ROTATE_180)
+    if rot == 270:
+        return cv2.rotate(img, cv2.ROTATE_90_COUNTERCLOCKWISE)
+    return img
+
+
+def unrot_box(box, W: float, H: float, rot: int) -> tuple:
+    """กรอบ ``(x0,y0,x1,y1)`` บนภาพที่หมุนแล้ว (กว้าง ``W`` สูง ``H``) → กรอบบนภาพก่อนหมุน"""
+    x0, y0, x1, y1 = [float(v) for v in box]
+    if rot == 90:
+        return (y0, W - x1, y1, W - x0)
+    if rot == 180:
+        return (W - x1, H - y1, W - x0, H - y0)
+    if rot == 270:
+        return (H - y1, x0, H - y0, x1)
+    return (x0, y0, x1, y1)
+
+
+def unrot_size(W: float, H: float, rot: int) -> tuple:
+    """ขนาดภาพก่อนหมุน จากขนาดภาพที่หมุนแล้ว"""
+    return (H, W) if rot in (90, 270) else (W, H)
+
+
 def _pix_to_bgr(pix) -> np.ndarray:
     img = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width, pix.n)
     if pix.n == 1:

@@ -47,6 +47,9 @@ def parse_pairs(raw) -> List[dict]:
             except (TypeError, ValueError):
                 raise ValueError("คู่ที่ %d: หน้าไม่ถูกต้อง" % n)
             item[s] = {"page": page, "bbox": bb}
+            rot = imaging.norm_rot(z.get("rotate")) if config.ZONE_ROTATE else 0
+            if rot:
+                item[s]["rotate"] = rot          # มุม 0 ไม่ใส่คีย์ ⇒ โซนเดิมได้ข้อมูลเดิมทุกตัว
         out.append(item)
     return out
 
@@ -185,12 +188,18 @@ def _run(job_id, raw_pairs, poster, progress, sharpness, ai_mode, ai_poster,
             if sharp == "max" and not mono:     # คมสูงสุดวัดงบจากภาพสี ⇒ เทา/ขาวดำใช้ 400 dpi
                 got = imaging.render_zone_sharp(srcs[s], z["page"], z["bbox"],
                                                 imaging.pair_image_budget(2))
+            rot = z.get("rotate", 0)
             if got is not None:
                 sent, jpeg, rinfo = got
                 einfo = {"warnings": [], "downscale": 1.0,
                          "quality": config.JPEG_QUALITIES[0]}
+                if rot:
+                    sent = imaging.rotate_img(sent, rot)
+                    jpeg = imaging.encode_jpeg(sent, einfo["quality"])
             else:
                 img, rinfo = srcs[s].render_zone(z["page"], z["bbox"])
+                if rot:
+                    img = imaging.rotate_img(img, rot)
                 rinfo["sharpness"] = "standard" if sharp == "standard" else (
                     "max→standard" if srcs[s].is_pdf else "source_pixels")
                 if mono:
@@ -225,10 +234,14 @@ def _run(job_id, raw_pairs, poster, progress, sharpness, ai_mode, ai_poster,
             fname = "p%d_%s.jpg" % (n, s)
             with open(os.path.join(rd, "img", fname), "wb") as f:
                 f.write(jpeg)
+            if z.get("rotate"):
+                rinfo["rotate"] = z["rotate"]
             side = {"page": z["page"], "bbox": z["bbox"], "image": fname,
                     "render": rinfo, "encode": einfo,
                     "sent_px": [int(sent.shape[1]), int(sent.shape[0])],
                     "jpeg_bytes": len(jpeg), "sha1": imaging.sha1_bytes(jpeg)[:12]}
+            if z.get("rotate"):
+                side["rotate"] = z["rotate"]     # ภาพที่ส่ง (และพิกัดทุกกรอบ) อยู่ในแนวที่หมุนแล้ว
             for w in rinfo.get("warnings", []) + einfo.get("warnings", []):
                 warnings.append("คู่ %d ฝั่ง %s: %s" % (n, s.upper(), w))
             pr["sides"][s] = side
@@ -401,7 +414,7 @@ def settings_snapshot() -> dict:
         "ENDPOINT", "MODEL", "LANGUAGE_HINTS", "TIMEOUT_S", "RETRIES",
         "MAX_REQUEST_BYTES", "MAX_IMAGE_BYTES", "MAX_IMAGE_MP", "JPEG_QUALITIES",
         "PDF_ZONE_DPI", "PDF_ZONE_DPI_MAX", "ZONE_MIN_LONG_SIDE",
-        "SHARPNESS", "SHARP_FILL", "SHARP_MAX_RENDERS", "COLOR_MODE", "BW_BLOCK_MM", "BW_C",
+        "SHARPNESS", "SHARP_FILL", "SHARP_MAX_RENDERS", "COLOR_MODE", "BW_BLOCK_MM", "BW_C", "ZONE_ROTATE",
         "CONF_FAIL", "CONF_LOW", "COVERAGE_MIN", "PAIR_MIN_SIM", "PAIR_MIN_RUN",
         "PAIR_MAX_DIST", "ROW_MERGE_ENABLED", "ROW_MAX_ANGLE",
         "PUNCT_CAN_FAIL", "CURVED_GROUP_ENABLED", "TILT_ANGLE", "CURVED_NEIGHBOR_MAX_CHARS",
@@ -483,7 +496,15 @@ def _reread(pairs, srcs, rd, poster, key, calls, warnings, say) -> dict:
                     continue
                 box = (ob[0] / ow * zw, ob[1] / oh * zh, ob[2] / ow * zw, ob[3] / oh * zh)
                 hgt = max(4.0, box[3] - box[1]) * 2.5
-            nb = _px_box_to_norm(box, side["bbox"], zw, zh, hgt * 1.0, hgt * 0.45)
+            rot = side.get("rotate", 0)
+            px_, py_ = hgt * 1.0, hgt * 0.45
+            if rot:
+                # กรอบบนภาพที่หมุนแล้ว → ภาพก่อนหมุน (ระยะเผื่อแนวนอน/ตั้งสลับกันที่ 90/270)
+                box = imaging.unrot_box(box, zw, zh, rot)
+                zw, zh = imaging.unrot_size(zw, zh, rot)
+                if rot in (90, 270):
+                    px_, py_ = py_, px_
+            nb = _px_box_to_norm(box, side["bbox"], zw, zh, px_, py_)
             if nb is None:
                 continue
             crops[s] = nb
@@ -512,6 +533,8 @@ def _reread(pairs, srcs, rd, poster, key, calls, warnings, say) -> dict:
                 img, info = srcs[s].render_zone(side["page"], crops[s],
                                                 scale=config.REREAD_SCALE,
                                                 max_side=config.REREAD_MAX_SIDE)
+            if side.get("rotate"):
+                img = imaging.rotate_img(img, side["rotate"])      # ครอปซูมอยู่ในแนวเดียวกับรอบหลัก
             mono_rr = rnd.get("color_mode") in ("gray", "bw")   # อ่านซ้ำด้วยสีเดียวกับรอบหลัก
             if mono_rr:
                 img, cinfo = imaging.to_color_mode(img, rnd["color_mode"], info.get("dpi"))

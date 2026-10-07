@@ -101,18 +101,35 @@ class _Doc:
             pass
 
 
+def _rot(g, rot):
+    if rot == 90:
+        return cv2.rotate(g, cv2.ROTATE_90_CLOCKWISE)
+    if rot == 180:
+        return cv2.rotate(g, cv2.ROTATE_180)
+    if rot == 270:
+        return cv2.rotate(g, cv2.ROTATE_90_COUNTERCLOCKWISE)
+    return g
+
+
 class PairCheck:
-    """คู่โซนหนึ่งคู่ · ``zA``/``zB`` = {"page", "bbox", "W", "H"} (W/H = ขนาดภาพที่ส่ง)"""
+    """คู่โซนหนึ่งคู่ · ``zA``/``zB`` = {"page", "bbox", "W", "H", "rot"?} (W/H = ขนาดภาพที่ส่ง)
+
+    ``rot`` = มุมที่ภาพที่ส่งถูกหมุน (ตามเข็ม) ⇒ ทุกพิกัด/ภาพในคลาสนี้อยู่ในแนวของภาพที่ส่ง ·
+    ไม่มี/0 = เส้นทางเดิมเป๊ะ"""
 
     def __init__(self, path_a: str, path_b: str, zA: dict, zB: dict):
         self.dA, self.dB = _Doc(path_a), _Doc(path_b)
         self.z = {"A": zA, "B": zB}
+        self.rot = {"A": int(zA.get("rot") or 0), "B": int(zB.get("rot") or 0)}
         self.geo = {}
+        self.wh0 = {}
         for s, d in (("A", self.dA), ("B", self.dB)):
             z = self.z[s]
             pw, ph = d.page_pt(z["page"])
             x, y, w, h = z["bbox"]
-            self.geo[s] = (x * pw, y * ph, w * pw / z["W"], h * ph / z["H"])
+            W0, H0 = (z["H"], z["W"]) if self.rot[s] in (90, 270) else (z["W"], z["H"])
+            self.wh0[s] = (W0, H0)
+            self.geo[s] = (x * pw, y * ph, w * pw / W0, h * ph / H0)
         self.ginfo: dict = {}
         self.ok = self._global_align()
 
@@ -124,12 +141,28 @@ class PairCheck:
         g = self.geo[s]
         return g[0] + x * g[2], g[1] + y * g[3]
 
-    def _zone_img(self, s, dpi_scale=1.0):
+    def _box_pt(self, s, b):
+        """กรอบบนภาพที่ส่ง (แนวที่หมุนแล้ว) → สี่เหลี่ยมบนหน้า (pt)"""
+        r = self.rot[s]
+        if r:
+            W, H = self.z[s]["W"], self.z[s]["H"]
+            x0, y0, x1, y1 = b
+            if r == 90:
+                b = (y0, W - x1, y1, W - x0)
+            elif r == 180:
+                b = (W - x1, H - y1, W - x0, H - y0)
+            else:
+                b = (H - y1, x0, H - y0, x1)
+        return self._px2pt(s, b[0], b[1]) + self._px2pt(s, b[2], b[3])
+
+    def _render(self, s, b, dpi):
         d = self.dA if s == "A" else self.dB
+        return _rot(d.render(self.z[s]["page"], self._box_pt(s, b), dpi), self.rot[s])
+
+    def _zone_img(self, s, dpi_scale=1.0):
         z, g = self.z[s], self.geo[s]
         dpi = 72.0 / g[2] * dpi_scale
-        rect = (g[0], g[1], g[0] + z["W"] * g[2], g[1] + z["H"] * g[3])
-        return d.render(z["page"], rect, dpi)
+        return self._render(s, (0, 0, z["W"], z["H"]), dpi)
 
     def _global_align(self) -> bool:
         t0 = time.time()
@@ -192,11 +225,9 @@ class PairCheck:
                                [1, 1, 1, 1]])
         m = SEARCH_MM / 25.4 * 72 / self.geo["B"][2]
         bB = (q[0].min() - m, q[1].min() - m, q[0].max() + m, q[1].max() + m)
-        ra = self._px2pt("A", bA[0], bA[1]) + self._px2pt("A", bA[2], bA[3])
-        rb = self._px2pt("B", bB[0], bB[1]) + self._px2pt("B", bB[2], bB[3])
         phys = self.gscale * self.geo["B"][2] / self.geo["A"][2]
-        pa = self.dA.render(self.z["A"]["page"], ra, dpi)
-        pb = self.dB.render(self.z["B"]["page"], rb, dpi / phys)
+        pa = self._render("A", bA, dpi)
+        pb = self._render("B", bB, dpi / phys)
         return pa, pb, dpi
 
     def check(self, side, box) -> dict:
@@ -423,9 +454,11 @@ def run(pairs: List[dict], srcs: dict, rd: str, warnings: List[str], say=None) -
         try:
             pc = PairCheck(a.path, b.path,
                            {"page": sd["a"]["page"], "bbox": sd["a"]["bbox"],
-                            "W": sd["a"]["sent_px"][0], "H": sd["a"]["sent_px"][1]},
+                            "W": sd["a"]["sent_px"][0], "H": sd["a"]["sent_px"][1],
+                            "rot": sd["a"].get("rotate", 0)},
                            {"page": sd["b"]["page"], "bbox": sd["b"]["bbox"],
-                            "W": sd["b"]["sent_px"][0], "H": sd["b"]["sent_px"][1]})
+                            "W": sd["b"]["sent_px"][0], "H": sd["b"]["sent_px"][1],
+                            "rot": sd["b"].get("rotate", 0)})
         except Exception as e:   # noqa: BLE001
             plog["error"] = str(e)[:200]
             warnings.append("คู่ %d: ตรวจด้วยภาพไม่ได้ (%s)" % (pr["n"], str(e)[:80]))

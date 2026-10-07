@@ -175,6 +175,9 @@ def last_pairs(d: str, runs: Optional[list] = None) -> list:
                 if bb is None:
                     raise ValueError("bbox")
                 item[s] = {"page": int(sd.get("page", 0)), "bbox": [round(v, 5) for v in bb]}
+                rot = imaging.norm_rot(sd.get("rotate"))
+                if rot:
+                    item[s]["rotate"] = rot
             out.append(item)
         return out
     except (OSError, ValueError, TypeError, AttributeError):

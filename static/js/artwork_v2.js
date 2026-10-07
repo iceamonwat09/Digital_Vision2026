@@ -7,7 +7,7 @@
 
   const COLORS = ["#2563eb", "#db2777", "#059669", "#7c3aed", "#ea580c", "#0891b2", "#4d7c0f", "#be123c"];
   const MAX_PAIRS = 8;
-  const S = { job: null, page: { a: 0, b: 0 }, pairs: [], result: null, busy: false };
+  const S = { job: null, page: { a: 0, b: 0 }, rot: { a: 0, b: 0 }, pairs: [], result: null, busy: false };
   const LS_KEY = "artwork_v2.session";
 
   function esc(s) {
@@ -45,9 +45,9 @@
     try {
       if (!S.job) return;
       const t = Date.now();
-      localStorage.setItem(LS_KEY, JSON.stringify({ job: S.job.id, pairs: S.pairs, page: S.page, t: t }));
+      localStorage.setItem(LS_KEY, JSON.stringify({ job: S.job.id, pairs: S.pairs, page: S.page, rot: S.rot, t: t }));
       const all = readJobZones();
-      all[S.job.id] = { pairs: S.pairs, page: S.page, t: t };
+      all[S.job.id] = { pairs: S.pairs, page: S.page, rot: S.rot, t: t };
       const ids = Object.keys(all).sort((x, y) => (all[y].t || 0) - (all[x].t || 0));
       ids.slice(ZONES_KEEP).forEach((k) => { delete all[k]; });
       localStorage.setItem(LS_ZONES, JSON.stringify(all));
@@ -200,7 +200,19 @@
     catch (e) { $("v2RunMsg").innerHTML = '<span class="v2-bad">เปิดผลรอบ ' + esc(run) + " ไม่ได้: " + esc(e.message) + "</span>"; }
   }
 
-  async function openJob(id, pairs, page) {
+  // มุมจอเริ่มต้นของงาน: ที่จำไว้ในเบราว์เซอร์ก่อน · ไม่มี ⇒ มุมของโซนแรกในแต่ละฝั่ง (โซนจากรอบตรวจล่าสุด)
+  function rotFrom(rot, pairs) {
+    const ok = (v) => [0, 90, 180, 270].indexOf(+v) >= 0;
+    const out = { a: 0, b: 0 };
+    ["a", "b"].forEach((s) => {
+      if (rot && ok(rot[s])) { out[s] = +rot[s]; return; }
+      const z = (pairs || []).map((p) => p && p[s]).find((x) => x);
+      if (z && ok(z.rotate)) out[s] = +z.rotate;
+    });
+    return out;
+  }
+
+  async function openJob(id, pairs, page, rot) {
     hideResult();
     if ($("v2Restore")) $("v2Restore").style.display = "none";   // เปิดงานอื่นแล้ว แถบถามเรื่องงานค้างหมดความหมาย
     let m;
@@ -216,6 +228,7 @@
       if (saved && Array.isArray(saved.pairs) && saved.pairs.length) {
         pairs = saved.pairs;
         page = page || saved.page;
+        rot = rot || saved.rot;
       } else if (Array.isArray(m.last_pairs) && m.last_pairs.length) {
         pairs = m.last_pairs;
         page = page || { a: m.last_pairs[0].a.page || 0, b: m.last_pairs[0].b.page || 0 };
@@ -227,6 +240,7 @@
     S.pairs = pairs;
     sel = null;
     S.page = page || { a: 0, b: 0 };
+    S.rot = rotFrom(rot, pairs);
     $("v2DrawCard").classList.remove("v2-hidden");
     $("v2JobLabel").textContent = "· งาน " + m.id;
     $("v2NameA").textContent = m.files.a.name;
@@ -235,6 +249,8 @@
     fillPages($("v2PageB"), m.files.b.pages || 1, S.page.b);
     loadPreview("a");
     loadPreview("b");
+    syncZbar("a");
+    syncZbar("b");
     renderZones();
     saveSession();
     if (m.runs && m.runs.length) {
@@ -273,12 +289,16 @@
   const ZOOM_MIN = 10, ZOOM_MAX = 400, MIN_ZONE = 0.005;
   const HANDLES = ["nw", "n", "ne", "e", "se", "s", "sw", "w"];
   const Z = { a: { pct: 100, fit: true }, b: { pct: 100, fit: true } };
-  let mode = "draw";              // draw = ลากที่ว่างเพื่อวาด · pan = ลากเพื่อเลื่อนภาพ
+  // pan (ค่าเริ่มต้น · แบบหน้า Artwork เดิม) = ลากที่ว่างเพื่อเลื่อนภาพ · คลิก/ลากโซนเพื่อเลือก ย้าย ย่อขยาย
+  // draw = ลากที่ว่างเพื่อวาดโซนใหม่ · วาดเสร็จกลับเป็น pan (ยกเว้นติ๊ก "วาดต่อเนื่อง")
+  let mode = "pan";
   let sel = null;                 // {pi, side} โซนที่เลือก (กด Delete เพื่อลบ)
   let spaceDown = false;
 
   const boxOf = (side) => $(side === "a" ? "v2BoxA" : "v2BoxB");
   const stageOf = (side) => $(side === "a" ? "v2StageA" : "v2StageB");
+  const rotWrapOf = (side) => $(side === "a" ? "v2RotA" : "v2RotB");
+  const rotOf = (side) => (S.rot && S.rot[side]) || 0;
   const imgOf = (side) => $(side === "a" ? "v2ImgA" : "v2ImgB");
   const ovOf = (side) => document.querySelector('.v2-ov[data-side="' + side + '"]');
   const zbarOf = (side) => document.querySelector('.v2-zbar[data-side="' + side + '"]');
@@ -288,8 +308,46 @@
     return [im.naturalWidth || 0, im.naturalHeight || 0];
   }
 
+  // ── หมุนจอ (ต่อไฟล์ · แบบหน้า Artwork เดิม) ──
+  // ภาพ+โซนหมุนด้วย CSS transform ทั้งก้อน ⇒ สูตรพิกัดโซน (สัดส่วนของหน้าที่ไม่หมุน) ไม่เปลี่ยน
+  // แปลงเฉพาะพิกัดเมาส์ (normPoint) และทิศลูกศร (unrotDelta) กลับเป็นของหน้าที่ไม่หมุน
+  function applyRot(side) {
+    const wrap = rotWrapOf(side), st = stageOf(side), r = rotOf(side);
+    if (!wrap || !st) return;
+    const W = st.offsetWidth, H = st.offsetHeight;
+    ["r90", "r180", "r270"].forEach((c) => wrap.classList.toggle(c, c === "r" + r));
+    if (!r || !W || !H) {
+      wrap.classList.remove("on");
+      wrap.style.width = ""; wrap.style.height = ""; st.style.transform = "";
+      rotLabels(side);
+      return;
+    }
+    const swap = r === 90 || r === 270;
+    wrap.classList.add("on");
+    wrap.style.width = (swap ? H : W) + "px";
+    wrap.style.height = (swap ? W : H) + "px";
+    st.style.transform = r === 90 ? "translate(" + H + "px,0) rotate(90deg)"
+      : r === 180 ? "translate(" + W + "px," + H + "px) rotate(180deg)"
+      : "translate(0," + W + "px) rotate(270deg)";
+    rotLabels(side);                                   // ป้ายบนจอหมุนเป็น px ⇒ วางใหม่ทุกครั้งที่ขนาดเปลี่ยน
+  }
+  // ขนาดเนื้อหาในกล่องเลื่อน (หลังหมุน)
+  function shownWH(side) {
+    const st = stageOf(side), wrap = rotWrapOf(side);
+    if (rotOf(side) && wrap) return [wrap.offsetWidth, wrap.offsetHeight];
+    return [st.offsetWidth, st.offsetHeight];
+  }
+  function unrotDelta(dx, dy, r) {
+    if (r === 90) return [dy, -dx];
+    if (r === 180) return [-dx, -dy];
+    if (r === 270) return [-dy, dx];
+    return [dx, dy];
+  }
+
   function fitPct(side, whole) {
-    const [w, h] = natSize(side), box = boxOf(side);
+    let [w, h] = natSize(side);
+    const box = boxOf(side);
+    if (rotOf(side) === 90 || rotOf(side) === 270) [w, h] = [h, w];     // พอดี "ด้านที่หันเข้าหากล่อง"
     if (!w || !h || !box) return 100;
     let p = (box.clientWidth - 2) / w * 100;
     if (whole) p = Math.min(p, (box.clientHeight - 2) / h * 100);
@@ -303,13 +361,15 @@
     const z = Z[side];
     z.fit = !!keepFit;
     if (!w || !box) { z.pct = pct; syncZbar(side); return; }
-    const oldW = st.offsetWidth || w * z.pct / 100;
+    const old = shownWH(side);
     const ax = anchor ? anchor[0] : box.clientWidth / 2, ay = anchor ? anchor[1] : box.clientHeight / 2;
-    const fx = (box.scrollLeft + ax) / oldW, fy = (box.scrollTop + ay) / (st.offsetHeight || 1);
+    const fx = (box.scrollLeft + ax) / (old[0] || w * z.pct / 100), fy = (box.scrollTop + ay) / (old[1] || 1);
     z.pct = pct;
     st.style.width = Math.round(w * pct / 100) + "px";
-    box.scrollLeft = fx * st.offsetWidth - ax;
-    box.scrollTop = fy * st.offsetHeight - ay;
+    applyRot(side);
+    const now = shownWH(side);
+    box.scrollLeft = fx * now[0] - ax;
+    box.scrollTop = fy * now[1] - ay;
     syncZbar(side);
   }
 
@@ -319,6 +379,26 @@
     bar.querySelector('[data-z="range"]').value = Z[side].pct;
     bar.querySelector(".v2-zpct").textContent = Z[side].pct + "%";
     bar.querySelector('[data-z="fitw"]').classList.toggle("on", Z[side].fit === true);
+    const rb = bar.querySelector('[data-z="rot"]');
+    if (rb) {
+      rb.querySelector(".v2-rotdeg").textContent = rotOf(side) + "°";
+      rb.classList.toggle("on", rotOf(side) !== 0);
+    }
+  }
+
+  // ปุ่ม ↻ = หมุนจอของไฟล์นี้ 90° ตามเข็ม · โซนของไฟล์นี้ที่ยังไม่เคยตั้งมุมเอง ⇒ ส่งภาพในแนวที่เห็นบนจอ
+  function rotateView(side) {
+    S.rot[side] = (rotOf(side) + 90) % 360;
+    S.pairs.forEach((p) => {
+      const z = p[side];
+      if (!z || z.rotManual) return;
+      if (S.rot[side]) z.rotate = S.rot[side]; else delete z.rotate;
+    });
+    setZoom(side, Z[side].fit ? fitPct(side, false) : Z[side].pct, [0, 0], Z[side].fit);
+    boxOf(side).scrollLeft = 0;
+    boxOf(side).scrollTop = 0;
+    renderZones();
+    saveSession();
   }
 
   function refit(side) { if (Z[side].fit) setZoom(side, fitPct(side, false), null, true); }
@@ -332,7 +412,9 @@
       else if (k === "fitw") setZoom(side, fitPct(side, false), null, true);
       else if (k === "fitp") setZoom(side, fitPct(side, true));
       else if (k === "100") setZoom(side, 100);
+      else if (ev.target.closest && ev.target.closest('[data-z="rot"]')) rotateView(side);
     });
+    bar.querySelector('[data-z="range"]').addEventListener("dblclick", () => setZoom(side, fitPct(side, false), null, true));
     bar.querySelector('[data-z="range"]').addEventListener("input", (ev) => setZoom(side, +ev.target.value));
   });
 
@@ -361,8 +443,11 @@
   ["a", "b"].forEach((side) => {
     const box = boxOf(side);
     box.addEventListener("pointerdown", (ev) => {
-      const want = ev.button === 1 || (ev.button === 0 && (mode === "pan" || spaceDown));
+      if (ev.target && ev.target.closest && ev.target.closest("[data-rlab]")) return;   // ชิปมุมบนจอหมุน
+      const onZone = !!(ev.target && ev.target.closest && ev.target.closest(".v2-zone[data-pi]"));
+      const want = ev.button === 1 || (ev.button === 0 && (spaceDown || (mode === "pan" && !onZone)));
       if (!want || !S.job) return;
+      if (ev.button === 0 && mode === "pan" && sel) { sel = null; renderZones(); }   // คลิกที่ว่าง = เลิกเลือก
       ev.stopPropagation();
       panStart(side, ev);
     }, { capture: true });
@@ -378,11 +463,12 @@
   });
 
   function setMode(m) {
-    mode = m;
-    root.classList.toggle("v2-mode-pan", m === "pan");
+    mode = m === "draw" ? "draw" : "pan";
+    root.classList.toggle("v2-mode-pan", mode === "pan");
     document.querySelectorAll("[data-mode]").forEach((b) => b.classList.toggle("on", b.dataset.mode === m));
   }
   document.querySelectorAll("[data-mode]").forEach((b) => b.addEventListener("click", () => setMode(b.dataset.mode)));
+  setMode(mode);
 
   function typing(ev) {
     const t = ev.target;
@@ -398,9 +484,23 @@
     if ((ev.key === "Delete" || ev.key === "Backspace") && sel) {
       ev.preventDefault();
       removeZone(sel.pi, sel.side);
-    } else if (ev.key === "Escape" && sel) {
+    } else if (ev.key === "Escape" && (sel || mode === "draw")) {
       sel = null;
+      if (mode === "draw") setMode("pan");
       renderZones();
+    } else if (sel && /^Arrow/.test(ev.key)) {
+      // ลูกศร = ขยับโซนที่เลือก 1 px บนจอ (Shift = 10 px) ตามทิศบนจอแม้จอหมุนอยู่
+      const z = S.pairs[sel.pi] && S.pairs[sel.pi][sel.side];
+      const st = stageOf(sel.side);
+      if (!z || !st.offsetWidth) return;
+      ev.preventDefault();
+      const k = ev.shiftKey ? 10 : 1;
+      const d = { ArrowLeft: [-k, 0], ArrowRight: [k, 0], ArrowUp: [0, -k], ArrowDown: [0, k] }[ev.key];
+      if (!d) return;
+      const u = unrotDelta(d[0], d[1], rotOf(sel.side));
+      z.bbox = editBox(z.bbox, "move", u[0] / st.offsetWidth, u[1] / st.offsetHeight).map(r5);
+      renderZones();
+      saveSession();
     }
   });
   document.addEventListener("keyup", (ev) => {
@@ -429,6 +529,7 @@
         ov.appendChild(zoneEl(z.bbox, COLORS[i % COLORS.length], "คู่ " + (i + 1), false, i, side, on));
       });
       if (draft && draft.side === side) ov.appendChild(zoneEl(draft.bbox, "#0f172a", "", true));
+      rotLabels(side);
     });
     const box = $("v2Pairs");
     box.innerHTML = S.pairs.map((p, i) => {
@@ -439,7 +540,98 @@
     }).join("") || '<span class="v2-muted">ยังไม่มีโซน</span>';
     const pend = S.pairs.find((p) => !p.a || !p.b);
     if (!S.busy) $("v2RunMsg").textContent = pend ? "คู่ที่ยังไม่ครบต้องวาดอีกฝั่งก่อนกดตรวจ" : "";
+    drawThumb();
   }
+
+  // ตัวอย่าง "ภาพที่จะส่งให้ Vision" ของโซนที่เลือก (ตัดจากภาพตัวอย่างบนจอ + หมุนตามมุมของโซน)
+  // แสดงผลล้วน — ภาพที่ส่งจริงเรนเดอร์ใหม่จากไฟล์ต้นฉบับที่ความละเอียดเต็ม
+  function drawThumb() {
+    const box = $("v2Thumb"), cv = $("v2ThumbCv");
+    if (!box || !cv) return;
+    const z = sel && S.pairs[sel.pi] && S.pairs[sel.pi][sel.side];
+    const im = sel && imgOf(sel.side);
+    if (!z || !im || !im.naturalWidth || z.page !== S.page[sel.side]) { box.classList.add("v2-hidden"); return; }
+    const [nw, nh] = [im.naturalWidth, im.naturalHeight];
+    const sx = z.bbox[0] * nw, sy = z.bbox[1] * nh, sw = Math.max(1, z.bbox[2] * nw), sh = Math.max(1, z.bbox[3] * nh);
+    const r = z.rotate || 0, swap = r === 90 || r === 270;
+    const k = Math.min(1, 420 / Math.max(swap ? sh : sw, 1), 240 / Math.max(swap ? sw : sh, 1));
+    const w = Math.max(1, Math.round(sw * k)), h = Math.max(1, Math.round(sh * k));
+    cv.width = swap ? h : w;
+    cv.height = swap ? w : h;
+    const ctx = cv.getContext("2d");
+    ctx.save();
+    ctx.translate(cv.width / 2, cv.height / 2);
+    ctx.rotate(r * Math.PI / 180);
+    ctx.drawImage(im, sx, sy, sw, sh, -w / 2, -h / 2, w, h);
+    ctx.restore();
+    $("v2ThumbCap").textContent = "🔎 ภาพที่จะส่งให้ Vision — คู่ " + (sel.pi + 1) + " ฝั่ง " +
+      (sel.side === "a" ? "🅰" : "🅱") + " · หมุน " + r + "° (ตัวอย่างความละเอียดต่ำ · ตัวหนังสือควรตั้งตรงอ่านได้)";
+    box.classList.remove("v2-hidden");
+  }
+
+  // จอหมุน: ป้าย "คู่ N" + ชิปมุม วางบนชั้นที่ไม่หมุน (มุมซ้ายบน/ขวาบนของกรอบตามที่เห็นบนจอ)
+  function dispRect(bb, r) {
+    const [x, y, w, h] = bb;
+    if (r === 90) return [1 - (y + h), x, h, w];
+    if (r === 180) return [1 - (x + w), 1 - (y + h), w, h];
+    if (r === 270) return [y, 1 - (x + w), h, w];
+    return [x, y, w, h];
+  }
+  function rotLabels(side) {
+    const wrap = rotWrapOf(side);
+    if (!wrap) return;
+    wrap.querySelectorAll(":scope > .v2-rlab").forEach((e) => e.remove());
+    const r = rotOf(side);
+    if (!r) return;
+    const W = wrap.offsetWidth, H = wrap.offsetHeight;
+    S.pairs.forEach((p, i) => {
+      const z = p[side];
+      if (!z || z.page !== S.page[side]) return;
+      const [u, v, w] = dispRect(z.bbox, r);
+      const col = COLORS[i % COLORS.length];
+      const inside = v * H < 22;                         // ชิดขอบบน ⇒ วางในกรอบ (ไม่ถูกตัด)
+      const lab = document.createElement("span");
+      lab.className = "v2-rlab" + (inside ? " in" : "");
+      lab.textContent = "คู่ " + (i + 1);
+      lab.style.background = col;
+      lab.style.left = (u * W) + "px";
+      lab.style.top = (v * H) + "px";
+      wrap.appendChild(lab);
+      const zr = z.rotate || 0;
+      const c = document.createElement("b");
+      c.className = "v2-rlab v2-zrot" + (inside ? " in" : "") + (zr ? " on" : "");
+      c.dataset.rlab = String(i);
+      c.textContent = "↻" + zr + "°";
+      c.style.color = col;
+      c.title = "มุมของภาพโซนนี้ที่ส่งให้ Vision (คลิกวน 0° → 90° → 180° → 270°)";
+      c.style.left = ((u + w) * W) + "px";
+      c.style.top = (v * H) + "px";
+      c.style.marginLeft = inside ? "-46px" : "-44px";
+      wrap.appendChild(c);
+    });
+  }
+  // ชิปบนชั้นที่ไม่หมุน — วนมุมของโซน (เหมือนชิปในกรอบ)
+  function cycleZoneRot(pi, side) {
+    const z = S.pairs[pi] && S.pairs[pi][side];
+    if (!z) return;
+    const nr = ((z.rotate || 0) + 90) % 360;
+    if (nr) z.rotate = nr; else delete z.rotate;
+    z.rotManual = true;
+    sel = { pi: pi, side: side };
+    renderZones();
+    saveSession();
+  }
+  ["a", "b"].forEach((side) => {
+    const wrap = rotWrapOf(side);
+    if (!wrap) return;
+    wrap.addEventListener("pointerdown", (ev) => {
+      const c = ev.target && ev.target.closest ? ev.target.closest("[data-rlab]") : null;
+      if (!c) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      cycleZoneRot(+c.dataset.rlab, side);
+    });
+  });
 
   function zoneEl(bb, color, label, draft, pi, side, selected) {
     const d = document.createElement("div");
@@ -459,6 +651,17 @@
       s.textContent = label;
       s.style.background = color;
       d.appendChild(s);
+    }
+    if (!draft && pi != null) {
+      const z = S.pairs[pi] && S.pairs[pi][side];
+      const r = (z && z.rotate) || 0;
+      const c = document.createElement("b");
+      c.className = "v2-zrot" + (r ? " on" : "");
+      c.dataset.rot = "1";
+      c.textContent = "↻" + r + "°";
+      c.style.color = color;
+      c.title = "มุมของภาพโซนนี้ที่ส่งให้ Vision (คลิกวน 0° → 90° → 180° → 270°) · ดูตัวอย่างใต้ภาพ";
+      d.appendChild(c);
     }
     if (selected) {
       HANDLES.forEach((h) => {
@@ -488,10 +691,13 @@
     saveSession();
   });
 
+  // พิกัดเมาส์ → สัดส่วนบนหน้าที่ไม่หมุน (กรอบของ ov บนจอ = กรอบหลังหมุน)
   function normPoint(ov, ev) {
     const r = ov.getBoundingClientRect();
-    return [Math.min(1, Math.max(0, (ev.clientX - r.left) / r.width)),
-            Math.min(1, Math.max(0, (ev.clientY - r.top) / r.height))];
+    const u = (ev.clientX - r.left) / r.width, v = (ev.clientY - r.top) / r.height;
+    const rot = rotOf(ov.dataset.side);
+    const p = rot === 90 ? [v, 1 - u] : rot === 180 ? [1 - u, 1 - v] : rot === 270 ? [1 - v, u] : [u, v];
+    return [Math.min(1, Math.max(0, p[0])), Math.min(1, Math.max(0, p[1]))];
   }
 
   const r5 = (v) => Math.round(v * 1e5) / 1e5;
@@ -514,9 +720,16 @@
     let act = null;        // {kind: "draw"|"edit", start, pi, h, b0, moved}
     const side = ov.dataset.side;
     ov.addEventListener("pointerdown", (ev) => {
-      if (ev.button !== 0 || !S.job || mode === "pan" || spaceDown) return;
-      const start = normPoint(ov, ev);
+      if (ev.button !== 0 || !S.job || spaceDown) return;
       const t = ev.target;
+      if (t && t.dataset && t.dataset.rot) {          // ชิป ↻ = วนมุมของโซนนี้
+        const zEl0 = t.closest(".v2-zone[data-pi]");
+        if (zEl0) cycleZoneRot(+zEl0.dataset.pi, side);
+        ev.preventDefault();
+        ev.stopPropagation();
+        return;
+      }
+      const start = normPoint(ov, ev);
       const zEl = t && t.closest ? t.closest(".v2-zone[data-pi]") : null;
       if (zEl) {
         const pi = +zEl.dataset.pi;
@@ -527,6 +740,7 @@
                 b0: z.bbox.slice(), moved: false };
         renderZones();
       } else {
+        if (mode !== "draw") return;                  // โหมดเลือก: ที่ว่างถูกใช้เลื่อนภาพแล้ว
         if (sel) { sel = null; renderZones(); }
         act = { kind: "draw", start: start };
       }
@@ -549,8 +763,11 @@
       act = null;
       if (a.kind === "edit") { if (a.moved) saveSession(); return; }
       const bb = rect(a.start, normPoint(ov, ev));
-      if (bb[2] < 0.01 || bb[3] < 0.01) { renderZones(); return; }   // คลิกเปล่า
-      addZone(side, { page: S.page[side], bbox: bb.map(r5) });
+      if (bb[2] < 0.01 || bb[3] < 0.01) { setMode("pan"); renderZones(); return; }   // คลิกเปล่า = เลิกวาด
+      const nz = { page: S.page[side], bbox: bb.map(r5) };
+      if (rotOf(side)) nz.rotate = rotOf(side);       // โซนที่วาดขณะหมุนจอ ⇒ ส่งภาพในแนวที่เห็น
+      if (!($("v2DrawCont") && $("v2DrawCont").checked)) setMode("pan");
+      addZone(side, nz);
     });
     ov.addEventListener("pointercancel", () => {
       if (act && act.kind === "edit") {
@@ -671,9 +888,34 @@
       '<img loading="lazy" alt="ภาพหลักฐานจุด ' + esc(f.id) + '" src="' + url + '"></a>';
   }
 
+  // ── ตารางข้างภาพ (ARTWORK_V2_SIDE_TABLE · แสดงผลล้วน) ──
+  //  · ตารางอยู่ขวามือของภาพ 🅰/🅱 ⇒ ภาพกับตารางอยู่บนจอพร้อมกัน · คอลัมน์กระชับ (ชนิดอยู่ใต้ระดับ)
+  //  · หมายเหตุ (โน้ตระบบ + ภาพหลักฐาน + คำตอบ AI) พับไว้ในแถวย่อยใต้แถว ⇒ กด ⓘ เปิดทีละแถว / "หมายเหตุทั้งหมด"
+  //  · แถวย่อยไม่มี data-f ⇒ ไม่ถูกนับเป็นจุดต่าง ไม่ซูม ไม่ถูกเลือก
+  const SIDE_TABLE = root.dataset.sideTable === "1";
+  function sideRow(id, sevKey, sevTxt, clsHtml, aHtml, bHtml, confHtml, notesHtml, extra) {
+    const has = !!notesHtml;
+    return '<tr class="click v2-s-' + esc(sevKey) + (extra.cls || "") + '" data-f="' + esc(id) + '"' + (extra.attr || "") +
+      "><td>" + esc(extra.label || id) + '</td><td><span class="v2-sev ' + esc(sevKey) + '">' + esc(sevTxt) +
+      '</span><div class="v2-cls">' + clsHtml + "</div></td><td>" + aHtml + "</td><td>" + bHtml + "</td><td>" + confHtml +
+      "</td><td>" + (has ? '<button type="button" class="v2-nbtn" data-nt="' + esc(id) +
+        '" aria-expanded="false" title="เปิด/ปิดหมายเหตุของแถวนี้">ⓘ</button>' : "") + "</td></tr>" +
+      (has ? '<tr class="v2-note" data-note="' + esc(id) + '" hidden><td></td><td colspan="5">' + notesHtml + "</td></tr>" : "");
+  }
+  function confShort(f) {
+    const c = f.confidence;
+    return '<span class="v2-conf' + (c != null && c < 0.8 ? " lo" : "") + '" title="ความมั่นใจของ Vision ตรงตัวอักษรที่ต่าง · A ' +
+      pct(f.a.conf) + " · B " + pct(f.b.conf) + '">' + pct(c) + "</span>";
+  }
+
   function findingRow(f) {
     const sev = SEV_TH[f.severity] || f.severity;
     const notes = (f.notes || []).filter((n) => !/^AI: /.test(n)).map(esc).join("<br>") + pixelEvidence(f);
+    if (SIDE_TABLE) {
+      return sideRow(f.id, f.severity, sev, esc(CLASS_TH[f.class] || f.class) +
+        (f.source === "ai" ? '<span class="v2-ai-tag">AI</span>' : ""),
+        cellText(f, "a"), cellText(f, "b"), confShort(f), notes + aiNote(f), {});
+    }
     return '<tr class="click" data-f="' + f.id + '"><td>' + f.id + '</td><td><span class="v2-sev ' + f.severity + '">' +
       sev + "</span></td><td>" + esc(CLASS_TH[f.class] || f.class) +
       (f.source === "ai" ? '<span class="v2-ai-tag">AI</span>' : "") +
@@ -737,6 +979,15 @@
         frag(m.a.frag) + " → " + frag(m.b.frag) + ' <span class="v2-muted">· ' + pct(m.confidence) + "</span>" +
         (notes ? "<br>" + notes : "") + aiNote(m) + "</div>";
     }).join("");
+    if (SIDE_TABLE) {
+      return sideRow(g.id, g.severity, SEV_TH[g.severity] || g.severity,
+        ms.length + " จุดในบรรทัดเดียวกัน" + (f0.source === "ai" ? '<span class="v2-ai-tag">AI</span>' : "") +
+        "<br>" + esc(cls.join(" · ")),
+        markedMulti(f0.a.text, ms.map((m) => m.a.span)), markedMulti(f0.b.text, ms.map((m) => m.b.span)),
+        confShort({ confidence: lo(ms.map((m) => m.confidence)), a: { conf: lo(ms.map((m) => m.a.conf)) },
+                    b: { conf: lo(ms.map((m) => m.b.conf)) } }),
+        per, { cls: " v2-grp", attr: ' data-members="' + ids.join(",") + '"', label: ids.join("·") });
+    }
     return '<tr class="click v2-grp" data-f="' + g.id + '" data-members="' + ids.join(",") + '"><td>' + ids.join("·") +
       '</td><td><span class="v2-sev ' + g.severity + '">' + (SEV_TH[g.severity] || g.severity) + "</span></td><td>" +
       ms.length + " จุดในบรรทัดเดียวกัน" + (f0.source === "ai" ? '<span class="v2-ai-tag">AI</span>' : "") +
@@ -787,7 +1038,10 @@
     return { a: side("a"), b: side("b") };
   }
 
-  const TBL_HEAD = '<thead><tr><th>#</th><th>ระดับ</th><th>ชนิด</th><th>🅰</th><th>🅱</th><th>ความมั่นใจ (Vision)</th><th>หมายเหตุ</th></tr></thead>';
+  const TBL_HEAD = SIDE_TABLE
+    ? '<thead><tr><th>#</th><th>ระดับ</th><th>🅰</th><th>🅱</th><th title="ความมั่นใจของ Vision ตรงตัวอักษรที่ต่าง">%</th>' +
+      '<th><button type="button" class="v2-nbtn v2-nall" title="เปิด/ปิดหมายเหตุทุกแถวในตารางนี้" aria-expanded="false">ⓘ</button></th></tr></thead>'
+    : '<thead><tr><th>#</th><th>ระดับ</th><th>ชนิด</th><th>🅰</th><th>🅱</th><th>ความมั่นใจ (Vision)</th><th>หมายเหตุ</th></tr></thead>';
 
   const AI_MODE_TH = { assist: "อัลกอริทึมตัดสิน + AI เสริม", judge: "AI ตัดสินหลัก", raw: "AI ตัดสินจากข้อมูลดิบ", off: "ปิด AI" };
   function folded(title, list) {
@@ -968,14 +1222,56 @@
         (p.coverage != null ? " · จับคู่ข้อความได้ " + Math.round(p.coverage * 100) + "%" +
           (p.coverage_ignored ? " (อัลกอริทึม — ไม่ใช้ตัดสินในโหมดข้อมูลดิบ)" : "") : "") +
         (p.reasons && p.reasons.length ? ' <span class="v2-muted">(' + p.reasons.map(esc).join(" · ") + ")</span>" : "") +
+        (SIDE_TABLE ? sideLayout(p, r, rows) :
         '<div class="v2-panes" style="margin-top:8px"><div>🅰 ' + sideInfo(p.sides.a) + svgFor(p, "a", r) +
         "</div><div>🅱 " + sideInfo(p.sides.b) + svgFor(p, "b", r) + "</div></div>" +
-        (rows ? '<div class="v2-tbl-wrap v2-main"><table class="v2-tbl">' + TBL_HEAD + "<tbody>" +
-          rows + '</tbody></table></div><div class="v2-tbl-more v2-muted" hidden></div>' : (p.unreadable ? "" : '<div class="v2-muted" style="margin-top:6px">ไม่พบจุดต่าง</div>')) +
+        (rows ? mainTable(rows, "", "") + '<div class="v2-tbl-more v2-muted" hidden></div>' : (p.unreadable ? "" : '<div class="v2-muted" style="margin-top:6px">ไม่พบจุดต่าง</div>'))) +
         aiBox(p) + debHtml + "</div>";
     }).join("");
     if (HOVER_ZOOM) zoomAfterRender();
     fitRows();
+    if (SIDE_TABLE) {
+      fitSide();
+      document.querySelectorAll("#v2PairsRes .v2-res-stage img").forEach((im) => im.addEventListener("load", fitSide));
+    }
+  }
+
+  // ตารางจุดต่างหลัก (ตัวเดียวที่ถูกจำกัดความสูง — รายการพับไม่ถูกจำกัด)
+  function mainTable(rows, wrapCls, tblCls) {
+    return '<div class="v2-tbl-wrap v2-main' + wrapCls + '"><table class="v2-tbl' + tblCls + '">' + TBL_HEAD +
+      "<tbody>" + rows + "</tbody></table></div>";
+  }
+  // ภาพ 🅰 | ภาพ 🅱 | ตารางจุดต่าง (สูงเท่าภาพ แต่ไม่เกินจอ · หัวตารางค้าง)
+  function sideLayout(p, r, rows) {
+    const fs = p.findings || [];
+    const nr = fs.filter((f) => f.severity === "red").length, ny = fs.filter((f) => f.severity === "yellow").length;
+    const head = '<div class="v2-side-h"><b>จุดต่าง</b>' +
+      (nr ? ' <span class="v2-sev red">ต่าง ' + nr + "</span>" : "") +
+      (ny ? ' <span class="v2-sev yellow">ไม่มั่นใจ ' + ny + "</span>" : "") +
+      (!nr && !ny ? ' <span class="v2-muted">ไม่มี</span>' : "") +
+      '<span class="v2-muted v2-side-tip">ชี้แถว = ซูมภาพ · ⓘ = หมายเหตุ</span></div>';
+    const body = rows ? mainTable(rows, " v2-side-in", " v2-tbl-side")
+      : '<div class="v2-side-empty v2-muted">' + (p.unreadable ? "อ่านไม่ได้ — ไม่มีตารางจุดต่าง" : "ไม่พบจุดต่าง") + "</div>";
+    return '<div class="v2-resgrid"><div class="v2-rescol">🅰 ' + sideInfo(p.sides.a) + svgFor(p, "a", r) +
+      '</div><div class="v2-rescol">🅱 ' + sideInfo(p.sides.b) + svgFor(p, "b", r) +
+      '</div><div class="v2-side">' + head + body + "</div></div>";
+  }
+  // ความสูงของตารางข้างภาพ = ความสูงของคอลัมน์ภาพ (ไม่ต่ำกว่า 360 px · ไม่เกินความสูงจอ)
+  function fitSide() {
+    if (!SIDE_TABLE) return;
+    document.querySelectorAll("#v2PairsRes .v2-resgrid").forEach((g) => {
+      const box = g.querySelector(".v2-side-in");
+      if (!box) return;
+      const cols = g.querySelectorAll(".v2-rescol");
+      const stack = window.matchMedia && window.matchMedia("(max-width: 1199px)").matches;
+      const nav = document.querySelector(".navbar");
+      const h = stack ? window.innerHeight * 0.6
+        : Math.min(Math.max.apply(null, Array.from(cols).map((c) => c.offsetHeight)),
+                   window.innerHeight - (nav ? nav.offsetHeight : 0) - 24);
+      const head = g.querySelector(".v2-side-h");
+      const mh = Math.max(360, Math.round(h - (stack || !head ? 0 : head.offsetHeight + 6))) + "px";
+      if (box.style.maxHeight !== mh) box.style.maxHeight = mh;
+    });
   }
 
   // ตารางจุดต่างหลักแสดง TABLE_ROWS แถวแล้วเลื่อนในตาราง ⇒ ภาพที่ซูมยังอยู่บนจอ (ARTWORK_V2_TABLE_ROWS · 0 = แบบเดิม)
@@ -984,6 +1280,7 @@
   const TABLE_ROWS = Math.max(0, parseInt(root.dataset.tableRows || "0", 10) || 0);
   function fitRows() {
     if (!TABLE_ROWS) return;
+    if (SIDE_TABLE) { fitSide(); return; }            // ตารางข้างภาพ: สูงตามภาพแทนจำนวนแถว
     document.querySelectorAll("#v2PairsRes .v2-tbl-wrap.v2-main").forEach((w) => {
       const trs = w.querySelectorAll("tbody > tr");
       const head = w.querySelector("thead");
@@ -1004,6 +1301,7 @@
       }
     });
   }
+  if (SIDE_TABLE && !TABLE_ROWS) window.addEventListener("resize", fitSide);
   if (TABLE_ROWS && window.ResizeObserver) {
     let fitQ = 0;
     new ResizeObserver(() => {
@@ -1016,6 +1314,21 @@
   }
 
   $("v2PairsRes").addEventListener("click", (ev) => {
+    const nb = ev.target.closest ? ev.target.closest(".v2-nbtn") : null;
+    if (nb) {
+      // หมายเหตุ: เปิด/ปิดแถวย่อย — ไม่เลือกแถว ไม่ค้างการซูม
+      ev.stopPropagation();
+      const tbl = nb.closest("table");
+      const open = nb.getAttribute("aria-expanded") !== "true";
+      const btns = nb.classList.contains("v2-nall") ? tbl.querySelectorAll(".v2-nbtn") : [nb];
+      btns.forEach((b) => {
+        b.setAttribute("aria-expanded", open ? "true" : "false");
+        b.classList.toggle("on", open);
+        const row = b.dataset.nt != null ? tbl.querySelector('tr.v2-note[data-note="' + CSS.escape(b.dataset.nt) + '"]') : null;
+        if (row) row.hidden = !open;
+      });
+      return;
+    }
     const tr = ev.target.closest ? ev.target.closest("tr[data-f]") : null;
     if (!tr) return;
     const id = tr.dataset.f;
@@ -1337,7 +1650,7 @@
   loadRecent();
   const sess = loadSession();
   if (sess && sess.job) {
-    if ($("v2Root") && $("v2Root").dataset.restoreConfirm === "0") openJob(sess.job, sess.pairs || [], sess.page);
+    if ($("v2Root") && $("v2Root").dataset.restoreConfirm === "0") openJob(sess.job, sess.pairs || [], sess.page, sess.rot);
     else offerRestore(sess);
   }
 
@@ -1359,7 +1672,7 @@
     bar.style.display = "";
     $("v2RestoreYes").addEventListener("click", () => {
       bar.style.display = "none";
-      openJob(s.job, Array.isArray(s.pairs) ? s.pairs : [], s.page);
+      openJob(s.job, Array.isArray(s.pairs) ? s.pairs : [], s.page, s.rot);
     });
     $("v2RestoreNo").addEventListener("click", () => {
       bar.style.display = "none";

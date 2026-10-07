@@ -97,6 +97,8 @@ def build_text(r: dict) -> str:
                   sd["sent_px"], en.get("quality"), en.get("downscale"), sd["jpeg_bytes"],
                   sd["sha1"], sd.get("request_index"), sd.get("ok"),
                   (" ERROR=" + sd["error"]) if sd.get("error") else ""))
+            if sd.get("rotate"):
+                a("     rotate: %d° ตามเข็ม (ภาพที่ส่ง + พิกัดกรอบทุกตัวอยู่ในแนวที่หมุนแล้ว)" % sd["rotate"])
             if rd.get("color_mode") in ("gray", "bw"):
                 a("     color: mode=%s%s" % (rd["color_mode"], (" block=%spx C=%s ink=%.1f%%" % (
                     rd.get("bw_block_px"), rd.get("bw_c"), 100.0 * (rd.get("ink_frac") or 0)))

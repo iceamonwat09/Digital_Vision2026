@@ -86,7 +86,8 @@ def page():
                            v2_hover_zoom=config.HOVER_ZOOM,
                            v2_line_group=config.LINE_GROUP,
                            v2_sort_severity=config.SORT_SEVERITY,
-                           v2_table_rows=config.TABLE_ROWS)
+                           v2_table_rows=config.TABLE_ROWS,
+                           v2_side_table=config.SIDE_TABLE)
 
 
 # ── API key ──────────────────────────────────────────────────────────
