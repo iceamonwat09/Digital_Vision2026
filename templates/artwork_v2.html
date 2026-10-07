@@ -53,6 +53,14 @@
   .v2-zone { position:absolute; border:2px solid; box-sizing:border-box; cursor:move; }
   .v2-space .v2-zone { pointer-events:none; }
   .v2-zone.draft { border-style:dashed; pointer-events:none; }
+  .v2-ign { position:absolute; box-sizing:border-box; border:1.5px dashed #b91c1c; pointer-events:none;
+    background:repeating-linear-gradient(135deg, rgba(185,28,28,.16) 0 5px, rgba(185,28,28,.04) 5px 10px); }
+  .v2-ign.draft { border-color:#0f172a; }
+  .v2-ign b { position:absolute; right:-1px; top:-1px; transform:translate(50%,-50%); width:16px; height:16px; line-height:15px;
+    text-align:center; font-size:11px; border-radius:50%; background:#b91c1c; color:#fff; cursor:pointer; pointer-events:auto; }
+  .v2-mode-ign .v2-stage .v2-ov { cursor:crosshair; }
+  .v2-mode-ign .v2-zone { pointer-events:none; }
+  .v2-res-stage rect.ign { fill:rgba(185,28,28,.10); stroke:#b91c1c; stroke-width:1; stroke-dasharray:4 3; vector-effect:non-scaling-stroke; }
   .v2-zone.sel { box-shadow:0 0 0 1px #fff, 0 0 0 3px rgba(15,23,42,.35); }
   .v2-zone span { position:absolute; left:-2px; top:-20px; font-size:12px; font-weight:600; color:#fff; padding:1px 5px; border-radius:3px; white-space:nowrap; pointer-events:none; }
   .v2-h { position:absolute; width:10px; height:10px; background:#fff; border:2px solid #0f172a; border-radius:2px; box-sizing:border-box; }
@@ -142,6 +150,7 @@
   .v2-debris summary { cursor:pointer; color:#475569; font-size:13px; }
   .v2-sev.dismissed { background:#f1f5f9; color:#475569; }
   .v2-sev.moved { background:#f1f5f9; color:#475569; } .v2-sev.pixel_same { background:#dcfce7; color:#166534; }
+  .v2-sev.excluded { background:#fee2e2; color:#7f1d1d; }
   .v2-pv { display:block; margin-top:4px; } .v2-pv img { display:block; max-width:100%; max-height:110px; border:1px solid #e2e8f0; border-radius:4px; background:#fff; }
   /* แถวที่รวมหลายจุดในบรรทัดเดียว (ARTWORK_V2_LINE_GROUP · แสดงผลล้วน) — รายการสมาชิกในช่องหมายเหตุ */
   .v2-gm { padding:3px 0; border-top:1px dashed #e2e8f0; }
@@ -197,7 +206,7 @@
 {% endblock %}
 
 {% block content %}
-<div class="v2" id="v2Root" data-can-manage="{{ 1 if can_manage_key else 0 }}" data-version="{{ v2_version }}" data-box-style="{{ v2_box_style }}" data-restore-confirm="{{ 1 if v2_restore_confirm else 0 }}" data-restore-days="{{ v2_restore_days }}" data-hover-zoom="{{ 1 if v2_hover_zoom else 0 }}" data-line-group="{{ 1 if v2_line_group else 0 }}" data-sort-severity="{{ 1 if v2_sort_severity else 0 }}" data-table-rows="{{ v2_table_rows }}" data-side-table="{{ 1 if v2_side_table else 0 }}">
+<div class="v2" id="v2Root" data-can-manage="{{ 1 if can_manage_key else 0 }}" data-version="{{ v2_version }}" data-box-style="{{ v2_box_style }}" data-restore-confirm="{{ 1 if v2_restore_confirm else 0 }}" data-restore-days="{{ v2_restore_days }}" data-hover-zoom="{{ 1 if v2_hover_zoom else 0 }}" data-line-group="{{ 1 if v2_line_group else 0 }}" data-sort-severity="{{ 1 if v2_sort_severity else 0 }}" data-table-rows="{{ v2_table_rows }}" data-side-table="{{ 1 if v2_side_table else 0 }}" data-zone-ignore="{{ 1 if v2_zone_ignore else 0 }}" data-ignore-max="{{ v2_ignore_max }}">
   <div class="v2-head">
     <h2>Artwork V2 <span class="v2-sub">เทียบข้อความสองไฟล์ด้วย Google Cloud Vision OCR · PoC</span></h2>
     <span class="v2-sub">โมดูล {{ v2_version }}</span>
@@ -239,6 +248,7 @@
     <div class="v2-tools">
       <button data-mode="pan" class="on" title="ลากที่ว่าง = เลื่อนภาพ · คลิกโซน = เลือก · ลากโซน = ย้าย · ลากจุดจับ = ย่อขยาย">🖐 เลือก / เลื่อนภาพ</button>
       <button data-mode="draw" title="ลากบนภาพเพื่อวาดโซนใหม่ (Esc = ยกเลิก)">✏️ วาดโซน</button>
+      {% if v2_zone_ignore %}<button data-mode="ign" title="ลากภายในโซนเพื่อกำหนดพื้นที่ที่ไม่ต้องตรวจ (เช่นช่องพิมพ์ inkjet · ป้ายขนาดของโรงพิมพ์) — จุดต่างในพื้นที่นี้ไปอยู่รายการพับ ไม่นับในผลตัดสิน · คลิก ✕ บนกรอบเพื่อลบ">⛔ พื้นที่ยกเว้น</button>{% endif %}
       <label class="v2-muted" title="ติ๊กไว้ = วาดได้หลายโซนติดกันโดยไม่ต้องกดปุ่มวาดใหม่ · คลิกเปล่า/Esc = เลิกวาด"><input type="checkbox" id="v2DrawCont"> วาดต่อเนื่อง</label>
       <span class="v2-muted">ล้อเมาส์ = ซูม · ปุ่มกลางลาก / Space ค้างแล้วลาก = เลื่อนภาพทุกโหมด · ลูกศร = ขยับโซนที่เลือก (Shift = ×10) · Delete = ลบ · ↻ ที่มุมโซน = มุมที่ส่งให้ Vision</span>
     </div>

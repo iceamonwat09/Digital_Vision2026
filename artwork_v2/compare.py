@@ -871,11 +871,18 @@ def compare(lines_a: List[dict], lines_b: List[dict],
     """``size_a``/``size_b`` = ขนาดภาพที่ส่ง (W, H) — ใช้ตัดสิน "ชิดขอบโซน" ของเศษอักขระ
     (ไม่ส่ง = ใช้แค่เกณฑ์ความมั่นใจ)"""
     merges: List[dict] = []
+    splits: List[dict] = []
     A, B = _prep(lines_a, "A", merges), _prep(lines_b, "B", merges)
     S = g = gi = None
-    if config.GEO_PAIRING or config.RECOMPOSE or config.RELOCATE:
+    if config.GEO_PAIRING or config.RECOMPOSE or config.RELOCATE or config.SPLIT_MERGED:
         from . import structure as S
         g, gi = S.build_geo(A, B)
+    if config.SPLIT_MERGED and g is not None:
+        for _ in range(30):
+            if not (S.split_merged(B, A, g, "B", splits) or S.split_merged(A, B, gi, "A", splits)):
+                break
+        if splits:
+            g, gi = S.build_geo(A, B)
 
     def _pair():
         if config.GEO_PAIRING and g is not None:
@@ -1034,6 +1041,7 @@ def compare(lines_a: List[dict], lines_b: List[dict],
         "reflow_edges": reflow,
         "reflow_lines": reflow_lines,
         "row_merges": merges,
+        "row_splits": splits,
         "pair_methods": methods,
         "coverage_a": None if cov_a is None else round(cov_a, 4),
         "coverage_b": None if cov_b is None else round(cov_b, 4),

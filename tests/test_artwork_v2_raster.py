@@ -1,0 +1,275 @@
+"""Artwork V2 — หลักฐานภาพบน PDF ที่เป็น "ภาพสแกนล้วน" (7 ต.ค. รอบ 5 · Friskies · ``PIXEL_RASTER``)
+
+ที่มา: Friskies 🅱 = PDF ที่มีแต่ภาพ JPEG 300 dpi ทั้งหน้า · เดิมเรนเดอร์ 1600 dpi ⇒ ขยายจุดรบกวนของ
+JPEG/การสแกน ⇒ ทุกจุด "ตรวจด้วยภาพไม่ได้" · ตอนนี้โซนที่เป็นภาพสแกนล้วนเทียบที่ความละเอียดจริง
+ของภาพ + เบลอ σ 0.8 px ทั้งสองฝั่ง
+
+สิ่งที่ล็อก (กฎเหล็กข้อ 2 — "ภาพเหมือน" ต้องไม่กลืนของจริง):
+* ตรวจจับ: ภาพเดียวคลุมโซน ≥ 90% **และ** ไม่มีของเวกเตอร์ในโซนเลย · ข้อความเวกเตอร์ทับภาพพื้นหลัง
+  (แบบ AvoDerm M2) ไม่ใช่ภาพสแกน · ชั้น OCR ที่มองไม่เห็นไม่นับ · สแกนหยาบกว่า 200 dpi = เส้นทางเดิม
+* PDF เวกเตอร์ทั้งคู่ ⇒ ภาพครอปเท่าเดิมทุกพิกเซล (เปิด/ปิดธงเหมือนกัน)
+* ภาพสแกนที่เหมือนต้นฉบับ ⇒ SAME · ลบจุด/จุดทศนิยม/เครื่องหมายทั้งตัว ⇒ **ไม่มีทาง SAME**
+  (ไล่ 200/300/600 dpi × JPEG q75/q92)
+* ปิดธง ⇒ ไม่มีจุดไหนถูกพับเลย (พฤติกรรมเดิม)
+"""
+
+from __future__ import annotations
+
+import io
+import os
+import random
+import sys
+
+import numpy as np
+import pytest
+
+sys.path.insert(0, os.path.dirname(__file__))
+
+from artwork_v2_fake import fta_from_lines  # noqa: E402
+
+from artwork_v2 import config, imaging, jobs, keystore, pipeline, pixverify, vision_client  # noqa: E402
+
+fitz = pytest.importorskip("fitz")
+cv2 = pytest.importorskip("cv2")
+from PIL import Image  # noqa: E402
+
+KEY = "AIza" + "R" * 35
+W_PT, H_PT = 420.0, 300.0
+SENT = 400 / 72.0
+ZONE = {"page": 0, "bbox": [0, 0, 1, 1], "W": int(W_PT * SENT), "H": int(H_PT * SENT)}
+
+
+@pytest.fixture(autouse=True)
+def _isolated(tmp_path, monkeypatch):
+    d = tmp_path / "v2"
+    monkeypatch.setattr(config, "DATA_DIR", str(d))
+    monkeypatch.setattr(config, "JOBS_DIR", str(d / "jobs"))
+    monkeypatch.setattr(config, "SECRET_DIR", str(d / "secret"))
+    monkeypatch.setattr(config, "KEY_FILE", str(d / "secret" / "key.json"))
+    monkeypatch.delenv(config.KEY_ENV, raising=False)
+    monkeypatch.setattr(config, "RETRY_WAIT_S", 0.0)
+    monkeypatch.setattr(config, "PIXEL_VERIFY", True)
+    monkeypatch.setattr(config, "PIXEL_LINE_MODE", True)
+    monkeypatch.setattr(config, "PIXEL_RASTER", True)
+    os.makedirs(config.JOBS_DIR)
+    yield
+
+
+def _rows():
+    rnd = random.Random(3)
+    return ["Ingredient %d: chicken %d.%d%% fish oil i j ; : . , vit B%d"
+            % (i, rnd.randint(1, 99), rnd.randint(0, 9), i) for i in range(14)]
+
+
+def _vec(path, rows=None):
+    d = fitz.open()
+    p = d.new_page(width=W_PT, height=H_PT)
+    for i, t in enumerate(rows or _rows()):
+        p.insert_text((20, 30 + 18 * i), t, fontsize=9)
+    d.save(str(path))
+    return str(path)
+
+
+def _jpeg(src, dpi, q, erase=()):
+    with fitz.open(src) as s:
+        pix = s[0].get_pixmap(matrix=fitz.Matrix(dpi / 72, dpi / 72), alpha=False)
+    a = np.frombuffer(pix.samples, np.uint8).reshape(pix.h, pix.w, 3).copy()
+    k = dpi / 72
+    for (x0, y0, x1, y1) in erase:
+        a[int(y0 * k):int(np.ceil(y1 * k)), int(x0 * k):int(np.ceil(x1 * k))] = 255
+    ok, buf = cv2.imencode(".jpg", cv2.cvtColor(a, cv2.COLOR_RGB2BGR), [cv2.IMWRITE_JPEG_QUALITY, q])
+    assert ok
+    return buf.tobytes()
+
+
+def _scan(dst, src, dpi=300, q=92, erase=(), rect=None, extra=None, rotate=0):
+    """PDF ที่มีแต่ภาพ (เหมือนไฟล์สแกน) · ``extra(page)`` = วาดเพิ่มทับ"""
+    d = fitz.open()
+    p = d.new_page(width=W_PT, height=H_PT)
+    p.insert_image(rect or p.rect, stream=_jpeg(src, dpi, q, erase))
+    if extra:
+        extra(p)
+    if rotate:
+        p.set_rotation(rotate)
+    d.save(str(dst))
+    return str(dst)
+
+
+def _marks(src):
+    """เครื่องหมายเล็ก ๆ ทั้งตัว (จุดบน i/j · จุด · จุดทศนิยม · ; :) เป็นกรอบ pt"""
+    with fitz.open(src) as d:
+        pix = d[0].get_pixmap(matrix=fitz.Matrix(600 / 72, 600 / 72))
+    g = np.frombuffer(pix.samples, np.uint8).reshape(pix.h, pix.w, pix.n)[:, :, 0]
+    n, _, st, _ = cv2.connectedComponentsWithStats((g < 128).astype(np.uint8), 8)
+    k = 600 / 72
+    cand = [((x - 2) / k, (y - 2) / k, (x + w + 2) / k, (y + h + 2) / k)
+            for x, y, w, h, a in (st[i] for i in range(1, n)) if 8 <= a <= 120 and w <= 14 and h <= 14]
+    random.Random(11).shuffle(cand)
+    pick = []
+    for c in cand:
+        if all(abs(c[0] - p[0]) > 25 or abs(c[1] - p[1]) > 12 for p in pick):
+            pick.append(c)
+        if len(pick) >= 30:
+            break
+    assert len(pick) >= 25
+    return pick
+
+
+def _statuses(pa, pb, marks):
+    pc = pixverify.PairCheck(pa, pb, ZONE, ZONE)
+    try:
+        assert pc.ok, pc.ginfo
+        return [pc.check("A", [m[0] * SENT - 3, m[1] * SENT - 3, m[2] * SENT + 3, m[3] * SENT + 3])["status"]
+                for m in marks], pc.raster
+    finally:
+        pc.close()
+
+
+# ── ตรวจจับโซนที่เป็นภาพสแกน ────────────────────────────────────────────
+
+def _zr(path, rect=None):
+    with fitz.open(path) as d:
+        pg = d[0]
+        return pixverify.zone_raster(pg, rect or tuple(pg.rect))
+
+
+def test_scanned_page_is_detected_with_native_dpi(tmp_path):
+    src = _vec(tmp_path / "v.pdf")
+    r = _zr(_scan(tmp_path / "s.pdf", src, dpi=300))
+    assert r and abs(r["dpi"] - 300) < 1 and r["cover"] == 1.0
+    assert abs(_zr(_scan(tmp_path / "s6.pdf", src, dpi=600))["dpi"] - 600) < 1
+
+
+def test_vector_text_over_a_background_image_is_not_raster(tmp_path):
+    """AvoDerm M2: ภาพ 72 dpi คลุมโซน 92% + ข้อความ/เส้นเวกเตอร์ทับ — ถ้าถือเป็นภาพสแกน
+    จะเทียบที่ 72 dpi แล้วมองไม่เห็นความต่างเล็ก ๆ เลย"""
+    src = _vec(tmp_path / "v.pdf")
+    assert _zr(_scan(tmp_path / "t.pdf", src, extra=lambda p: p.insert_text((30, 60), "NET 85 g"))) is None
+    assert _zr(_scan(tmp_path / "l.pdf", src,
+                     extra=lambda p: p.draw_line((10, 10), (100, 10)))) is None
+
+
+def test_hidden_ocr_text_layer_does_not_block_detection(tmp_path):
+    """ไฟล์สแกนที่ผ่าน OCR มีข้อความที่มองไม่เห็นซ้อนอยู่ — ไม่ใช่ของเวกเตอร์ที่พิมพ์"""
+    src = _vec(tmp_path / "v.pdf")
+    p = _scan(tmp_path / "o.pdf", src,
+              extra=lambda pg: pg.insert_text((30, 60), "Ingredient 0", render_mode=3))
+    assert _zr(p) is not None
+
+
+def test_coarse_scan_and_partial_cover_keep_the_old_path(tmp_path):
+    src = _vec(tmp_path / "v.pdf")
+    assert _zr(_scan(tmp_path / "c.pdf", src, dpi=150)) is None          # หยาบกว่า RASTER_MIN_DPI
+    part = fitz.Rect(0, 0, W_PT, H_PT * 0.8)     # ภาพคงสัดส่วน = 336×240 pt กลางหน้า ⇒ คลุม 64%
+    assert _zr(_scan(tmp_path / "h.pdf", src, rect=part)) is None        # ภาพคลุมโซนไม่พอ
+    # โซนที่อยู่ในส่วนที่ภาพคลุมทั้งหมด ⇒ เป็นภาพสแกนได้
+    assert _zr(tmp_path / "h.pdf", (60, 10, 360, 230)) is not None
+
+
+def test_rotated_page_uses_the_same_coordinates_as_rendering(tmp_path):
+    src = _vec(tmp_path / "v.pdf")
+    p = _scan(tmp_path / "r.pdf", src, rotate=90)
+    assert _zr(p) is not None
+    # ข้อความเวกเตอร์บนหน้าที่หมุน ต้องยังถูกนับในโซนที่ครอบมันอยู่ (พิกัดหน้าที่หมุนแล้ว)
+    p2 = _scan(tmp_path / "r2.pdf", src, rotate=90,
+               extra=lambda pg: pg.insert_text((30, 60), "NET 85 g"))
+    with fitz.open(p2) as d:
+        pg = d[0]
+        hit = fitz.Rect(30, 50, 90, 64) * pg.rotation_matrix
+        hit.normalize()
+        assert pixverify.zone_raster(pg, tuple(hit)) is None
+
+
+# ── ผลการเทียบ ────────────────────────────────────────────────────────
+
+def test_vector_pairs_render_exactly_as_before(tmp_path, monkeypatch):
+    pa = _vec(tmp_path / "a.pdf")
+    pb = _vec(tmp_path / "b.pdf", rows=[r.replace("chicken", "chickn") for r in _rows()])
+    box = (100, 100, 260, 160)
+    out = {}
+    for flag in (True, False):
+        monkeypatch.setattr(config, "PIXEL_RASTER", flag)
+        pc = pixverify.PairCheck(pa, pb, ZONE, ZONE)
+        assert pc.raster == {"A": None, "B": None} and "raster" not in pc.ginfo
+        out[flag] = [pc._crops(s, box) for s in ("A", "B")]
+        pc.close()
+    for (a1, b1, d1), (a0, b0, d0) in zip(out[True], out[False]):
+        assert d1 == d0 and np.array_equal(a1, a0) and np.array_equal(b1, b0)
+
+
+@pytest.mark.parametrize("dpi,q", [(200, 75), (300, 75), (300, 92), (600, 92)])
+def test_scan_matches_its_vector_original_and_erased_marks_are_never_same(tmp_path, dpi, q):
+    pa = _vec(tmp_path / "a.pdf")
+    marks = _marks(pa)
+    st, raster = _statuses(pa, _scan(tmp_path / "s.pdf", pa, dpi, q), marks)
+    assert raster["A"] is None and abs(raster["B"]["dpi"] - dpi) < 1
+    assert st.count("SAME") >= 0.9 * len(marks), st
+    st, _ = _statuses(pa, _scan(tmp_path / "m.pdf", pa, dpi, q, erase=marks), marks)
+    assert "SAME" not in st, st
+
+
+def test_scan_vs_scan_both_capped(tmp_path):
+    pa = _vec(tmp_path / "v.pdf")
+    marks = _marks(pa)
+    sa = _scan(tmp_path / "a.pdf", pa, 300, 92)
+    st, raster = _statuses(sa, _scan(tmp_path / "b.pdf", pa, 400, 85), marks)
+    assert raster["A"] and raster["B"]
+    assert st.count("SAME") >= 0.9 * len(marks)
+    st, _ = _statuses(sa, _scan(tmp_path / "m.pdf", pa, 400, 85, erase=marks), marks)
+    assert "SAME" not in st
+
+
+def test_flag_off_scan_folds_nothing(tmp_path, monkeypatch):
+    """เส้นทางเดิม: เรนเดอร์ 1600 dpi จากภาพ 300 dpi ⇒ จุดรบกวนของการสแกนทำให้ไม่มีอะไร SAME"""
+    monkeypatch.setattr(config, "PIXEL_RASTER", False)
+    pa = _vec(tmp_path / "a.pdf")
+    marks = _marks(pa)
+    st, raster = _statuses(pa, _scan(tmp_path / "s.pdf", pa, 300, 92), marks)
+    assert raster == {"A": None, "B": None}
+    assert st.count("SAME") <= 2
+
+
+# ── ทั้ง pipeline: Log + คำเตือนบอกว่าไฟล์ไหนเป็นภาพสแกน ───────────────────
+
+def _line_boxes(path, W, H):
+    out = []
+    with fitz.open(path) as d:
+        pg = d[0]
+        sx, sy = W / pg.rect.width, H / pg.rect.height
+        for b in pg.get_text("dict")["blocks"]:
+            for ln in b.get("lines", []):
+                r = ln["bbox"]
+                out.append(("".join(s["text"] for s in ln["spans"]),
+                            (r[0] * sx, r[1] * sy, r[2] * sx, r[3] * sy), 0.98))
+    return out
+
+
+def test_pipeline_scan_misread_is_folded_and_logged(tmp_path, monkeypatch):
+    pa = _vec(tmp_path / "a.pdf")
+    pb = _scan(tmp_path / "b.pdf", pa, 300, 92)
+    rows = _rows()
+
+    def fake(groups, poster=None, key=None):
+        res = {}
+        for gi, g in enumerate(groups):
+            for it in g:
+                W, H = Image.open(io.BytesIO(it["jpeg"])).size
+                lines = _line_boxes(pa, W, H)       # ฝั่ง B ไม่มีชั้นข้อความ — ใช้ผังของ A
+                if it["id"].endswith("b"):          # OCR "อ่านผิด" ฝั่งภาพสแกน
+                    lines = [(t.replace(rows[3], rows[3].replace("chicken", "chickem")), b, c)
+                             for t, b, c in lines]
+                res[it["id"]] = {"ok": True, "error": "", "fta": fta_from_lines(lines, W, H),
+                                 "request_index": gi}
+        return {"results": res, "calls": [{"index": 0, "phase": "main", "images": [],
+                                           "json_bytes": 10, "status": 200, "attempts": 1,
+                                           "ms": 1, "error": "", "at": "t"}]}
+    jid = jobs.create(("a.pdf", open(pa, "rb").read()), ("b.pdf", open(pb, "rb").read()))["id"]
+    keystore.save(KEY)
+    monkeypatch.setattr(vision_client, "annotate", fake)
+    r = pipeline.run(jid, [{"a": {"page": 0, "bbox": [0, 0, 1, 1]},
+                            "b": {"page": 0, "bbox": [0, 0, 1, 1]}}])
+    p = r["pairs"][0]
+    assert not p["findings"] and len(p["pixel_same"]) == 1
+    assert any("ไฟล์ B เป็นภาพสแกน 300 dpi" in w for w in r["warnings"])
+    assert "raster=True" in r["log_text"] and "raster (ภาพสแกนล้วน" in r["log_text"]
+    assert "PIXEL_RASTER=True" in r["log_text"]

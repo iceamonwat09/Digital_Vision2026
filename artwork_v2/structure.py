@@ -255,6 +255,103 @@ def recompose(X, Y, gXY: Geo, ux, side: str, merges) -> bool:
     return False
 
 
+# ── แยกบรรทัดที่ Vision รวมข้ามคอลัมน์ (``SPLIT_MERGED``) ─────────────────────
+
+def _cut_line(x: dict, t: int):
+    """ตัดบรรทัดที่ตำแหน่งข้อความ ``t`` (ต้องตรงรอยต่อของตัวอักษร) ⇒ ``(ซ้าย, ขวา)`` หรือ ``None``"""
+    pos, ci = 0, None
+    for k, c in enumerate(x["chars"]):
+        if pos == t:
+            ci = k
+            break
+        pos += len(c["c"])
+    if ci is None:
+        return None
+
+    def piece(chars):
+        while chars and not chars[0]["c"].strip():
+            chars = chars[1:]
+        while chars and not chars[-1]["c"].strip():
+            chars = chars[:-1]
+        boxes = [c["box"] for c in chars if c.get("box")]
+        if not chars or not boxes:
+            return None
+        cc = [c["conf"] for c in chars if c.get("conf") is not None]
+        bx = C.union(boxes)
+        cen = x.get("center") or (0.5, 0.5)
+        ob = x["box"]
+        ocx, ocy = (ob[0] + ob[2]) / 2.0, (ob[1] + ob[3]) / 2.0
+        ncx, ncy = (bx[0] + bx[2]) / 2.0, (bx[1] + bx[3]) / 2.0
+        out = dict(x)
+        out.pop("parts", None)
+        out.update(chars=list(chars), text="".join(c["c"] for c in chars), box=bx,
+                   center=(cen[0] * ncx / ocx if ocx else cen[0], cen[1] * ncy / ocy if ocy else cen[1]),
+                   conf_mean=(sum(cc) / len(cc)) if cc else None,
+                   conf_min=min(cc) if cc else None, split_from=x["text"])
+        return C._reprep(out)
+    L, R = piece(x["chars"][:ci]), piece(x["chars"][ci:])
+    return (L, R) if L is not None and R is not None and L["dk"] and R["dk"] else None
+
+
+def _same_place(mb, pb) -> bool:
+    """กรอบที่ทำนายจากอีกฝั่ง กับกรอบชิ้นที่ตัด อยู่แถวเดียวกันและซ้อนกันแนวนอนเกินครึ่ง"""
+    h = max(4.0, pb[3] - pb[1])
+    if abs(_ctr(mb)[1] - _ctr(pb)[1]) > h:
+        return False
+    ov = min(mb[2], pb[2]) - max(mb[0], pb[0])
+    return ov >= 0.5 * min(mb[2] - mb[0], pb[2] - pb[0])
+
+
+def split_merged(X, Y, gYX: Geo, side: str, splits) -> bool:
+    """Vision อ่านสองคอลัมน์ที่อยู่แถวเดียวกันเป็น **บรรทัดเดียว** ในฝั่ง ``X`` แต่อีกฝั่งอ่านแยก
+    (Friskies: 🅱 ``6 kcal … 100 กรัม ให้ 1 ซอง … 4 กก.)`` = 🅰 สองบรรทัดคนละคอลัมน์) ⇒
+    บรรทัดที่รวมจับคู่ได้แค่คอลัมน์เดียว อีกคอลัมน์กลายเป็น "หายไป/เกินมา" แดงทั้งบรรทัด
+
+    แยกเมื่อครบทุกข้อ (ไม่แตะตัวอักษร — แค่แบ่งบรรทัด ⇒ ความต่างจริงยังถูกเทียบครบ):
+    * ต้นหรือท้ายของ x **เท่ากับ** บรรทัด y ของอีกฝั่งทุกตัวอักษร (คีย์ยาวเกิน ``SHORT``) และส่วนที่เหลือ
+      มีตัวอักษร/ตัวเลข ≥ 3 ตัว
+    * รอยตัดอยู่ตรงช่องว่าง (ไม่ตัดกลางคำ)
+    * ไม่มีบรรทัดอื่นในฝั่ง X ที่เท่ากับ y อยู่แล้ว (กันการนับซ้ำของบรรทัดที่พิมพ์ซ้ำหลายแผง)
+    * ตำแหน่งของ y ที่ทำนายมาฝั่ง X อยู่ **ที่ชิ้นนั้นพอดี** (แถวเดียวกัน · ซ้อนแนวนอนเกินครึ่ง)
+    """
+    ydk = {y["dk"] for y in Y}
+    xdk = {x["dk"] for x in X}
+    order = sorted(range(len(Y)), key=lambda j: -len(Y[j]["dk"]))
+    for i, x in enumerate(X):
+        if not x.get("box") or x.get("parts") or x["dk"] in ydk:
+            continue
+        for j in order:
+            y = Y[j]
+            k = y["dk"]
+            if len(k) <= SHORT or not y.get("box") or k in xdk or k == x["dk"]:
+                continue
+            if x["dk"].startswith(k):
+                head, cut = True, len(k)
+                rest = x["dk"][cut:]
+            elif x["dk"].endswith(k):
+                head, cut = False, len(x["dk"]) - len(k)
+                rest = x["dk"][:cut]
+            else:
+                continue
+            if sum(1 for c in rest if c.isalnum()) < 3:
+                continue
+            t = x["dk_idx"][cut]
+            if t <= 0 or not x["text"][t - 1].isspace():
+                continue
+            lr = _cut_line(x, t)
+            if lr is None:
+                continue
+            piece = lr[0] if head else lr[1]
+            if piece["dk"] != k or not _same_place(gYX.box(y["box"]), piece["box"]):
+                continue
+            X[i:i + 1] = list(lr)
+            if splits is not None:
+                splits.append({"side": side, "left": lr[0]["text"], "right": lr[1]["text"],
+                               "evidence": y["text"]})
+            return True
+    return False
+
+
 # ── ข้อความเดียวกันย้ายที่ในคู่บรรทัดเดียวกัน ─────────────────────────────
 
 def mark_moved(fs: List[dict]) -> None:

@@ -50,8 +50,82 @@ def parse_pairs(raw) -> List[dict]:
             rot = imaging.norm_rot(z.get("rotate")) if config.ZONE_ROTATE else 0
             if rot:
                 item[s]["rotate"] = rot          # มุม 0 ไม่ใส่คีย์ ⇒ โซนเดิมได้ข้อมูลเดิมทุกตัว
+            ign = _parse_ignore(z.get("ignore"), bb, n, s) if config.ZONE_IGNORE else []
+            if ign:
+                item[s]["ignore"] = ign          # ไม่มี = ไม่ใส่คีย์ (ข้อมูลเดิมทุกตัว)
         out.append(item)
     return out
+
+
+def _parse_ignore(raw, zone, n, s) -> List[list]:
+    """พื้นที่ยกเว้นของโซน (สัดส่วนของหน้า [x, y, w, h] เหมือน bbox) · ตัดให้อยู่ในโซน ·
+    พื้นที่ที่ไม่ทับโซนเลยถูกทิ้ง · ผิดรูป ⇒ ``ValueError``"""
+    if raw in (None, []):
+        return []
+    if not isinstance(raw, list):
+        raise ValueError("คู่ที่ %d: พื้นที่ยกเว้นฝั่ง %s ไม่ถูกต้อง" % (n, s.upper()))
+    if len(raw) > config.IGNORE_MAX:
+        raise ValueError("คู่ที่ %d: พื้นที่ยกเว้นฝั่ง %s ได้สูงสุด %d กรอบ" % (n, s.upper(), config.IGNORE_MAX))
+    zx0, zy0, zx1, zy1 = zone[0], zone[1], zone[0] + zone[2], zone[1] + zone[3]
+    out = []
+    for b in raw:
+        bb = imaging.clamp_bbox(b)
+        if bb is None:
+            raise ValueError("คู่ที่ %d: พื้นที่ยกเว้นฝั่ง %s ไม่ถูกต้อง/เล็กเกินไป" % (n, s.upper()))
+        x0, y0 = max(zx0, bb[0]), max(zy0, bb[1])
+        x1, y1 = min(zx1, bb[0] + bb[2]), min(zy1, bb[1] + bb[3])
+        if x1 - x0 <= 0 or y1 - y0 <= 0:
+            continue
+        out.append([round(x0, 6), round(y0, 6), round(x1 - x0, 6), round(y1 - y0, 6)])
+    return out
+
+
+def _page_box(side: dict, box) -> Optional[tuple]:
+    """กรอบบนภาพที่ส่ง (px · แนวที่หมุนแล้ว) → สัดส่วนบนหน้า (x0, y0, x1, y1)"""
+    if not box:
+        return None
+    W, H = side["sent_px"]
+    rot = side.get("rotate", 0) or 0
+    x0, y0, x1, y1 = imaging.unrot_box(box, W, H, rot)
+    W0, H0 = imaging.unrot_size(W, H, rot)
+    zx, zy, zw, zh = side["bbox"]
+    return (zx + x0 / W0 * zw, zy + y0 / H0 * zh, zx + x1 / W0 * zw, zy + y1 / H0 * zh)
+
+
+def _inside_ignore(side: dict, box) -> bool:
+    pb = _page_box(side, box)
+    if pb is None:
+        return False
+    area = max(1e-12, (pb[2] - pb[0]) * (pb[3] - pb[1]))
+    hit = 0.0
+    for x, y, w, h in side.get("ignore") or []:
+        iw = min(pb[2], x + w) - max(pb[0], x)
+        ih = min(pb[3], y + h) - max(pb[1], y)
+        if iw > 0 and ih > 0:
+            hit += iw * ih
+    return min(hit, area) / area >= config.IGNORE_COVER
+
+
+def apply_ignore(pr: dict) -> int:
+    """ย้ายจุดต่างที่อยู่ในพื้นที่ยกเว้น **ทุกฝั่งที่มีกรอบ** ไปรายการพับ ``excluded`` (ไม่ลบ) ·
+    ฝั่งที่มีกรอบแต่ไม่ได้ยกเว้น ⇒ คงไว้ (ผู้ใช้ยกเว้นเฉพาะฝั่งที่วาด) · คืนจำนวนที่ย้าย"""
+    sides = pr.get("sides") or {}
+    if not any(sides.get(s, {}).get("ignore") for s in ("a", "b")):
+        return 0
+    keep, moved = [], []
+    for f in pr.get("findings") or []:
+        boxed = [s for s in ("a", "b") if (f.get(s) or {}).get("box")]
+        if boxed and all(_inside_ignore(sides[s], f[s]["box"]) for s in boxed):
+            f["excluded_from"] = f["severity"]
+            f["severity"] = "excluded"
+            f.setdefault("notes", []).append("อยู่ในพื้นที่ยกเว้นที่กำหนดไว้ในโซน — ไม่นับในผลตัดสิน")
+            moved.append(f)
+        else:
+            keep.append(f)
+    if moved:
+        pr["findings"] = keep
+        pr["excluded"] = (pr.get("excluded") or []) + moved
+    return len(moved)
 
 
 def _px_box_to_norm(box, zone_bbox, zw, zh, pad_x, pad_y):
@@ -242,6 +316,8 @@ def _run(job_id, raw_pairs, poster, progress, sharpness, ai_mode, ai_poster,
                     "jpeg_bytes": len(jpeg), "sha1": imaging.sha1_bytes(jpeg)[:12]}
             if z.get("rotate"):
                 side["rotate"] = z["rotate"]     # ภาพที่ส่ง (และพิกัดทุกกรอบ) อยู่ในแนวที่หมุนแล้ว
+            if z.get("ignore"):
+                side["ignore"] = z["ignore"]     # พื้นที่ยกเว้น (สัดส่วนของหน้า)
             for w in rinfo.get("warnings", []) + einfo.get("warnings", []):
                 warnings.append("คู่ %d ฝั่ง %s: %s" % (n, s.upper(), w))
             pr["sides"][s] = side
@@ -308,12 +384,14 @@ def _run(job_id, raw_pairs, poster, progress, sharpness, ai_mode, ai_poster,
         pr["reflow_edges"] = cmp_["reflow_edges"]
         pr["reflow_lines"] = cmp_["reflow_lines"]
         pr["row_merges"] = cmp_.get("row_merges", [])
+        pr["row_splits"] = cmp_.get("row_splits", [])
         pr["unpaired"] = {"a": cmp_["unpaired_a"], "b": cmp_["unpaired_b"]}
         pr["lines"] = {"a": _compact_lines(cmp_["lines_a"]), "b": _compact_lines(cmp_["lines_b"])}
         pr["line_pairs"] = cmp_["pairs"]
         if not cmp_["lines_a"] and not cmp_["lines_b"]:
             warnings.append("คู่ %d: ไม่พบข้อความทั้งสองฝั่ง" % n)
             pr["coverage"] = None
+        apply_ignore(pr)
     stage["compare_ms"] = int((time.time() - t0) * 1000)
 
     # ── 4) อ่านซ้ำแบบซูมเฉพาะจุดแดง ────────────────────────────────────
@@ -336,11 +414,16 @@ def _run(job_id, raw_pairs, poster, progress, sharpness, ai_mode, ai_poster,
         for f in pr.get("relocated", []):
             fid += 1
             f["id"] = fid
+        for f in pr.get("excluded", []):
+            fid += 1
+            f["id"] = fid
 
     # ── 6) AI ตรวจทาน (ข้อความของ Vision → N8N/Gemini · ไม่ส่งภาพ · ไม่ยิง Vision ซ้ำ) ──
     t0 = time.time()
     ai_sum, fid = ai_review.run_all(pairs, ai_mode, warnings, say, fid, ai_poster)
     stage["ai_ms"] = int((time.time() - t0) * 1000)
+    for pr in pairs:              # จุดที่ AI เพิ่ม/คืนมา ก็ต้องผ่านพื้นที่ยกเว้นเหมือนกัน
+        apply_ignore(pr)
 
     # ── 6b) หลักฐานภาพ (PDF ↔ PDF · เรนเดอร์ไฟล์ต้นฉบับในเครื่อง · ไม่ยิง Vision/Gemini) ──
     t0 = time.time()
@@ -352,7 +435,7 @@ def _run(job_id, raw_pairs, poster, progress, sharpness, ai_mode, ai_poster,
         pr.pop("_cmp", None)
         pr.pop("_raw", None)
         # ห้ามใช้ชื่อ ``key`` — ทับกุญแจ API ข้างบน แล้ว redact() ลบชื่อคีย์ทิ้งแทนกุญแจจริง
-        for lk in ("findings", "debris", "algo_only", "ai_dismissed", "relocated", "pixel_same"):
+        for lk in ("findings", "debris", "algo_only", "ai_dismissed", "relocated", "pixel_same", "excluded"):
             for f in pr.get(lk) or []:
                 if "confidence" not in f:
                     f["confidence"] = ai_review.confidence(f)
@@ -369,6 +452,8 @@ def _run(job_id, raw_pairs, poster, progress, sharpness, ai_mode, ai_poster,
         if pr.get("pixel_same"):
             rs.append("ภาพเหมือนกันทุกพิกเซล %d จุด — OCR อ่านต่างเอง (รายการพับ — ไม่นับ)"
                       % len(pr["pixel_same"]))
+        if pr.get("excluded"):
+            rs.append("อยู่ในพื้นที่ยกเว้น %d จุด (รายการพับ — ไม่นับ)" % len(pr["excluded"]))
         pr["verdict"] = v
         pr["reasons"] = rs
     verdict, reasons = verdict_of(pairs)
@@ -378,6 +463,9 @@ def _run(job_id, raw_pairs, poster, progress, sharpness, ai_mode, ai_poster,
     n_pix = sum(len(pr.get("pixel_same") or []) for pr in pairs)
     if n_pix:
         reasons.append("ภาพเหมือนกันทุกพิกเซล %d จุด — OCR อ่านต่างเอง (รายการพับ — ไม่นับ)" % n_pix)
+    n_exc = sum(len(pr.get("excluded") or []) for pr in pairs)
+    if n_exc:
+        reasons.append("อยู่ในพื้นที่ยกเว้น %d จุด (รายการพับ — ไม่นับ)" % n_exc)
     stage["total_ms"] = int((time.time() - t_all) * 1000)
     result = {
         "version": VERSION, "job": job_id, "run": run_name,
@@ -426,8 +514,9 @@ def settings_snapshot() -> dict:
         "AI_JUDGE_ONESIDED_GUARD",
         "ONE_REQUEST_PER_PAIR", "RUN_GUARD", "RUN_MAX_CONCURRENT", "RUN_COOLDOWN_S",
         "GEO_PAIRING", "RECOMPOSE", "MOVED_TEXT", "RELOCATE", "BALANCED_MOVE",
-        "VERTICAL_UPRIGHT", "QUOTE_PUNCT", "AI_EXPERIMENTAL_MODES",
-        "PIXEL_VERIFY", "PIXEL_LINE_MODE", "PIXEL_TIME_BUDGET_S")}
+        "VERTICAL_UPRIGHT", "QUOTE_PUNCT", "SPLIT_MERGED", "AI_EXPERIMENTAL_MODES",
+        "PIXEL_VERIFY", "PIXEL_LINE_MODE", "PIXEL_TIME_BUDGET_S", "PIXEL_RASTER",
+        "ZONE_IGNORE", "IGNORE_COVER")}
 
 
 def _reread(pairs, srcs, rd, poster, key, calls, warnings, say) -> dict:

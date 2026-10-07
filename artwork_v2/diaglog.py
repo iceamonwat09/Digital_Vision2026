@@ -99,6 +99,8 @@ def build_text(r: dict) -> str:
                   (" ERROR=" + sd["error"]) if sd.get("error") else ""))
             if sd.get("rotate"):
                 a("     rotate: %d° ตามเข็ม (ภาพที่ส่ง + พิกัดกรอบทุกตัวอยู่ในแนวที่หมุนแล้ว)" % sd["rotate"])
+            if sd.get("ignore"):
+                a("     ignore (พื้นที่ยกเว้น · สัดส่วนของหน้า %d กรอบ): %s" % (len(sd["ignore"]), sd["ignore"]))
             if rd.get("color_mode") in ("gray", "bw"):
                 a("     color: mode=%s%s" % (rd["color_mode"], (" block=%spx C=%s ink=%.1f%%" % (
                     rd.get("bw_block_px"), rd.get("bw_c"), 100.0 * (rd.get("ink_frac") or 0)))
@@ -141,6 +143,13 @@ def build_text(r: dict) -> str:
                 # บรรทัดแยก — รูปแบบบรรทัดบนต้องคงเดิม (ตัวโหลดชุดข้อมูลอ่านมัน)
                 a("        ↳ ต่อด้วยหลักฐานจากอีกฝั่ง (ใส่ … แทนจุดไข่ปลาที่ OCR ทิ้ง): %s"
                   % _q(m.get("evidence") or "", 80))
+        rs = p.get("row_splits") or []
+        if rs:
+            # รูปแบบบรรทัดนี้ต้องคงเดิม — ตัวโหลดชุดข้อมูลต่อชิ้นกลับเป็นบรรทัดที่ Vision ส่งมา
+            a("  row_splits (%d) — แยกบรรทัดที่ Vision รวมข้ามคอลัมน์:" % len(rs))
+            for m in rs:
+                a("     %s: %s ‖ %s" % (m["side"], _q(m["left"], 400), _q(m["right"], 400)))
+                a("        ↳ ชิ้นหนึ่งตรงกับอีกฝั่งทุกตัวอักษรที่ตำแหน่งเดียวกัน: %s" % _q(m.get("evidence") or "", 80))
         cl = p.get("curved_lines") or {}
         a("  curved_lines (เอียง > %s° จากแนวหลัก + เศษติดกัน): A=%s B=%s" % (
             _f(config.TILT_ANGLE, 0), cl.get("A"), cl.get("B")))
@@ -182,6 +191,10 @@ def build_text(r: dict) -> str:
         if p.get("pixel_same"):
             a("  pixel_same — ภาพเหมือนกันทุกพิกเซล (OCR อ่านต่างเอง) ไม่นับ (%d):" % len(p["pixel_same"]))
             for f in p["pixel_same"]:
+                finding(f)
+        if p.get("excluded"):
+            a("  excluded — อยู่ในพื้นที่ยกเว้นที่กำหนดในโซน ไม่นับ (%d):" % len(p["excluded"]))
+            for f in p["excluded"]:
                 finding(f)
         if p.get("algo_only") is not None:
             if p.get("raw_lines"):
@@ -237,13 +250,17 @@ def build_text(r: dict) -> str:
 
     px = r.get("pixel") or {}
     a("")
-    a("[PIXEL] enabled=%s line_mode=%s same=%s diff=%s unverifiable=%s skipped=%s ms=%s%s" % (
-        px.get("enabled"), px.get("line_mode"), px.get("same", 0), px.get("diff", 0),
+    a("[PIXEL] enabled=%s line_mode=%s raster=%s same=%s diff=%s unverifiable=%s skipped=%s ms=%s%s" % (
+        px.get("enabled"), px.get("line_mode"), px.get("raster", "-"), px.get("same", 0), px.get("diff", 0),
         px.get("unverifiable", 0), px.get("skipped", 0), px.get("ms", 0),
         (" reason=" + px["reason"]) if px.get("reason") else ""))
     for pl in px.get("pairs") or []:
         a("  pair %s align=%s%s" % (pl.get("n"), pl.get("align"),
                                     (" error=" + str(pl["error"])) if pl.get("error") else ""))
+        if pl.get("raster"):
+            a("    raster (ภาพสแกนล้วน — เทียบที่ความละเอียดจริง + เบลอ): %s" % ", ".join(
+                "%s=%s" % (k.upper(), ("%gdpi cover=%g" % (v["dpi"], v["cover"])) if v else "-")
+                for k, v in sorted(pl["raster"].items())))
         for it in pl.get("items") or []:
             a("    F%s %s checks=%s ms=%s" % (it.get("id"), it.get("status"), it.get("n_checks"), it.get("ms")))
         for e in pl.get("errors") or []:

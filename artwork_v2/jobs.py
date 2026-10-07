@@ -178,6 +178,9 @@ def last_pairs(d: str, runs: Optional[list] = None) -> list:
                 rot = imaging.norm_rot(sd.get("rotate"))
                 if rot:
                     item[s]["rotate"] = rot
+                ign = [imaging.clamp_bbox(b) for b in sd.get("ignore") or []]
+                if ign and all(ign):
+                    item[s]["ignore"] = [[round(v, 5) for v in b] for b in ign]
             out.append(item)
         return out
     except (OSError, ValueError, TypeError, AttributeError):

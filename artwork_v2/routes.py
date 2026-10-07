@@ -87,7 +87,9 @@ def page():
                            v2_line_group=config.LINE_GROUP,
                            v2_sort_severity=config.SORT_SEVERITY,
                            v2_table_rows=config.TABLE_ROWS,
-                           v2_side_table=config.SIDE_TABLE)
+                           v2_side_table=config.SIDE_TABLE,
+                           v2_zone_ignore=config.ZONE_IGNORE,
+                           v2_ignore_max=config.IGNORE_MAX)
 
 
 # ── API key ──────────────────────────────────────────────────────────

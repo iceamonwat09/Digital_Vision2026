@@ -189,7 +189,8 @@ def load_log(path):
     rx_line = re.compile(r'^\s+([AB])\d+ conf=([0-9.-]+) min=\S+ ang=([0-9.-]+) '
                          r'box=\[([0-9,-]+)\] "(.*)"(?: \[soft-hyphen\])?\s*$')
     rx_merge = re.compile(r'^\s+([AB]): "(.*)" \+ "(.*)"\s*$')
-    out, n, merges = {}, None, {}
+    rx_split = re.compile(r'^\s+([AB]): "(.*)" \u2016 "(.*)"\s*$')
+    out, n, merges, splits = {}, None, {}, {}
     with open(path, encoding="utf-8") as f:
         for raw in f:
             m = rx_pair.match(raw)
@@ -197,6 +198,11 @@ def load_log(path):
                 n = int(m.group(1))
                 out[n] = {"A": [0, 0, []], "B": [0, 0, []]}
                 merges[n] = []
+                splits[n] = []
+                continue
+            m = rx_split.match(raw) if n is not None else None
+            if m:
+                splits[n].append((m.group(1), m.group(2), m.group(3)))
                 continue
             m = rx_merge.match(raw) if n is not None else None
             if m:
@@ -215,6 +221,18 @@ def load_log(path):
                 ang = None if m.group(3) == "-" else float(m.group(3))
                 box = tuple(float(v) for v in m.group(4).split(","))
                 out[n][m.group(1)][2].append((m.group(5), box, conf, ang))
+    # row_splits เกิด **หลัง** การต่อแถว ⇒ ต่อชิ้นที่ถูกแยกกลับก่อน (ชิ้นซ้าย-ขวาอยู่ติดกันใน Log)
+    for k, d in out.items():
+        for side, left, right in reversed(splits.get(k, [])):
+            ls = d[side][2]
+            for idx in range(len(ls) - 1):
+                if ls[idx][0] != left or ls[idx + 1][0] != right:
+                    continue
+                (lt, lb, lc, la), (rt, rb, rc, _ra) = ls[idx], ls[idx + 1]
+                box = (min(lb[0], rb[0]), min(lb[1], rb[1]), max(lb[2], rb[2]), max(lb[3], rb[3]))
+                conf = (lc * len(lt) + rc * len(rt)) / float(len(lt) + len(rt))
+                ls[idx:idx + 2] = [(lt + " " + rt, box, conf, la)]
+                break
     # บรรทัดใน Log เป็นบรรทัด **หลังต่อแถว** — แยกกลับเป็นชิ้นตามรายการ row_merges
     # (กรอบแบ่งตามสัดส่วนจำนวนตัวอักษร) ให้ compare ต่อเองเหมือนบนสถานี
     for k, d in out.items():

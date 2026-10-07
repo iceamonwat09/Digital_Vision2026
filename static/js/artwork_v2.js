@@ -292,6 +292,9 @@
   // pan (ค่าเริ่มต้น · แบบหน้า Artwork เดิม) = ลากที่ว่างเพื่อเลื่อนภาพ · คลิก/ลากโซนเพื่อเลือก ย้าย ย่อขยาย
   // draw = ลากที่ว่างเพื่อวาดโซนใหม่ · วาดเสร็จกลับเป็น pan (ยกเว้นติ๊ก "วาดต่อเนื่อง")
   let mode = "pan";
+  // พื้นที่ยกเว้นในโซน (ARTWORK_V2_ZONE_IGNORE) — เก็บใน z.ignore เป็นสัดส่วนของหน้า (เหมือน bbox)
+  const ZONE_IGNORE = ($("v2Root") && $("v2Root").dataset.zoneIgnore) === "1";
+  const IGNORE_MAX = parseInt(($("v2Root") && $("v2Root").dataset.ignoreMax) || "20", 10) || 20;
   let sel = null;                 // {pi, side} โซนที่เลือก (กด Delete เพื่อลบ)
   let spaceDown = false;
 
@@ -443,7 +446,7 @@
   ["a", "b"].forEach((side) => {
     const box = boxOf(side);
     box.addEventListener("pointerdown", (ev) => {
-      if (ev.target && ev.target.closest && ev.target.closest("[data-rlab]")) return;   // ชิปมุมบนจอหมุน
+      if (ev.target && ev.target.closest && ev.target.closest("[data-rlab],[data-igndel]")) return;   // ชิปมุมบนจอหมุน · ✕ ของพื้นที่ยกเว้น
       const onZone = !!(ev.target && ev.target.closest && ev.target.closest(".v2-zone[data-pi]"));
       const want = ev.button === 1 || (ev.button === 0 && (spaceDown || (mode === "pan" && !onZone)));
       if (!want || !S.job) return;
@@ -463,8 +466,9 @@
   });
 
   function setMode(m) {
-    mode = m === "draw" ? "draw" : "pan";
+    mode = m === "draw" ? "draw" : (m === "ign" && ZONE_IGNORE) ? "ign" : "pan";
     root.classList.toggle("v2-mode-pan", mode === "pan");
+    root.classList.toggle("v2-mode-ign", mode === "ign");
     document.querySelectorAll("[data-mode]").forEach((b) => b.classList.toggle("on", b.dataset.mode === m));
   }
   document.querySelectorAll("[data-mode]").forEach((b) => b.addEventListener("click", () => setMode(b.dataset.mode)));
@@ -484,9 +488,9 @@
     if ((ev.key === "Delete" || ev.key === "Backspace") && sel) {
       ev.preventDefault();
       removeZone(sel.pi, sel.side);
-    } else if (ev.key === "Escape" && (sel || mode === "draw")) {
+    } else if (ev.key === "Escape" && (sel || mode !== "pan")) {
       sel = null;
-      if (mode === "draw") setMode("pan");
+      if (mode !== "pan") setMode("pan");
       renderZones();
     } else if (sel && /^Arrow/.test(ev.key)) {
       // ลูกศร = ขยับโซนที่เลือก 1 px บนจอ (Shift = 10 px) ตามทิศบนจอแม้จอหมุนอยู่
@@ -527,13 +531,16 @@
         if (!z || z.page !== S.page[side]) return;
         const on = sel && sel.pi === i && sel.side === side;
         ov.appendChild(zoneEl(z.bbox, COLORS[i % COLORS.length], "คู่ " + (i + 1), false, i, side, on));
+        (z.ignore || []).forEach((b, k) => ov.appendChild(ignEl(b, i, k)));
       });
-      if (draft && draft.side === side) ov.appendChild(zoneEl(draft.bbox, "#0f172a", "", true));
+      if (draft && draft.side === side) ov.appendChild(draft.ign ? ignEl(draft.bbox) : zoneEl(draft.bbox, "#0f172a", "", true));
       rotLabels(side);
     });
     const box = $("v2Pairs");
     box.innerHTML = S.pairs.map((p, i) => {
-      const st = (p.a ? "🅰✔" : "🅰—") + " " + (p.b ? "🅱✔" : "🅱—");
+      const nIgn = ((p.a && p.a.ignore) || []).length + ((p.b && p.b.ignore) || []).length;
+      const st = (p.a ? "🅰✔" : "🅰—") + " " + (p.b ? "🅱✔" : "🅱—") +
+        (nIgn ? ' <span title="พื้นที่ยกเว้นในคู่นี้">⛔' + nIgn + "</span>" : "");
       return '<span class="v2-chip" style="border-color:' + COLORS[i % COLORS.length] + '"><b style="color:' +
         COLORS[i % COLORS.length] + '">คู่ ' + (i + 1) + "</b> " + st +
         ' <button data-del="' + i + '" title="ลบคู่นี้">✕</button></span>';
@@ -563,6 +570,13 @@
     ctx.translate(cv.width / 2, cv.height / 2);
     ctx.rotate(r * Math.PI / 180);
     ctx.drawImage(im, sx, sy, sw, sh, -w / 2, -h / 2, w, h);
+    (z.ignore || []).forEach((b) => {               // พื้นที่ยกเว้น (ส่งให้ Vision เหมือนเดิม แต่ไม่นับจุดต่างในนี้)
+      ctx.fillStyle = "rgba(185,28,28,.22)";
+      ctx.strokeStyle = "#b91c1c";
+      const rx = (b[0] * nw - sx) * k - w / 2, ry = (b[1] * nh - sy) * k - h / 2;
+      ctx.fillRect(rx, ry, b[2] * nw * k, b[3] * nh * k);
+      ctx.strokeRect(rx, ry, b[2] * nw * k, b[3] * nh * k);
+    });
     ctx.restore();
     $("v2ThumbCap").textContent = "🔎 ภาพที่จะส่งให้ Vision — คู่ " + (sel.pi + 1) + " ฝั่ง " +
       (sel.side === "a" ? "🅰" : "🅱") + " · หมุน " + r + "° (ตัวอย่างความละเอียดต่ำ · ตัวหนังสือควรตั้งตรงอ่านได้)";
@@ -632,6 +646,48 @@
       cycleZoneRot(+c.dataset.rlab, side);
     });
   });
+
+  function ignEl(bb, pi, k) {
+    const d = document.createElement("div");
+    d.className = "v2-ign" + (pi == null ? " draft" : "");
+    d.style.left = bb[0] * 100 + "%";
+    d.style.top = bb[1] * 100 + "%";
+    d.style.width = bb[2] * 100 + "%";
+    d.style.height = bb[3] * 100 + "%";
+    if (pi != null) {
+      d.title = "พื้นที่ยกเว้นของคู่ " + (pi + 1) + " — จุดต่างในนี้ไม่นับในผลตัดสิน";
+      const x = document.createElement("b");
+      x.textContent = "✕";
+      x.dataset.igndel = pi + ":" + k;
+      x.title = "ลบพื้นที่ยกเว้นนี้";
+      d.appendChild(x);
+    }
+    return d;
+  }
+  // กรอบยกเว้นต้องอยู่ "ในโซน" — ใช้โซนของฝั่งนี้ที่ครอบจุดกลางของกรอบ แล้วตัดให้อยู่ในโซน
+  function addIgnore(side, bb) {
+    const cx = bb[0] + bb[2] / 2, cy = bb[1] + bb[3] / 2;
+    const pi = S.pairs.findIndex((p) => {
+      const z = p[side];
+      return z && z.page === S.page[side] && cx >= z.bbox[0] && cx <= z.bbox[0] + z.bbox[2] &&
+        cy >= z.bbox[1] && cy <= z.bbox[1] + z.bbox[3];
+    });
+    if (pi < 0) { $("v2RunMsg").textContent = "วาดพื้นที่ยกเว้นภายในโซน (จุดกลางของกรอบต้องอยู่ในโซน)"; return false; }
+    const z = S.pairs[pi][side];
+    if ((z.ignore || []).length >= IGNORE_MAX) { $("v2RunMsg").textContent = "พื้นที่ยกเว้นได้สูงสุด " + IGNORE_MAX + " กรอบต่อโซน"; return false; }
+    const x0 = Math.max(bb[0], z.bbox[0]), y0 = Math.max(bb[1], z.bbox[1]);
+    const x1 = Math.min(bb[0] + bb[2], z.bbox[0] + z.bbox[2]), y1 = Math.min(bb[1] + bb[3], z.bbox[1] + z.bbox[3]);
+    z.ignore = (z.ignore || []).concat([[x0, y0, x1 - x0, y1 - y0].map(r5)]);
+    sel = { pi: pi, side: side };
+    return true;
+  }
+  function delIgnore(side, tag) {
+    const [pi, k] = String(tag).split(":").map(Number);
+    const z = S.pairs[pi] && S.pairs[pi][side];
+    if (!z || !z.ignore || !z.ignore[k]) return;
+    z.ignore.splice(k, 1);
+    if (!z.ignore.length) delete z.ignore;
+  }
 
   function zoneEl(bb, color, label, draft, pi, side, selected) {
     const d = document.createElement("div");
@@ -722,6 +778,20 @@
     ov.addEventListener("pointerdown", (ev) => {
       if (ev.button !== 0 || !S.job || spaceDown) return;
       const t = ev.target;
+      if (t && t.dataset && t.dataset.igndel) {       // ✕ บนพื้นที่ยกเว้น = ลบ
+        ev.preventDefault();
+        ev.stopPropagation();
+        delIgnore(side, t.dataset.igndel);
+        renderZones();
+        saveSession();
+        return;
+      }
+      if (mode === "ign") {                           // วาดพื้นที่ยกเว้น (ไม่แตะโซน)
+        act = { kind: "ign", start: normPoint(ov, ev) };
+        ov.setPointerCapture(ev.pointerId);
+        ev.preventDefault();
+        return;
+      }
       if (t && t.dataset && t.dataset.rot) {          // ชิป ↻ = วนมุมของโซนนี้
         const zEl0 = t.closest(".v2-zone[data-pi]");
         if (zEl0) cycleZoneRot(+zEl0.dataset.pi, side);
@@ -751,6 +821,7 @@
       if (!act) return;
       const p = normPoint(ov, ev);
       if (act.kind === "draw") { renderZones({ side: side, bbox: rect(act.start, p) }); return; }
+      if (act.kind === "ign") { renderZones({ side: side, bbox: rect(act.start, p), ign: true }); return; }
       const z = S.pairs[act.pi] && S.pairs[act.pi][side];
       if (!z) return;
       z.bbox = editBox(act.b0, act.h, p[0] - act.start[0], p[1] - act.start[1]).map(r5);
@@ -763,6 +834,14 @@
       act = null;
       if (a.kind === "edit") { if (a.moved) saveSession(); return; }
       const bb = rect(a.start, normPoint(ov, ev));
+      if (a.kind === "ign") {
+        if (bb[2] < 0.003 || bb[3] < 0.003) { setMode("pan"); renderZones(); return; }   // คลิกเปล่า = เลิกวาด
+        const ok = addIgnore(side, bb);
+        if (ok && !($("v2DrawCont") && $("v2DrawCont").checked)) setMode("pan");
+        renderZones();
+        if (ok) saveSession();
+        return;
+      }
       if (bb[2] < 0.01 || bb[3] < 0.01) { setMode("pan"); renderZones(); return; }   // คลิกเปล่า = เลิกวาด
       const nz = { page: S.page[side], bbox: bb.map(r5) };
       if (rotOf(side)) nz.rotate = rotOf(side);       // โซนที่วาดขณะหมุนจอ ⇒ ส่งภาพในแนวที่เห็น
@@ -857,7 +936,7 @@
   }
 
   const SEV_TH = { red: "ต่าง", yellow: "ไม่มั่นใจ", debris: "เศษ", dismissed: "AI: สัญญาณรบกวน",
-    moved: "ย้ายที่", pixel_same: "ภาพเหมือน" };
+    moved: "ย้ายที่", pixel_same: "ภาพเหมือน", excluded: "ยกเว้น" };
   const AI_TH = { real: "ต่างจริง", noise: "สัญญาณรบกวนของ OCR", uncertain: "ไม่แน่ใจ" };
   function pct(v) { return v == null ? "-" : Math.round(v * 100) + "%"; }
 
@@ -928,7 +1007,7 @@
   //    (อัลกอริทึม/AI) · จุดหาย/เกินฝั่งเดียว การ์ดโค้ง และจุดที่ไม่มีเลข ไม่ถูกจับกลุ่ม
   //  · ระดับของแถว = สมาชิกที่หนักที่สุด · แถวอยู่ตำแหน่งของสมาชิกตัวแรก
   const LINE_GROUP = root.dataset.lineGroup === "1";
-  const SEV_RANK = { red: 4, yellow: 3, debris: 2, moved: 2, dismissed: 1, pixel_same: 1 };
+  const SEV_RANK = { red: 4, yellow: 3, debris: 2, moved: 2, dismissed: 1, pixel_same: 1, excluded: 1 };
   let GRP = {};                 // id ของแถวกลุ่ม ("g<id แรก>") → [id สมาชิก] — ใช้กับการซูม/เลือกแถว
   function lineGroups(list) {
     const out = [], at = {};
@@ -1094,6 +1173,20 @@
     return esc(text.slice(0, s[0])) + '<mark class="v2-d">' + esc(text.slice(s[0], s[1])) + "</mark>" + esc(text.slice(s[1]));
   }
 
+  // พื้นที่ยกเว้น (สัดส่วนของหน้า) → กรอบบนภาพที่ส่ง (px · แนวที่หมุนแล้ว) — กลับด้านของ pipeline._page_box
+  function ignSentBox(sd, b) {
+    const W = sd.sent_px[0], H = sd.sent_px[1], r = sd.rotate || 0;
+    const W0 = (r === 90 || r === 270) ? H : W, H0 = (r === 90 || r === 270) ? W : H;
+    const [zx, zy, zw, zh] = sd.bbox;
+    if (!zw || !zh) return null;
+    const u0 = (b[0] - zx) / zw * W0, v0 = (b[1] - zy) / zh * H0;
+    const u1 = (b[0] + b[2] - zx) / zw * W0, v1 = (b[1] + b[3] - zy) / zh * H0;
+    if (r === 90) return [H0 - v1, u0, H0 - v0, u1];
+    if (r === 180) return [W0 - u1, H0 - v1, W0 - u0, H0 - v0];
+    if (r === 270) return [v0, W0 - u1, v1, W0 - u0];
+    return [u0, v0, u1, v1];
+  }
+
   function svgFor(p, side, run) {
     const sd = p.sides[side];
     const W = sd.sent_px[0], H = sd.sent_px[1];
@@ -1111,6 +1204,10 @@
         g += '<rect class="ocr" x="' + l.box[0] + '" y="' + l.box[1] + '" width="' + (l.box[2] - l.box[0]) + '" height="' + (l.box[3] - l.box[1]) + '"/>';
       });
     }
+    (sd.ignore || []).forEach((b) => {
+      const r = ignSentBox(sd, b);
+      if (r) g += '<rect class="ign" x="' + r[0] + '" y="' + r[1] + '" width="' + (r[2] - r[0]) + '" height="' + (r[3] - r[1]) + '"><title>พื้นที่ยกเว้น — จุดต่างในนี้ไม่นับ</title></rect>';
+    });
     let tags = "";
     (p.findings || []).forEach((f) => {
       if (BOX_STYLE === "span") { g += spanFrame(f, side); return; }
@@ -1211,7 +1308,8 @@
     GRP = {};
     $("v2PairsRes").innerHTML = (r.pairs || []).map((p) => {
       const rows = rowsHtml(p.findings);
-      const debHtml = folded("ภาพเหมือนกันทุกพิกเซล — OCR อ่านต่างเอง · ไม่นับในผลตัดสิน (เปิดดูภาพหลักฐานได้)", p.pixel_same) +
+      const debHtml = folded("อยู่ในพื้นที่ยกเว้นที่กำหนดในโซน — ไม่นับในผลตัดสิน", p.excluded) +
+        folded("ภาพเหมือนกันทุกพิกเซล — OCR อ่านต่างเอง · ไม่นับในผลตัดสิน (เปิดดูภาพหลักฐานได้)", p.pixel_same) +
         folded("ข้อความมีอยู่ในอีกฝั่งตรงตำแหน่งเดียวกัน (OCR จัดบรรทัดต่างกัน) — ไม่นับในผลตัดสิน", p.relocated) +
         folded("เศษอักขระ / ขอบโซน — ไม่นับในผลตัดสิน", p.debris) +
         folded(p.raw_lines && p.ai && p.ai.mode === "raw"

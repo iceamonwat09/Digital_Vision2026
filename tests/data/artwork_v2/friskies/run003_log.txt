@@ -1,0 +1,807 @@
+@"/root/.claude/uploads/dc749879-bfa7-569a-9d0d-b229b0aca2ec/eb9ccd31-F-AW-N-2026-00002908_TUMC030000_5APLA0000642_PLB_FRISKIES_100X190_OC.F_GREEN_SG_rev1_1.pdf" @"/root/.claude/uploads/dc749879-bfa7-569a-9d0d-b229b0aca2ec/55cbc9b7-O-AW-N-2026-00002908_TUMC030000_5APLA0000642_PLB_FRISKIES_100X190_OC.F_GREEN_SG_rev1_1.pdf" ให้เลือกได้ไปก่อนเยี่ยม มาดูต่อสำหรับ เคสใหม่นะ 
+วิเคราะห์ปัญหาก่อน ว่าควรวางแผนในการปรับให้เข้ากับระบบเราอย่างไร โดยต้องให้ฉันยืนยันแผนการ
+
+=== ARTWORK V2 · CLOUD VISION OCR · DIAGNOSTIC LOG ===
+version=2026.10.07-v2pixel job=20261007_173743_56a188 run=run_003 at=2026-10-07 18:04:14 owner=admin
+VERDICT=FAIL (ไม่ผ่าน)
+  - พบจุดต่างที่มั่นใจ 7 จุด
+  - จุดที่ไม่มั่นใจ 33 จุด (ต้องดูด้วยตา)
+time_ms: render=1159 vision=40130 compare=688 reread=0 ai=67429 total=130269
+sharpness=standard (ภาพที่ส่ง: มาตรฐาน 400 dpi)
+color_mode=color (สีของภาพที่ส่ง: สี)
+api_key: source=ui masked=••••L_6g length=39
+
+[SETTINGS]
+  ENDPOINT=https://eu-vision.googleapis.com
+  MODEL=builtin/stable
+  LANGUAGE_HINTS=[]
+  TIMEOUT_S=120.0
+  RETRIES=2
+  MAX_REQUEST_BYTES=9500000
+  MAX_IMAGE_BYTES=7121928
+  MAX_IMAGE_MP=40.0
+  JPEG_QUALITIES=[92, 88, 84, 80, 75, 70]
+  PDF_ZONE_DPI=400
+  PDF_ZONE_DPI_MAX=1200
+  ZONE_MIN_LONG_SIDE=1600
+  SHARPNESS=standard
+  SHARP_FILL=0.92
+  SHARP_MAX_RENDERS=4
+  COLOR_MODE=color
+  BW_BLOCK_MM=3.0
+  BW_C=12.0
+  CONF_FAIL=0.8
+  CONF_LOW=0.6
+  COVERAGE_MIN=0.9
+  PAIR_MIN_SIM=0.6
+  PAIR_MIN_RUN=0.4
+  PAIR_MAX_DIST=0.12
+  ROW_MERGE_ENABLED=True
+  ROW_MAX_ANGLE=10.0
+  PUNCT_CAN_FAIL=True
+  CURVED_GROUP_ENABLED=True
+  TILT_ANGLE=10.0
+  CURVED_NEIGHBOR_MAX_CHARS=8
+  DEBRIS_ENABLED=True
+  DEBRIS_CONF=0.6
+  SEAM_FILLER=True
+  CROSS_ROW_JOIN=True
+  SYMBOL_TOKEN=True
+  FRACTION_YELLOW=True
+  REREAD_ENABLED=False
+  REREAD_MAX=12
+  REREAD_SCALE=2.0
+  REREAD_MAX_SIDE=2400
+  AI_MODE=off
+  AI_REVIEW_URL=http://127.0.0.1:5678/webhook/artwork-v2-review
+  AI_RAW_URL=http://127.0.0.1:5678/webhook/artwork-v2-raw
+  AI_TIMEOUT_S=180.0
+  AI_RAW_TIMEOUT_S=300.0
+  AI_RAW_SAFETY=True
+  AI_RETRIES=1
+  AI_JUDGE_PUNCT_YELLOW=True
+  AI_QUOTE_RECOVER=True
+  AI_QUOTE_RECOVER_MAX_SHIFT=2
+  AI_EQUIV_NOISE=True
+  AI_SEND_CURVED=True
+  AI_JUDGE_KEEP_ALGO_RED=True
+  AI_JUDGE_NOISE_GUARD=True
+  AI_JUDGE_CURVED_YELLOW=True
+  AI_JUDGE_ONESIDED_GUARD=True
+  ONE_REQUEST_PER_PAIR=True
+  RUN_GUARD=True
+  RUN_MAX_CONCURRENT=2
+  RUN_COOLDOWN_S=3.0
+  GEO_PAIRING=True
+  RECOMPOSE=True
+  MOVED_TEXT=True
+  RELOCATE=True
+  BALANCED_MOVE=True
+  VERTICAL_UPRIGHT=True
+  QUOTE_PUNCT=True
+  AI_EXPERIMENTAL_MODES=False
+  PIXEL_VERIFY=True
+  PIXEL_LINE_MODE=True
+  PIXEL_TIME_BUDGET_S=180.0
+
+[FILES]
+  A: name=F-AW-N-2026-00002908 TUMC030000 5APLA0000642 PLB FRISKIES 100X190 OC.F GREEN SG rev1 (1).pdf type=pdf bytes=3659446 sha1=882d2fd72844 pages=1 page_mm=[547.4, 347.7]
+  B: name=O-AW-N-2026-00002908 TUMC030000 5APLA0000642 PLB FRISKIES 100X190 OC.F GREEN SG rev1 (1).pdf type=pdf bytes=4162745 sha1=5a148e10d353 pages=3 page_mm=[326.1, 260.4]
+
+[VISION REQUESTS]
+  #0 phase=main images=p1_a,p1_b json_bytes=4900526 http=200 attempts=1 ms=40104 model=builtin/stable at=2026-10-07 18:02:45
+
+[PAIR 1] verdict=FAIL coverage=0.971 (A=0.971 B=0.992) same_request=True methods={'exact': 68, 'content': 30, 'position': 2}
+  A: page=1 bbox=[0.48002, 0.33838, 0.17435, 0.53539] render_dpi=400.0 zone_mm=[95.4, 186.2] render_px=[1504, 2933] image_scale=- sent_px=[1504, 2933] jpeg_q=92 downscale=1.0 jpeg_bytes=1883775 sha1=e5f2918e189d req=0 ok=True
+     sharp: mode=standard base_dpi=400.0 → dpi=400.0 (×1.0) budget=-k tries=[]
+     ocr: blocks=29 by_type={'TEXT': 29} paragraphs=47 words=983 symbols=3300 lines=103 chars=3391 conf_mean=0.957 conf_min=0.115 low_conf(<0.6)=0.032 langs=['en', 'ko', 'th', 'id', 'ms'] breaks={'LINE_BREAK': 47, 'EOL_SURE_SPACE': 56} soft_hyphen_lines=0 angles={0: 980, 270: 2, 90: 1} skipped_blocks=0 text_len=3965 pages=[(1504, 2933)]
+  B: page=1 bbox=[0.50626, 0.07437, 0.29677, 0.71646] render_dpi=400.0 zone_mm=[96.8, 186.6] render_px=[1525, 2939] image_scale=- sent_px=[1525, 2939] jpeg_q=92 downscale=1.0 jpeg_bytes=1791450 sha1=a713d2dc4666 req=0 ok=True
+     sharp: mode=standard base_dpi=400.0 → dpi=400.0 (×1.0) budget=-k tries=[]
+     ocr: blocks=30 by_type={'TEXT': 30} paragraphs=51 words=964 symbols=3298 lines=108 chars=3391 conf_mean=0.963 conf_min=0.119 low_conf(<0.6)=0.024 langs=['en', 'ko', 'th', 'id', 'ms'] breaks={'LINE_BREAK': 51, 'EOL_SURE_SPACE': 57} soft_hyphen_lines=0 angles={0: 961, 270: 2, 90: 1} skipped_blocks=0 text_len=3960 pages=[(1525, 2939)]
+  pairing: line_pairs=100 unpaired_a=[15, 49, 68] unpaired_b=[14, 35, 49, 69, 86, 87, 90, 93] reflow_lines_a=[68] reflow_lines_b=[14, 35, 69] reflow_edges=['B:Inc.,', 'A:H', 'A:Inc.,', 'B:RegNo.:', 'A:RegNo.:', 'A:1']
+  row_merges (0) — ต่อแถวที่ OCR ตัดตรงเส้นตกแต่ง:
+  curved_lines (เอียง > 10° จากแนวหลัก + เศษติดกัน): A=[84, 85, 86] B=[88, 89, 90, 91]
+  findings (40):
+   F1 YELLOW PUNCT method=content score=1.000
+      A line=47 frag="" word="oleh:" conf=0.455 box=[431,1513,437,1553]
+        text="Unggas Terhidrolisa; Perisa; Ekstrak Ikan. oleh: PT Nestlé Indonesia, Jakarta, 12520, Indonesia"
+      B line=47 frag=",," word="Ikan.,," conf=0.662 box=[499,1519,567,1560]
+        text="Unggas Terhidrolisa; Perisa; Ekstrak Ikan.,, oleh: PT Nestlé Indonesia, Jakarta, 12520, Indonesia"
+      note: AI: ไม่แน่ใจ
+      note: ภาพยืนยันว่าต่าง
+      ai: verdict=uncertain confidence(vision)=0.455 words=-/-
+      ai_reason: "ความเชื่อมั่นของคำใน A และ B ต่ำ (A47:4 'Ikan.' conf 0.63, B47:4 'Ikan.,,' conf 0.65)."
+      ai_suggestion: "ตรวจสอบเครื่องหมายวรรคตอนใน 'Ikan.' / 'Ikan.,,'."
+   F2 YELLOW PUNCT method=content score=1.000
+      A line=48 frag="'" word="합제(L-로이신'" conf=0.463 box=[751,1546,769,1594]
+        text="구아검), 농어, 가수분해단백질(닭, 칠면조, 오리), 아미노산제 합제(L-로이신'"
+      B line=48 frag="" word="합제(L-로이신" conf=0.978 box=[765,1555,773,1603]
+        text="구아검), 농어, 가수분해단백질(닭, 칠면조, 오리), 아미노산제 합제(L-로이신"
+      note: AI: ไม่แน่ใจ
+      note: ภาพยืนยันว่าต่าง
+      ai: verdict=uncertain confidence(vision)=0.463 words=-/-
+      ai_reason: "ความเชื่อมั่นของคำใน A ต่ำ (A48:6 '합제(L-로이신'' conf 0.46)."
+      ai_suggestion: "ตรวจสอบเครื่องหมายวรรคตอนใน '합제(L-로이신'' / '합제(L-로이신'."
+   F3 YELLOW CASE method=content score=1.000
+      A line=45 frag="O" word="NO.IM-10-000-03-AAACN0757G-23" conf=0.283 box=[830,1601,843,1650]
+        text="NO.IM-10-000-03-AAACN0757G-23"
+      B line=64 frag="o" word="No." conf=0.885 box=[835,1628,847,1656]
+        text="No. IM-10-000-03-AAACN0757G-23"
+      note: AI: ไม่แน่ใจ
+      note: ภาพยืนยันว่าต่าง
+      ai: verdict=uncertain confidence(vision)=0.283 words=-/-
+      ai_reason: "ความเชื่อมั่นของคำใน A ต่ำมาก (A45:0 'NO.IM-10-000-03-AAACN0757G-23' conf 0.28) และมีการแยกคำใน B."
+      ai_suggestion: "ตรวจสอบตัวพิมพ์ใหญ่-เล็กและรูปแบบของ 'NO.' / 'No.' ในหมายเลขทะเบียน."
+   F4 YELLOW PUNCT method=content score=1.000
+      A line=72 frag="," word="유한책임회사," conf=0.978 box=[1446,1965,1451,2008]
+        text="Korea: 수입업체명 및 주소: 네슬레코리아 유한책임회사,"
+      B line=73 frag="." word="유한책임회사." conf=0.915 box=[1450,1968,1460,2012]
+        text="Korea: 수입업체명 및 주소: 네슬레코리아 유한책임회사."
+      note: เครื่องหมายวรรคตอนต้องยืนยันด้วยการอ่านซ้ำ (ปิดอยู่) — ยังไม่ยืนยัน
+      note: AI: ต่างจริง
+      note: ภาพยืนยันว่าต่าง
+      ai: verdict=real confidence(vision)=0.915 words=-/-
+      ai_reason: "เครื่องหมายวรรคตอนแตกต่างกัน (จุลภาคใน A เทียบกับมหัพภาคใน B) และคำที่เกี่ยวข้องมีความเชื่อมั่นสูง (A72:5 '유한책임회사,' conf 0.98, B73:5 '유한책임회사.' conf 0.92)."
+      ai_suggestion: "ตรวจสอบเครื่องหมายวรรคตอนท้ายคำว่า '유한책임회사' ว่าเป็นจุลภาคหรือมหัพภาค."
+   F5 YELLOW PUNCT method=content score=0.999
+      A line=92 frag="," word="후," conf=0.784 box=[1454,2362,1460,2404]
+        text="피하여 서늘하고 건조한 장소에 보관하여 주십시오. 개봉 후,"
+      B line=97 frag="" word="후" conf=0.993 box=[1454,2370,1460,2413]
+        text="피하여 서늘하고 건조한 장소에 보관하여 주십시오. 개봉 후"
+      note: AI: ไม่แน่ใจ
+      note: ภาพยืนยันว่าต่าง
+      ai: verdict=uncertain confidence(vision)=0.784 words=-/-
+      ai_reason: "ความเชื่อมั่นของคำใน A ต่ำ (A92:7 '후,' conf 0.78)."
+      ai_suggestion: "ตรวจสอบเครื่องหมายจุลภาคหลังคำว่า '후'."
+   F6 YELLOW PUNCT method=content score=0.999
+      A line=69 frag=""" word="No."" conf=0.425 box=[1453,1852,1461,1887]
+        text="Beverage & Creamery Sdn. Bhd. Plot 73 & Lot No.""
+      B line=70 frag="" word="No." conf=0.956 box=[1453,1858,1459,1894]
+        text="Beverage & Creamery Sdn. Bhd. Plot 73 & Lot No."
+      note: AI: ไม่แน่ใจ
+      note: ภาพยืนยันว่าต่าง
+      ai: verdict=uncertain confidence(vision)=0.425 words=-/-
+      ai_reason: "ความเชื่อมั่นของคำใน A ต่ำ (A69:9 'No."' conf 0.43)."
+      ai_suggestion: "ตรวจสอบเครื่องหมายอัญประกาศหลังคำว่า 'No.'."
+   F7 YELLOW PUNCT method=content score=0.999
+      A line=9 frag="-" word="-" conf=0.226 box=[34,791,46,843]
+        text="- GUARANTEED ANALYSIS คุณภาพอาหารสัตว์ทางเคมี: Crude"
+      B line=9 frag="" word="GUARANTEED" conf=0.963 box=[63,804,69,848]
+        text="GUARANTEED ANALYSIS คุณภาพอาหารสัตว์ทางเคมี: Crude"
+      note: AI: ไม่แน่ใจ
+      note: ภาพยืนยันว่าต่าง
+      ai: verdict=uncertain confidence(vision)=0.226 words=-/-
+      ai_reason: "ความเชื่อมั่นของสัญลักษณ์ใน A ต่ำ (A9:0 '-' conf 0.23)."
+      ai_suggestion: "ตรวจสอบว่ามีเครื่องหมายขีดกลางนำหน้า 'GUARANTEED ANALYSIS' หรือไม่."
+   F8 YELLOW PUNCT method=content score=0.999
+      A line=27 frag="•" word="•" conf=0.238 box=[36,1156,47,1201]
+        text="• 1세 이후) 등록성분량: 조단백질 5.5% 이상, 조지방 0.05% 이상, 조섬유 1.0%"
+      B line=27 frag="" word="1세" conf=0.989 box=[62,1162,70,1211]
+        text="1세 이후) 등록성분량: 조단백질 5.5% 이상, 조지방 0.05% 이상, 조섬유 1.0%"
+      note: AI: ไม่แน่ใจ
+      note: ภาพยืนยันว่าต่าง
+      ai: verdict=uncertain confidence(vision)=0.237 words=-/-
+      ai_reason: "ความเชื่อมั่นของสัญลักษณ์ใน A ต่ำ (A27:0 '•' conf 0.24)."
+      ai_suggestion: "ตรวจสอบว่ามีสัญลักษณ์จุดนำหน้า '1세' หรือไม่."
+   F9 RED NUMBER method=content score=0.998
+      A line=20 frag="1" word="1" conf=0.927 box=[807,867,818,902]
+        text="1 sachet per day. This product is a treat and is intended for"
+      B line=19 frag="" word="sachet" conf=0.991 box=[829,874,835,913]
+        text="sachet per day. This product is a treat and is intended for"
+      note: ไม่ได้อ่านซ้ำ (ปิดอยู่)
+      note: AI: สัญญาณรบกวนของ OCR
+      note: ภาพยืนยันว่าต่าง
+      ai: verdict=noise confidence(vision)=0.927 words=-/-
+      ai_reason: "ข้อความ '1' ถูกย้ายไปอยู่ในบรรทัดอื่นใน B (B14:0)."
+      ai_suggestion: "ไม่ต้องดำเนินการใดๆ เนื่องจากเป็นข้อความที่ถูกย้าย."
+   F10 YELLOW TEXT method=content score=0.993
+      A line=78 frag="I" word="IN:" conf=0.315 box=[582,2207,592,2263]
+        text="8 "850124079 4 7 3'' > IN: 1800 103 1947 บ.เนสท์เล่ (ไทย) จำกัด เลขที่ 999/9 ถนนพระราม 1 แขวง"
+      B line=79 frag="" word="N:" conf=0.628 box=[556,2214,564,2271]
+        text="8 "850124079 4 7 3'' > N: 1800 103 1947 บ.เนสท์เล่ (ไทย) จำกัด เลขที่ 999/9 ถนนพระราม 1 แขวง"
+      note: AI: ไม่แน่ใจ
+      note: ภาพยืนยันว่าต่าง
+      ai: verdict=uncertain confidence(vision)=0.315 words=-/-
+      ai_reason: "ความเชื่อมั่นของคำใน A และ B ต่ำ (A78:6 'IN:' conf 0.32, B79:6 'N:' conf 0.63)."
+      ai_suggestion: "ตรวจสอบตัวอักษร 'I' ใน 'IN:' / 'N:'."
+   F11 YELLOW TEXT method=content score=0.990
+      A line=11 frag="" word="0.05%" conf=0.630 box=[184,879,190,920]
+        text="0.05% (Min), Mineral(calcium) 0.001%"
+      B line=11 frag="Tujuan" word="Tujuan" conf=0.365 box=[61,888,146,927]
+        text="Tujuan 0.05% (Min), Mineral(calcium) 0.001%"
+      note: AI: ไม่แน่ใจ
+      note: ภาพยืนยันว่าต่าง
+      ai: verdict=uncertain confidence(vision)=0.365 words=-/-
+      ai_reason: "คำว่า 'Tujuan' เพิ่มเข้ามาใน B และมีความเชื่อมั่นต่ำ (B11:0 'Tujuan' conf 0.36)."
+      ai_suggestion: "ตรวจสอบว่าคำว่า 'Tujuan' ควรมีอยู่ใน B หรือไม่."
+   F12 RED TEXT method=content score=0.986
+      A line=35 frag="i" word="Diimport" conf=0.984 box=[821,1167,834,1212]
+        text="Diimport oleh / Imported By: Malaysia: Purina"
+      B line=36 frag="" word="Dimport" conf=0.929 box=[829,1172,837,1221]
+        text="Dimport oleh / Imported By: Malaysia: Purina"
+      note: ไม่ได้อ่านซ้ำ (ปิดอยู่)
+      note: AI: ต่างจริง
+      note: ภาพยืนยันว่าต่าง
+      ai: verdict=real confidence(vision)=0.929 words=-/-
+      ai_reason: "ตัวอักษรแตกต่างกัน ('Diimport' ใน A เทียบกับ 'Dimport' ใน B) และคำที่เกี่ยวข้องมีความเชื่อมั่นสูง (A35:0 'Diimport' conf 0.98, B36:0 'Dimport' conf 0.93)."
+      ai_suggestion: "ตรวจสอบการสะกดคำว่า 'Diimport' / 'Dimport'."
+   F13 YELLOW TEXT method=content score=0.972
+      A line=25 frag="insu" word="insu" conf=0.210 box=[36,1075,92,1118]
+        text="insu 제품명: 프리스키 리커블 흰살생선 성분등록번호: 서울-37006호 명칭 및 Cara Penggunaan:lihat tabel rekomendasi penyajian"
+      B line=25 frag="" word="제품명:" conf=0.988 box=[66,1082,72,1126]
+        text="제품명: 프리스키 리커블 흰살생선 성분등록번호: 서울-37006호 명칭 및 Cara Penggunaan:lihattabelrekomendasi penyajian"
+      note: AI: ไม่แน่ใจ
+      note: ภาพยืนยันว่าต่าง
+      ai: verdict=uncertain confidence(vision)=0.210 words=-/-
+      ai_reason: "คำว่า 'insu' เพิ่มเข้ามาใน A และมีความเชื่อมั่นต่ำ (A25:0 'insu' conf 0.21)."
+      ai_suggestion: "ตรวจสอบว่าคำว่า 'insu' ควรมีอยู่ใน A หรือไม่."
+   F14 YELLOW TEXT method=content score=0.963
+      A line=62 frag=": (" word="PH: (632)" conf=0.893 box=[609,2007,630,2052]
+        text="PH: (632) 8898-0061"
+      B line=58 frag="E" word="PHE" conf=0.557 box=[617,2014,626,2060]
+        text="PHE 632) 8898-0061"
+      note: AI: ไม่แน่ใจ
+      note: ภาพยืนยันว่าต่าง
+      ai: verdict=uncertain confidence(vision)=0.557 words=-/-
+      ai_reason: "ความเชื่อมั่นของคำใน B ต่ำ (B58:0 'PHE' conf 0.56)."
+      ai_suggestion: "ตรวจสอบการสะกดคำว่า 'PH:' / 'PHE'."
+   F15 YELLOW TEXT method=content score=0.957
+      A line=74 frag="웨" word="웨스트게이트" conf=0.443 box=[813,2045,833,2089]
+        text="웨스트게이트 타워). 구입 후 사용하시거나 포장이 훼손된"
+      B line=75 frag="워" word="워스트게이트" conf=0.693 box=[820,2053,838,2099]
+        text="워스트게이트 타워). 구입 후 사용하시거나 포장이 훼손된"
+      note: AI: ไม่แน่ใจ
+      note: ภาพยืนยันว่าต่าง
+      ai: verdict=uncertain confidence(vision)=0.443 words=-/-
+      ai_reason: "ความเชื่อมั่นของคำใน A และ B ต่ำ (A74:0 '웨스트게이트' conf 0.44, B75:0 '워스트게이트' conf 0.69)."
+      ai_suggestion: "ตรวจสอบการสะกดคำว่า '웨스트게이트' / '워스트게이트'."
+   F16 YELLOW NUMBER method=content score=0.948
+      A line=90 frag="☆EE||||" word="☆EE||||" conf=0.151 box=[1336,2260,1457,2313]
+        text="ปทุมวัน เขตปทุมวัน กรุงเทพมหานคร 10330 (F9) ☆EE||||"
+      B line=95 frag="#57" word="#57" conf=0.408 box=[1321,2274,1455,2322]
+        text="ปทุมวัน เขตปทุมวัน กรุงเทพมหานคร 10330 (F9) #57"
+      note: AI: ไม่แน่ใจ
+      note: ภาพยืนยันว่าต่าง
+      ai: verdict=uncertain confidence(vision)=0.151 words=-/-
+      ai_reason: "ความเชื่อมั่นของสัญลักษณ์ใน A และ B ต่ำมาก (A90:5 '☆EE||||' conf 0.15, B95:5 '#57' conf 0.41)."
+      ai_suggestion: "ตรวจสอบสัญลักษณ์ท้ายบรรทัด."
+   F17 YELLOW NUMBER method=content score=0.947
+      A line=50 frag="+)" word="(+)56" conf=0.271 box=[319,1640,351,1681]
+        text="(+)56 g (14g x 47:"
+      B line=50 frag="2:" word="(2:56" conf=0.400 box=[325,1648,419,1692]
+        text="(2:56 g (14gx47):"
+      note: AI: ไม่แน่ใจ
+      note: ภาพยืนยันว่าต่าง
+      ai: verdict=uncertain confidence(vision)=0.272 words=-/-
+      ai_reason: "ความเชื่อมั่นของคำใน A และ B ต่ำมาก (A50:0 '(+)56' conf 0.27, B50:0 '(2:56' conf 0.36)."
+      ai_suggestion: "ตรวจสอบตัวเลขและสัญลักษณ์ใน '(+)56' / '(2:56'."
+   F18 YELLOW NUMBER method=content score=0.947
+      A line=50 frag="" word="47:" conf=0.520 box=[609,1643,615,1684]
+        text="(+)56 g (14g x 47:"
+      B line=50 frag=")" word="(14gx47):" conf=0.563 box=[647,1652,659,1695]
+        text="(2:56 g (14gx47):"
+      note: AI: ไม่แน่ใจ
+      note: ภาพยืนยันว่าต่าง
+      ai: verdict=uncertain confidence(vision)=0.520 words=-/-
+      ai_reason: "ความเชื่อมั่นของคำใน A และ B ต่ำ (A50:4 '47:' conf 0.52, B50:2 '(14gx47):' conf 0.46) และมีการรวมคำ/แยกคำ."
+      ai_suggestion: "ตรวจสอบรูปแบบของ '(14g x 47:' / '(14gx47):'."
+   F19 RED NUMBER method=content score=0.946
+      A line=24 frag="" word="ให้" conf=0.969 box=[804,1030,810,1070]
+        text="ให้ 1 ซองต่อวันสำหรับแมวโต (น้ำหนักโดยประมาณ 4 กก.)"
+      B line=24 frag="6 kcal /sachet ค่าพลังงานที่สัตว์สามารถนำไปใช้ 42 กิโลแคลอรี…" word="6 kcal /sachet ค่าพลังงานที่สัตว์สามารถนำไปใช้ 42 กิโลแคลอรี…" conf=0.868 box=[67,1039,762,1077]
+        text="6 kcal /sachet ค่าพลังงานที่สัตว์สามารถนำไปใช้ 42 กิโลแคลอรี่ต่อ 100 กรัม ให้ 1 ซองต่อวันสำหรับแมวโต (น้ำหนักโดยประมาณ 4 กก.)"
+      note: ไม่ได้อ่านซ้ำ (ปิดอยู่)
+      note: AI: ต่างจริง
+      note: ภาพยืนยันว่าต่าง
+      ai: verdict=real confidence(vision)=0.868 words=-/-
+      ai_reason: "ข้อความ '6 kcal /sachet ค่าพลังงานที่สัตว์สามารถนำไปใช้ 42 กิโลแคลอรี่ต่อ 100 กรัม' เพิ่มเข้ามาใน B และคำที่เกี่ยวข้องมีความเชื่อมั่นสูง (B24:0-B24:7 conf >= 0.87)."
+      ai_suggestion: "ตรวจสอบว่าข้อความดังกล่าวควรมีอยู่ใน B หรือไม่."
+   F20 YELLOW TEXT method=content score=0.922
+      A line=29 frag="o" word="abuus:no" conf=0.346 box=[288,1281,301,1311]
+        text="INGREDIENTS/ abuus:no KOMPOSISI"
+      B line=29 frag="au/" word="abuus:nau/KOMPOSISIE" conf=0.415 box=[293,1286,424,1320]
+        text="INGREDIENTS/ abuus:nau/KOMPOSISIE"
+      note: AI: ไม่แน่ใจ
+      note: ภาพยืนยันว่าต่าง
+      ai: verdict=uncertain confidence(vision)=0.346 words=-/-
+      ai_reason: "ความเชื่อมั่นของคำใน A และ B ต่ำมาก (A29:1 'abuus:no' conf 0.34, B29:1 'abuus:nau/KOMPOSISIE' conf 0.33)."
+      ai_suggestion: "ตรวจสอบการสะกดคำว่า 'abuus:no' / 'abuus:nau/KOMPOSISIE'."
+   F21 YELLOW TEXT method=content score=0.922
+      A line=29 frag="" word="KOMPOSISI" conf=0.620 box=[531,1281,535,1311]
+        text="INGREDIENTS/ abuus:no KOMPOSISI"
+      B line=29 frag="E" word="abuus:nau/KOMPOSISIE" conf=0.429 box=[580,1286,602,1320]
+        text="INGREDIENTS/ abuus:nau/KOMPOSISIE"
+      note: AI: สัญญาณรบกวนของ OCR
+      note: ภาพยืนยันว่าต่าง
+      ai: verdict=noise confidence(vision)=0.429 words=-/-
+      ai_reason: "เป็นส่วนหนึ่งของความแตกต่างที่ครอบคลุมโดย candidate F20 และมีความเชื่อมั่นต่ำ."
+      ai_suggestion: "ไม่ต้องดำเนินการใดๆ."
+   F22 YELLOW TEXT method=content score=0.882
+      A line=64 frag="ha" word="THhusamaha" conf=0.311 box=[673,2081,693,2130]
+        text="THhusamaha 1162 nsa"
+      B line=60 frag="ne" word="THhusamane" conf=0.152 box=[680,2090,699,2139]
+        text="THhusamane 1162 nsa"
+      note: AI: ไม่แน่ใจ
+      note: ภาพยืนยันว่าต่าง
+      ai: verdict=uncertain confidence(vision)=0.152 words=-/-
+      ai_reason: "ความเชื่อมั่นของคำใน A และ B ต่ำมาก (A64:0 'THhusamaha' conf 0.14, B60:0 'THhusamane' conf 0.12)."
+      ai_suggestion: "ตรวจสอบการสะกดคำว่า 'THhusamaha' / 'THhusamane'."
+   F23 YELLOW TEXT method=content score=0.842
+      A line=13 frag="nan I" word="nan Iuu1%" conf=0.366 box=[477,953,553,999]
+        text="Ash 2% (Max), Crude Fibre nan Iuu1% (Max),"
+      B line=13 frag="mn T" word="mn Tuunnnn1%" conf=0.455 box=[485,961,560,1003]
+        text="Ash 2% (Max), Crude Fibre mn Tuunnnn1% (Max),"
+      note: AI: ไม่แน่ใจ
+      note: ภาพยืนยันว่าต่าง
+      ai: verdict=uncertain confidence(vision)=0.366 words=-/-
+      ai_reason: "ความเชื่อมั่นของคำใน A ต่ำ (A13:5 'nan' conf 0.37)."
+      ai_suggestion: "ตรวจสอบการสะกดคำว่า 'nan' / 'mn'."
+   F24 YELLOW TEXT method=content score=0.842
+      A line=13 frag="" word="Iuu1%" conf=0.382 box=[578,953,584,998]
+        text="Ash 2% (Max), Crude Fibre nan Iuu1% (Max),"
+      B line=13 frag="nnnn" word="Tuunnnn1%" conf=0.563 box=[586,961,654,1002]
+        text="Ash 2% (Max), Crude Fibre mn Tuunnnn1% (Max),"
+      note: AI: ไม่แน่ใจ
+      note: ภาพยืนยันว่าต่าง
+      ai: verdict=uncertain confidence(vision)=0.382 words=-/-
+      ai_reason: "ความเชื่อมั่นของคำใน A และ B ต่ำมาก (A13:6 'Iuu1%' conf 0.37, B13:6 'Tuunnnn1%' conf 0.46)."
+      ai_suggestion: "ตรวจสอบการสะกดคำว่า 'Iuu1%' / 'Tuunnnn1%'."
+   F25 YELLOW TEXT method=content score=0.842
+      A line=23 frag="umslanksñuu:unviadu" word="Usunumslanksñuu:unviadu" conf=0.267 box=[1186,989,1434,1033]
+        text="should be available at all times Usunumslanksñuu:unviadu"
+      B line=22 frag="nu" word="Usunnu" conf=0.534 box=[1190,998,1212,1040]
+        text="should be available at all times Usunnu"
+      note: AI: ไม่แน่ใจ
+      note: ภาพยืนยันว่าต่าง
+      ai: verdict=uncertain confidence(vision)=0.267 words=-/-
+      ai_reason: "ความเชื่อมั่นของคำใน A และ B ต่ำมาก (A23:6 'Usunumslanksñuu:unviadu' conf 0.27, B22:6 'Usunnu' conf 0.42)."
+      ai_suggestion: "ตรวจสอบการสะกดคำว่า 'Usunumslanksñuu:unviadu' / 'Usunnu'."
+   F26 YELLOW TEXT method=content score=0.836
+      A line=12 frag="" word="u" conf=0.375 box=[267,914,275,963]
+        text="(Min), Moisture u T 90% (Max), Crude"
+      B line=12 frag="Aub" word="Aubu" conf=0.283 box=[286,924,368,967]
+        text="(Min), Moisture Aubu Tuunnan 90% (Max), Crude"
+      note: AI: ไม่แน่ใจ
+      note: ภาพยืนยันว่าต่าง
+      ai: verdict=uncertain confidence(vision)=0.282 words=-/-
+      ai_reason: "ความเชื่อมั่นของคำใน A และ B ต่ำมาก (A12:2 'u' conf 0.38, B12:2 'Aubu' conf 0.28)."
+      ai_suggestion: "ตรวจสอบการสะกดคำว่า 'u' / 'Aubu'."
+   F27 YELLOW TEXT method=content score=0.836
+      A line=12 frag="" word="90%" conf=0.841 box=[395,913,403,962]
+        text="(Min), Moisture u T 90% (Max), Crude"
+      B line=12 frag="uunnan" word="Tuunnan" conf=0.280 box=[399,922,515,966]
+        text="(Min), Moisture Aubu Tuunnan 90% (Max), Crude"
+      note: AI: สัญญาณรบกวนของ OCR
+      note: ภาพยืนยันว่าต่าง
+      ai: verdict=noise confidence(vision)=0.280 words=-/-
+      ai_reason: "เป็นส่วนหนึ่งของความแตกต่างที่ครอบคลุมโดย candidate F26 และมีความเชื่อมั่นต่ำ."
+      ai_suggestion: "ไม่ต้องดำเนินการใดๆ."
+   F28 YELLOW NUMBER method=content score=0.749
+      A line=41 frag="XXXXXX" word="XXXXXX" conf=0.492 box=[1353,1396,1440,1431]
+        text="Reg No.: IM-610, D-13-291, IN-233; CFPR No. XXXXXX"
+      B line=42 frag="SF-CF12-26-172683205264" word="SF-CF12-26-172683205264" conf=0.514 box=[1179,1401,1444,1435]
+        text="IM-610, D-13-291, IN-233; CFPR No. SF-CF12-26-172683205264"
+      note: AI: ไม่แน่ใจ
+      note: ตรวจด้วยภาพไม่ได้
+      ai: verdict=uncertain confidence(vision)=0.492 words=-/-
+      ai_reason: "ความเชื่อมั่นของคำใน A และ B ต่ำ (A41:7 'XXXXXX' conf 0.49, B42:5 'SF-CF12-26-172683205264' conf 0.51)."
+      ai_suggestion: "ตรวจสอบหมายเลขทะเบียน 'XXXXXX' / 'SF-CF12-26-172683205264'."
+   F29 YELLOW TEXT method=content score=0.717
+      A line=77 frag="" word="onṁnkɩhulnu:1" conf=0.340 box=[1295,2184,1301,2219]
+        text="4. Thailand: onṁnkɩhulnu:1"
+      B line=78 frag="n" word="nonɩnuſnu:" conf=0.479 box=[1321,2192,1340,2227]
+        text="4. Thailand: nonɩnuſnu:"
+      note: AI: ไม่แน่ใจ
+      note: ภาพยืนยันว่าต่าง
+      ai: verdict=uncertain confidence(vision)=0.340 words=-/-
+      ai_reason: "ความเชื่อมั่นของคำใน A และ B ต่ำมาก (A77:2 'onṁnkɩhulnu:1' conf 0.12, B78:2 'nonɩnuſnu:' conf 0.15)."
+      ai_suggestion: "ตรวจสอบการสะกดคำภาษาไทย."
+   F30 YELLOW TEXT method=content score=0.717
+      A line=77 frag="ṁnkɩhul" word="onṁnkɩhulnu:1" conf=0.115 box=[1334,2184,1421,2219]
+        text="4. Thailand: onṁnkɩhulnu:1"
+      B line=78 frag="ɩnuſ" word="nonɩnuſnu:" conf=0.150 box=[1377,2192,1425,2227]
+        text="4. Thailand: nonɩnuſnu:"
+      note: AI: สัญญาณรบกวนของ OCR
+      note: ภาพยืนยันว่าต่าง
+      ai: verdict=noise confidence(vision)=0.115 words=-/-
+      ai_reason: "เป็นความแตกต่างซ้ำซ้อนกับ candidate F29."
+      ai_suggestion: "ไม่ต้องดำเนินการใดๆ."
+   F31 RED MISSING_IN_B method=unpaired score=-
+      A line=15 frag="6 kcal /sachet ค่าพลังงานที่สัตว์สามารถนำไปใช้ 42 กิโลแคลอรี…" word="" conf=0.992 box=[60,1030,708,1068]
+        text="6 kcal /sachet ค่าพลังงานที่สัตว์สามารถนำไปใช้ 42 กิโลแคลอรีต่อ 100"
+      B line=None frag="" word="" conf=- box=-
+        text=""
+      note: ไม่ได้อ่านซ้ำ (ปิดอยู่)
+      note: AI: สัญญาณรบกวนของ OCR
+      note: ภาพยืนยันว่าต่าง
+      ai: verdict=noise confidence(vision)=0.992 words=-/-
+      ai_reason: "ข้อความถูกย้ายไปอยู่ในบรรทัดอื่นใน B (B24:0-B24:6)."
+      ai_suggestion: "ไม่ต้องดำเนินการใดๆ เนื่องจากเป็นข้อความที่ถูกย้าย."
+   F32 RED MISSING_IN_B method=unpaired score=-
+      A line=49 frag="• L-알라닌), 가다랑어추출물 제조일자: 제품에 별도 표시(일월년 순) 유통기한:" word="" conf=0.971 box=[35,1586,775,1649]
+        text="• L-알라닌), 가다랑어추출물 제조일자: 제품에 별도 표시(일월년 순) 유통기한:"
+      B line=None frag="" word="" conf=- box=-
+        text=""
+      note: ไม่ได้อ่านซ้ำ (ปิดอยู่)
+      note: AI: ต่างจริง
+      note: ตรวจด้วยภาพไม่ได้
+      ai: verdict=real confidence(vision)=0.971 words=-/-
+      ai_reason: "ข้อความหายไปใน B และคำที่เกี่ยวข้องมีความเชื่อมั่นสูง (A49:1-A49:8 conf >= 0.9)."
+      ai_suggestion: "เพิ่มข้อความ '• L-알라닌), 가다랑어추출물 제조일자: ผลิตภัณฑ์ที่ระบุแยกต่างหาก (วันเดือนปี) วันหมดอายุ:' ลงใน B."
+   F33 YELLOW EXTRA_IN_B method=unpaired score=-
+      A line=None frag="" word="" conf=- box=-
+        text=""
+      B line=49 frag="7" word="" conf=0.436 box=[724,1595,746,1642]
+        text="7"
+      note: AI: ไม่แน่ใจ
+      note: ภาพยืนยันว่าต่าง
+      ai: verdict=uncertain confidence(vision)=0.436 words=-/-
+      ai_reason: "ข้อความ '7' เพิ่มเข้ามาใน B และมีความเชื่อมั่นต่ำ (B49:0 '7' conf 0.44)."
+      ai_suggestion: "ตรวจสอบว่าตัวเลข '7' ควรมีอยู่ใน B หรือไม่."
+   F34 RED EXTRA_IN_B method=unpaired score=-
+      A line=None frag="" word="" conf=- box=-
+        text=""
+      B line=86 frag="INKJET area" word="" conf=0.990 box=[306,2568,715,2629]
+        text="INKJET area"
+      note: ไม่ได้อ่านซ้ำ (ปิดอยู่)
+      note: AI: ต่างจริง
+      note: ภาพยืนยันว่าต่าง
+      ai: verdict=real confidence(vision)=0.990 words=-/-
+      ai_reason: "ข้อความ 'INKJET area' เพิ่มเข้ามาใน B และคำที่เกี่ยวข้องมีความเชื่อมั่นสูง (B86:0 'INKJET' conf 0.98, B86:1 'area' conf 0.98)."
+      ai_suggestion: "ตรวจสอบว่าข้อความ 'INKJET area' ควรมีอยู่ใน B หรือไม่."
+   F35 RED EXTRA_IN_B method=unpaired score=-
+      A line=None frag="" word="" conf=- box=-
+        text=""
+      B line=87 frag="L5.5 CM x W2.0 CM" word="" conf=0.955 box=[180,2652,827,2705]
+        text="L5.5 CM x W2.0 CM"
+      note: ไม่ได้อ่านซ้ำ (ปิดอยู่)
+      note: AI: ต่างจริง
+      note: ภาพยืนยันว่าต่าง
+      ai: verdict=real confidence(vision)=0.955 words=-/-
+      ai_reason: "ข้อความ 'L5.5 CM x W2.0 CM' เพิ่มเข้ามาใน B และคำที่เกี่ยวข้องมีความเชื่อมั่นสูง (B87:0-B87:4 conf >= 0.69)."
+      ai_suggestion: "ตรวจสอบว่าข้อความ 'L5.5 CM x W2.0 CM' ควรมีอยู่ใน B หรือไม่."
+   F36 YELLOW EXTRA_IN_B method=unpaired score=-
+      A line=None frag="" word="" conf=- box=-
+        text=""
+      B line=93 frag="Δ" word="" conf=0.845 box=[677,2827,767,2891]
+        text="Δ"
+      note: AI: ต่างจริง
+      note: ภาพยืนยันว่าต่าง
+      ai: verdict=real confidence(vision)=0.845 words=-/-
+      ai_reason: "สัญลักษณ์ 'Δ' เพิ่มเข้ามาใน B และมีความเชื่อมั่นสูง (B93:0 'Δ' conf 0.84)."
+      ai_suggestion: "ตรวจสอบว่าสัญลักษณ์ 'Δ' ควรมีอยู่ใน B หรือไม่."
+   F37 YELLOW CURVED method=group score=-
+      A line=None frag="" word="" conf=0.537 box=[269,2809,298,2831]
+        text="DISPOST"
+      B line=None frag="" word="" conf=0.548 box=[277,2817,363,2859]
+        text="DISPOSE · THOU"
+      note: ข้อความโค้ง/เอียง — OCR อ่านไม่นิ่ง ดูด้วยตา (2 จุด)
+      note: AI: ไม่แน่ใจ
+      note: ภาพยืนยันว่าต่าง
+      ai: verdict=uncertain confidence(vision)=0.537 words=-/-
+      ai_reason: "ข้อความอยู่ในแนวโค้งและมีความเชื่อมั่นต่ำ (A84:1 'DISPOST' conf 0.54, B88:1 'DISPOSE' conf 0.55)."
+      ai_suggestion: "ตรวจสอบการสะกดคำว่า 'DISPOST' / 'DISPOSE' และข้อความ 'THOU'."
+       · F- YELLOW TEXT method=content score=0.923 curved
+       ·    A line=84 frag="T" word="DISPOST" conf=0.537 box=[269,2809,298,2831]
+       ·      text="PLEASE DISPOST"
+       ·    B line=88 frag="E" word="DISPOSE" conf=0.548 box=[277,2817,307,2841]
+       ·      text="PLEASE DISPOSE"
+       · F- YELLOW EXTRA_IN_B method=unpaired score=- curved
+       ·    A line=None frag="" word="" conf=- box=-
+       ·      text=""
+       ·    B line=90 frag="THOU" word="" conf=0.988 box=[326,2827,363,2859]
+       ·      text="THOU"
+       ·    note: ข้อความโค้ง/เอียงต้องยืนยันด้วยการอ่านซ้ำ (ปิดอยู่) — ยังไม่ยืนยัน
+   F39 YELLOW EXTRA_IN_B method=ai score=-
+      A line=None frag="" word="" conf=- box=-
+        text=""
+      B line=41 frag="Reg No.:" word="Reg No.:" conf=0.596 box=[1347,1365,1446,1407]
+        text="Cabuyao, Laguna, Philippines BAI Company Reg No.:"
+      note: AI พบเพิ่ม — อัลกอริทึมไม่ได้ฟ้องจุดนี้ (ยังไม่ยืนยัน โปรดดูด้วยตา)
+      note: ตรวจด้วยภาพไม่ได้
+      ai: verdict=real confidence(vision)=0.596 words=[]/['B41:5', 'B41:6']
+      ai_reason: "ข้อความ 'Reg No.:' เพิ่มเข้ามาใน B และคำที่เกี่ยวข้องมีความเชื่อมั่นสูง (B41:5 conf 0.97, B41:6 conf 0.6)."
+      ai_suggestion: "ตรวจสอบว่าข้อความ 'Reg No.:' ควรมีอยู่ใน B หรือไม่."
+   F40 YELLOW MISSING_IN_B method=ai score=-
+      A line=41 frag="Reg No.:" word="Reg No.:" conf=0.808 box=[809,1396,907,1431]
+        text="Reg No.: IM-610, D-13-291, IN-233; CFPR No. XXXXXX"
+      B line=None frag="" word="" conf=- box=-
+        text=""
+      note: AI พบเพิ่ม — อัลกอริทึมไม่ได้ฟ้องจุดนี้ (ยังไม่ยืนยัน โปรดดูด้วยตา)
+      note: ตรวจด้วยภาพไม่ได้
+      ai: verdict=real confidence(vision)=0.808 words=['A41:0', 'A41:1']/[]
+      ai_reason: "ข้อความ 'Reg No.:' หายไปใน B และคำที่เกี่ยวข้องมีความเชื่อมั่นสูง (A41:0 conf 0.99, A41:1 conf 0.81)."
+      ai_suggestion: "ตรวจสอบว่าข้อความ 'Reg No.:' ควรมีอยู่ใน B หรือไม่."
+   F41 YELLOW MISSING_IN_B method=ai score=-
+      A line=68 frag="I" word="I" conf=0.664 box=[1452,310,1461,325]
+        text="I"
+      B line=None frag="" word="" conf=- box=-
+        text=""
+      note: AI พบเพิ่ม — อัลกอริทึมไม่ได้ฟ้องจุดนี้ (ยังไม่ยืนยัน โปรดดูด้วยตา)
+      note: ตรวจด้วยภาพไม่ได้
+      ai: verdict=uncertain confidence(vision)=0.664 words=['A68:0']/[]
+      ai_reason: "สัญลักษณ์ 'I' เพิ่มเข้ามาใน A และมีความเชื่อมั่นต่ำ (A68:0 conf 0.66)."
+      ai_suggestion: "ตรวจสอบว่าสัญลักษณ์ 'I' ควรมีอยู่ใน A หรือไม่."
+  debris — เศษอักขระ / ขอบโซน ไม่นับในผลตัดสิน (0):
+  relocated — ข้อความมีอยู่ในอีกฝั่งตรงตำแหน่งเดียวกัน (OCR จัดบรรทัดต่างกัน) ไม่นับ (1):
+   F38 MOVED NUMBER method=content score=0.977
+      A line=57 frag="Business Park, Singapore 486035 Brunei: Kingston" word="Business Park, Singapore 486035 Brunei: Kingston" conf=0.899 box=[815,1786,1450,1861]
+        text="ชื่ออาหารสัตว์ทางการค้า ฟริสกี้ส์ ลิล ลิคเอเบิล พร้อมปลาทะเลเนื้อขาว | Business Park, Singapore 486035 Brunei: Kingston"
+      B line=53 frag="" word="|" conf=0.727 box=[808,1794,818,1861]
+        text="ชื่ออาหารสัตว์ทางการค้า ฟริสกี้ส์ ลิล ลิคเอเบิล พร้อมปลาทะเลเนื้อขาว |"
+      note: ข้อความนี้มีอยู่ในอีกฝั่งตรงตำแหน่งเดียวกันบนภาพ (OCR จัดบรรทัดต่างกัน) — ไม่นับในผลตัดสิน · อีกฝั่ง: Business Park, Singapore 486035 Brunei: Kingston
+  OCR lines A (103):
+   A000 conf=0.95 min=0.77 ang=0 box=[436,243,547,260] "PURINA®"
+   A001 conf=0.87 min=0.39 ang=360 box=[421,282,1112,399] "Friskies mickables"
+   A002 conf=0.97 min=0.78 ang=0 box=[414,450,1081,485] "JUST TEAR & SQUEEZE THESE CREAMY LICKABLE,"
+   A003 conf=0.97 min=0.65 ang=0 box=[296,493,1199,525] "HAND-FED TREATS FOR MORE BONDING MOMENTS WITH YOUR CAT."
+   A004 conf=0.99 min=0.95 ang=0 box=[425,538,1068,571] "A FUN WAY TO TREAT YOUR PLAYFUL EXPLORER!"
+   A005 conf=0.96 min=0.93 ang=0 box=[359,635,509,666] "TRY it as"
+   A006 conf=0.97 min=0.86 ang=358 box=[361,670,510,713] "a treat"
+   A007 conf=0.92 min=0.75 ang=0 box=[723,637,869,669] "Mix it in"
+   A008 conf=0.99 min=0.97 ang=358 box=[730,671,875,711] "a meal"
+   A009 conf=0.98 min=0.23 ang=0 box=[34,791,737,843] "- GUARANTEED ANALYSIS คุณภาพอาหารสัตว์ทางเคมี: Crude"
+   A010 conf=0.99 min=0.77 ang=0 box=[60,836,746,880] "Protein โปรตีน ไม่น้อยกว่า 5.5% (Min), Crude Fat ไขมัน"
+   A011 conf=0.92 min=0.63 ang=0 box=[187,879,719,922] "0.05% (Min), Mineral(calcium) 0.001%"
+   A012 conf=0.91 min=0.38 ang=0 box=[58,909,773,966] "(Min), Moisture u T 90% (Max), Crude"
+   A013 conf=0.85 min=0.37 ang=0 box=[56,951,777,1003] "Ash 2% (Max), Crude Fibre nan Iuu1% (Max),"
+   A014 conf=0.96 min=0.61 ang=0 box=[59,993,777,1039] "Metabolizable Energy (ME): 420 kcal/kg, 42 kcal/100g,"
+   A015 conf=0.99 min=0.90 ang=0 box=[60,1030,708,1068] "6 kcal /sachet ค่าพลังงานที่สัตว์สามารถนำไปใช้ 42 กิโลแคลอรีต่อ 100"
+   A016 conf=0.91 min=0.63 ang=359 box=[1092,633,1246,664] "SQueeze it"
+   A017 conf=0.97 min=0.94 ang=2 box=[1104,672,1244,721] "on top"
+   A018 conf=0.98 min=0.93 ang=0 box=[809,784,1335,818] "RECOMMENDED DAILY FEEDING AMOUNTS:"
+   A019 conf=0.99 min=0.96 ang=0 box=[809,825,1431,866] "For an average adult cat (approximately 4kg), please feed"
+   A020 conf=0.98 min=0.93 ang=0 box=[807,867,1433,902] "1 sachet per day. This product is a treat and is intended for"
+   A021 conf=0.97 min=0.79 ang=359 box=[805,903,1404,958] "occasional feeding. Please monitor your cat's weight to"
+   A022 conf=0.98 min=0.78 ang=0 box=[806,946,1423,996] "maintain a lean body condition. clean, fresh drinking water"
+   A023 conf=0.76 min=0.27 ang=0 box=[805,989,1434,1035] "should be available at all times Usunumslanksñuu:unviadu"
+   A024 conf=0.99 min=0.96 ang=0 box=[807,1030,1320,1073] "ให้ 1 ซองต่อวันสำหรับแมวโต (น้ำหนักโดยประมาณ 4 กก.)"
+   A025 conf=0.96 min=0.21 ang=0 box=[36,1075,1391,1118] "insu 제품명: 프리스키 리커블 흰살생선 성분등록번호: 서울-37006호 명칭 및 Cara Penggunaan:lihat tabel rekomendasi penyajian"
+   A026 conf=0.99 min=0.98 ang=0 box=[60,1114,1318,1162] "형태: 애완큰고양이사료105, 액상고형(레토르트 멸균사료) 용도: 애완동물용(생 후 Storage Instructions: Store in a cool, dry place."
+   A027 conf=0.97 min=0.24 ang=0 box=[36,1156,778,1211] "• 1세 이후) 등록성분량: 조단백질 5.5% 이상, 조지방 0.05% 이상, 조섬유 1.0%"
+   A028 conf=0.99 min=0.98 ang=0 box=[60,1203,777,1250] "이하, 조회분 2.0% 이하, 칼슘 0.001% 이상, 인 0.02% 이상, 수분 90.0% 이하"
+   A029 conf=0.72 min=0.34 ang=0 box=[59,1281,533,1311] "INGREDIENTS/ abuus:no KOMPOSISI"
+   A030 conf=0.96 min=0.54 ang=0 box=[57,1310,770,1357] "Water; Tuna; Thickeners (Modified Tapioca Starch INS1442, Guar Gum"
+   A031 conf=0.95 min=0.50 ang=0 box=[58,1352,771,1398] "INS412); Seabass; Hydrolysed Poultry Protein; Seasoning; Fish Extract."
+   A032 conf=0.99 min=0.90 ang=0 box=[60,1389,685,1440] "น้ำ ปลาทูน่า สารให้ความคงตัว ปลากระพง ไฮโดรไลซ์โปรตีนจากสัตว์ปีก"
+   A033 conf=0.97 min=0.54 ang=0 box=[60,1431,718,1474] "สารปรุงแต่งรส น้ำโปรตีนสกัดจากปลาเข้มข้น Air, Tuna, Pengental (Tepung"
+   A034 conf=0.97 min=0.64 ang=0 box=[57,1469,771,1510] "Tapioka Modifikasi INS1442, Guaran INS412); Kakap Putih; Protein"
+   A035 conf=0.99 min=0.98 ang=1 box=[809,1167,1435,1220] "Diimport oleh / Imported By: Malaysia: Purina"
+   A036 conf=0.99 min=0.97 ang=0 box=[809,1208,1436,1255] "Petcare (Malaysia) Sdn. Bhd. (200201013615), Level"
+   A037 conf=0.97 min=0.53 ang=0 box=[807,1250,1438,1283] "22, 1 Powerhouse, No.1, Persiaran Bandar Utama,"
+   A038 conf=0.99 min=0.96 ang=0 box=[808,1287,1436,1323] "Bandar Utama 47800 Petaling Jaya, Selangor Darul"
+   A039 conf=0.98 min=0.89 ang=0 box=[808,1317,1436,1364] "Ehsan, Malaysia. Philippines: Nestle Philippines,"
+   A040 conf=0.97 min=0.71 ang=0 box=[809,1356,1439,1402] "Inc., Cabuyao, Laguna, Philippines BAI Company"
+   A041 conf=0.92 min=0.49 ang=0 box=[809,1396,1440,1431] "Reg No.: IM-610, D-13-291, IN-233; CFPR No. XXXXXX"
+   A042 conf=0.97 min=0.86 ang=0 box=[808,1438,1439,1475] "Indonesia: Diimpor oleh: PT Nestlé Trading"
+   A043 conf=0.98 min=0.84 ang=0 box=[807,1469,1435,1510] "Indonesia, Jakarta, 12520, Indonesia - Didistribusikan"
+   A044 conf=1.00 min=0.98 ang=359 box=[806,1536,1435,1593] "India: Nestlé India Limited 100/101, World Trade Centre,"
+   A045 conf=0.93 min=0.28 ang=1 box=[808,1601,1243,1658] "NO.IM-10-000-03-AAACN0757G-23"
+   A046 conf=0.99 min=0.92 ang=0 box=[809,1580,1436,1620] "Barakhamba Lane, New Delhi-110001.CPCB Registration"
+   A047 conf=0.97 min=0.46 ang=0 box=[57,1507,1437,1555] "Unggas Terhidrolisa; Perisa; Ekstrak Ikan. oleh: PT Nestlé Indonesia, Jakarta, 12520, Indonesia"
+   A048 conf=0.95 min=0.46 ang=0 box=[60,1546,769,1604] "구아검), 농어, 가수분해단백질(닭, 칠면조, 오리), 아미노산제 합제(L-로이신'"
+   A049 conf=0.97 min=0.28 ang=1 box=[35,1586,775,1649] "• L-알라닌), 가다랑어추출물 제조일자: 제품에 별도 표시(일월년 순) 유통기한:"
+   A050 conf=0.73 min=0.27 ang=0 box=[233,1639,775,1686] "(+)56 g (14g x 47:"
+   A051 conf=0.90 min=0.67 ang=0 box=[58,1686,772,1730] "0.42 kcal/g-Tail Corporation Public"
+   A052 conf=0.99 min=0.97 ang=359 box=[57,1727,269,1770] "Company Limited"
+   A053 conf=0.94 min=0.68 ang=1 box=[809,1646,1441,1695] "Consumer Care, P.O. BAG NO. 2, NEW DELHI-110001,"
+   A054 conf=0.97 min=0.79 ang=0 box=[843,1686,1446,1730] "1800 103 1947, WECARE@IN.NESTLE.COM."
+   A055 conf=0.98 min=0.92 ang=0 box=[814,1736,1448,1772] "Singapore: Nestlé Singapore Pte Ltd, 15A Changi"
+   A056 conf=0.99 min=0.95 ang=0 box=[816,1771,1447,1809] "Business Park Central 1, #05-02/03 Eightrium@Changi"
+   A057 conf=0.98 min=0.76 ang=0 box=[63,1775,1450,1861] "ชื่ออาหารสัตว์ทางการค้า ฟริสกี้ส์ ลิล ลิคเอเบิล พร้อมปลาทะเลเนื้อขาว | Business Park, Singapore 486035 Brunei: Kingston"
+   A058 conf=0.99 min=0.97 ang=0 box=[64,1838,310,1890] "เลขทะเบียนอาหารสัตว์"
+   A059 conf=0.97 min=0.95 ang=360 box=[627,1889,776,1930] "PURINA"
+   A060 conf=0.99 min=0.95 ang=0 box=[586,1946,768,1974] "ID: 0800-18-21028"
+   A061 conf=0.99 min=0.98 ang=0 box=[584,1980,765,2008] "SG: 800-601-1633"
+   A062 conf=0.98 min=0.89 ang=0 box=[585,2007,778,2052] "PH: (632) 8898-0061"
+   A063 conf=0.99 min=0.95 ang=0 box=[586,2043,773,2088] "MY:1-800-88-7462"
+   A064 conf=0.46 min=0.14 ang=1 box=[585,2080,771,2132] "THhusamaha 1162 nsa"
+   A065 conf=0.99 min=0.98 ang=0 box=[585,2120,711,2146] "0-2657-8601"
+   A066 conf=0.98 min=0.95 ang=0 box=[587,2151,742,2185] "KR: 소비자 상담:"
+   A067 conf=0.99 min=0.99 ang=0 box=[585,2186,735,2215] "080-239-0320"
+   A068 conf=0.66 min=0.66 ang=0 box=[1452,310,1461,325] "I"
+   A069 conf=0.97 min=0.42 ang=0 box=[814,1852,1461,1887] "Beverage & Creamery Sdn. Bhd. Plot 73 & Lot No.""
+   A070 conf=0.97 min=0.81 ang=359 box=[810,1884,1449,1928] "3-6, Beribi Industrial Complex, Jalan Gadong BE1118,"
+   A071 conf=0.98 min=0.81 ang=1 box=[815,1928,1448,1960] "BSBm NEGARA BRUNEI DARUSSALAM"
+   A072 conf=0.99 min=0.98 ang=0 box=[816,1965,1451,2008] "Korea: 수입업체명 및 주소: 네슬레코리아 유한책임회사,"
+   A073 conf=0.99 min=0.94 ang=0 box=[815,2007,1452,2052] "서울특별시 서대문구 충정로 70, 10, 12, 16층(미근동,"
+   A074 conf=0.96 min=0.44 ang=0 box=[813,2045,1448,2095] "웨스트게이트 타워). 구입 후 사용하시거나 포장이 훼손된"
+   A075 conf=1.00 min=0.99 ang=1 box=[815,2084,1450,2145] "경우에는 교환/환불이 불가합니다. 단, 제품 자체 불량인 경우"
+   A076 conf=0.99 min=0.90 ang=0 box=[816,2137,1452,2180] "공정거래위원회고시 소비자분쟁해결기준에 의거하여 교환,"
+   A077 conf=0.61 min=0.12 ang=0 box=[1119,2183,1458,2220] "4. Thailand: onṁnkɩhulnu:1"
+   A078 conf=0.94 min=0.24 ang=0 box=[89,2198,1418,2278] "8 "850124079 4 7 3'' > IN: 1800 103 1947 บ.เนสท์เล่ (ไทย) จำกัด เลขที่ 999/9 ถนนพระราม 1 แขวง"
+   A079 conf=0.97 min=0.92 ang=0 box=[80,2272,511,2332] "BEST BEFORE DATE: LOT NO:"
+   A080 conf=0.96 min=0.96 ang=1 box=[655,2342,717,2372] "비닐류"
+   A081 conf=0.98 min=0.94 ang=0 box=[80,2338,462,2392] "MANUFACTURING DATE:"
+   A082 conf=0.94 min=0.81 ang=1 box=[78,2389,468,2461] "MRP Rs. (Incl. of all taxes):"
+   A083 conf=0.98 min=0.91 ang=0 box=[633,2434,729,2453] "내포장: OTHER"
+   A084 conf=0.92 min=0.54 ang=297 box=[230,2809,298,2911] "PLEASE DISPOST"
+   A085 conf=0.98 min=0.98 ang=3 box=[302,2818,322,2832] "OF"
+   A086 conf=0.97 min=0.87 ang=67 box=[328,2817,384,2908] "HOUGHTFULLY"
+   A087 conf=0.96 min=0.94 ang=0 box=[500,2903,528,2919] "PP"
+   A088 conf=0.97 min=0.96 ang=0 box=[669,2416,694,2431] "PP"
+   A089 conf=0.96 min=0.87 ang=0 box=[674,2903,745,2920] "Cat Food"
+   A090 conf=0.86 min=0.15 ang=359 box=[814,2260,1457,2321] "ปทุมวัน เขตปทุมวัน กรุงเทพมหานคร 10330 (F9) ☆EE||||"
+   A091 conf=1.00 min=0.99 ang=0 box=[816,2315,1448,2357] "급여하지 마십시오. 직사광선이 닿는 장소 및 해충이 있는 장소를"
+   A092 conf=0.99 min=0.78 ang=0 box=[815,2362,1460,2404] "피하여 서늘하고 건조한 장소에 보관하여 주십시오. 개봉 후,"
+   A093 conf=1.00 min=0.98 ang=0 box=[816,2410,1277,2451] "냉장 보관하거나 빨리 사용하시기 바랍니다."
+   A094 conf=0.98 min=0.94 ang=359 box=[957,2476,1394,2520] "Country of origin: Thailand"
+   A095 conf=0.97 min=0.92 ang=0 box=[957,2528,1409,2574] "Manufactured by: i-Tail Corporation"
+   A096 conf=0.98 min=0.94 ang=359 box=[957,2574,1360,2627] "Public Company Limited 30/24"
+   A097 conf=0.98 min=0.94 ang=0 box=[958,2626,1441,2675] "Rama 2 Road, Mueang Samut Sakhon"
+   A098 conf=0.98 min=0.93 ang=0 box=[958,2678,1349,2722] "District, Samut Sakhon 74000,"
+   A099 conf=0.98 min=0.82 ang=1 box=[957,2726,1367,2776] "Thailand บริษัท ไอ-เทล คอร์ปอเรชั่น จำกัด"
+   A100 conf=0.94 min=0.45 ang=0 box=[959,2772,1409,2805] "(มหาชน) เลขที่ 30/24 ถนนพระราม 2 อำเภอเมือง"
+   A101 conf=0.93 min=0.64 ang=359 box=[958,2807,1294,2844] "สมุทรสาคร จังหวัดสมุทรสาคร 74000"
+   A102 conf=0.97 min=0.87 ang=0 box=[837,2863,1440,2902] "Purina trademarks are owned by Société des Produits Nestlé S.A."
+  OCR lines B (108):
+   B000 conf=0.94 min=0.74 ang=0 box=[443,251,553,269] "PURINA®"
+   B001 conf=0.85 min=0.43 ang=360 box=[422,292,1116,409] "Friskies mickables"
+   B002 conf=0.98 min=0.73 ang=0 box=[420,457,1089,492] "JUST TEAR&SQUEEZE THESE CREAMY LICKABLE,"
+   B003 conf=0.98 min=0.89 ang=0 box=[303,500,1204,534] "HAND-FED TREATS FOR MORE BONDING MOMENTS WITH YOUR CAT."
+   B004 conf=0.99 min=0.93 ang=0 box=[430,546,1075,580] "A FUN WAY TO TREAT YOUR PLAYFUL EXPLORER!"
+   B005 conf=0.95 min=0.91 ang=359 box=[364,641,515,676] "TRY it as"
+   B006 conf=0.98 min=0.98 ang=359 box=[368,680,516,719] "a treat"
+   B007 conf=0.94 min=0.76 ang=0 box=[730,646,877,677] "Mix it in"
+   B008 conf=0.99 min=0.97 ang=358 box=[737,678,881,718] "a meal"
+   B009 conf=0.99 min=0.90 ang=0 box=[66,804,740,848] "GUARANTEED ANALYSIS คุณภาพอาหารสัตว์ทางเคมี: Crude"
+   B010 conf=0.98 min=0.79 ang=0 box=[68,842,758,888] "Protein โปรตีน ไม่น้อยกว่า 5.5% (Min), Crude Fat ไขมัน"
+   B011 conf=0.90 min=0.36 ang=0 box=[61,888,726,927] "Tujuan 0.05% (Min), Mineral(calcium) 0.001%"
+   B012 conf=0.80 min=0.28 ang=0 box=[65,919,779,970] "(Min), Moisture Aubu Tuunnan 90% (Max), Crude"
+   B013 conf=0.90 min=0.46 ang=0 box=[62,959,785,1007] "Ash 2% (Max), Crude Fibre mn Tuunnnn1% (Max),"
+   B014 conf=0.97 min=0.97 ang=0 box=[815,874,826,913] "1"
+   B015 conf=0.92 min=0.62 ang=0 box=[1098,642,1255,673] "SQueeze it"
+   B016 conf=0.98 min=0.96 ang=1 box=[1113,682,1248,731] "on top"
+   B017 conf=0.98 min=0.92 ang=0 box=[814,792,1343,826] "RECOMMENDED DAILY FEEDING AMOUNTS:"
+   B018 conf=0.99 min=0.95 ang=0 box=[814,832,1438,873] "For an average adult cat (approximately 4kg), please feed"
+   B019 conf=0.98 min=0.93 ang=0 box=[832,874,1440,913] "sachet per day. This product is a treat and is intended for"
+   B020 conf=0.98 min=0.86 ang=359 box=[813,913,1412,962] "occasional feeding. Please monitor your cat's weight to"
+   B021 conf=0.98 min=0.89 ang=0 box=[812,954,1431,1000] "maintain a lean body condition. clean, fresh drinking water"
+   B022 conf=0.92 min=0.42 ang=0 box=[812,998,1212,1042] "should be available at all times Usunnu"
+   B023 conf=0.99 min=0.95 ang=0 box=[66,1000,785,1046] "Metabolizable Energy (ME): 420 kcal/kg, 42 kcal/100g,"
+   B024 conf=0.99 min=0.87 ang=0 box=[67,1039,1327,1083] "6 kcal /sachet ค่าพลังงานที่สัตว์สามารถนำไปใช้ 42 กิโลแคลอรี่ต่อ 100 กรัม ให้ 1 ซองต่อวันสำหรับแมวโต (น้ำหนักโดยประมาณ 4 กก.)"
+   B025 conf=0.99 min=0.89 ang=0 box=[69,1082,1399,1126] "제품명: 프리스키 리커블 흰살생선 성분등록번호: 서울-37006호 명칭 및 Cara Penggunaan:lihattabelrekomendasi penyajian"
+   B026 conf=0.99 min=0.96 ang=0 box=[67,1126,1326,1169] "형태: 애완큰고양이사료105, 액상고형(레토르트 멸균사료) 용도: 애완동물용(생 후 Storage Instructions: Store in a cool, dry place."
+   B027 conf=0.99 min=0.96 ang=0 box=[66,1162,785,1221] "1세 이후) 등록성분량: 조단백질 5.5% 이상, 조지방 0.05% 이상, 조섬유 1.0%"
+   B028 conf=1.00 min=0.99 ang=0 box=[67,1211,784,1260] "이하, 조회분 2.0% 이하, 칼슘 0.001% 이상, 인 0.02% 이상, 수분 90.0% 이하"
+   B029 conf=0.76 min=0.33 ang=0 box=[64,1286,602,1320] "INGREDIENTS/ abuus:nau/KOMPOSISIE"
+   B030 conf=0.96 min=0.56 ang=0 box=[64,1318,778,1367] "Water; Tuna; Thickeners (Modified Tapioca Starch INS1442, Guar Gum"
+   B031 conf=0.95 min=0.48 ang=0 box=[65,1360,781,1405] "INS412); Seabass; Hydrolysed Poultry Protein; Seasoning; Fish Extract."
+   B032 conf=0.99 min=0.89 ang=0 box=[67,1398,693,1449] "น้ำ ปลาทูน่า สารให้ความคงตัว ปลากระพง ไฮโดรไลซ์โปรตีนจากสัตว์ปีก"
+   B033 conf=0.97 min=0.55 ang=0 box=[66,1439,725,1484] "สารปรุงแต่งรส น้ำโปรตีนสกัดจากปลาเข้มข้น Air, Tuna, Pengental (Tepung"
+   B034 conf=0.97 min=0.76 ang=0 box=[64,1477,777,1518] "Tapioka Modifikasi INS1442, Guaran INS412); Kakap Putih; Protein"
+   B035 conf=0.94 min=0.94 ang=0 box=[770,1555,778,1603] ","
+   B036 conf=0.99 min=0.93 ang=1 box=[814,1172,1442,1230] "Dimport oleh / Imported By: Malaysia: Purina"
+   B037 conf=0.99 min=0.95 ang=0 box=[816,1215,1442,1264] "Petcare (Malaysia) Sdn. Bhd. (200201013615), Level"
+   B038 conf=0.96 min=0.52 ang=0 box=[813,1259,1444,1293] "22, 1 Powerhouse, No.1, Persiaran Bandar Utama,"
+   B039 conf=0.99 min=0.97 ang=0 box=[815,1295,1443,1335] "Bandar Utama 47800 Petaling Jaya, Selangor Darul"
+   B040 conf=0.98 min=0.82 ang=0 box=[813,1326,1444,1374] "Ehsan, Malaysia. Philippines: Nestle Philippines, Inc.,"
+   B041 conf=0.96 min=0.60 ang=0 box=[814,1363,1446,1407] "Cabuyao, Laguna, Philippines BAI Company Reg No.:"
+   B042 conf=0.97 min=0.51 ang=0 box=[814,1401,1444,1438] "IM-610, D-13-291, IN-233; CFPR No. SF-CF12-26-172683205264"
+   B043 conf=0.98 min=0.90 ang=0 box=[814,1446,1446,1482] "Indonesia: Diimpor oleh: PT Nestlé Trading"
+   B044 conf=0.98 min=0.86 ang=0 box=[814,1477,1443,1518] "Indonesia, Jakarta, 12520, Indonesia - Didistribusikan"
+   B045 conf=1.00 min=0.97 ang=359 box=[815,1545,1441,1602] "India: Nestlé India Limited 100/101, World Trade Centre,"
+   B046 conf=0.98 min=0.88 ang=359 box=[811,1581,1442,1640] "Barakhamba Lane, New Delhi-110001.CPCB Registration"
+   B047 conf=0.96 min=0.65 ang=0 box=[64,1514,1444,1563] "Unggas Terhidrolisa; Perisa; Ekstrak Ikan.,, oleh: PT Nestlé Indonesia, Jakarta, 12520, Indonesia"
+   B048 conf=0.99 min=0.97 ang=0 box=[68,1555,769,1613] "구아검), 농어, 가수분해단백질(닭, 칠면조, 오리), 아미노산제 합제(L-로이신"
+   B049 conf=0.44 min=0.44 ang=0 box=[724,1595,746,1642] "7"
+   B050 conf=0.65 min=0.36 ang=0 box=[240,1648,781,1697] "(2:56 g (14gx47):"
+   B051 conf=0.92 min=0.60 ang=0 box=[65,1693,780,1740] "0.42 kcal/g-Tail Corporation Public"
+   B052 conf=0.97 min=0.91 ang=358 box=[65,1733,278,1783] "Company Limited"
+   B053 conf=0.97 min=0.73 ang=0 box=[69,1784,813,1861] "ชื่ออาหารสัตว์ทางการค้า ฟริสกี้ส์ ลิล ลิคเอเบิล พร้อมปลาทะเลเนื้อขาว |"
+   B054 conf=0.99 min=0.98 ang=0 box=[70,1840,318,1900] "เลขทะเบียนอาหารสัตว์"
+   B055 conf=0.97 min=0.95 ang=359 box=[635,1899,784,1942] "PURINA"
+   B056 conf=0.99 min=0.97 ang=0 box=[592,1954,774,1985] "ID: 0800-18-21028"
+   B057 conf=0.99 min=0.97 ang=0 box=[591,1988,772,2017] "SG: 800-601-1633"
+   B058 conf=0.94 min=0.56 ang=0 box=[592,2014,783,2060] "PHE 632) 8898-0061"
+   B059 conf=0.99 min=0.96 ang=0 box=[592,2052,779,2099] "MY: 1-800-88-7462"
+   B060 conf=0.39 min=0.12 ang=1 box=[591,2089,778,2141] "THhusamane 1162 nsa"
+   B061 conf=0.99 min=0.97 ang=360 box=[592,2127,717,2156] "0-2657-8601"
+   B062 conf=0.99 min=0.98 ang=0 box=[593,2159,749,2193] "KR: 소비자 상담:"
+   B063 conf=0.99 min=0.99 ang=360 box=[592,2194,739,2224] "080-239-0320"
+   B064 conf=0.98 min=0.89 ang=0 box=[815,1628,1252,1656] "No. IM-10-000-03-AAACN0757G-23"
+   B065 conf=0.95 min=0.80 ang=0 box=[818,1654,1449,1704] "Consumer Care, P.O. BAG NO. 2, NEW DELHI-110001,"
+   B066 conf=0.97 min=0.62 ang=0 box=[851,1693,1452,1740] "1800 103 1947, WECARE@IN.NESTLE.COM."
+   B067 conf=0.98 min=0.91 ang=0 box=[819,1744,1456,1781] "Singapore: Nestlé Singapore Pte Ltd, 15A Changi"
+   B068 conf=0.98 min=0.94 ang=0 box=[823,1780,1455,1817] "Business Park Central 1, #05-02/03 Eightrium@Changi"
+   B069 conf=1.00 min=0.93 ang=1 box=[822,1795,1456,1871] "Business Park, Singapore 486035 Brunei: Kingston"
+   B070 conf=0.98 min=0.92 ang=0 box=[822,1858,1456,1898] "Beverage & Creamery Sdn. Bhd. Plot 73 & Lot No."
+   B071 conf=0.96 min=0.85 ang=359 box=[816,1892,1455,1940] "3-6, Beribi Industrial Complex, Jalan Gadong BE1118,"
+   B072 conf=0.97 min=0.80 ang=359 box=[822,1937,1454,1968] "BSBm NEGARA BRUNEI DARUSSALAM"
+   B073 conf=0.99 min=0.92 ang=0 box=[823,1968,1460,2016] "Korea: 수입업체명 및 주소: 네슬레코리아 유한책임회사."
+   B074 conf=0.99 min=0.96 ang=0 box=[823,2014,1454,2060] "서울특별시 서대문구 충정로 70, 10, 12, 16층(미근동,"
+   B075 conf=0.95 min=0.69 ang=0 box=[820,2053,1453,2103] "워스트게이트 타워). 구입 후 사용하시거나 포장이 훼손된"
+   B076 conf=1.00 min=0.99 ang=1 box=[822,2093,1456,2152] "경우에는 교환/환불이 불가합니다. 단, 제품 자체 불량인 경우"
+   B077 conf=1.00 min=0.99 ang=0 box=[823,2143,1456,2189] "공정거래위원회고시 소비자분쟁해결기준에 의거하여 교환,"
+   B078 conf=0.71 min=0.15 ang=0 box=[1120,2192,1455,2227] "4. Thailand: nonɩnuſnu:"
+   B079 conf=0.95 min=0.24 ang=0 box=[93,2206,1425,2288] "8 "850124079 4 7 3'' > N: 1800 103 1947 บ.เนสท์เล่ (ไทย) จำกัด เลขที่ 999/9 ถนนพระราม 1 แขวง"
+   B080 conf=0.96 min=0.87 ang=0 box=[85,2282,518,2339] "BEST BEFORE DATE: LOT NO:"
+   B081 conf=0.97 min=0.93 ang=0 box=[86,2345,469,2403] "MANUFACTURING DATE:"
+   B082 conf=0.93 min=0.67 ang=1 box=[84,2395,474,2471] "MRP Rs. (Incl. of all taxes):"
+   B083 conf=0.97 min=0.97 ang=1 box=[661,2351,726,2381] "비닐류"
+   B084 conf=0.98 min=0.98 ang=0 box=[676,2425,700,2442] "PP"
+   B085 conf=0.98 min=0.93 ang=0 box=[640,2443,737,2462] "내포장: OTHER"
+   B086 conf=0.99 min=0.98 ang=0 box=[306,2568,715,2629] "INKJET area"
+   B087 conf=0.95 min=0.69 ang=0 box=[180,2652,827,2705] "L5.5 CM x W2.0 CM"
+   B088 conf=0.94 min=0.55 ang=299 box=[235,2817,307,2917] "PLEASE DISPOSE"
+   B089 conf=0.97 min=0.97 ang=0 box=[309,2828,327,2841] "OF"
+   B090 conf=0.99 min=0.98 ang=35 box=[326,2827,363,2859] "THOU"
+   B091 conf=0.96 min=0.73 ang=72 box=[342,2832,388,2916] "OUGHTFULLY"
+   B092 conf=0.97 min=0.96 ang=0 box=[506,2912,536,2928] "PP"
+   B093 conf=0.84 min=0.84 ang=0 box=[677,2827,767,2891] "Δ"
+   B094 conf=0.93 min=0.91 ang=0 box=[681,2912,753,2929] "Cat Food"
+   B095 conf=0.93 min=0.41 ang=359 box=[822,2274,1455,2328] "ปทุมวัน เขตปทุมวัน กรุงเทพมหานคร 10330 (F9) #57"
+   B096 conf=1.00 min=0.99 ang=0 box=[823,2322,1456,2365] "급여하지 마십시오. 직사광선이 닿는 장소 및 해충이 있는 장소를"
+   B097 conf=1.00 min=0.99 ang=0 box=[822,2370,1457,2413] "피하여 서늘하고 건조한 장소에 보관하여 주십시오. 개봉 후"
+   B098 conf=1.00 min=0.98 ang=0 box=[823,2417,1284,2460] "냉장 보관하거나 빨리 사용하시기 바랍니다."
+   B099 conf=0.99 min=0.96 ang=359 box=[962,2485,1399,2527] "Country of origin: Thailand"
+   B100 conf=0.98 min=0.91 ang=0 box=[965,2534,1418,2585] "Manufactured by: i-Tail Corporation"
+   B101 conf=0.99 min=0.96 ang=0 box=[965,2585,1367,2633] "Public Company Limited 30/24"
+   B102 conf=0.98 min=0.95 ang=0 box=[966,2636,1449,2684] "Rama 2 Road, Mueang Samut Sakhon"
+   B103 conf=0.96 min=0.72 ang=0 box=[964,2685,1356,2726] "District, Samut Sakhon 74000,"
+   B104 conf=0.98 min=0.86 ang=1 box=[963,2734,1376,2784] "Thailand บริษัท ไอ-เทล คอร์ปอเรชั่น จำกัด"
+   B105 conf=0.97 min=0.78 ang=0 box=[965,2781,1415,2814] "(มหาชน) เลขที่ 30/24 ถนนพระราม 2 อำเภอเมือง"
+   B106 conf=0.96 min=0.76 ang=359 box=[964,2816,1302,2855] "สมุทรสาคร จังหวัดสมุทรสาคร 74000"
+   B107 conf=0.96 min=0.71 ang=0 box=[844,2872,1446,2912] "Purina trademarks are owned by Société des Produits Nestlé S.A."
+
+[REREAD] enabled=False candidates=9 crops=0 done=0 confirmed=0 downgraded=0 skipped_cap=0 errors=0
+
+[PIXEL] enabled=True line_mode=True same=0 diff=35 unverifiable=5 skipped=0 ms=20853
+  pair 1 align={'inliers': 830, 'ecc': 0.9547, 'scale': 1.0008, 'tx': 5.8, 'ty': 8.3, 'ms': 1963}
+    F1 DIFF checks=2 ms=360
+    F2 DIFF checks=2 ms=401
+    F3 DIFF checks=2 ms=426
+    F4 DIFF checks=2 ms=520
+    F5 DIFF checks=2 ms=477
+    F6 DIFF checks=2 ms=376
+    F7 DIFF checks=2 ms=335
+    F8 DIFF checks=2 ms=397
+    F9 DIFF checks=2 ms=252
+    F10 DIFF checks=2 ms=520
+    F11 DIFF checks=2 ms=333
+    F12 DIFF checks=2 ms=355
+    F13 DIFF checks=2 ms=469
+    F14 DIFF checks=2 ms=479
+    F15 DIFF checks=2 ms=540
+    F16 DIFF checks=2 ms=916
+    F17 DIFF checks=2 ms=561
+    F18 DIFF checks=2 ms=395
+    F19 DIFF checks=2 ms=603
+    F20 DIFF checks=2 ms=580
+    F21 DIFF checks=2 ms=436
+    F22 DIFF checks=2 ms=547
+    F23 DIFF checks=2 ms=634
+    F24 DIFF checks=2 ms=572
+    F25 DIFF checks=2 ms=654
+    F26 DIFF checks=2 ms=416
+    F27 DIFF checks=2 ms=561
+    F28 UNVERIFIABLE checks=2 ms=478
+    F29 DIFF checks=2 ms=469
+    F30 DIFF checks=2 ms=769
+    F31 DIFF checks=1 ms=484
+    F32 UNVERIFIABLE checks=1 ms=327
+    F33 DIFF checks=1 ms=235
+    F34 DIFF checks=1 ms=360
+    F35 DIFF checks=1 ms=303
+    F36 DIFF checks=1 ms=500
+    F37 DIFF checks=5 ms=1301
+    F39 UNVERIFIABLE checks=1 ms=205
+    F40 UNVERIFIABLE checks=1 ms=197
+    F41 UNVERIFIABLE checks=1 ms=120
+
+[AI REVIEW] mode=assist url=http://127.0.0.1:5678/webhook/artwork-v2-review pairs_ok=1 pairs_failed=0
+  pair 1: status=ok engine=gemini-2.5-flash http=200 ms=67421 attempts=1 request_bytes=51644 candidates=37
+     ref_accuracy=1.000 items=5/7 reviews=37/37 reviewed=40/40 extra_added=3 extra_duplicate=2 extra_noise=2 vision_conf A=0.957 B=0.963 usage={'promptTokenCount': 31223, 'candidatesTokenCount': 5097, 'totalTokenCount': 52702, 'trafficType': 'ON_DEMAND', 'promptTokensDetails': [{'modality': 'TEXT', 'tokenCount': 31223}], 'candidatesTokensDetails': [{'modality': 'TEXT', 'tokenCount': 5097}], 'thoughtsTokenCount': 16382}
+     recovered=1 equivalent=2 algo_red_kept=-
+     equivalent item (AI=real): ข้อความสองฝั่งเท่ากันตามกติกาเทียบของระบบ (ช่องว่าง/จุดไข่ปลา/อักษรสมมูล) 'TEAR & SQUEEZE' ≈ 'TEAR&SQUEEZE'
+     equivalent item (AI=real): ข้อความสองฝั่งเท่ากันตามกติกาเทียบของระบบ (ช่องว่าง/จุดไข่ปลา/อักษรสมมูล) 'MY:1-800-88-7462' ≈ 'MY: 1-800-88-7462'
+     summary: "พบความแตกต่าง 'real' 7 จุด และ 'uncertain' 15 จุด รวมถึง 'noise' 4 จุด. ความแตกต่างที่สำคัญได้แก่ การสะกดคำ 'กิโลแคลอรี' / 'กิโลแคลอรี่', ข้อความที่หายไปใน B เช่น '• L-알라닌)...유통기한:' และ 'Reg No.:', ข้อความที่เพิ่มเข้ามาใน B เช่น '6 kcal /sachet...กรัม', 'INKJET area', 'L5.5 CM x W2.0 CM' และสัญลักษณ์ 'Δ'. นอกจากนี้ยังมีความแตกต่างในการเว้นวรรคและเครื่องหมายวรรคตอนที่ต้องตรวจสอบ."
+     suggestion: "ตรวจสอบความถูกต้องของการสะกดคำ 'กิโลแคลอรี' และ 'กิโลแคลอรี่' ในไฟล์ต้นฉบับ."
+     suggestion: "ยืนยันว่าข้อความ '• L-알라닌), 가다랑어추출물 제조일자: ผลิตภัณฑ์ที่ระบุแยกต่างหาก (วันเดือนปี) วันหมดอายุ:' ควรมีอยู่ใน B หรือไม่."
+     suggestion: "ยืนยันว่าข้อความ '6 kcal /sachet ค่าพลังงานที่สัตว์สามารถนำไปใช้ 42 กิโลแคลอรี่ต่อ 100 กรัม', 'INKJET area', 'L5.5 CM x W2.0 CM' และสัญลักษณ์ 'Δ' ควรมีอยู่ใน B หรือไม่."
+     suggestion: "ตรวจสอบการเว้นวรรคใน 'TEAR & SQUEEZE' / 'TEAR&SQUEEZE' และ 'MY:1-800' / 'MY: 1-800'."
+     suggestion: "ตรวจสอบเครื่องหมายวรรคตอนท้ายคำว่า '유한책임회사' ว่าเป็นจุลภาคหรือมหัพภาค."
+     suggestion: "ตรวจสอบข้อความและสัญลักษณ์ที่มีความเชื่อมั่นต่ำทั้งหมดที่ระบุว่าเป็น 'uncertain' เพื่อยืนยันความถูกต้อง."
+
+[WARNINGS] 0
+=== END ===

@@ -27,6 +27,12 @@
 จับได้ 94.9% · แก้จุด/ฮัมซะอาหรับในตาราง John West 190/190 · ทดสอบแบบกันข้อมูล (จูนบน AvoDerm
 ทดสอบ John West) 18/18 · ข้อจำกัด: การแก้ < 0.005 mm² จับได้บางส่วน · สีที่ความสว่างเท่าเดิม
 มองไม่เห็น · ใช้ได้เฉพาะ PDF ↔ PDF
+
+**ภาพสแกน (``PIXEL_RASTER`` · 7 ต.ค. รอบ 5 · Friskies):** โซนที่เป็นภาพสแกนล้วน (``zone_raster``)
+เทียบที่ความละเอียดจริงของภาพนั้น (ไม่ขยายจุดรบกวน JPEG/การสแกนขึ้นไป 1600 dpi) + เบลอ σ 0.8 px
+ทั้งสองฝั่ง · Friskies (🅱 JPEG 300 dpi): ภาพเหมือน 0 → 18 จุด · ลบเครื่องหมายเล็กทั้งตัว 40 จุด
+พลาด 0 · ไฟล์สังเคราะห์ 200-600 dpi × JPEG q75/q92: ลบจุดทั้งจุดไม่มีทาง SAME · สแกน < 200 dpi
+และ PDF เวกเตอร์ = เส้นทางเดิมทุกพิกเซล
 """
 
 from __future__ import annotations
@@ -70,6 +76,45 @@ MIN_AREA = 6.0      # px ที่ 1600 dpi
 TONE_MAX = 40.0
 BIG = 600           # การ์ดรวมที่กรอบใหญ่เกินนี้ (px ภาพที่ส่ง) ⇒ ตรวจสมาชิกแทนกรอบรวม
 CHUNK = 280         # โหมดบรรทัด: แบ่งบรรทัดยาวเป็นท่อน ๆ (คงความละเอียด 1600 dpi)
+RASTER_COVER = 0.90  # ภาพเดียวต้องคลุมโซนอย่างน้อยเท่านี้ถึงนับว่าโซนเป็น "ภาพสแกน"
+RASTER_MIN_DPI = 200.0  # สแกนหยาบกว่านี้ = จุด/จุดทศนิยมเหลือ ~2 px (150 dpi ลบจุดทั้งจุดแล้วยังพลาด 3/30) ⇒ เส้นทางเดิม
+RASTER_SIGMA = 0.8   # เบลอ (px ที่ความละเอียดจริง) ทั้งสองฝั่ง — วัดบน Friskies: σ 0.8 = 18 จุดภาพเหมือน · mutation 0/40 พลาด (σ 1.0 พลาด 1 · σ 0.7 ภาพเหมือนน้อยลง)
+# ทุกอย่างที่ "วาด" ลงหน้า ยกเว้นภาพ และข้อความที่มองไม่เห็น (ชั้น OCR ของไฟล์สแกน = ignore-text)
+_RASTER_SKIP = ("fill-image", "fill-imgmask", "ignore-text", "clip", "pop", "begin", "end")
+
+
+def zone_raster(page, rect_pt) -> Optional[dict]:
+    """โซนนี้เป็น "ภาพสแกนล้วน" ไหม · คืน ``{"dpi", "cover"}`` หรือ ``None``
+
+    ต้องครบสองข้อ: ภาพเดียวคลุมโซน ≥ ``RASTER_COVER`` **และ** ในโซนไม่มีของเวกเตอร์ใด ๆ
+    (ข้อความที่มองเห็น/เส้น/พื้นไล่สี) — artwork ที่วางข้อความเวกเตอร์ทับภาพพื้นหลังความละเอียดต่ำ
+    (AvoDerm M2: ภาพ 72 dpi คลุมโซน 92% + เส้น 1,187 ชิ้น) ต้องไม่เข้าเงื่อนไข ไม่งั้นเทียบที่ 72 dpi
+    ความละเอียดจริง = จำนวนพิกเซลต่อความยาวบนหน้า (ไม่ขึ้นกับการหมุนภาพบนหน้า) · ใช้แกนที่หยาบกว่า"""
+    zr = fitz.Rect(*rect_pt)
+    if page.rotation:        # get_image_info/get_bboxlog ใช้พิกัดของหน้าที่ยังไม่หมุน
+        zr = zr * page.derotation_matrix
+        zr.normalize()
+    za = zr.get_area()
+    if za <= 0:
+        return None
+    best = None
+    for im in page.get_image_info():
+        t = im.get("transform") or (0, 0, 0, 0, 0, 0)
+        sx, sy = math.hypot(t[0], t[1]), math.hypot(t[2], t[3])
+        if sx <= 0 or sy <= 0 or not im.get("width") or not im.get("height"):
+            continue
+        cov = (fitz.Rect(im["bbox"]) & zr).get_area() / za
+        if cov >= RASTER_COVER and (best is None or cov > best["cover"]):
+            best = {"cover": round(cov, 3),
+                    "dpi": round(min(im["width"] / (sx / 72.0), im["height"] / (sy / 72.0)), 1)}
+    if best is None or best["dpi"] < RASTER_MIN_DPI:
+        return None
+    for kind, r in page.get_bboxlog():
+        if kind.startswith(_RASTER_SKIP):
+            continue
+        if not (fitz.Rect(r) & zr).is_empty:
+            return None
+    return best
 
 
 def _odd(n) -> int:
@@ -131,7 +176,19 @@ class PairCheck:
             self.wh0[s] = (W0, H0)
             self.geo[s] = (x * pw, y * ph, w * pw / W0, h * ph / H0)
         self.ginfo: dict = {}
+        # ภาพสแกน (``zone_raster``) ต่อฝั่ง · ปิดธง/ตรวจไม่ได้ = None = เส้นทางเดิมทุกพิกเซล
+        self.raster = {"A": None, "B": None}
+        if config.PIXEL_RASTER:
+            for s, d in (("A", self.dA), ("B", self.dB)):
+                try:
+                    z = self.z[s]
+                    self.raster[s] = zone_raster(d.doc[z["page"]],
+                                                 self._box_pt(s, (0, 0, z["W"], z["H"])))
+                except Exception:    # noqa: BLE001
+                    self.raster[s] = None
         self.ok = self._global_align()
+        if self.ok and (self.raster["A"] or self.raster["B"]):
+            self.ginfo["raster"] = {s.lower(): self.raster[s] for s in ("A", "B")}
 
     def close(self):
         self.dA.close()
@@ -226,8 +283,14 @@ class PairCheck:
         m = SEARCH_MM / 25.4 * 72 / self.geo["B"][2]
         bB = (q[0].min() - m, q[1].min() - m, q[0].max() + m, q[1].max() + m)
         phys = self.gscale * self.geo["B"][2] / self.geo["A"][2]
+        ra, rb = self.raster["A"], self.raster["B"]
+        if ra or rb:     # ไม่เรนเดอร์ละเอียดเกินพิกเซลที่ภาพสแกนมีจริง (ฝั่ง B คิดเป็นสเกลของ A)
+            dpi = min([dpi] + ([ra["dpi"]] if ra else []) + ([rb["dpi"] * phys] if rb else []))
         pa = self._render("A", bA, dpi)
         pb = self._render("B", bB, dpi / phys)
+        if ra or rb:
+            pa = cv2.GaussianBlur(pa, (0, 0), RASTER_SIGMA)
+            pb = cv2.GaussianBlur(pb, (0, 0), RASTER_SIGMA)
         return pa, pb, dpi
 
     def check(self, side, box) -> dict:
@@ -432,6 +495,7 @@ _TH = {"SAME": "ภาพเหมือนกันทุกพิกเซล 
 def run(pairs: List[dict], srcs: dict, rd: str, warnings: List[str], say=None) -> dict:
     """ตรวจทุกจุดของทุกคู่ · แก้ ``pairs`` ในที่ · คืนสรุปสำหรับ Log"""
     log = {"enabled": config.PIXEL_VERIFY, "line_mode": config.PIXEL_LINE_MODE,
+           "raster": config.PIXEL_RASTER,
            "pairs": [], "same": 0, "diff": 0, "unverifiable": 0, "skipped": 0, "ms": 0}
     if not config.PIXEL_VERIFY:
         return log
@@ -464,6 +528,12 @@ def run(pairs: List[dict], srcs: dict, rd: str, warnings: List[str], say=None) -
             warnings.append("คู่ %d: ตรวจด้วยภาพไม่ได้ (%s)" % (pr["n"], str(e)[:80]))
             continue
         plog["align"] = pc.ginfo
+        if pc.ok and pc.ginfo.get("raster"):
+            plog["raster"] = pc.ginfo["raster"]
+            warnings.append("คู่ %d: %s — หลักฐานภาพเทียบที่ความละเอียดของภาพสแกน (เบลอ σ %g px "
+                            "กันจุดรบกวนของการสแกน/JPEG)" % (pr["n"], " · ".join(
+                                "ไฟล์ %s เป็นภาพสแกน %g dpi" % (k.upper(), v["dpi"])
+                                for k, v in sorted(pc.ginfo["raster"].items()) if v), RASTER_SIGMA))
         if not pc.ok:
             plog["error"] = pc.ginfo.get("error")
             pc.close()

@@ -27,7 +27,7 @@ from artwork_v2 import compare, config, textmodel  # noqa: E402
 D = os.path.join(os.path.dirname(__file__), "data", "artwork_v2")
 JW = sorted(glob.glob(os.path.join(D, "johnwest", "*_log.txt")))
 RULES = ("GEO_PAIRING", "RECOMPOSE", "MOVED_TEXT", "RELOCATE", "BALANCED_MOVE",
-         "VERTICAL_UPRIGHT", "QUOTE_PUNCT")
+         "VERTICAL_UPRIGHT", "QUOTE_PUNCT", "SPLIT_MERGED")
 
 
 def _flags(monkeypatch, on):
@@ -188,6 +188,12 @@ def test_recompose_joins_pieces_that_equal_the_other_line_exactly(monkeypatch):
     r0 = _cmp(RECOMP_A, _recomp_b())
     assert sum(f["severity"] == "red" for f in r0["findings"]) == 2
     _flags(monkeypatch, True)
+    r = _cmp(RECOMP_A, _recomp_b())
+    assert r["findings"] == []
+    # 7 ต.ค. รอบ 5: ตอนนี้ "แยกบรรทัดที่รวมข้ามคอลัมน์" (SPLIT_MERGED) อธิบายได้ก่อน — แยก A แทนการต่อ B
+    # (สถานีจริง: "Produced … Ltd," กับ "Saturated fat" อยู่คนละคอลัมน์) · ผลเหมือนกัน: ไม่มีจุดต่าง
+    assert [(x["side"], x["right"]) for x in r["row_splits"]] == [("A", "Saturated fat")]
+    monkeypatch.setattr(config, "SPLIT_MERGED", False)
     r = _cmp(RECOMP_A, _recomp_b())
     assert r["findings"] == []
     assert any(m.get("via") == "recompose" for m in r["row_merges"])
