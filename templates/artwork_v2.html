@@ -124,6 +124,8 @@
   .v2-sev.red { background:#fee2e2; color:#991b1b; } .v2-sev.yellow { background:#fef3c7; color:#92400e; } .v2-sev.debris { background:#f1f5f9; color:#475569; }
   .v2-debris summary { cursor:pointer; color:#475569; font-size:13px; }
   .v2-sev.dismissed { background:#f1f5f9; color:#475569; }
+  .v2-sev.moved { background:#f1f5f9; color:#475569; } .v2-sev.pixel_same { background:#dcfce7; color:#166534; }
+  .v2-pv { display:block; margin-top:4px; } .v2-pv img { display:block; max-width:100%; max-height:110px; border:1px solid #e2e8f0; border-radius:4px; background:#fff; }
   /* แถวที่รวมหลายจุดในบรรทัดเดียว (ARTWORK_V2_LINE_GROUP · แสดงผลล้วน) — รายการสมาชิกในช่องหมายเหตุ */
   .v2-gm { padding:3px 0; border-top:1px dashed #e2e8f0; }
   .v2-gm:first-child { border-top:0; padding-top:0; }
@@ -229,8 +231,10 @@
       <label class="v2-muted" title="ส่งข้อความที่ Vision อ่านได้ให้ Gemini (ผ่าน N8N) ตรวจทาน — ไม่ส่งภาพ ไม่ยิง Vision ซ้ำ · % ความมั่นใจคิดจาก Vision เสมอ">AI ตรวจทาน
         <select id="v2Ai" class="v2-input">
           <option value="assist"{% if v2_ai_mode == "assist" %} selected{% endif %}>อัลกอริทึมตัดสิน + AI เสริม</option>
+          {% if v2_ai_experimental or v2_ai_mode in ('judge', 'raw') %}
           <option value="judge"{% if v2_ai_mode == "judge" %} selected{% endif %}>AI ตัดสินหลัก (ทดลอง)</option>
           <option value="raw"{% if v2_ai_mode == "raw" %} selected{% endif %} title="ส่งบรรทัดตามที่ Vision อ่านได้ตรง ๆ (ไม่ผ่านอัลกอริทึม) ให้ Gemini เทียบเองแบบคิดนาน · กรอบ/% ยังมาจาก Vision · ใช้เวลานานขึ้น">AI ตัดสินจากข้อมูลดิบ (ทดลอง)</option>
+          {% endif %}
           <option value="off"{% if v2_ai_mode == "off" %} selected{% endif %}>ปิด AI</option>
         </select></label>
       <span id="v2RunMsg" class="v2-muted"></span>

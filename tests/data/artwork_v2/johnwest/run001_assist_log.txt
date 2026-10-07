@@ -1,0 +1,526 @@
+=== ARTWORK V2 · CLOUD VISION OCR · DIAGNOSTIC LOG ===
+version=2026.10.04-v2restore job=20261007_094045_c40958 run=run_001 at=2026-10-07 09:42:51 owner=admin
+VERDICT=FAIL (ไม่ผ่าน)
+  - พบจุดต่างที่มั่นใจ 11 จุด
+  - จุดที่ไม่มั่นใจ 12 จุด (ต้องดูด้วยตา)
+time_ms: render=756 vision=19137 compare=316 reread=0 ai=64077 total=84289
+sharpness=standard (ภาพที่ส่ง: มาตรฐาน 400 dpi)
+api_key: source=ui masked=••••L_6g length=39
+
+[SETTINGS]
+  ENDPOINT=https://eu-vision.googleapis.com
+  MODEL=builtin/stable
+  LANGUAGE_HINTS=[]
+  TIMEOUT_S=120.0
+  RETRIES=2
+  MAX_REQUEST_BYTES=9500000
+  MAX_IMAGE_BYTES=7121928
+  MAX_IMAGE_MP=40.0
+  JPEG_QUALITIES=[92, 88, 84, 80, 75, 70]
+  PDF_ZONE_DPI=400
+  PDF_ZONE_DPI_MAX=1200
+  ZONE_MIN_LONG_SIDE=1600
+  SHARPNESS=standard
+  SHARP_FILL=0.92
+  SHARP_MAX_RENDERS=4
+  CONF_FAIL=0.8
+  CONF_LOW=0.6
+  COVERAGE_MIN=0.9
+  PAIR_MIN_SIM=0.6
+  PAIR_MIN_RUN=0.4
+  PAIR_MAX_DIST=0.12
+  ROW_MERGE_ENABLED=True
+  ROW_MAX_ANGLE=10.0
+  PUNCT_CAN_FAIL=True
+  CURVED_GROUP_ENABLED=True
+  TILT_ANGLE=10.0
+  CURVED_NEIGHBOR_MAX_CHARS=8
+  DEBRIS_ENABLED=True
+  DEBRIS_CONF=0.6
+  SEAM_FILLER=True
+  CROSS_ROW_JOIN=True
+  SYMBOL_TOKEN=True
+  FRACTION_YELLOW=True
+  REREAD_ENABLED=False
+  REREAD_MAX=12
+  REREAD_SCALE=2.0
+  REREAD_MAX_SIDE=2400
+  AI_MODE=assist
+  AI_REVIEW_URL=http://127.0.0.1:5678/webhook/artwork-v2-review
+  AI_RAW_URL=http://127.0.0.1:5678/webhook/artwork-v2-raw
+  AI_TIMEOUT_S=180.0
+  AI_RAW_TIMEOUT_S=300.0
+  AI_RAW_SAFETY=True
+  AI_RETRIES=1
+  AI_JUDGE_PUNCT_YELLOW=True
+  AI_QUOTE_RECOVER=True
+  AI_QUOTE_RECOVER_MAX_SHIFT=2
+  AI_EQUIV_NOISE=True
+  AI_SEND_CURVED=True
+  AI_JUDGE_KEEP_ALGO_RED=True
+  AI_JUDGE_NOISE_GUARD=True
+  AI_JUDGE_CURVED_YELLOW=True
+  AI_JUDGE_ONESIDED_GUARD=True
+  ONE_REQUEST_PER_PAIR=True
+  RUN_GUARD=True
+  RUN_MAX_CONCURRENT=2
+  RUN_COOLDOWN_S=3.0
+
+[FILES]
+  A: name=Final printer AW-N-2026-00000836 5KZ02335N000001007 1.pdf type=pdf bytes=1702931 sha1=848e8db5a312 pages=1 page_mm=[297.0, 210.0]
+  B: name=Original file LBL 3AAOCN2NKALL5IJWUFSJ CH N SFO 5KZ02335N000001005 1.pdf type=pdf bytes=1365121 sha1=7feb327a3362 pages=1 page_mm=[297.0, 210.0]
+
+[VISION REQUESTS]
+  #0 phase=main images=p1_a,p1_b json_bytes=2225218 http=200 attempts=1 ms=19122 model=builtin/stable at=2026-10-07 09:41:46
+
+[PAIR 1] verdict=FAIL coverage=0.963 (A=0.963 B=0.979) same_request=True methods={'exact': 58, 'content': 13, 'position': 9}
+  A: page=1 bbox=[0.05405, 0.3062, 0.91351, 0.15853] render_dpi=400.0 zone_mm=[271.3, 33.3] render_px=[4274, 525] image_scale=- sent_px=[4274, 525] jpeg_q=92 downscale=1.0 jpeg_bytes=805349 sha1=89da7d95f77a req=0 ok=True
+     sharp: mode=standard base_dpi=400.0 → dpi=400.0 (×1.0) budget=-k tries=[]
+     ocr: blocks=62 by_type={'TEXT': 62} paragraphs=71 words=309 symbols=1234 lines=85 chars=1234 conf_mean=0.963 conf_min=0.106 low_conf(<0.6)=0.019 langs=['ar', 'en', 'en-Arab'] breaks={'LINE_BREAK': 71, 'EOL_SURE_SPACE': 14} soft_hyphen_lines=0 angles={90: 8, 0: 298, 270: 3} skipped_blocks=0 text_len=1497 pages=[(4274, 525)]
+  B: page=1 bbox=[0.05405, 0.26991, 0.91351, 0.15662] render_dpi=400.0 zone_mm=[271.3, 32.9] render_px=[4274, 519] image_scale=- sent_px=[4274, 519] jpeg_q=92 downscale=1.0 jpeg_bytes=863392 sha1=24cb73ba0204 req=0 ok=True
+     sharp: mode=standard base_dpi=400.0 → dpi=400.0 (×1.0) budget=-k tries=[]
+     ocr: blocks=58 by_type={'TEXT': 58} paragraphs=60 words=299 symbols=1201 lines=86 chars=1201 conf_mean=0.964 conf_min=0.267 low_conf(<0.6)=0.019 langs=['ar', 'en', 'en-Arab'] breaks={'LINE_BREAK': 60, 'EOL_SURE_SPACE': 26} soft_hyphen_lines=0 angles={0: 294, 270: 5} skipped_blocks=0 text_len=1453 pages=[(4274, 519)]
+  pairing: line_pairs=80 unpaired_a=[0, 10, 33, 79] unpaired_b=[28, 46, 52, 75, 79] reflow_lines_a=[79] reflow_lines_b=[] reflow_edges=['B:-', 'A:-', 'B:120g']
+  row_merges (2) — ต่อแถวที่ OCR ตัดตรงเส้นตกแต่ง:
+     A: "WEIGHT" + ". تستند النسبة المئوية للقيم اليومية على أساس نظام غذائي ٢٠٠٠ سعرة حرارية."
+     B: "WEIGHT" + "تستند النسبة المئوية للقيم اليومية على أساس نظام غذائي ٢٠٠٠ سعرة حرارية."
+        ↳ ต่อด้วยหลักฐานจากอีกฝั่ง (ใส่ … แทนจุดไข่ปลาที่ OCR ทิ้ง): "WEIGHT . تستند النسبة المئوية للقيم اليومية على أساس نظام غذائي ٢٠٠٠ سعرة حرارية…"
+  curved_lines (เอียง > 10° จากแนวหลัก + เศษติดกัน): A=[0, 5, 10, 83] B=[84]
+  findings (23):
+   F1 YELLOW PUNCT method=content score=0.997
+      A line=45 frag="" word="Serving" conf=0.989 box=[2114,106,2116,120]
+        text="Serving size ½ cup (100g.)"
+      B line=20 frag="|" word="|" conf=0.397 box=[2110,112,2114,125]
+        text="| Serving size 1/2 cup (100g.)"
+      note: AI: ไม่แน่ใจ
+      ai: verdict=uncertain confidence(vision)=0.397 words=-/-
+      ai_reason: "มีความแตกต่างของเครื่องหมาย "|" ใน B และรูปแบบของเศษส่วน "½" ใน A กับ "1/2" ใน B ซึ่งเป็นรูปแบบที่ OCR อ่านได้ไม่เสถียร และค่าความเชื่อมั่นของคำที่เกี่ยวข้องต่ำ"
+      ai_suggestion: "ตรวจสอบความถูกต้องของเครื่องหมาย "|" และรูปแบบเศษส่วน "½" / "1/2" ในไฟล์อาร์ตเวิร์ค"
+   F2 YELLOW PUNCT method=content score=0.997
+      A line=22 frag="." word="اليومية." conf=0.746 box=[2300,187,2303,198]
+        text="اليومية."
+      B line=19 frag="," word="اليومية," conf=0.717 box=[2302,192,2305,203]
+        text="اليومية,"
+      note: AI: ไม่แน่ใจ
+      ai: verdict=uncertain confidence(vision)=0.717 words=-/-
+      ai_reason: "มีความแตกต่างของเครื่องหมายวรรคตอน "." ใน A กับ "," ใน B และค่าความเชื่อมั่นของคำที่เกี่ยวข้องต่ำ"
+      ai_suggestion: "ตรวจสอบเครื่องหมายวรรคตอนท้ายคำว่า "اليومية" ในไฟล์อาร์ตเวิร์ค"
+   F3 RED TEXT method=content score=0.996
+      A line=55 frag="Saturated fat" word="Saturated fat" conf=0.890 box=[2113,248,2187,272]
+        text="Produced in Thailand for John West Foods Ltd, Saturated fat"
+      B line=40 frag="" word="Ltd," conf=0.902 box=[2086,251,2090,274]
+        text="Produced in Thailand for John West Foods Ltd,"
+      note: ไม่ได้อ่านซ้ำ (ปิดอยู่)
+      note: AI: ต่างจริง
+      ai: verdict=real confidence(vision)=0.889 words=-/-
+      ai_reason: "ข้อความ "Saturated fat" ปรากฏใน A แต่ไม่พบใน B และค่าความเชื่อมั่นของคำสูง"
+      ai_suggestion: "ตรวจสอบว่าข้อความ "Saturated fat" ควรมีอยู่ใน B หรือไม่"
+   F4 RED TEXT method=content score=0.971
+      A line=51 frag="ى" word="فى" conf=0.850 box=[1866,131,1882,153]
+        text="شروط التخزين: يحفظ فى مكان جاف بارد وجيد التهوية."
+      B line=12 frag="ي" word="في" conf=0.957 box=[1867,135,1883,160]
+        text="شروط التخزين: يحفظ في مكان جاف بارد وجيد التهوية."
+      note: ไม่ได้อ่านซ้ำ (ปิดอยู่)
+      note: AI: ต่างจริง
+      ai: verdict=real confidence(vision)=0.850 words=-/-
+      ai_reason: "มีความแตกต่างของตัวอักษร 'ى' ใน A กับ 'ي' ใน B ในคำว่า "فى" / "في" และค่าความเชื่อมั่นของคำสูง"
+      ai_suggestion: "ตรวจสอบการสะกดคำว่า "في" / "فى" ในไฟล์อาร์ตเวิร์ค"
+   F5 YELLOW TEXT method=content score=0.928
+      A line=4 frag="ي" word="في" conf=0.974 box=[1124,313,1185,415]
+        text="في زيت دوار الشمس"
+      B line=3 frag="ى" word="فى" conf=0.778 box=[1116,305,1185,401]
+        text="فى زيت دوار الشمس"
+      note: AI: ไม่แน่ใจ
+      ai: verdict=uncertain confidence(vision)=0.778 words=-/-
+      ai_reason: "มีความแตกต่างของตัวอักษร 'ي' ใน A กับ 'ى' ใน B ในคำว่า "في" / "فى" และค่าความเชื่อมั่นของคำใน B ต่ำ"
+      ai_suggestion: "ตรวจสอบการสะกดคำว่า "في" / "فى" ในไฟล์อาร์ตเวิร์ค"
+   F6 RED TEXT method=content score=0.905
+      A line=42 frag="أ" word="ألياف" conf=0.953 box=[2517,348,2521,360]
+        text="ألياف غذائية"
+      B line=59 frag="ا" word="الياف" conf=0.940 box=[2516,354,2519,364]
+        text="الياف غذائية"
+      note: ไม่ได้อ่านซ้ำ (ปิดอยู่)
+      note: AI: ต่างจริง
+      ai: verdict=real confidence(vision)=0.940 words=-/-
+      ai_reason: "มีความแตกต่างของตัวอักษร 'أ' ใน A กับ 'ا' ใน B ในคำว่า "ألياف" / "الياف" และค่าความเชื่อมั่นของคำสูง"
+      ai_suggestion: "ตรวจสอบการสะกดคำว่า "ألياف" / "الياف" ในไฟล์อาร์ตเวิร์ค"
+   F7 RED NUMBER method=content score=0.853
+      A line=39 frag="4 mg" word="%24 mg" conf=0.815 box=[2274,310,2321,324]
+        text="٤٧٥ ملجم %24 mg 475"
+      B line=57 frag="0" word="%20" conf=0.962 box=[2315,316,2321,328]
+        text="٤٧٥ ملجم %20 475mg"
+      note: ไม่ได้อ่านซ้ำ (ปิดอยู่)
+      note: AI: ไม่แน่ใจ
+      ai: verdict=uncertain confidence(vision)=0.815 words=-/-
+      ai_reason: "มีความแตกต่างของตัวเลข "24" ใน A กับ "20" ใน B และค่าความเชื่อมั่นของคำใน B ต่ำ"
+      ai_suggestion: "ตรวจสอบค่าเปอร์เซ็นต์ "%24" / "%20" ในไฟล์อาร์ตเวิร์ค"
+   F8 YELLOW TEXT method=content score=0.853
+      A line=39 frag="" word="475" conf=0.953 box=[2270,310,2272,324]
+        text="٤٧٥ ملجم %24 mg 475"
+      B line=57 frag="mg" word="475mg" conf=0.721 box=[2275,316,2291,328]
+        text="٤٧٥ ملجم %20 475mg"
+      note: AI: ไม่แน่ใจ
+      ai: verdict=uncertain confidence(vision)=0.721 words=-/-
+      ai_reason: "มีความแตกต่างของหน่วย "mg" ที่เพิ่มเข้ามาใน B และค่าความเชื่อมั่นของคำใน B ต่ำ"
+      ai_suggestion: "ตรวจสอบหน่วย "mg" ที่ต่อท้ายตัวเลข "475" ในไฟล์อาร์ตเวิร์ค"
+   F9 YELLOW NUMBER method=content score=0.840
+      A line=63 frag="#" word="#170gDWEIGHT" conf=0.540 box=[1637,420,1657,493]
+        text="#170gDWEIGHT"
+      B line=48 frag="" word="170gDWEIGHT" conf=0.988 box=[1653,426,1663,499]
+        text="170gDWEIGHT 120g"
+      note: AI: ไม่แน่ใจ
+      ai: verdict=uncertain confidence(vision)=0.540 words=-/-
+      ai_reason: "มีความแตกต่างของสัญลักษณ์ "#" ที่หายไปใน B และค่าความเชื่อมั่นของคำต่ำทั้งสองด้าน"
+      ai_suggestion: "ตรวจสอบสัญลักษณ์ "#" หน้าตัวเลข "170gDWEIGHT" ในไฟล์อาร์ตเวิร์ค"
+   F10 RED NUMBER method=content score=0.833
+      A line=64 frag="120" word="120g" conf=0.978 box=[1979,427,2053,501]
+        text="120g"
+      B line=74 frag="26" word="26g" conf=0.923 box=[2251,413,2264,423]
+        text="26g"
+      note: ไม่ได้อ่านซ้ำ (ปิดอยู่)
+      note: AI: สัญญาณรบกวนของ OCR
+      ai: verdict=noise confidence(vision)=0.923 words=-/-
+      ai_reason: "การเปรียบเทียบไม่ถูกต้อง เนื่องจาก "120g" ใน A64 คือน้ำหนักสุทธิที่ระบายน้ำแล้ว ซึ่งพบใน B48 ส่วน "26g" ใน B74 คือปริมาณโปรตีน ซึ่งพบใน A79"
+      ai_suggestion: "ไม่ต้องดำเนินการใดๆ เนื่องจากเป็นการเปรียบเทียบที่ผิดพลาด"
+   F11 RED TEXT method=content score=0.830
+      A line=37 frag="ج" word="ملجم" conf=0.987 box=[2359,293,2366,302]
+        text="٥٠ ملجم"
+      B line=56 frag="ح" word="ملحم" conf=0.816 box=[2359,296,2366,305]
+        text="٥٠ ملحم"
+      note: ไม่ได้อ่านซ้ำ (ปิดอยู่)
+      note: AI: ต่างจริง
+      ai: verdict=real confidence(vision)=0.817 words=-/-
+      ai_reason: "มีความแตกต่างของตัวอักษร 'จ' ใน A กับ 'ห' ใน B ในคำว่า "ملجم" / "ملحم" และค่าความเชื่อมั่นของคำสูง"
+      ai_suggestion: "ตรวจสอบการสะกดคำว่า "ملجم" / "ملحم" ในไฟล์อาร์ตเวิร์ค"
+   F12 RED TEXT method=content score=0.691
+      A line=12 frag="معلومات غذائية Nutritional information" word="معلومات غذائية Nutritional information" conf=0.839 box=[2119,47,2515,75]
+        text="معلومات غذائية Nutritional information تم إنتاجه في تايلاند لشركة جون ويست فودز ليمتد،"
+      B line=9 frag="" word="تم" conf=0.987 box=[2073,49,2077,75]
+        text="تم إنتاجه في تايلاند لشركة جون ويست فودز ليمتد معلومات غذائية Nutritional information"
+      note: ไม่ได้อ่านซ้ำ (ปิดอยู่)
+      note: AI: สัญญาณรบกวนของ OCR
+      ai: verdict=noise confidence(vision)=0.839 words=-/-
+      ai_reason: "ข้อความ "معلومات غذائية Nutritional information" มีการสลับตำแหน่งภายในบรรทัดเดียวกันระหว่าง A และ B ซึ่งถือเป็นการย้ายตำแหน่งข้อความ ไม่ใช่ความแตกต่างของเนื้อหา"
+      ai_suggestion: "ไม่ต้องดำเนินการใดๆ เนื่องจากเป็นเพียงการย้ายตำแหน่งข้อความ"
+   F13 YELLOW TEXT method=content score=0.691
+      A line=12 frag="،" word="ليمتد،" conf=0.726 box=[1667,45,1672,71]
+        text="معلومات غذائية Nutritional information تم إنتاجه في تايلاند لشركة جون ويست فودز ليمتد،"
+      B line=9 frag="معلومات غذائية Nutritional information" word="معلومات غذائية Nutritional information" conf=0.503 box=[2118,50,2516,75]
+        text="تم إنتاجه في تايلاند لشركة جون ويست فودز ليمتد معلومات غذائية Nutritional information"
+      note: AI: ไม่แน่ใจ
+      ai: verdict=uncertain confidence(vision)=0.503 words=-/-
+      ai_reason: "มีความแตกต่างของเครื่องหมายจุลภาค "," ที่หายไปใน B และค่าความเชื่อมั่นของคำต่ำ"
+      ai_suggestion: "ตรวจสอบเครื่องหมายจุลภาคหลังคำว่า "ليمتد" ในไฟล์อาร์ตเวิร์ค"
+   F14 YELLOW MISSING_IN_B method=unpaired score=-
+      A line=33 frag="ܙ ܒܗ" word="" conf=0.274 box=[2362,253,2387,266]
+        text="ܙ ܒܗ"
+      B line=None frag="" word="" conf=- box=-
+        text=""
+      note: AI: ไม่แน่ใจ
+      ai: verdict=uncertain confidence(vision)=0.274 words=-/-
+      ai_reason: "ข้อความ "ܙ ܒܗ" ปรากฏใน A แต่ไม่พบใน B และค่าความเชื่อมั่นของคำต่ำมาก"
+      ai_suggestion: "ตรวจสอบว่าข้อความ "ܙ ܒܗ" ควรมีอยู่ใน B หรือไม่"
+   F15 RED EXTRA_IN_B method=unpaired score=-
+      A line=None frag="" word="" conf=- box=-
+        text=""
+      B line=28 frag="Saturated fat" word="" conf=0.988 box=[2116,256,2183,266]
+        text="Saturated fat"
+      note: ไม่ได้อ่านซ้ำ (ปิดอยู่)
+      note: AI: สัญญาณรบกวนของ OCR
+      ai: verdict=noise confidence(vision)=0.988 words=-/-
+      ai_reason: "ข้อความ "Saturated fat" ปรากฏใน B (B28) แต่ก็พบใน A (A55) ซึ่งถือเป็นการย้ายตำแหน่งข้อความ ไม่ใช่ข้อความที่เพิ่มเข้ามาใหม่"
+      ai_suggestion: "ไม่ต้องดำเนินการใดๆ เนื่องจากเป็นเพียงการย้ายตำแหน่งข้อความ"
+   F16 RED EXTRA_IN_B method=unpaired score=-
+      A line=None frag="" word="" conf=- box=-
+        text=""
+      B line=46 frag="DRAINED" word="" conf=0.991 box=[1871,426,1973,452]
+        text="DRAINED"
+      note: ไม่ได้อ่านซ้ำ (ปิดอยู่)
+      note: AI: ต่างจริง
+      ai: verdict=real confidence(vision)=0.991 words=-/-
+      ai_reason: "ข้อความ "DRAINED" ปรากฏใน B แต่ไม่พบใน A และค่าความเชื่อมั่นของคำสูง"
+      ai_suggestion: "ตรวจสอบว่าข้อความ "DRAINED" ควรมีอยู่ใน B หรือไม่"
+   F17 RED EXTRA_IN_B method=unpaired score=-
+      A line=None frag="" word="" conf=- box=-
+        text=""
+      B line=52 frag="اجم" word="" conf=0.964 box=[2362,258,2388,268]
+        text="اجم"
+      note: ไม่ได้อ่านซ้ำ (ปิดอยู่)
+      note: AI: ต่างจริง
+      ai: verdict=real confidence(vision)=0.964 words=-/-
+      ai_reason: "ข้อความ "اجم" ปรากฏใน B แต่ไม่พบใน A และค่าความเชื่อมั่นของคำสูง"
+      ai_suggestion: "ตรวจสอบว่าข้อความ "اجم" ควรมีอยู่ใน B หรือไม่"
+   F18 RED EXTRA_IN_B method=unpaired score=-
+      A line=None frag="" word="" conf=- box=-
+        text=""
+      B line=75 frag="52%" word="" conf=0.977 box=[2309,414,2331,424]
+        text="52%"
+      note: ไม่ได้อ่านซ้ำ (ปิดอยู่)
+      note: AI: สัญญาณรบกวนของ OCR
+      ai: verdict=noise confidence(vision)=0.977 words=-/-
+      ai_reason: "ข้อความ "52%" ปรากฏใน B (B75) แต่ก็พบใน A (A79) ซึ่งถือเป็นการย้ายตำแหน่งข้อความ ไม่ใช่ข้อความที่เพิ่มเข้ามาใหม่"
+      ai_suggestion: "ไม่ต้องดำเนินการใดๆ เนื่องจากเป็นเพียงการย้ายตำแหน่งข้อความ"
+   F19 YELLOW CURVED method=group score=-
+      A line=None frag="" word="" conf=0.954 box=[165,53,4237,486]
+        text="000171 · 054326 · خال من الزيوت المهدرجة · Free from hydrogenated oils"
+      B line=None frag="" word="" conf=0.414 box=[4202,78,4236,454]
+        text=""000171 · 054326'"
+      note: ข้อความโค้ง/เอียง — OCR อ่านไม่นิ่ง ดูด้วยตา (4 จุด)
+      note: AI: ไม่แน่ใจ
+      ai: verdict=uncertain confidence(vision)=0.413 words=-/-
+      ai_reason: "มีความแตกต่างของเครื่องหมายคำพูด " และ ' รอบตัวเลขบาร์โค้ด และค่าความเชื่อมั่นของคำต่ำ นอกจากนี้ยังเป็นข้อความที่อยู่ในแนวโค้งซึ่ง OCR อ่านได้ไม่เสถียร"
+      ai_suggestion: "ตรวจสอบตัวเลขบาร์โค้ดและเครื่องหมายรอบตัวเลขในไฟล์อาร์ตเวิร์ค"
+       · F- YELLOW NUMBER method=position score=0.991 curved
+       ·    A line=83 frag="" word="000171" conf=0.992 box=[4233,465,4237,486]
+       ·      text="5 000171 054326"
+       ·    B line=84 frag=""" word=""000171" conf=0.612 box=[4202,437,4235,454]
+       ·      text="5 "000171 054326'"
+       · F- YELLOW NUMBER method=position score=0.991 curved
+       ·    A line=83 frag="" word="054326" conf=0.985 box=[4232,85,4236,109]
+       ·      text="5 000171 054326"
+       ·    B line=84 frag="'" word="054326'" conf=0.414 box=[4203,78,4236,89]
+       ·      text="5 "000171 054326'"
+       · F- YELLOW MISSING_IN_B method=unpaired score=- curved
+       ·    A line=0 frag="خال من الزيوت المهدرجة" word="" conf=0.982 box=[165,53,199,379]
+       ·      text="خال من الزيوت المهدرجة"
+       ·    B line=None frag="" word="" conf=- box=-
+       ·      text=""
+       ·    note: ข้อความโค้ง/เอียงต้องยืนยันด้วยการอ่านซ้ำ (ปิดอยู่) — ยังไม่ยืนยัน
+       · F- YELLOW MISSING_IN_B method=unpaired score=- curved
+       ·    A line=10 frag="Free from hydrogenated oils" word="" conf=0.954 box=[2545,166,2570,435]
+       ·      text="Free from hydrogenated oils"
+       ·    B line=None frag="" word="" conf=- box=-
+       ·      text=""
+       ·    note: ข้อความโค้ง/เอียงต้องยืนยันด้วยการอ่านซ้ำ (ปิดอยู่) — ยังไม่ยืนยัน
+   F21 YELLOW NUMBER method=ai score=-
+      A line=14 frag="١٠٠غ )" word="(١٠٠غ )" conf=0.293 box=[2398,105,2418,119]
+        text="حجم الحصة 1/2 كوب (١٠٠غ )"
+      B line=5 frag="۱۰۰ غ) -" word="(۱۰۰ غ) -" conf=0.267 box=[2394,109,2419,122]
+        text="حجم الحصة 1/2 كوب (۱۰۰ غ) -"
+      note: AI พบเพิ่ม — อัลกอริทึมไม่ได้ฟ้องจุดนี้ (ยังไม่ยืนยัน โปรดดูด้วยตา)
+      ai: verdict=uncertain confidence(vision)=0.267 words=['A14:4', 'A14:5']/['B5:4', 'B5:5', 'B5:6']
+      ai_reason: "มีความแตกต่างของตัวเลขอารบิก "١٠٠" ใน A กับ "۱۰۰" ใน B และเครื่องหมายวรรคตอน รวมถึงมีเครื่องหมาย "-" เพิ่มเข้ามาใน B ค่าความเชื่อมั่นของคำที่เกี่ยวข้องต่ำ"
+      ai_suggestion: "ตรวจสอบตัวเลขและเครื่องหมายวรรคตอนในส่วนนี้ในไฟล์อาร์ตเวิร์ค"
+   F22 YELLOW MISSING_IN_B method=ai score=-
+      A line=32 frag="٧جم" word="٧جم" conf=0.535 box=[2360,235,2389,246]
+        text="٧جم"
+      B line=None frag="" word="" conf=- box=-
+        text=""
+      note: AI พบเพิ่ม — อัลกอริทึมไม่ได้ฟ้องจุดนี้ (ยังไม่ยืนยัน โปรดดูด้วยตา)
+      ai: verdict=uncertain confidence(vision)=0.535 words=['A32:0']/[]
+      ai_reason: "ข้อความ "٧جم" ปรากฏใน A แต่ไม่พบใน B และค่าความเชื่อมั่นของคำต่ำ"
+      ai_suggestion: "ตรวจสอบว่าข้อความ "٧جم" ควรมีอยู่ใน B หรือไม่"
+   F23 YELLOW MISSING_IN_B method=ai score=-
+      A line=35 frag="جم" word="جم" conf=0.978 box=[2361,276,2379,284]
+        text="جم"
+      B line=None frag="" word="" conf=- box=-
+        text=""
+      note: AI พบเพิ่ม — อัลกอริทึมไม่ได้ฟ้องจุดนี้ (ยังไม่ยืนยัน โปรดดูด้วยตา)
+      ai: verdict=real confidence(vision)=0.978 words=['A35:0']/[]
+      ai_reason: "ข้อความ "جم" ปรากฏใน A แต่ไม่พบใน B และค่าความเชื่อมั่นของคำสูง"
+      ai_suggestion: "ตรวจสอบว่าข้อความ "جم" ควรมีอยู่ใน B หรือไม่"
+   F24 YELLOW EXTRA_IN_B method=ai score=-
+      A line=None frag="" word="" conf=- box=-
+        text=""
+      B line=79 frag="Ⓡ" word="Ⓡ" conf=0.461 box=[2688,165,2702,178]
+        text="Ⓡ"
+      note: AI พบเพิ่ม — อัลกอริทึมไม่ได้ฟ้องจุดนี้ (ยังไม่ยืนยัน โปรดดูด้วยตา)
+      ai: verdict=uncertain confidence(vision)=0.461 words=[]/['B79:0']
+      ai_reason: "มีสัญลักษณ์ "Ⓡ" ปรากฏใน B แต่ไม่พบใน A และค่าความเชื่อมั่นของสัญลักษณ์ต่ำ"
+      ai_suggestion: "ตรวจสอบว่าสัญลักษณ์ "Ⓡ" ควรมีอยู่ใน B หรือไม่"
+  debris — เศษอักขระ / ขอบโซน ไม่นับในผลตัดสิน (1):
+   F20 DEBRIS EXTRA_IN_B method=unpaired score=-
+      A line=None frag="" word="" conf=- box=-
+        text=""
+      B line=79 frag="Ⓡ" word="" conf=0.461 box=[2688,165,2702,178]
+        text="Ⓡ"
+      note: เศษอักขระ / ขอบโซน — ไม่มีตัวอักษรหรือตัวเลข และความมั่นใจต่ำหรือชิดขอบโซน (ไม่นับในผลตัดสิน)
+  OCR lines A (84):
+   A000 conf=0.98 min=0.82 ang=90 box=[165,53,199,379] "خال من الزيوت المهدرجة"
+   A001 conf=0.99 min=0.96 ang=0 box=[775,40,961,75] "منذ 1857"
+   A002 conf=0.97 min=0.96 ang=3 box=[430,37,1305,246] "جون وست"
+   A003 conf=0.99 min=0.95 ang=0 box=[519,232,1213,301] "لحم تونا خفيف قطع كبيرة"
+   A004 conf=0.99 min=0.97 ang=0 box=[527,309,1215,416] "في زيت دوار الشمس"
+   A005 conf=0.81 min=0.80 ang=0 box=[2565,115,2687,160] "SAFE"
+   A006 conf=0.99 min=0.99 ang=0 box=[3106,42,3387,77] "SINCE 1857"
+   A007 conf=0.98 min=0.96 ang=359 box=[2805,100,3667,231] "JOHN WEST"
+   A008 conf=0.99 min=0.98 ang=0 box=[2834,277,3661,325] "LIGHT MEAT TUNA CHUNKS"
+   A009 conf=0.99 min=0.98 ang=0 box=[2897,338,3594,398] "IN SUNFLOWER OIL"
+   A010 conf=0.95 min=0.52 ang=91 box=[2545,166,2570,435] "Free from hydrogenated oils"
+   A011 conf=0.96 min=0.64 ang=0 box=[1707,19,2082,40] "المكونات تونا زيت دوار الشمس، ماء، ملح."
+   A012 conf=0.97 min=0.69 ang=0 box=[1667,45,2515,75] "معلومات غذائية Nutritional information تم إنتاجه في تايلاند لشركة جون ويست فودز ليمتد،"
+   A013 conf=0.90 min=0.40 ang=2 box=[2394,91,2520,104] "تحتوي العبوة على ١٢ حصة -"
+   A014 conf=0.75 min=0.29 ang=0 box=[2398,105,2519,119] "حجم الحصة 1/2 كوب (١٠٠غ )"
+   A015 conf=0.98 min=0.85 ang=0 box=[2407,134,2520,146] "محتوى الحصة الواحدة"
+   A016 conf=0.99 min=0.98 ang=0 box=[2437,156,2521,168] "السعرات الحرارية"
+   A017 conf=0.95 min=0.42 ang=0 box=[2439,182,2519,196] "الحصة اليومية 7"
+   A018 conf=0.98 min=0.97 ang=4 box=[2452,232,2520,246] "دهون كلية"
+   A019 conf=0.99 min=0.96 ang=3 box=[2448,252,2520,266] "دهون مشبعة"
+   A020 conf=0.99 min=0.99 ang=0 box=[2307,157,2331,167] "170"
+   A021 conf=0.97 min=0.92 ang=0 box=[2308,178,2340,187] "الحصة"
+   A022 conf=0.95 min=0.75 ang=0 box=[2300,187,2341,198] "اليومية."
+   A023 conf=0.97 min=0.93 ang=8 box=[2307,200,2336,217] "Daily"
+   A024 conf=0.98 min=0.96 ang=0 box=[2308,214,2337,222] "value"
+   A025 conf=0.92 min=0.92 ang=0 box=[2250,235,2270,246] "7 g"
+   A026 conf=0.98 min=0.97 ang=0 box=[2310,237,2331,247] "10%"
+   A027 conf=0.97 min=0.96 ang=0 box=[2252,255,2270,266] "1 g"
+   A028 conf=0.95 min=0.94 ang=0 box=[2309,257,2324,266] "5%"
+   A029 conf=0.71 min=0.56 ang=3 box=[2250,273,2270,285] "Og"
+   A030 conf=0.92 min=0.85 ang=4 box=[2252,293,2285,304] "50 mg"
+   A031 conf=0.98 min=0.97 ang=0 box=[2309,296,2333,305] "17%"
+   A032 conf=0.79 min=0.54 ang=357 box=[2360,235,2389,246] "٧جم"
+   A033 conf=0.27 min=0.11 ang=0 box=[2362,253,2387,266] "ܙ ܒܗ"
+   A034 conf=0.98 min=0.95 ang=2 box=[2444,272,2520,284] "دهون مهدرجة"
+   A035 conf=0.98 min=0.98 ang=0 box=[2361,276,2379,284] "جم"
+   A036 conf=0.98 min=0.96 ang=358 box=[2451,290,2519,304] "كوليسترول"
+   A037 conf=0.89 min=0.63 ang=0 box=[2351,293,2388,303] "٥٠ ملجم"
+   A038 conf=0.99 min=0.98 ang=0 box=[2467,314,2519,322] "صوديوم"
+   A039 conf=0.89 min=0.73 ang=0 box=[2251,310,2387,325] "٤٧٥ ملجم %24 mg 475"
+   A040 conf=0.98 min=0.94 ang=2 box=[2420,328,2519,343] "كربوهيدات كلية"
+   A041 conf=0.73 min=0.68 ang=3 box=[2251,332,2269,342] "وہ"
+   A042 conf=0.98 min=0.95 ang=0 box=[2459,348,2521,360] "ألياف غذائية"
+   A043 conf=0.98 min=0.96 ang=0 box=[2478,370,2520,380] "سكريات"
+   A044 conf=0.98 min=0.95 ang=0 box=[2116,92,2239,104] "1.2 Serving per container"
+   A045 conf=0.95 min=0.24 ang=0 box=[2115,106,2244,120] "Serving size ½ cup (100g.)"
+   A046 conf=0.99 min=0.97 ang=1 box=[2115,133,2223,144] "Amount per serving"
+   A047 conf=0.99 min=0.98 ang=0 box=[2116,156,2160,165] "Calories"
+   A048 conf=0.98 min=0.96 ang=0 box=[2115,233,2161,243] "Total fat"
+   A049 conf=0.97 min=0.68 ang=0 box=[1621,73,2084,101] "ليفربول، إنجلترا من قبل شركة تاي يونيون للتصنيع"
+   A050 conf=0.97 min=0.82 ang=0 box=[1702,102,2082,125] "المحدودة ساموت ساخون 74000 ، تايلاند"
+   A051 conf=0.96 min=0.72 ang=0 box=[1612,130,2082,154] "شروط التخزين: يحفظ فى مكان جاف بارد وجيد التهوية."
+   A052 conf=0.96 min=0.60 ang=0 box=[1774,157,2083,182] "تاريخ الإنتاج والانتهاء: أنظر العبوة."
+   A053 conf=0.97 min=0.75 ang=0 box=[1693,187,2087,211] "الوزن المصفى : 120جم الوزن الصافي: 170 جم"
+   A054 conf=0.98 min=0.93 ang=0 box=[1554,216,2085,245] "Ingredients: Tuna, Sunflower Oil, Water, Salt."
+   A055 conf=0.98 min=0.82 ang=0 box=[1544,248,2187,272] "Produced in Thailand for John West Foods Ltd, Saturated fat"
+   A056 conf=0.98 min=0.95 ang=0 box=[1703,280,2085,309] "Liverpool, England by Thai Union"
+   A057 conf=0.98 min=0.83 ang=0 box=[1456,311,2085,341] "Manufacturing Co., Ltd, Samut Sakhon 74000, Thailand."
+   A058 conf=0.99 min=0.90 ang=0 box=[1634,340,2181,369] "Storage: Cool, dry in ventilated place. Dietary fibre"
+   A059 conf=0.98 min=0.93 ang=0 box=[1512,392,2089,413] "FOR PRODUCTION AND EXPIRY DATE SEE ON CAN"
+   A060 conf=0.99 min=0.99 ang=0 box=[1483,466,1525,480] "STEEL"
+   A061 conf=0.98 min=0.97 ang=0 box=[1612,424,1656,448] "NET"
+   A062 conf=0.96 min=0.69 ang=359 box=[1566,453,2513,481] "WEIGHT . تستند النسبة المئوية للقيم اليومية على أساس نظام غذائي ٢٠٠٠ سعرة حرارية."
+   A063 conf=0.80 min=0.49 ang=3 box=[1637,420,1978,503] "#170gDWEIGHT"
+   A064 conf=0.99 min=0.98 ang=0 box=[1979,427,2087,501] "120g"
+   A065 conf=0.99 min=0.98 ang=0 box=[2115,272,2160,281] "Trans fat"
+   A066 conf=0.99 min=0.98 ang=359 box=[2116,290,2177,301] "Cholesterol"
+   A067 conf=0.99 min=0.97 ang=2 box=[2116,310,2155,320] "Sodium"
+   A068 conf=1.00 min=0.99 ang=0 box=[2116,329,2218,342] "Total carbohydrate"
+   A069 conf=0.96 min=0.95 ang=0 box=[2309,334,2324,343] "0%"
+   A070 conf=0.68 min=0.51 ang=3 box=[2250,350,2270,363] "Og"
+   A071 conf=0.96 min=0.95 ang=0 box=[2308,354,2325,363] "0%"
+   A072 conf=0.99 min=0.98 ang=4 box=[2115,367,2174,382] "Total sugar"
+   A073 conf=0.70 min=0.54 ang=3 box=[2250,369,2271,382] "Og"
+   A074 conf=0.96 min=0.95 ang=0 box=[2309,373,2326,382] "0%"
+   A075 conf=0.99 min=0.98 ang=3 box=[2114,386,2189,401] "Added sugars"
+   A076 conf=0.69 min=0.53 ang=3 box=[2250,389,2270,402] "Og"
+   A077 conf=0.97 min=0.97 ang=0 box=[2308,392,2324,402] "0%"
+   A078 conf=0.99 min=0.99 ang=2 box=[2116,407,2155,417] "Protein"
+   A079 conf=0.98 min=0.97 ang=0 box=[2251,408,2333,421] "26 g 52%"
+   A080 conf=0.98 min=0.88 ang=0 box=[2123,433,2398,446] "*The % daily values are based on a 2000 calorie diet."
+   A081 conf=0.98 min=0.96 ang=2 box=[2459,388,2520,399] "سكر مضاف"
+   A082 conf=0.99 min=0.98 ang=0 box=[2481,408,2520,418] "بروتين"
+   A083 conf=0.98 min=0.95 ang=270 box=[4201,85,4235,486] "5 000171 054326"
+  OCR lines B (85):
+   B000 conf=0.99 min=0.97 ang=0 box=[775,43,961,80] "منذ 1857"
+   B001 conf=0.97 min=0.95 ang=4 box=[428,43,1306,257] "جون وست"
+   B002 conf=0.99 min=0.97 ang=0 box=[521,234,1213,315] "لحم تونا خفيف قطع كبيرة"
+   B003 conf=0.97 min=0.78 ang=359 box=[525,304,1211,411] "فى زيت دوار الشمس"
+   B004 conf=0.94 min=0.61 ang=0 box=[2398,95,2519,109] "تحتوي العبوة على ١٢ حصة"
+   B005 conf=0.74 min=0.27 ang=0 box=[2394,109,2520,122] "حجم الحصة 1/2 كوب (۱۰۰ غ) -"
+   B006 conf=0.98 min=0.79 ang=0 box=[2407,137,2520,149] "محتوى الحصة الواحدة"
+   B007 conf=0.99 min=0.97 ang=0 box=[2116,96,2239,108] "1.2 Serving per container"
+   B008 conf=0.95 min=0.62 ang=0 box=[1707,19,2082,45] "المكونات تونا زيت دوار الشمس، ماء، ملح."
+   B009 conf=0.96 min=0.50 ang=0 box=[1675,49,2516,75] "تم إنتاجه في تايلاند لشركة جون ويست فودز ليمتد معلومات غذائية Nutritional information"
+   B010 conf=0.97 min=0.67 ang=0 box=[1620,76,2083,104] "ليفربول، إنجلترا من قبل شركة تاي يونيون للتصنيع"
+   B011 conf=0.97 min=0.72 ang=0 box=[1703,106,2083,128] "المحدودة ساموت ساخون 74000 ، تايلاند"
+   B012 conf=0.98 min=0.76 ang=0 box=[1611,135,2082,160] "شروط التخزين: يحفظ في مكان جاف بارد وجيد التهوية."
+   B013 conf=0.96 min=0.63 ang=0 box=[1775,160,2082,186] "تاريخ الإنتاج والانتهاء: أنظر العبوة."
+   B014 conf=0.97 min=0.78 ang=0 box=[1693,190,2088,215] "الوزن المصفى: 120جم الوزن الصافي: 170 جم"
+   B015 conf=0.99 min=0.98 ang=0 box=[2437,160,2520,171] "السعرات الحرارية"
+   B016 conf=0.95 min=0.42 ang=0 box=[2439,186,2519,199] "الحصة اليومية 7"
+   B017 conf=0.99 min=0.99 ang=0 box=[2307,159,2331,171] "170"
+   B018 conf=0.98 min=0.95 ang=0 box=[2308,181,2339,191] "الحصة"
+   B019 conf=0.92 min=0.70 ang=0 box=[2302,192,2339,203] "اليومية,"
+   B020 conf=0.88 min=0.40 ang=0 box=[2110,111,2244,125] "| Serving size 1/2 cup (100g.)"
+   B021 conf=0.99 min=0.98 ang=1 box=[2115,136,2223,148] "Amount per serving"
+   B022 conf=0.99 min=0.98 ang=0 box=[2116,160,2159,169] "Calories"
+   B023 conf=0.98 min=0.97 ang=0 box=[2309,207,2335,218] "Daily"
+   B024 conf=0.98 min=0.95 ang=0 box=[2308,218,2336,226] "value"
+   B025 conf=0.99 min=0.97 ang=358 box=[2115,236,2160,247] "Total fat"
+   B026 conf=0.97 min=0.96 ang=0 box=[2250,239,2270,250] "7 g"
+   B027 conf=0.98 min=0.97 ang=0 box=[2310,241,2332,251] "10%"
+   B028 conf=0.99 min=0.97 ang=0 box=[2116,256,2183,266] "Saturated fat"
+   B029 conf=0.99 min=0.98 ang=358 box=[2115,274,2159,286] "Trans fat"
+   B030 conf=0.99 min=0.98 ang=0 box=[2116,295,2178,304] "Cholesterol"
+   B031 conf=0.98 min=0.96 ang=0 box=[2116,314,2155,324] "Sodium"
+   B032 conf=0.99 min=0.98 ang=1 box=[2115,333,2219,346] "Total carbohydrate"
+   B033 conf=0.94 min=0.93 ang=3 box=[2252,258,2270,270] "1g"
+   B034 conf=0.95 min=0.94 ang=0 box=[2309,260,2327,270] "5%"
+   B035 conf=0.70 min=0.53 ang=3 box=[2250,277,2270,289] "Og"
+   B036 conf=0.99 min=0.99 ang=4 box=[2251,296,2286,309] "50 mg"
+   B037 conf=0.98 min=0.98 ang=0 box=[2309,298,2332,309] "17%"
+   B038 conf=0.70 min=0.55 ang=3 box=[2250,334,2270,347] "Og"
+   B039 conf=0.97 min=0.91 ang=0 box=[1554,221,2086,248] "Ingredients: Tuna, Sunflower Oil, Water, Salt."
+   B040 conf=0.98 min=0.90 ang=0 box=[1544,251,2088,274] "Produced in Thailand for John West Foods Ltd,"
+   B041 conf=0.98 min=0.93 ang=359 box=[1703,283,2085,313] "Liverpool, England by Thai Union"
+   B042 conf=0.99 min=0.93 ang=0 box=[1456,315,2086,342] "Manufacturing Co., Ltd, Samut Sakhon 74000, Thailand."
+   B043 conf=0.98 min=0.82 ang=0 box=[1634,343,2180,372] "Storage: Cool, dry in ventilated place. Dietary fibre"
+   B044 conf=0.98 min=0.94 ang=0 box=[1511,395,2088,416] "FOR PRODUCTION AND EXPIRY DATE SEE ON CAN"
+   B045 conf=0.98 min=0.97 ang=0 box=[1613,428,1657,452] "NET"
+   B046 conf=0.99 min=0.99 ang=359 box=[1871,426,1973,452] "DRAINED"
+   B047 conf=0.99 min=0.99 ang=0 box=[1483,469,1526,483] "STEEL"
+   B048 conf=0.93 min=0.40 ang=2 box=[1658,426,2087,508] "170gDWEIGHT 120g"
+   B049 conf=0.98 min=0.97 ang=3 box=[2452,236,2520,251] "دهون كلية"
+   B050 conf=0.81 min=0.56 ang=0 box=[2360,239,2387,249] "٧جم"
+   B051 conf=0.99 min=0.96 ang=4 box=[2448,255,2520,270] "دهون مشبعة"
+   B052 conf=0.96 min=0.95 ang=0 box=[2362,258,2388,268] "اجم"
+   B053 conf=0.98 min=0.95 ang=1 box=[2444,275,2520,287] "دهون مهدرجة"
+   B054 conf=0.98 min=0.96 ang=0 box=[2451,295,2520,306] "كوليسترول"
+   B055 conf=0.99 min=0.98 ang=0 box=[2467,317,2520,326] "صوديوم"
+   B056 conf=0.85 min=0.62 ang=0 box=[2351,296,2388,306] "٥٠ ملحم"
+   B057 conf=0.90 min=0.72 ang=0 box=[2251,316,2389,328] "٤٧٥ ملجم %20 475mg"
+   B058 conf=0.98 min=0.94 ang=2 box=[2420,332,2521,345] "كربوهيدات كلية"
+   B059 conf=0.97 min=0.94 ang=2 box=[2459,353,2519,364] "الياف غذائية"
+   B060 conf=0.98 min=0.96 ang=0 box=[2478,374,2520,384] "سكريات"
+   B061 conf=0.98 min=0.98 ang=0 box=[2363,358,2382,365] "جم"
+   B062 conf=0.98 min=0.94 ang=0 box=[2459,392,2520,402] "سكر مضاف"
+   B063 conf=0.99 min=0.98 ang=2 box=[2481,411,2520,422] "بروتين"
+   B064 conf=0.69 min=0.65 ang=3 box=[2251,355,2269,365] "وہ"
+   B065 conf=0.96 min=0.94 ang=0 box=[2309,338,2324,347] "0%"
+   B066 conf=0.96 min=0.94 ang=0 box=[2309,358,2325,367] "0%"
+   B067 conf=0.99 min=0.98 ang=5 box=[2115,372,2174,385] "Total sugar"
+   B068 conf=0.71 min=0.56 ang=3 box=[2250,373,2270,386] "Og"
+   B069 conf=0.97 min=0.97 ang=0 box=[2309,377,2324,386] "0%"
+   B070 conf=0.99 min=0.97 ang=2 box=[2116,390,2189,404] "Added sugars"
+   B071 conf=0.67 min=0.49 ang=3 box=[2251,393,2270,405] "Og"
+   B072 conf=0.96 min=0.95 ang=0 box=[2309,395,2326,405] "0%"
+   B073 conf=0.99 min=0.98 ang=4 box=[2116,410,2156,421] "Protein"
+   B074 conf=0.88 min=0.78 ang=0 box=[2251,413,2275,423] "26g"
+   B075 conf=0.98 min=0.97 ang=0 box=[2309,414,2331,424] "52%"
+   B076 conf=0.98 min=0.77 ang=0 box=[2123,437,2398,449] "*The % daily values are based on a 2000 calorie diet."
+   B077 conf=0.97 min=0.73 ang=0 box=[1567,456,2509,485] "WEIGHT … تستند النسبة المئوية للقيم اليومية على أساس نظام غذائي ٢٠٠٠ سعرة حرارية."
+   B078 conf=0.89 min=0.83 ang=360 box=[2565,121,2685,167] "SAFE"
+   B079 conf=0.46 min=0.46 ang=0 box=[2688,165,2702,178] "Ⓡ"
+   B080 conf=0.99 min=0.99 ang=0 box=[3106,45,3388,80] "SINCE 1857"
+   B081 conf=0.97 min=0.91 ang=0 box=[2806,104,3671,232] "JOHN WEST"
+   B082 conf=0.99 min=0.99 ang=0 box=[2832,281,3661,328] "LIGHT MEAT TUNA CHUNKS"
+   B083 conf=0.99 min=0.99 ang=0 box=[2897,342,3593,401] "IN SUNFLOWER OIL"
+   B084 conf=0.91 min=0.41 ang=270 box=[4202,78,4236,491] "5 "000171 054326'"
+
+[REREAD] enabled=False candidates=13 crops=0 done=0 confirmed=0 downgraded=0 skipped_cap=0 errors=0
+
+[AI REVIEW] mode=assist url=http://127.0.0.1:5678/webhook/artwork-v2-review pairs_ok=1 pairs_failed=0
+  pair 1: status=ok engine=gemini-2.5-flash http=200 ms=64071 attempts=1 request_bytes=29003 candidates=19
+     ref_accuracy=0.966 items=6/10 reviews=19/19 reviewed=23/23 extra_added=4 extra_duplicate=2 extra_noise=3 vision_conf A=0.963 B=0.964 usage={'promptTokenCount': 17776, 'candidatesTokenCount': 3521, 'totalTokenCount': 37678, 'trafficType': 'ON_DEMAND', 'promptTokensDetails': [{'modality': 'TEXT', 'tokenCount': 17776}], 'candidatesTokensDetails': [{'modality': 'TEXT', 'tokenCount': 3521}], 'thoughtsTokenCount': 16381}
+     recovered=0 equivalent=3 algo_red_kept=-
+     equivalent item (AI=real): ข้อความสองฝั่งเท่ากันตามกติกาเทียบของระบบ (ช่องว่าง/จุดไข่ปลา/อักษรสมมูล) '1 g' ≈ '1g'
+     equivalent item (AI=uncertain): ข้อความสองฝั่งเท่ากันตามกติกาเทียบของระบบ (ช่องว่าง/จุดไข่ปลา/อักษรสมมูล) 'المصفى :' ≈ 'المصفى:'
+     equivalent item (AI=uncertain): ข้อความสองฝั่งเท่ากันตามกติกาเทียบของระบบ (ช่องว่าง/จุดไข่ปลา/อักษรสมมูล) '26 g' ≈ '26g'
+     invalid item: ข้อความที่ยกมาฝั่ง A ไม่ตรงกับ Vision ('–' ≠ '-') "{"a_words": ["A13:5"], "a_quote": "–", "b_words": [], "b_quote": "", "kind": "punct", "verdict": "uncertain", "reason": "มีเครื่องหมาย \"-\" ปรากฏใน A แต่ไม่พบใน B และค่าความเชื่อมั่นของคำต่ำ", "sugge…"
+     summary: "พบความแตกต่างที่ 'real' ทั้งหมด 9 จุด และความแตกต่างที่ 'uncertain' 14 จุด. ความแตกต่างที่ 'real' ได้แก่ ข้อความ "Saturated fat" หายไปใน B, การสะกดคำว่า "فى" ใน A เป็น "في" ใน B, การสะกดคำว่า "ألياف" ใน A เป็น "الياف" ใน B, การสะกดคำว่า "ملجم" ใน A เป็น "ملحم" ใน B, ข้อความ "DRAINED" เพิ่มเข้ามาใน B, ข้อความ "اجم" เพิ่มเข้ามาใน B, ข้อความ "خال من الزيوت المهدرجة" หายไปใน B, ช่องว่างระหว่าง "1" และ "g" ใน A หายไปใน B, และข้อความ "جم" หายไปใน B. ความแตกต่างเหล่านี้ควรได้รับการตรวจสอบอย่างละเอียดในไฟล์อาร์ตเวิร์ค."
+     suggestion: "ตรวจสอบข้อความและตัวเลขที่มีความแตกต่างที่ระบุว่าเป็น 'real' ในไฟล์อาร์ตเวิร์ค"
+     suggestion: "ตรวจสอบข้อความและตัวเลขที่มีความแตกต่างที่ระบุว่าเป็น 'uncertain' โดยเฉพาะอย่างยิ่งในส่วนของตัวเลข เปอร์เซ็นต์ และเครื่องหมายวรรคตอน"
+     suggestion: "ยืนยันว่าข้อความที่หายไปหรือเพิ่มเข้ามาใหม่นั้นเป็นไปตามข้อกำหนดที่ถูกต้อง"
+     suggestion: "ตรวจสอบการสะกดคำภาษาอาหรับที่มีความแตกต่างของตัวอักษร 'ي'/'ى' และ 'أ'/'ا' รวมถึง 'ج'/'ح'"
+
+[WARNINGS] 0

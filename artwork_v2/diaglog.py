@@ -125,6 +125,9 @@ def build_text(r: dict) -> str:
         a("  row_merges (%d) — ต่อแถวที่ OCR ตัดตรงเส้นตกแต่ง:" % len(rm))
         for m in rm:
             a("     %s: %s + %s" % (m["side"], _q(m["left"], 80), _q(m["right"], 80)))
+            if m.get("via") == "recompose":
+                a("        ↳ ต่อชิ้นที่ Vision แยก — ต่อแล้วตรงกับอีกฝั่งทุกตัวอักษร: %s"
+                  % _q(m.get("evidence") or "", 80))
             if m.get("via") == "cross_side":
                 # บรรทัดแยก — รูปแบบบรรทัดบนต้องคงเดิม (ตัวโหลดชุดข้อมูลอ่านมัน)
                 a("        ↳ ต่อด้วยหลักฐานจากอีกฝั่ง (ใส่ … แทนจุดไข่ปลาที่ OCR ทิ้ง): %s"
@@ -162,6 +165,15 @@ def build_text(r: dict) -> str:
         a("  debris — เศษอักขระ / ขอบโซน ไม่นับในผลตัดสิน (%d):" % len(p.get("debris") or []))
         for f in p.get("debris") or []:
             finding(f)
+        if p.get("relocated"):
+            a("  relocated — ข้อความมีอยู่ในอีกฝั่งตรงตำแหน่งเดียวกัน (OCR จัดบรรทัดต่างกัน) ไม่นับ (%d):"
+              % len(p["relocated"]))
+            for f in p["relocated"]:
+                finding(f)
+        if p.get("pixel_same"):
+            a("  pixel_same — ภาพเหมือนกันทุกพิกเซล (OCR อ่านต่างเอง) ไม่นับ (%d):" % len(p["pixel_same"]))
+            for f in p["pixel_same"]:
+                finding(f)
         if p.get("algo_only") is not None:
             if p.get("raw_lines"):
                 a("  algo_only — ผลของอัลกอริทึม ไว้เทียบ ไม่นับ (โหมด raw · line= อ้างบรรทัด OCR lines) (%d):"
@@ -213,6 +225,20 @@ def build_text(r: dict) -> str:
         if it.get("text_a") is not None:
             a("     crop A: %s" % _q(it.get("text_a"), 200))
             a("     crop B: %s" % _q(it.get("text_b"), 200))
+
+    px = r.get("pixel") or {}
+    a("")
+    a("[PIXEL] enabled=%s line_mode=%s same=%s diff=%s unverifiable=%s skipped=%s ms=%s%s" % (
+        px.get("enabled"), px.get("line_mode"), px.get("same", 0), px.get("diff", 0),
+        px.get("unverifiable", 0), px.get("skipped", 0), px.get("ms", 0),
+        (" reason=" + px["reason"]) if px.get("reason") else ""))
+    for pl in px.get("pairs") or []:
+        a("  pair %s align=%s%s" % (pl.get("n"), pl.get("align"),
+                                    (" error=" + str(pl["error"])) if pl.get("error") else ""))
+        for it in pl.get("items") or []:
+            a("    F%s %s checks=%s ms=%s" % (it.get("id"), it.get("status"), it.get("n_checks"), it.get("ms")))
+        for e in pl.get("errors") or []:
+            a("    error %s" % e)
 
     ar = r.get("ai") or {}
     a("")

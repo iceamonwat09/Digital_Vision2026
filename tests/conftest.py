@@ -6,9 +6,17 @@ Artwork V2 รอบ 5 (3 ต.ค.) เปลี่ยนค่าเริ่�
 จะพยายามต่อ N8N จริงบน 127.0.0.1) · ค่าเริ่มต้นใหม่ทดสอบใน ``test_artwork_v2_ai_review.py``
 """
 
+import os
+
 import pytest
 
 _NEW_DEFAULTS_TESTED_IN = {"test_artwork_v2_ai_review"}
+# 7 ต.ค. (ข้อสรุปทีม): กติกาโครงสร้าง + หลักฐานภาพ เปิดเป็นค่าเริ่มต้น — เทสต์รุ่นก่อนใช้ OCR ปลอม
+# บน PDF ที่หมึกเหมือนกัน (หลักฐานภาพจะพับจุดต่างปลอมนั้นถูกต้องตามหน้าที่) และล็อกผลของตัวเทียบรุ่นเดิม
+# ⇒ ตรึงค่าเดิมให้ · ค่าใหม่ทดสอบในโมดูลด้านล่าง (+ ``ARTWORK_V2_TEST_NEW_RULES=1`` = รันเทสต์รุ่นก่อนด้วยค่าใหม่)
+_STRUCT_TESTED_IN = {"test_artwork_v2_structure", "test_artwork_v2_pixverify"}
+_STRUCT_FLAGS = ("GEO_PAIRING", "RECOMPOSE", "MOVED_TEXT", "RELOCATE", "BALANCED_MOVE",
+                 "VERTICAL_UPRIGHT", "QUOTE_PUNCT", "PIXEL_VERIFY")
 _GUARD_TESTED_IN = {"test_artwork_v2_zone_guard"}
 
 
@@ -21,6 +29,9 @@ def _artwork_v2_legacy_defaults(request, monkeypatch):
     from artwork_v2 import config
     monkeypatch.setattr(config, "REREAD_ENABLED", True)
     monkeypatch.setattr(config, "AI_MODE", "off")
+    if name not in _STRUCT_TESTED_IN and os.getenv("ARTWORK_V2_TEST_NEW_RULES") != "1":
+        for k in _STRUCT_FLAGS:
+            monkeypatch.setattr(config, k, False)
     # 4 ต.ค.: 1 คู่ = 1 คำขอ + ด่านกันยิงรัว — เทสต์รุ่นก่อนยิง /run ติดกันบนงานเดียว
     # และล็อกการรวมคู่ลงคำขอเดียว ⇒ ตรึงค่าเดิม (ค่าใหม่ทดสอบใน test_artwork_v2_zone_guard.py)
     if name not in _GUARD_TESTED_IN:

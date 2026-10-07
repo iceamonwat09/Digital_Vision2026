@@ -27,7 +27,7 @@ artwork_v2_bp = Blueprint("artwork_v2", __name__)
 _RUNS = runguard.RunGuard()
 _KEY_TESTS = runguard.RunGuard()
 
-_IMG_RE = re.compile(r"^(p[0-9]+|rr[0-9]+)_[ab]\.jpg$")
+_IMG_RE = re.compile(r"^((p[0-9]+|rr[0-9]+)_[ab]|pv[0-9]+)\.jpg$")
 _RAW_RE = re.compile(r"^p[0-9]+_[ab]\.json$")
 
 
@@ -78,6 +78,7 @@ def page():
                            can_manage_key=_is_admin(_viewer()),
                            v2_sharpness=config.SHARPNESS,
                            v2_ai_mode=config.AI_MODE,
+                           v2_ai_experimental=config.AI_EXPERIMENTAL_MODES,
                            v2_box_style=config.BOX_STYLE,
                            v2_restore_confirm=config.RESTORE_CONFIRM,
                            v2_restore_days=config.RESTORE_MAX_AGE_DAYS,

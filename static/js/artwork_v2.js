@@ -627,7 +627,7 @@
     NUMBER: "ตัวเลข", CASE: "ตัวพิมพ์ใหญ่-เล็ก", TEXT: "ข้อความ", PUNCT: "เครื่องหมาย",
     FILLER: "จุดไข่ปลา/เส้นตกแต่ง", FRACTION: "เศษส่วน (OCR อ่านไม่นิ่ง)",
     MISSING_IN_B: "หายไปจาก 🅱", EXTRA_IN_B: "มีเฉพาะใน 🅱",
-    CURVED: "ข้อความโค้ง/เอียง",
+    CURVED: "ข้อความโค้ง/เอียง", MOVED: "ข้อความย้ายที่",
   };
 
   // การ์ด "ข้อความโค้ง/เอียง" รวมหลายจุด — แสดงคำของทุกสมาชิก (ไม่มีจุดไหนถูกลบ)
@@ -638,7 +638,8 @@
       "</span> " + marked(m[side].text, m[side].span)).join("<br>");
   }
 
-  const SEV_TH = { red: "ต่าง", yellow: "ไม่มั่นใจ", debris: "เศษ", dismissed: "AI: สัญญาณรบกวน" };
+  const SEV_TH = { red: "ต่าง", yellow: "ไม่มั่นใจ", debris: "เศษ", dismissed: "AI: สัญญาณรบกวน",
+    moved: "ย้ายที่", pixel_same: "ภาพเหมือน" };
   const AI_TH = { real: "ต่างจริง", noise: "สัญญาณรบกวนของ OCR", uncertain: "ไม่แน่ใจ" };
   function pct(v) { return v == null ? "-" : Math.round(v * 100) + "%"; }
 
@@ -659,9 +660,19 @@
       (ai.suggestion ? '<span class="v2-ai-note">💡 ' + esc(ai.suggestion) + "</span>" : "");
   }
 
+  // หลักฐานภาพ (ARTWORK_V2_PIXEL_VERIFY): ภาพ A | B (ทาบแล้ว) | จุดที่ต่าง — เรนเดอร์จากไฟล์ต้นฉบับในเครื่อง
+  function pixelEvidence(f) {
+    const px = f.pixel;
+    if (!px || !px.evidence || !S.result) return "";
+    const url = "/api/artwork_v2/jobs/" + encodeURIComponent(S.result.job) + "/runs/" +
+      encodeURIComponent(S.result.run) + "/img/" + encodeURIComponent(px.evidence);
+    return '<a class="v2-pv" href="' + url + '" target="_blank" rel="noopener" title="ภาพหลักฐาน: 🅰 | 🅱 (ทาบแล้ว) | จุดที่ต่าง (กรอบแดง)">' +
+      '<img loading="lazy" alt="ภาพหลักฐานจุด ' + esc(f.id) + '" src="' + url + '"></a>';
+  }
+
   function findingRow(f) {
     const sev = SEV_TH[f.severity] || f.severity;
-    const notes = (f.notes || []).filter((n) => !/^AI: /.test(n)).map(esc).join("<br>");
+    const notes = (f.notes || []).filter((n) => !/^AI: /.test(n)).map(esc).join("<br>") + pixelEvidence(f);
     return '<tr class="click" data-f="' + f.id + '"><td>' + f.id + '</td><td><span class="v2-sev ' + f.severity + '">' +
       sev + "</span></td><td>" + esc(CLASS_TH[f.class] || f.class) +
       (f.source === "ai" ? '<span class="v2-ai-tag">AI</span>' : "") +
@@ -674,7 +685,7 @@
   //    (อัลกอริทึม/AI) · จุดหาย/เกินฝั่งเดียว การ์ดโค้ง และจุดที่ไม่มีเลข ไม่ถูกจับกลุ่ม
   //  · ระดับของแถว = สมาชิกที่หนักที่สุด · แถวอยู่ตำแหน่งของสมาชิกตัวแรก
   const LINE_GROUP = root.dataset.lineGroup === "1";
-  const SEV_RANK = { red: 4, yellow: 3, debris: 2, dismissed: 1 };
+  const SEV_RANK = { red: 4, yellow: 3, debris: 2, moved: 2, dismissed: 1, pixel_same: 1 };
   let GRP = {};                 // id ของแถวกลุ่ม ("g<id แรก>") → [id สมาชิก] — ใช้กับการซูม/เลือกแถว
   function lineGroups(list) {
     const out = [], at = {};
@@ -944,7 +955,9 @@
     GRP = {};
     $("v2PairsRes").innerHTML = (r.pairs || []).map((p) => {
       const rows = rowsHtml(p.findings);
-      const debHtml = folded("เศษอักขระ / ขอบโซน — ไม่นับในผลตัดสิน", p.debris) +
+      const debHtml = folded("ภาพเหมือนกันทุกพิกเซล — OCR อ่านต่างเอง · ไม่นับในผลตัดสิน (เปิดดูภาพหลักฐานได้)", p.pixel_same) +
+        folded("ข้อความมีอยู่ในอีกฝั่งตรงตำแหน่งเดียวกัน (OCR จัดบรรทัดต่างกัน) — ไม่นับในผลตัดสิน", p.relocated) +
+        folded("เศษอักขระ / ขอบโซน — ไม่นับในผลตัดสิน", p.debris) +
         folded(p.raw_lines && p.ai && p.ai.mode === "raw"
           ? "ผลของอัลกอริทึม — ไว้เทียบกับ AI เท่านั้น ไม่นับในผลตัดสิน (โหมด AI ตัดสินจากข้อมูลดิบ)"
           : "อัลกอริทึมพบ แต่ AI ไม่ได้ระบุ — ไม่นับในผลตัดสิน (โหมด AI ตัดสินหลัก)", p.algo_only) +

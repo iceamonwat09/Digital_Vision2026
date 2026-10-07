@@ -20,7 +20,7 @@ from difflib import SequenceMatcher
 from typing import Callable, Dict, List, Optional
 
 from . import VERSION, ai_review, compare, config, imaging, jobs, keystore, textmodel, vision_client
-from . import diaglog
+from . import diaglog, pixverify
 
 MAX_PAIRS = 8          # 16 ภาพ = เพดานต่อคำขอของ Vision
 
@@ -271,6 +271,7 @@ def _run(job_id, raw_pairs, poster, progress, sharpness, ai_mode, ai_poster,
                                "b": _compact_lines(parsed["b"]["lines"])}
         pr["findings"] = cmp_["findings"]
         pr["debris"] = cmp_["debris"]
+        pr["relocated"] = cmp_.get("relocated") or []
         pr["curved_lines"] = cmp_["curved_lines"]
         pr["coverage"] = cmp_["coverage"]
         pr["coverage_a"] = cmp_["coverage_a"]
@@ -304,18 +305,26 @@ def _run(job_id, raw_pairs, poster, progress, sharpness, ai_mode, ai_poster,
         for f in pr.get("debris", []):
             fid += 1
             f["id"] = fid
+        for f in pr.get("relocated", []):
+            fid += 1
+            f["id"] = fid
 
     # ── 6) AI ตรวจทาน (ข้อความของ Vision → N8N/Gemini · ไม่ส่งภาพ · ไม่ยิง Vision ซ้ำ) ──
     t0 = time.time()
     ai_sum, fid = ai_review.run_all(pairs, ai_mode, warnings, say, fid, ai_poster)
     stage["ai_ms"] = int((time.time() - t0) * 1000)
 
+    # ── 6b) หลักฐานภาพ (PDF ↔ PDF · เรนเดอร์ไฟล์ต้นฉบับในเครื่อง · ไม่ยิง Vision/Gemini) ──
+    t0 = time.time()
+    pixel_log = pixverify.run(pairs, srcs, rd, warnings, say)
+    stage["pixel_ms"] = int((time.time() - t0) * 1000)
+
     # ── 7) ผลตัดสิน + บันทึก ─────────────────────────────────────────
     for pr in pairs:
         pr.pop("_cmp", None)
         pr.pop("_raw", None)
         # ห้ามใช้ชื่อ ``key`` — ทับกุญแจ API ข้างบน แล้ว redact() ลบชื่อคีย์ทิ้งแทนกุญแจจริง
-        for lk in ("findings", "debris", "algo_only", "ai_dismissed"):
+        for lk in ("findings", "debris", "algo_only", "ai_dismissed", "relocated", "pixel_same"):
             for f in pr.get(lk) or []:
                 if "confidence" not in f:
                     f["confidence"] = ai_review.confidence(f)
@@ -329,19 +338,25 @@ def _run(job_id, raw_pairs, poster, progress, sharpness, ai_mode, ai_poster,
         elif pr.get("algo_only"):
             rs.append("อัลกอริทึมพบอีก %d จุดที่ AI ไม่ได้ระบุ (รายการพับ — ไม่นับ)"
                       % len(pr["algo_only"]))
+        if pr.get("pixel_same"):
+            rs.append("ภาพเหมือนกันทุกพิกเซล %d จุด — OCR อ่านต่างเอง (รายการพับ — ไม่นับ)"
+                      % len(pr["pixel_same"]))
         pr["verdict"] = v
         pr["reasons"] = rs
     verdict, reasons = verdict_of(pairs)
     n_algo = sum(len(pr.get("algo_only") or []) for pr in pairs)
     if n_algo:
         reasons.append("อัลกอริทึมพบอีก %d จุดที่ AI ไม่ได้ระบุ (รายการพับ — ไม่นับ)" % n_algo)
+    n_pix = sum(len(pr.get("pixel_same") or []) for pr in pairs)
+    if n_pix:
+        reasons.append("ภาพเหมือนกันทุกพิกเซล %d จุด — OCR อ่านต่างเอง (รายการพับ — ไม่นับ)" % n_pix)
     stage["total_ms"] = int((time.time() - t_all) * 1000)
     result = {
         "version": VERSION, "job": job_id, "run": run_name,
         "at": time.strftime("%Y-%m-%d %H:%M:%S"),
         "verdict": verdict, "verdict_th": VERDICT_TH[verdict], "reasons": reasons,
         "sharpness": sharp,
-        "pairs": pairs, "calls": calls, "reread": reread_log, "ai": ai_sum,
+        "pairs": pairs, "calls": calls, "reread": reread_log, "ai": ai_sum, "pixel": pixel_log,
         "warnings": warnings, "stage": stage,
         "key": {"source": key_src, "masked": keystore.mask(key), "length": len(key)},
         "settings": settings_snapshot(),
@@ -381,7 +396,10 @@ def settings_snapshot() -> dict:
         "AI_QUOTE_RECOVER", "AI_QUOTE_RECOVER_MAX_SHIFT", "AI_EQUIV_NOISE", "AI_SEND_CURVED",
         "AI_JUDGE_KEEP_ALGO_RED", "AI_JUDGE_NOISE_GUARD", "AI_JUDGE_CURVED_YELLOW",
         "AI_JUDGE_ONESIDED_GUARD",
-        "ONE_REQUEST_PER_PAIR", "RUN_GUARD", "RUN_MAX_CONCURRENT", "RUN_COOLDOWN_S")}
+        "ONE_REQUEST_PER_PAIR", "RUN_GUARD", "RUN_MAX_CONCURRENT", "RUN_COOLDOWN_S",
+        "GEO_PAIRING", "RECOMPOSE", "MOVED_TEXT", "RELOCATE", "BALANCED_MOVE",
+        "VERTICAL_UPRIGHT", "QUOTE_PUNCT", "AI_EXPERIMENTAL_MODES",
+        "PIXEL_VERIFY", "PIXEL_LINE_MODE", "PIXEL_TIME_BUDGET_S")}
 
 
 def _reread(pairs, srcs, rd, poster, key, calls, warnings, say) -> dict:

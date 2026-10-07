@@ -145,7 +145,8 @@ def test_mode_is_known_and_old_modes_unchanged():
     assert config.AI_MODES == ("assist", "judge", "raw", "off")
     assert ai_review.norm_mode("raw") == "raw" and ai_review.norm_mode("RAW ") == "raw"
     src = open(os.path.join(ROOT, "artwork_v2", "config.py"), encoding="utf-8").read()
-    assert 'os.getenv("ARTWORK_V2_AI_MODE", "assist")' in src   # ค่าเริ่มต้นของเครื่องไม่เปลี่ยน
+    # 7 ต.ค. ค่าเริ่มต้นของเครื่องเปลี่ยนเป็น "off" (ข้อสรุปทีม) — raw ยังเป็นตัวเลือกที่ต้องเลือกเอง
+    assert 'os.getenv("ARTWORK_V2_AI_MODE", "off")' in src
 
 
 def test_raw_payload_is_vision_lines_as_returned_without_algorithm_output():

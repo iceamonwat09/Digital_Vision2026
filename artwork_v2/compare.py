@@ -520,7 +520,15 @@ def _standalone(text: str, s: int, e: int) -> bool:
     return s < e and (s == 0 or text[s - 1].isspace()) and (e >= len(text) or text[e].isspace())
 
 
+# เครื่องหมายคำพูด/ขีด/ดอกจันที่ OCR ใส่ ๆ หาย ๆ รอบตัวเลข (บาร์โค้ด ``"000171`` · ``054326'``)
+QUOTE_MARKS = set("\"'\u201c\u201d\u2018\u2019\u00ab\u00bb|#*")
+
+
 def classify(a_txt: str, b_txt: str, a_ctx: str, b_ctx: str, standalone: bool = False) -> str:
+    if config.QUOTE_PUNCT:
+        t = (a_txt + b_txt).strip()
+        if t and all(c in QUOTE_MARKS or c.isspace() for c in t):
+            return "PUNCT"
     if a_txt and b_txt and a_txt.casefold() == b_txt.casefold():
         return "CASE"
     if any(c.isdigit() for c in a_txt + b_txt):
@@ -745,6 +753,35 @@ def _box_gap(a, b) -> float:
 
 
 def curved_lines(lines: List[dict]) -> set:
+    """``_curved_base`` + (``VERTICAL_UPRIGHT``) บรรทัดแนวตั้ง 90°±3° ที่กรอบสูง ≥ 2.5 เท่าของกว้าง
+    และยาวกว่าเพื่อนบ้านสั้น = **ข้อความพิมพ์ตั้งตามปกติ** ไม่ใช่ตราโค้ง (เดิม claim แนวตั้ง
+    "Free from hydrogenated oils" conf 0.95 เป็นเหลืองทุกรอบ) — บรรทัดสั้นที่เคยถูกดึงเข้ากลุ่ม
+    เพราะติดบรรทัดแนวตั้งนั้น ถูกประเมินใหม่"""
+    out = _curved_base(lines)
+    if not config.VERTICAL_UPRIGHT or not out:
+        return out
+    dom = dominant_angle(lines)
+    keep = set()
+    for i in out:
+        ln = lines[i]
+        a, b = ln.get("angle"), ln.get("box")
+        if a is None or not b:
+            continue
+        w, h = b[2] - b[0], b[3] - b[1]
+        dk = ln.get("dk")
+        if dk is None:
+            dk = diff_key_map(ln.get("text") or "")[0]
+        if abs(_adist(a, dom) - 90) <= 3 and h >= 2.5 * w and len(dk) > config.CURVED_NEIGHBOR_MAX_CHARS:
+            keep.add(i)
+    if not keep:
+        return out
+    tmp = [dict(l) for l in lines]
+    for i in keep:
+        tmp[i]["angle"] = dom
+    return _curved_base(tmp)
+
+
+def _curved_base(lines: List[dict]) -> set:
     """ดัชนีบรรทัดที่เป็น "ข้อความโค้ง/เอียง"
 
     * บรรทัดที่เอียงจากแนวหลักของโซนเกิน ``TILT_ANGLE``
@@ -835,13 +872,41 @@ def compare(lines_a: List[dict], lines_b: List[dict],
     (ไม่ส่ง = ใช้แค่เกณฑ์ความมั่นใจ)"""
     merges: List[dict] = []
     A, B = _prep(lines_a, "A", merges), _prep(lines_b, "B", merges)
-    pairs, ua, ub = pair_lines(A, B)
+    S = g = gi = None
+    if config.GEO_PAIRING or config.RECOMPOSE or config.RELOCATE:
+        from . import structure as S
+        g, gi = S.build_geo(A, B)
+
+    def _pair():
+        if config.GEO_PAIRING and g is not None:
+            return S.pair_lines_geo(A, B, g)
+        return pair_lines(A, B)
+
+    pairs, ua, ub = _pair()
     if config.CROSS_ROW_JOIN:
         for _ in range(50):
             if not (_cross_join(B, A, pairs, set(ub), "B", merges)
                     or _cross_join(A, B, pairs, set(ua), "A", merges)):
                 break
-            pairs, ua, ub = pair_lines(A, B)
+            pairs, ua, ub = _pair()
+    if config.RECOMPOSE and g is not None:
+        for _ in range(30):
+            # บรรทัดที่อธิบายได้แล้วว่าเป็นการตัดบรรทัดต่างกัน ไม่ถูกนำไปต่อ (ไม่กินหลักฐาน)
+            refl: List[dict] = []
+            for ia, ib, _m, _s in pairs:
+                refl += diff_pair(A[ia], B[ib], A, B, ia, ib)[1]
+
+            def explained(i, mine, other, side):
+                k = mine[i]["dk"].replace("-", "")
+                edge = [e["text"].replace("-", "") for e in refl
+                        if e["side"] != side and e["text"].strip("-")]
+                return _crosses_lines(mine[i]["dk"], other) or any(k and k in t for t in edge)
+            ub_ = {u for u in ub if not explained(u, B, A, "B")}
+            ua_ = {u for u in ua if not explained(u, A, B, "A")}
+            if not (S.recompose(B, A, gi, ub_, "B", merges)
+                    or S.recompose(A, B, g, ua_, "A", merges)):
+                break
+            pairs, ua, ub = _pair()
     findings: List[dict] = []
     reflow: List[dict] = []
     for ia, ib, method, score in pairs:
@@ -849,8 +914,22 @@ def compare(lines_a: List[dict], lines_b: List[dict],
         for x in f:
             x["pair_method"] = method
             x["pair_score"] = score
+        if config.MOVED_TEXT:
+            if S is None:
+                from . import structure as S
+            S.mark_moved(f)
         findings += f
         reflow += r
+
+    relocated: List[dict] = []
+    cancelled = {"A": set(), "B": set()}
+    if config.RELOCATE and g is not None:
+        findings, relocated, cancelled = S.relocate(findings, A, B, ua, ub, g, gi)
+        for x in relocated:
+            x["severity"] = "moved"
+            x["notes"] = ["ข้อความนี้มีอยู่ในอีกฝั่งตรงตำแหน่งเดียวกันบนภาพ (OCR จัดบรรทัดต่างกัน) — "
+                          "ไม่นับในผลตัดสิน · อีกฝั่ง: " + (x.get("reloc_into") or "")[:80]]
+            x.pop("_cap", None)
 
     reflow_lines = {"A": [], "B": []}
     for side, uns, mine, other in (("A", ua, A, B), ("B", ub, B, A)):
@@ -861,7 +940,8 @@ def compare(lines_a: List[dict], lines_b: List[dict],
         for i in uns:
             ln = mine[i]
             k = ln["dk"].replace("-", "")
-            if _crosses_lines(ln["dk"], other) or any(k and k in t for t in edge_texts):
+            if i in cancelled[side] or _crosses_lines(ln["dk"], other) \
+                    or any(k and k in t for t in edge_texts):
                 reflow_lines[side].append(i)
                 continue
             box = ln["box"]
@@ -878,15 +958,27 @@ def compare(lines_a: List[dict], lines_b: List[dict],
             f["_short"] = len(ln["dk"]) < 2 or _is_punct(ln["dk"])
             findings.append(f)
 
+    if config.BALANCED_MOVE:
+        if S is None:
+            from . import structure as S
+        S.mark_balanced(findings)
     for f in findings:
         short = f.pop("_short", False)
-        if f["pair_method"] != "unpaired":
+        if f["class"] == "MOVED":
+            sev = "yellow"
+        elif f["pair_method"] != "unpaired":
             sev = severity(f)
         else:
             conf = f["a"]["conf"] if f["a"]["conf"] is not None else f["b"]["conf"]
             sev = "yellow" if short or conf is None or conf < config.CONF_FAIL else "red"
         f["severity"] = sev
         f["notes"] = []
+        cap = f.pop("_cap", None)
+        if cap:
+            f["cap"] = cap
+            if f["severity"] == "red":
+                f["severity"] = "yellow"
+            f["notes"].append(S.CAP_NOTE.get(cap, cap))
         if f["class"] == "FRACTION":
             f["notes"].append("เศษส่วน — Vision อ่านตัวเดียวกันไม่นิ่ง (วัดแล้ว: ½ · 1/2 · 2 · 1 · หาย) "
                               "แยกจากการแก้งานจริงด้วยข้อความไม่ได้ โปรดดูด้วยตา")
@@ -934,6 +1026,7 @@ def compare(lines_a: List[dict], lines_b: List[dict],
     return {
         "findings": findings,
         "debris": debris,
+        "relocated": relocated,
         "curved_lines": {"A": sorted(curved["A"]), "B": sorted(curved["B"])},
         "lines_a": A, "lines_b": B,
         "pairs": [{"a": ia, "b": ib, "method": m, "score": s} for ia, ib, m, s in pairs],

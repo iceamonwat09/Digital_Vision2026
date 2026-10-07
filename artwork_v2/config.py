@@ -148,10 +148,33 @@ REREAD_MAX_SIDE = _i("ARTWORK_V2_REREAD_MAX_SIDE", "2400")
 #   "off"    = ไม่เรียก AI = ผลเดิมเป๊ะ
 # % ความมั่นใจทุกจุดคิดจากค่าความมั่นใจของ Vision ตรงตัวอักษรนั้น — **ไม่ใช่ตัวเลขที่ AI บอก**
 # หน้าเว็บเลือกได้ต่อรอบ (ช่อง "AI ตรวจทาน") — ค่านี้คือค่าที่เลือกไว้ตอนเปิดหน้า
+# ── กติกาโครงสร้างของการเทียบ (7 ต.ค. · ข้อสรุปทีม · ``artwork_v2/structure.py``) ──────
+# แดงหลอกส่วนใหญ่มาจาก Vision จัดบรรทัดต่างกันสองฝั่ง ไม่ใช่อ่านตัวอักษรผิด · ทุกธง ``0`` = เดิมเป๊ะ
+GEO_PAIRING = _b("ARTWORK_V2_GEO_PAIRING", "1")          # จับคู่บรรทัดตามตำแหน่ง
+RECOMPOSE = _b("ARTWORK_V2_RECOMPOSE", "1")              # ต่อชิ้นที่ถูกแยก (เท่ากันทุกตัวอักษร)
+MOVED_TEXT = _b("ARTWORK_V2_MOVED_TEXT", "1")            # ข้อความย้ายที่ในบรรทัด ⇒ MOVED เหลือง
+RELOCATE = _b("ARTWORK_V2_RELOCATE", "1")                # อยู่อีกบรรทัดตรงตำแหน่งเดียวกัน ⇒ พับ
+BALANCED_MOVE = _b("ARTWORK_V2_BALANCED_MOVE", "1")      # หาย+เกินข้อความเดียวกัน ⇒ เหลือง
+VERTICAL_UPRIGHT = _b("ARTWORK_V2_VERTICAL_UPRIGHT", "1")  # ข้อความแนวตั้งไม่ใช่ข้อความโค้ง
+QUOTE_PUNCT = _b("ARTWORK_V2_QUOTE_PUNCT", "1")          # ต่างแค่ " ' | # * = เครื่องหมาย
+
+# ── หลักฐานภาพ (7 ต.ค. · ``artwork_v2/pixverify.py``) — PDF ↔ PDF เท่านั้น ─────────────
+# เรนเดอร์ไฟล์ต้นฉบับใหม่ในเครื่องรอบทุกจุดต่าง (ไม่ยิง Vision/Gemini) · หมึกเหมือนกันทุกพิกเซล ⇒
+# ย้ายไปรายการพับพร้อมภาพหลักฐาน (ไม่ลบ) · ภาพต่าง ⇒ คงไว้ + ป้าย · ``0`` = เดิมเป๊ะ
+PIXEL_VERIFY = _b("ARTWORK_V2_PIXEL_VERIFY", "1")
+# บังคับให้ "ทั้งบรรทัด OCR" ของทั้งสองฝั่งเหมือนกันด้วย (กันกรอบที่ Vision วางผิดคำ)
+PIXEL_LINE_MODE = _b("ARTWORK_V2_PIXEL_LINE_MODE", "1")
+PIXEL_TIME_BUDGET_S = _f("ARTWORK_V2_PIXEL_TIME_BUDGET_S", "180")
+
+# 7 ต.ค. (ข้อสรุปทีมวิเคราะห์ Log ทุกชุด): AI ที่เห็นแค่ข้อความตอบ "ต่างจริง" กับสัญญาณรบกวน 14 ครั้ง
+# · โหมด judge ทำของจริงหาย 3 จุด · บน John West "real" ถูกแค่ 1/11 ⇒ ค่าเริ่มต้น **ปิด**
+# (ตั้ง ``ARTWORK_V2_AI_MODE=assist`` = แบบเดิม)
 AI_MODES = ("assist", "judge", "raw", "off")
-AI_MODE = os.getenv("ARTWORK_V2_AI_MODE", "assist").strip().lower()
+AI_MODE = os.getenv("ARTWORK_V2_AI_MODE", "off").strip().lower()
 if AI_MODE not in AI_MODES:
     AI_MODE = "off"
+# โหมด judge / raw ซ่อนจากหน้าเว็บ (ทำของจริงหายบนสถานี) · ``1`` = แสดงเหมือนเดิม · API ยังรับค่าได้
+AI_EXPERIMENTAL_MODES = _b("ARTWORK_V2_AI_EXPERIMENTAL_MODES", "0")
 AI_REVIEW_URL = os.getenv("ARTWORK_V2_AI_REVIEW_URL",
                           "http://127.0.0.1:5678/webhook/artwork-v2-review").strip()
 AI_TIMEOUT_S = _f("ARTWORK_V2_AI_TIMEOUT_S", "180")

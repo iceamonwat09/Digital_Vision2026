@@ -111,14 +111,15 @@ def _poster(answer, status=200, seen=None):
 
 # ── ① ค่าเริ่มต้นใหม่ ─────────────────────────────────────────────────
 
-def test_new_defaults_no_resend_and_ai_assist(monkeypatch):
-    """ผู้ใช้สั่ง "ห้ามส่งซ้ำ" ⇒ อ่านซ้ำปิด · AI เปิดแบบอัลกอริทึมตัดสิน + AI เสริม"""
-    for k in ("ARTWORK_V2_REREAD", "ARTWORK_V2_AI_MODE"):
+def test_new_defaults_no_resend_and_ai_off(monkeypatch):
+    """ผู้ใช้สั่ง "ห้ามส่งซ้ำ" ⇒ อ่านซ้ำปิด · 7 ต.ค. (ข้อสรุปทีม) AI ค่าเริ่มต้น **ปิด**"""
+    for k in ("ARTWORK_V2_REREAD", "ARTWORK_V2_AI_MODE", "ARTWORK_V2_AI_EXPERIMENTAL_MODES"):
         monkeypatch.delenv(k, raising=False)
     fresh = importlib.reload(config)
     try:
         assert fresh.REREAD_ENABLED is False
-        assert fresh.AI_MODE == "assist"
+        assert fresh.AI_MODE == "off"
+        assert fresh.AI_EXPERIMENTAL_MODES is False
         assert fresh.AI_REVIEW_URL.endswith("/webhook/artwork-v2-review")
         assert "127.0.0.1" in fresh.AI_REVIEW_URL
     finally:
@@ -747,3 +748,21 @@ def test_prompt_rules_from_station_run_20261006():
                  "leader dots", "Do not write confidence numbers"):
         assert rule in p, rule
     assert "word_conf (Vision lowest" not in p        # รูปแบบข้อมูลเก่า (words/word_conf) ไม่อยู่ใน prompt
+
+
+def test_station_page_hides_judge_and_raw_unless_flagged(monkeypatch):
+    """judge/raw ทำของจริงหายบนสถานี ⇒ ไม่อยู่ในหน้าเว็บ เว้นแต่เปิดธง (API ยังรับค่าได้)"""
+    from jinja2 import Environment, FileSystemLoader
+    root = os.path.join(os.path.dirname(__file__), "..", "templates")
+    src = open(os.path.join(root, "artwork_v2.html"), encoding="utf-8").read()
+    i = src.index('<select id="v2Ai"'); j = src.index("</select>", i)
+    tpl = Environment().from_string(src[i:j + 9])
+    off = tpl.render(v2_ai_mode="off", v2_ai_experimental=False)
+    assert 'value="judge"' not in off and 'value="raw"' not in off
+    assert 'value="assist"' in off and 'value="off" selected' in off
+    on = tpl.render(v2_ai_mode="off", v2_ai_experimental=True)
+    assert 'value="judge"' in on and 'value="raw"' in on
+    # เครื่องที่ตั้งค่าเริ่มต้นเป็น judge ไว้ ต้องยังเห็นตัวเลือกที่ถูกเลือกอยู่
+    kept = tpl.render(v2_ai_mode="judge", v2_ai_experimental=False)
+    assert 'value="judge" selected' in kept
+    assert ai_review.norm_mode("judge") == "judge"
