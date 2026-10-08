@@ -26,6 +26,12 @@
 **Branch: `claude/laughing-fermat-i9aise`** (ต่อจาก `claude/practical-franklin-a5p6zd`) · `CONFIG_VERSION` = **`2026.10.08-v2-card`** ·
 โมดูล `artwork_v2/` (VERSION `2026.10.08-v2warp`) · เมนู **"Artwork V2"** (`/artwork_v2`) ·
 เทสต์ `tests/test_artwork_v2.py` **73 ตัว** + `tests/test_artwork_v2_robust.py` **717 ตัว** (ข้อมูล OCR จริง · ~2.5 นาที)
+· V2 ทั้งชุด **596 + 717**
+
+> 📘 **เอกสารอ้างอิงฉบับรวม: [`docs/ARTWORK_V2.md`](docs/ARTWORK_V2.md)** — pipeline ทีละขั้น · โมดูล · ชนิดจุดต่าง ·
+> API · ไฟล์ข้อมูล · **ธงทุกตัวพร้อมค่าเริ่มต้น** · เทสต์ทุกไฟล์ · ผลสถานี · **รายการปัญหาที่ยังเปิดอยู่ (ข้อ 13)** ·
+> ลำดับงานที่แนะนำ · checklist. บันทึกรายวันด้านล่างคือ *ที่มา* ของแต่ละข้อ — อ่านเอกสารนั้นก่อนเริ่มงาน V2 ·
+> **แก้ธง/ปัญหาแล้วต้องอัปเดตตารางในเอกสารนั้นด้วย**
 
 **แยกจากโหมด `artwork_check` 100%** — ไม่ import โค้ดเดิม (มีเทสต์ล็อก) · ข้อมูลอยู่
 `data/artwork_v2/` (gitignore) · เรียก Vision **ตรงจาก Python ด้วย `requests`** (ไม่ผ่าน N8N ·
