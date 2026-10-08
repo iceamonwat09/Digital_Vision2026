@@ -1441,12 +1441,52 @@
       (st.langs && st.langs.length ? " · ภาษา " + esc(st.langs.join(",")) : "") + "</div>";
   }
 
+  // ── หน้าตาการ์ดผลตรวจแบบใหม่ (ARTWORK_V2_CARD_STYLE · แสดงผลล้วน) ──
+  //  · แถบผลตัดสิน: ไอคอน + เหตุผล + ข้อมูลรอบเป็นชิป · หัวการ์ดต่อคู่: ป้ายผล + แถบความครอบคลุม
+  //  · หัวคอลัมน์ภาพ: บรรทัดเดียว (รายละเอียดเต็มอยู่ใน title) · ปิดธง = markup เดิมทุกตัวอักษร
+  const CARD = root.dataset.cardStyle === "polish";
+  const VERDICT_ICON = { PASS: "✓", REVIEW: "!", FAIL: "✕", UNREADABLE: "?" };
+  function verdictHtml(r) {
+    const chips = ["รอบ " + r.run, r.at, r.version ? "รุ่น " + r.version : "",
+      r.sharpness ? "ภาพที่ส่ง: " + (r.sharpness === "max" ? "คมสูงสุด" : "มาตรฐาน 400 dpi") : "",
+      r.color_mode && r.color_mode !== "color" ? "สีของภาพ: " + (r.color_mode === "bw" ? "ขาวดำ" : "เทา") : "",
+      r.ai && r.ai.mode ? "AI: " + (AI_MODE_TH[r.ai.mode] || r.ai.mode) : ""].filter((x) => x);
+    return '<div class="v2-verdict v2-vx v2-v-' + esc(r.verdict) + '"><span class="v2-vic" aria-hidden="true">' +
+      esc(VERDICT_ICON[r.verdict] || "•") + '</span><div class="v2-vbody"><div class="v2-vt">' + esc(r.verdict) +
+      ' <span>' + esc(r.verdict_th) + "</span></div>" +
+      ((r.reasons || []).length ? '<div class="v2-vr">' + r.reasons.map(esc).join(" · ") + "</div>" : "") +
+      '<div class="v2-vmeta">' + chips.map((c) => "<span>" + esc(c) + "</span>").join("") + "</div></div></div>";
+  }
+  function pairHead(p) {
+    const cov = p.coverage != null ? Math.round(p.coverage * 100) : null;
+    return '<div class="v2-ph"><span class="v2-pnum">คู่ ' + esc(p.n) + "</span>" +
+      (p.verdict ? '<span class="v2-vpill v2-v-' + esc(p.verdict) + '">' + esc(VERDICT_ICON[p.verdict] || "") + " " +
+        esc(p.verdict) + "</span>" : "") +
+      (cov != null ? '<span class="v2-covm' + (cov < 90 ? " lo" : "") + '" title="สัดส่วนบรรทัดที่จับคู่ข้อความ 🅰↔🅱 ได้' +
+        (p.coverage_ignored ? " (อัลกอริทึม — ไม่ใช้ตัดสินในโหมดข้อมูลดิบ)" : "") + '">จับคู่ข้อความ <i><b style="width:' +
+        Math.max(0, Math.min(100, cov)) + '%"></b></i> ' + cov + "%" + (p.coverage_ignored ? " *" : "") + "</span>" : "") +
+      "</div>" + (p.reasons && p.reasons.length ? '<div class="v2-preason">' + p.reasons.map(esc).join(" · ") + "</div>" : "");
+  }
+  function sideHead(s, sd) {
+    const st = sd.stats || {};
+    const full = sd.sent_px[0] + "×" + sd.sent_px[1] + " px" + (sd.render && sd.render.dpi ? " · " + sd.render.dpi + " dpi" : "") +
+      " · JPEG q" + (sd.encode && sd.encode.quality) + " · " + (sd.jpeg_bytes / 1024).toFixed(0) + " KB" +
+      (st.lines != null ? " · " + st.lines + " บรรทัด · ความมั่นใจเฉลี่ย " + (st.conf_mean != null ? st.conf_mean.toFixed(2) : "-") : "") +
+      (st.langs && st.langs.length ? " · ภาษา " + st.langs.join(",") : "");
+    const short = [sd.page != null ? "หน้า " + (sd.page + 1) : "", sd.render && sd.render.dpi ? sd.render.dpi + " dpi" : "",
+      st.lines != null ? st.lines + " บรรทัด" : "", st.conf_mean != null ? "มั่นใจ " + Math.round(st.conf_mean * 100) + "%" : "",
+      sd.rotate ? "↻" + sd.rotate + "°" : ""].filter((x) => x).join(" · ");
+    return '<div class="v2-colh"><span class="v2-sbadge ' + s + '">' + (s === "a" ? "🅰" : "🅱") + '</span><span class="v2-colm" title="' +
+      esc(full) + '">' + esc(short) + "</span></div>" +
+      (sd.ok ? "" : '<div class="v2-bad v2-colerr">อ่านไม่ได้: ' + esc(sd.error) + "</div>");
+  }
+
   function showResult(r) {
     S.result = r;
     S.review = null;                                 // ผลใหม่ = เลขจุดชุดใหม่ ⇒ ไม่ใช้ผลรีวิวของผลเดิม
     $("v2ResCard").classList.remove("v2-hidden");
     $("v2LogCard").classList.remove("v2-hidden");
-    $("v2Verdict").innerHTML = '<div class="v2-verdict v2-v-' + esc(r.verdict) + '">' + esc(r.verdict) + " — " +
+    $("v2Verdict").innerHTML = CARD ? verdictHtml(r) : '<div class="v2-verdict v2-v-' + esc(r.verdict) + '">' + esc(r.verdict) + " — " +
       esc(r.verdict_th) + "<small>" + (r.reasons || []).map(esc).join(" · ") + " · รอบ " + esc(r.run) +
       " · " + esc(r.at) + (r.version ? " · รุ่น " + esc(r.version) : "") +
       (r.sharpness ? " · ภาพที่ส่ง: " + (r.sharpness === "max" ? "คมสูงสุด" : "มาตรฐาน 400 dpi") : "") +
@@ -1482,13 +1522,14 @@
           ? "ผลของอัลกอริทึม — ไว้เทียบกับ AI เท่านั้น ไม่นับในผลตัดสิน (โหมด AI ตัดสินจากข้อมูลดิบ)"
           : "อัลกอริทึมพบ แต่ AI ไม่ได้ระบุ — ไม่นับในผลตัดสิน (โหมด AI ตัดสินหลัก)", p.algo_only) +
         folded("AI ตัดสินว่าเป็นสัญญาณรบกวนของ OCR — ไม่นับในผลตัดสิน", p.ai_dismissed);
-      return '<div class="v2-card" data-pn="' + esc(p.n) + '" style="margin:12px 0"><b>คู่ ' + p.n + "</b> — " + esc(p.verdict || "") +
+      return (CARD ? '<div class="v2-card v2-pcard v2-pv-' + esc(p.verdict || "") + '" data-pn="' + esc(p.n) + '">' + pairHead(p) :
+        '<div class="v2-card" data-pn="' + esc(p.n) + '" style="margin:12px 0"><b>คู่ ' + p.n + "</b> — " + esc(p.verdict || "") +
         (p.coverage != null ? " · จับคู่ข้อความได้ " + Math.round(p.coverage * 100) + "%" +
           (p.coverage_ignored ? " (อัลกอริทึม — ไม่ใช้ตัดสินในโหมดข้อมูลดิบ)" : "") : "") +
-        (p.reasons && p.reasons.length ? ' <span class="v2-muted">(' + p.reasons.map(esc).join(" · ") + ")</span>" : "") +
+        (p.reasons && p.reasons.length ? ' <span class="v2-muted">(' + p.reasons.map(esc).join(" · ") + ")</span>" : "")) +
         (SIDE_TABLE ? sideLayout(p, r, rows) :
-        '<div class="v2-panes" style="margin-top:8px"><div>🅰 ' + sideInfo(p.sides.a) + svgFor(p, "a", r) +
-        "</div><div>🅱 " + sideInfo(p.sides.b) + svgFor(p, "b", r) + "</div></div>" +
+        '<div class="v2-panes" style="margin-top:8px"><div>' + colHead("a", p.sides.a) + svgFor(p, "a", r) +
+        "</div><div>" + colHead("b", p.sides.b) + svgFor(p, "b", r) + "</div></div>" +
         (rows ? mainTable(rows, "", "") + '<div class="v2-tbl-more v2-muted" hidden></div>' : (p.unreadable ? "" : '<div class="v2-muted" style="margin-top:6px">ไม่พบจุดต่าง</div>'))) +
         aiBox(p) + debHtml + "</div>";
     }).join("");
@@ -1500,6 +1541,8 @@
       document.querySelectorAll("#v2PairsRes .v2-res-stage img").forEach((im) => im.addEventListener("load", fitSide));
     }
   }
+
+  function colHead(s, sd) { return CARD ? sideHead(s, sd) : (s === "a" ? "🅰 " : "🅱 ") + sideInfo(sd); }
 
   // ตารางจุดต่างหลัก (ตัวเดียวที่ถูกจำกัดความสูง — รายการพับไม่ถูกจำกัด)
   function mainTable(rows, wrapCls, tblCls) {
@@ -1517,8 +1560,8 @@
       '<span class="v2-muted v2-side-tip">ชี้แถว = ซูมภาพ · ⓘ = หมายเหตุ</span></div>';
     const body = rows ? mainTable(rows, " v2-side-in", " v2-tbl-side")
       : '<div class="v2-side-empty v2-muted">' + (p.unreadable ? "อ่านไม่ได้ — ไม่มีตารางจุดต่าง" : "ไม่พบจุดต่าง") + "</div>";
-    return '<div class="v2-resgrid"><div class="v2-rescol">🅰 ' + sideInfo(p.sides.a) + svgFor(p, "a", r) +
-      '</div><div class="v2-rescol">🅱 ' + sideInfo(p.sides.b) + svgFor(p, "b", r) +
+    return '<div class="v2-resgrid"><div class="v2-rescol">' + colHead("a", p.sides.a) + svgFor(p, "a", r) +
+      '</div><div class="v2-rescol">' + colHead("b", p.sides.b) + svgFor(p, "b", r) +
       '</div><div class="v2-side">' + head + body + "</div></div>";
   }
   // ความสูงของตารางข้างภาพ = ความสูงของคอลัมน์ภาพ (ไม่ต่ำกว่า 360 px · ไม่เกินความสูงจอ)

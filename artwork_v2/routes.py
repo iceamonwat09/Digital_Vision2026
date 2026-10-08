@@ -91,7 +91,8 @@ def page():
                            v2_zone_ignore=config.ZONE_IGNORE,
                            v2_ignore_max=config.IGNORE_MAX,
                            v2_est_box=config.EST_BOX,
-                           v2_review=config.REVIEW)
+                           v2_review=config.REVIEW,
+                           v2_card_style=config.CARD_STYLE)
 
 
 # ── API key ──────────────────────────────────────────────────────────

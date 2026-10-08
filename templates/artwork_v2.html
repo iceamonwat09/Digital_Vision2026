@@ -234,13 +234,134 @@
     .v2-side { grid-column:1 / -1; position:static; }
   }
   @media (max-width: 700px) { .v2-resgrid { grid-template-columns:minmax(0,1fr); } }
+  /* ── หน้าตาการ์ดผลตรวจแบบใหม่ (ARTWORK_V2_CARD_STYLE · แสดงผลล้วน · ทุกกฎผูกกับ data-card-style="polish") ── */
+  #v2Root[data-card-style="polish"] {
+    --v2-red:#dc2626; --v2-amber:#d97706; --v2-green:#16a34a; --v2-slate:#64748b; --v2-line:#e2e8f0; --v2-soft:#f8fafc;
+  }
+  #v2Root[data-card-style="polish"] #v2ResCard { padding:18px 20px; border-radius:14px; box-shadow:0 1px 3px rgba(15,23,42,.06), 0 8px 24px -12px rgba(15,23,42,.10); }
+  #v2Root[data-card-style="polish"] #v2ResCard > h3 { font-size:17px; letter-spacing:.1px; margin-bottom:12px; }
+  /* แถบผลตัดสิน: ไอคอนกลม + หัวเรื่อง + เหตุผล + ชิปข้อมูลรอบ */
+  #v2Root[data-card-style="polish"] .v2-verdict.v2-vx { display:flex; gap:14px; align-items:flex-start; padding:14px 18px;
+    border-radius:12px; border:1px solid transparent; font-size:inherit; font-weight:400; }
+  #v2Root[data-card-style="polish"] .v2-vic { flex:0 0 auto; width:40px; height:40px; border-radius:50%; display:grid; place-items:center;
+    font:800 20px/1 system-ui, sans-serif; color:#fff; background:var(--v2-slate); box-shadow:0 2px 6px rgba(15,23,42,.15); }
+  #v2Root[data-card-style="polish"] .v2-vbody { min-width:0; flex:1; }
+  #v2Root[data-card-style="polish"] .v2-vt { font-size:21px; font-weight:800; line-height:1.25; }
+  #v2Root[data-card-style="polish"] .v2-vt span { font-weight:600; opacity:.85; }
+  #v2Root[data-card-style="polish"] .v2-vr { margin-top:3px; font-size:14px; font-weight:500; }
+  #v2Root[data-card-style="polish"] .v2-vmeta { display:flex; flex-wrap:wrap; gap:5px; margin-top:8px; }
+  #v2Root[data-card-style="polish"] .v2-vmeta span { background:rgba(255,255,255,.65); border:1px solid rgba(15,23,42,.08);
+    border-radius:999px; padding:1px 9px; font-size:11.5px; color:#334155; overflow-wrap:anywhere; }
+  #v2Root[data-card-style="polish"] .v2-vx.v2-v-PASS { background:linear-gradient(90deg,#dcfce7,#f0fdf4); border-color:#bbf7d0; }
+  #v2Root[data-card-style="polish"] .v2-vx.v2-v-REVIEW { background:linear-gradient(90deg,#fef3c7,#fffbeb); border-color:#fde68a; }
+  #v2Root[data-card-style="polish"] .v2-vx.v2-v-FAIL { background:linear-gradient(90deg,#fee2e2,#fef2f2); border-color:#fecaca; }
+  #v2Root[data-card-style="polish"] .v2-vx.v2-v-UNREADABLE { background:linear-gradient(90deg,#e2e8f0,#f8fafc); border-color:#cbd5e1; }
+  #v2Root[data-card-style="polish"] .v2-vx.v2-v-PASS .v2-vic { background:var(--v2-green); }
+  #v2Root[data-card-style="polish"] .v2-vx.v2-v-REVIEW .v2-vic { background:var(--v2-amber); }
+  #v2Root[data-card-style="polish"] .v2-vx.v2-v-FAIL .v2-vic { background:var(--v2-red); }
+  /* คำเตือน + แถบรีวิว + คำอธิบายสัญลักษณ์ */
+  #v2Root[data-card-style="polish"] .v2-warnbox { border-radius:10px; border-left:4px solid #f59e0b; padding:9px 12px; }
+  #v2Root[data-card-style="polish"] .v2-revbar { border-radius:12px; padding:10px 14px; background:var(--v2-soft); }
+  #v2Root[data-card-style="polish"] .v2-revbar.done { background:#f0fdf4; }
+  #v2Root[data-card-style="polish"] .v2-revprog { height:10px; box-shadow:inset 0 1px 2px rgba(15,23,42,.08); }
+  #v2Root[data-card-style="polish"] .v2-revtodo button { background:#fff; padding:1px 9px; font-weight:600; transition:background .15s, border-color .15s; }
+  #v2Root[data-card-style="polish"] .v2-revtodo button:hover { background:#eff6ff; border-color:#93c5fd; }
+  #v2Root[data-card-style="polish"] .v2-legend { background:var(--v2-soft); border:1px solid var(--v2-line); border-radius:10px; padding:7px 12px; gap:6px 14px; }
+  /* การ์ดต่อคู่: แถบสีซ้ายตามผล + หัวการ์ด */
+  #v2Root[data-card-style="polish"] .v2-pcard { margin:16px 0; padding:14px 16px 16px; border-radius:12px; border-left:4px solid var(--v2-slate);
+    box-shadow:0 1px 2px rgba(15,23,42,.05); }
+  #v2Root[data-card-style="polish"] .v2-pcard.v2-pv-PASS { border-left-color:var(--v2-green); }
+  #v2Root[data-card-style="polish"] .v2-pcard.v2-pv-REVIEW { border-left-color:var(--v2-amber); }
+  #v2Root[data-card-style="polish"] .v2-pcard.v2-pv-FAIL { border-left-color:var(--v2-red); }
+  #v2Root[data-card-style="polish"] .v2-ph { display:flex; flex-wrap:wrap; align-items:center; gap:8px 10px; }
+  #v2Root[data-card-style="polish"] .v2-pnum { font-size:16px; font-weight:800; color:#0f172a; }
+  #v2Root[data-card-style="polish"] .v2-vpill { display:inline-flex; align-items:center; gap:4px; border-radius:999px; padding:2px 10px;
+    font-size:12px; font-weight:700; letter-spacing:.3px; }
+  #v2Root[data-card-style="polish"] .v2-covm { display:inline-flex; align-items:center; gap:7px; font-size:12px; color:#475569;
+    background:var(--v2-soft); border:1px solid var(--v2-line); border-radius:999px; padding:2px 10px; white-space:nowrap; }
+  #v2Root[data-card-style="polish"] .v2-covm i { display:inline-block; width:72px; height:6px; border-radius:999px; background:#e2e8f0; overflow:hidden; }
+  #v2Root[data-card-style="polish"] .v2-covm i b { display:block; height:100%; background:var(--v2-green); }
+  #v2Root[data-card-style="polish"] .v2-covm.lo i b { background:var(--v2-amber); }
+  #v2Root[data-card-style="polish"] .v2-preason { margin-top:4px; font-size:13px; color:#475569; }
+  /* หัวคอลัมน์ภาพ + กล่องภาพ */
+  #v2Root[data-card-style="polish"] .v2-colh { display:flex; align-items:center; gap:8px; min-height:26px; margin-bottom:6px; }
+  #v2Root[data-card-style="polish"] .v2-sbadge { font-size:18px; line-height:1; }
+  #v2Root[data-card-style="polish"] .v2-colm { min-width:0; font-size:12px; color:#64748b; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; cursor:help; }
+  #v2Root[data-card-style="polish"] .v2-colerr { font-size:12px; margin:-2px 0 6px; }
+  #v2Root[data-card-style="polish"] .v2-res-stage { border-color:#d6dde6; border-radius:10px; background:var(--v2-soft);
+    box-shadow:0 1px 2px rgba(15,23,42,.06); }
+  #v2Root[data-card-style="polish"] .v2-resgrid { margin-top:12px; gap:16px; }
+  /* ตารางจุดต่าง */
+  #v2Root[data-card-style="polish"] .v2-side-h { min-height:26px; }
+  #v2Root[data-card-style="polish"] .v2-side-h > b { font-size:14px; }
+  #v2Root[data-card-style="polish"] .v2-sev { border-radius:999px; padding:1px 8px; }
+  #v2Root[data-card-style="polish"] .v2-tbl-wrap.v2-side-in { border-radius:10px; box-shadow:0 1px 2px rgba(15,23,42,.05); }
+  #v2Root[data-card-style="polish"] .v2-tbl tr.click { transition:background .12s ease; }
+  #v2Root[data-card-style="polish"] .v2-tbl-side tr.v2-note > td { background:#f8fafc; border-left:0; }
+  /* ปุ่มรีวิวเป็นกลุ่มเดียวกัน (segmented) */
+  #v2Root[data-card-style="polish"] .v2-rv { gap:0; }
+  #v2Root[data-card-style="polish"] .v2-rv .v2-rvb { border-radius:0; padding:2px 8px; margin-left:-1px; transition:background .12s, color .12s; }
+  #v2Root[data-card-style="polish"] .v2-rv .v2-rvb:first-child { border-radius:999px 0 0 999px; margin-left:0; }
+  #v2Root[data-card-style="polish"] .v2-rv .v2-rvb.false { border-radius:0 999px 999px 0; }
+  #v2Root[data-card-style="polish"] .v2-rv .v2-rvb.real:hover:not(.on) { background:#fef2f2; color:#991b1b; }
+  #v2Root[data-card-style="polish"] .v2-rv .v2-rvs { margin-left:6px; }
+  /* ในตารางข้างภาพ (คอลัมน์แคบ): ปุ่มรีวิวซ้อนเป็นกลุ่มแนวตั้งกว้างเท่ากัน — ไม่ตัดเป็นรูปทรงไม่เท่ากัน */
+  #v2Root[data-card-style="polish"] .v2-tbl-side .v2-rv { display:inline-grid; grid-template-columns:auto; margin-top:6px; }
+  #v2Root[data-card-style="polish"] .v2-tbl-side .v2-rv .v2-rvb { margin:-1px 0 0; border-radius:0; text-align:left; padding:2px 7px; }
+  #v2Root[data-card-style="polish"] .v2-tbl-side .v2-rv .v2-rvb:first-child { margin-top:0; border-radius:8px 8px 0 0; }
+  #v2Root[data-card-style="polish"] .v2-tbl-side .v2-rv .v2-rvb.false { border-radius:0 0 8px 8px; }
+  #v2Root[data-card-style="polish"] .v2-tbl-side .v2-rv .v2-rvs { margin:3px 0 0; max-width:8.5em; }
+  #v2Root[data-card-style="polish"] .v2-ai { border-radius:10px; }
+  #v2Root[data-card-style="polish"] .v2-debris { border:1px solid var(--v2-line); border-radius:10px; padding:6px 10px; background:var(--v2-soft); }
+  #v2Root[data-card-style="polish"] .v2-debris > summary { font-weight:600; }
+  #v2Root[data-card-style="polish"] .v2-debris .v2-tbl-wrap { background:#fff; border-radius:8px; }
+  /* จอแคบ: แถวจุดต่างเป็นการ์ด — #/ระดับ/% บรรทัดแรก · 🅰 · 🅱 เต็มความกว้าง (ไม่ตัดกลางคำ) */
+  @media (max-width: 640px) {
+    #v2Root[data-card-style="polish"] #v2ResCard { padding:14px 12px; }
+    #v2Root[data-card-style="polish"] .v2-vic { width:32px; height:32px; font-size:16px; }
+    #v2Root[data-card-style="polish"] .v2-vt { font-size:18px; }
+    #v2Root[data-card-style="polish"] .v2-pcard { padding:12px 10px 12px 12px; }
+    #v2Root[data-card-style="polish"][data-side-table="1"] .v2-tbl,
+    #v2Root[data-card-style="polish"][data-side-table="1"] .v2-tbl > tbody { display:block; width:100%; }
+    #v2Root[data-card-style="polish"][data-side-table="1"] .v2-tbl > thead { display:none; }
+    #v2Root[data-card-style="polish"][data-side-table="1"] .v2-tbl tr[data-f] { display:grid; grid-template-columns:auto 1fr auto auto;
+      grid-template-areas:"id sev conf nb" "a a a a" "b b b b"; column-gap:8px; row-gap:2px; padding:8px 10px;
+      border-bottom:1px solid var(--v2-line); }
+    #v2Root[data-card-style="polish"][data-side-table="1"] .v2-tbl tr[data-f] > td { display:block; border:0; padding:0; width:auto; white-space:normal; }
+    #v2Root[data-card-style="polish"][data-side-table="1"] .v2-tbl tr[data-f] > td:nth-child(1) { grid-area:id; padding-top:1px; }
+    #v2Root[data-card-style="polish"][data-side-table="1"] .v2-tbl tr[data-f] > td:nth-child(2) { grid-area:sev; }
+    #v2Root[data-card-style="polish"][data-side-table="1"] .v2-tbl tr[data-f] > td:nth-child(3) { grid-area:a; margin-top:4px; }
+    #v2Root[data-card-style="polish"][data-side-table="1"] .v2-tbl tr[data-f] > td:nth-child(4) { grid-area:b; }
+    #v2Root[data-card-style="polish"][data-side-table="1"] .v2-tbl tr[data-f] > td:nth-child(5) { grid-area:conf; text-align:right; }
+    #v2Root[data-card-style="polish"][data-side-table="1"] .v2-tbl tr[data-f] > td:nth-child(6) { grid-area:nb; }
+    #v2Root[data-card-style="polish"][data-side-table="1"] .v2-tbl tr[data-f] > td:nth-child(3)::before { content:"🅰 "; }
+    #v2Root[data-card-style="polish"][data-side-table="1"] .v2-tbl tr[data-f] > td:nth-child(4)::before { content:"🅱 "; }
+    #v2Root[data-card-style="polish"][data-side-table="1"] .v2-tbl tr[data-f] .v2-cls { display:inline; margin-left:6px; max-width:none; }
+    #v2Root[data-card-style="polish"][data-side-table="1"] .v2-tbl tr.v2-s-red[data-f] { box-shadow:inset 3px 0 0 var(--v2-red); }
+    #v2Root[data-card-style="polish"][data-side-table="1"] .v2-tbl tr.v2-s-yellow[data-f] { box-shadow:inset 3px 0 0 var(--v2-amber); }
+    #v2Root[data-card-style="polish"][data-side-table="1"] .v2-tbl tr[data-f] > td:first-child { box-shadow:none; }
+    #v2Root[data-card-style="polish"][data-side-table="1"] .v2-tbl tr[data-f] > td { background:transparent !important; }
+    #v2Root[data-card-style="polish"][data-side-table="1"] .v2-tbl tr.v2-rv-real[data-f] { background:#fff5f5; }
+    #v2Root[data-card-style="polish"][data-side-table="1"] .v2-tbl tr.v2-rv-false[data-f] { background:#f8fafc; color:#64748b; }
+    #v2Root[data-card-style="polish"][data-side-table="1"] .v2-tbl tr.v2-note:not([hidden]) { display:block; }
+    #v2Root[data-card-style="polish"][data-side-table="1"] .v2-tbl tr.v2-note > td:first-child { display:none; }
+    #v2Root[data-card-style="polish"][data-side-table="1"] .v2-tbl tr.v2-note > td { display:block; padding:6px 10px 8px; }
+    #v2Root[data-card-style="polish"] #v2PairsRes.v2-rv-todo-only tr.v2-rv-done { display:none; }
+    #v2Root[data-card-style="polish"] .v2-rvt, #v2Root[data-card-style="polish"] .v2-rvs { display:inline; }
+    #v2Root[data-card-style="polish"] .v2-rv .v2-rvb { font-size:11.5px; padding:2px 9px; }
+    #v2Root[data-card-style="polish"] .v2-tbl-side .v2-rv { display:flex; flex-wrap:wrap; max-width:none; }
+    #v2Root[data-card-style="polish"] .v2-tbl-side .v2-rv .v2-rvb { margin:0 0 0 -1px; text-align:center; }
+    #v2Root[data-card-style="polish"] .v2-tbl-side .v2-rv .v2-rvb:first-child { margin-left:0; border-radius:999px 0 0 999px; }
+    #v2Root[data-card-style="polish"] .v2-tbl-side .v2-rv .v2-rvb.false { border-radius:0 999px 999px 0; }
+    #v2Root[data-card-style="polish"] .v2-tbl-side .v2-rv .v2-rvs { margin:0 0 0 6px; align-self:center; }
+  }
   .v2-legend span { display:inline-flex; align-items:center; gap:4px; margin-right:12px; font-size:12px; color:#475569; }
   .v2-legend i { display:inline-block; width:14px; height:10px; border:2px solid; }
 </style>
 {% endblock %}
 
 {% block content %}
-<div class="v2" id="v2Root" data-can-manage="{{ 1 if can_manage_key else 0 }}" data-version="{{ v2_version }}" data-box-style="{{ v2_box_style }}" data-restore-confirm="{{ 1 if v2_restore_confirm else 0 }}" data-restore-days="{{ v2_restore_days }}" data-hover-zoom="{{ 1 if v2_hover_zoom else 0 }}" data-line-group="{{ 1 if v2_line_group else 0 }}" data-sort-severity="{{ 1 if v2_sort_severity else 0 }}" data-table-rows="{{ v2_table_rows }}" data-side-table="{{ 1 if v2_side_table else 0 }}" data-zone-ignore="{{ 1 if v2_zone_ignore else 0 }}" data-ignore-max="{{ v2_ignore_max }}" data-est-box="{{ 1 if v2_est_box else 0 }}" data-review="{{ 1 if v2_review else 0 }}">
+<div class="v2" id="v2Root" data-can-manage="{{ 1 if can_manage_key else 0 }}" data-version="{{ v2_version }}" data-box-style="{{ v2_box_style }}" data-restore-confirm="{{ 1 if v2_restore_confirm else 0 }}" data-restore-days="{{ v2_restore_days }}" data-hover-zoom="{{ 1 if v2_hover_zoom else 0 }}" data-line-group="{{ 1 if v2_line_group else 0 }}" data-sort-severity="{{ 1 if v2_sort_severity else 0 }}" data-table-rows="{{ v2_table_rows }}" data-side-table="{{ 1 if v2_side_table else 0 }}" data-zone-ignore="{{ 1 if v2_zone_ignore else 0 }}" data-ignore-max="{{ v2_ignore_max }}" data-est-box="{{ 1 if v2_est_box else 0 }}" data-review="{{ 1 if v2_review else 0 }}" data-card-style="{{ 'polish' if v2_card_style else 'classic' }}">
   <div class="v2-head">
     <h2>Artwork V2 <span class="v2-sub">เทียบข้อความสองไฟล์ด้วย Google Cloud Vision OCR · PoC</span></h2>
     <span class="v2-sub">โมดูล {{ v2_version }}</span>
