@@ -250,13 +250,17 @@ def build_text(r: dict) -> str:
 
     px = r.get("pixel") or {}
     a("")
-    a("[PIXEL] enabled=%s line_mode=%s raster=%s same=%s diff=%s unverifiable=%s skipped=%s ms=%s%s" % (
+    a("[PIXEL] enabled=%s line_mode=%s raster=%s same=%s diff=%s unverifiable=%s skipped=%s ms=%s%s%s" % (
         px.get("enabled"), px.get("line_mode"), px.get("raster", "-"), px.get("same", 0), px.get("diff", 0),
         px.get("unverifiable", 0), px.get("skipped", 0), px.get("ms", 0),
+        (" pymupdf=" + str(px["pymupdf"])) if px.get("pymupdf") else "",
         (" reason=" + px["reason"]) if px.get("reason") else ""))
     for pl in px.get("pairs") or []:
         a("  pair %s align=%s%s" % (pl.get("n"), pl.get("align"),
                                     (" error=" + str(pl["error"])) if pl.get("error") else ""))
+        if pl.get("raster_check"):
+            a("    raster_check: %s" % " · ".join(
+                "%s=%s" % (k.upper(), v) for k, v in sorted(pl["raster_check"].items())))
         if pl.get("raster"):
             a("    raster (ภาพสแกนล้วน — เทียบที่ความละเอียดจริง + เบลอ): %s" % ", ".join(
                 "%s=%s" % (k.upper(), ("%gdpi cover=%g" % (v["dpi"], v["cover"])) if v else "-")

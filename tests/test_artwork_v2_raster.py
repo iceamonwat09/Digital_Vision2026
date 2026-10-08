@@ -273,3 +273,88 @@ def test_pipeline_scan_misread_is_folded_and_logged(tmp_path, monkeypatch):
     assert any("ไฟล์ B เป็นภาพสแกน 300 dpi" in w for w in r["warnings"])
     assert "raster=True" in r["log_text"] and "raster (ภาพสแกนล้วน" in r["log_text"]
     assert "PIXEL_RASTER=True" in r["log_text"]
+    assert "raster_check: A=" in r["log_text"] and "B=ภาพสแกน 300 dpi" in r["log_text"]
+    assert "pymupdf=" in r["log_text"]
+
+
+# ── 8 ต.ค.: ภาพสแกนอยู่ฝั่ง 🅰 (สถานีรอบ Friskies สลับไฟล์) · เหตุผลใน Log ─────────
+
+def _statuses_swapped(pa, pb, marks):
+    pc = pixverify.PairCheck(pa, pb, ZONE, ZONE)
+    try:
+        assert pc.ok, pc.ginfo
+        return [pc.check("B", [m[0] * SENT - 3, m[1] * SENT - 3, m[2] * SENT + 3, m[3] * SENT + 3])["status"]
+                for m in marks], pc.raster
+    finally:
+        pc.close()
+
+
+def test_scan_on_side_a_is_symmetric(tmp_path):
+    """สถานี 8 ต.ค. ส่งไฟล์สแกนเป็น 🅰 — ต้องได้ผลเท่ากับตอนอยู่ฝั่ง 🅱 (เทสต์เดิมใช้ 🅱 เสมอ)"""
+    pv = _vec(tmp_path / "v.pdf")
+    marks = _marks(pv)
+    st, raster = _statuses_swapped(_scan(tmp_path / "s.pdf", pv, 300, 92), pv, marks)
+    assert abs(raster["A"]["dpi"] - 300) < 1 and raster["B"] is None
+    assert st.count("SAME") >= 0.9 * len(marks), st
+    st, _ = _statuses_swapped(_scan(tmp_path / "m.pdf", pv, 300, 92, erase=marks), pv, marks)
+    assert "SAME" not in st, st
+
+
+def test_raster_check_says_why(tmp_path):
+    pv = _vec(tmp_path / "v.pdf")
+    with fitz.open(_scan(tmp_path / "s.pdf", pv, 300, 92)) as d:
+        r, why = pixverify.raster_check(d[0], tuple(d[0].rect))
+        assert r and "300 dpi" in why
+    with fitz.open(pv) as d:
+        r, why = pixverify.raster_check(d[0], tuple(d[0].rect))
+        assert r is None and "ไม่มีภาพเดียวคลุมโซน" in why
+    with fitz.open(_scan(tmp_path / "c.pdf", pv, 150, 92)) as d:
+        r, why = pixverify.raster_check(d[0], tuple(d[0].rect))
+        assert r is None and "150 dpi" in why
+
+    def ink(p):
+        p.insert_text((40, 40), "VECTOR", fontsize=12)
+    with fitz.open(_scan(tmp_path / "x.pdf", pv, 300, 92, extra=ink)) as d:
+        r, why = pixverify.raster_check(d[0], tuple(d[0].rect))
+        assert r is None and "fill-text" in why
+    # zone_raster คือผลส่วนแรกของ raster_check เสมอ
+    with fitz.open(tmp_path / "s.pdf") as d:
+        assert pixverify.zone_raster(d[0], tuple(d[0].rect)) == pixverify.raster_check(d[0], tuple(d[0].rect))[0]
+
+
+def test_raster_check_error_is_reported_not_swallowed(tmp_path, monkeypatch):
+    """ตรวจไม่ได้ ≠ ไม่ใช่ภาพสแกน — เดิมกลืน exception เงียบ (สถานี: raster=True แต่ไม่มีบรรทัด raster)"""
+    pv = _vec(tmp_path / "v.pdf")
+    sc = _scan(tmp_path / "s.pdf", pv, 300, 92)
+
+    def boom(page, rect):
+        raise RuntimeError("bboxlog broke")
+    monkeypatch.setattr(pixverify, "raster_check", boom)
+    pc = pixverify.PairCheck(sc, pv, ZONE, ZONE)
+    try:
+        assert pc.raster == {"A": None, "B": None}
+        assert "RuntimeError" in pc.raster_why["A"] and "bboxlog broke" in pc.raster_why["A"]
+    finally:
+        pc.close()
+
+
+def test_flag_off_has_no_raster_check(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "PIXEL_RASTER", False)
+    pv = _vec(tmp_path / "v.pdf")
+    pc = pixverify.PairCheck(_scan(tmp_path / "s.pdf", pv, 300, 92), pv, ZONE, ZONE)
+    try:
+        assert pc.raster_why == {} and "raster" not in pc.ginfo
+    finally:
+        pc.close()
+
+
+def test_warp_guard_rejects_degenerate_stretch():
+    """ECC เคยยืดแนวตั้ง 4.35 เท่า (จุดบนตัว i หลุดกรอบ) — ต้องถูกปฏิเสธ · เศษเล็ก ๆ ผ่าน"""
+    ok = np.array([[1.004, 0.001, 6.3], [-0.002, 0.998, 5.8]], np.float32)
+    bad = np.array([[0.97, 0.01, 6.7], [-0.007, 4.346, -59.6]], np.float32)
+    shear = np.array([[1.0, 0.2, 6.0], [0.0, 1.0, 6.0]], np.float32)
+    far = np.array([[1.0, 0.0, 30.0], [0.0, 1.0, 6.0]], np.float32)
+    assert pixverify._warp_ok(ok, (6, 6), (44, 43), (32, 31))
+    assert not pixverify._warp_ok(bad, (6, 6), (44, 43), (32, 31))
+    assert not pixverify._warp_ok(shear, (6, 6), (44, 43), (32, 31))
+    assert not pixverify._warp_ok(far, (6, 6), (44, 43), (32, 31))

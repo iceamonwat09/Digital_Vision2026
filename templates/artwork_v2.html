@@ -139,6 +139,10 @@
               transition:opacity .2s ease; pointer-events:none; }
   .v2-znote.on { opacity:1; }
   .v2-znote.est { top:auto; bottom:6px; transform:translateX(-50%); font-size:11px; padding:3px 8px; }
+  /* ข้อความอยู่ในตัวห่อ (ไม่ถูกกล่องภาพตัดขอบ) · ภาพสูงพอ = ซ้อนบนภาพ · ภาพเตี้ย (.short) = บรรทัดใต้ภาพ จองที่ไว้ */
+  .v2-res-wrap { position:relative; }
+  .v2-res-wrap.short .v2-znote, .v2-res-wrap.short .v2-znote.est { position:static; transform:none; max-width:none;
+              margin-top:4px; min-height:2.9em; padding:3px 8px; font-size:11px; box-shadow:none; background:#f8fafc; }
   .v2-tbl tr.hov { background:#f1f5f9; box-shadow:inset 3px 0 0 #2563eb; }
   @media (prefers-reduced-motion: reduce) {
     .v2-res-stage rect.f, .v2-res-stage rect.d, .v2-tag, .v2-zbadge, .v2-znote { transition:none; }

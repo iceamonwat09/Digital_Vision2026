@@ -1227,11 +1227,13 @@
       g += d.svg;
       tags += d.tag;
     });
-    return '<div class="v2-res-stage" data-side="' + side + '" data-w="' + W + '" data-h="' + H + '">' +
+    // ข้อความซูมอยู่ "นอก" กล่องภาพ (ในตัวห่อเดียวกัน) — ภาพเตี้ย (แถบกว้าง) ⇒ ย้ายลงใต้ภาพ ไม่บัง/ไม่ถูกขอบตัด
+    return (HOVER_ZOOM ? '<div class="v2-res-wrap">' : "") +
+      '<div class="v2-res-stage" data-side="' + side + '" data-w="' + W + '" data-h="' + H + '">' +
       '<img alt="ภาพที่ส่งให้ Vision ฝั่ง ' + side.toUpperCase() + '" src="/api/artwork_v2/jobs/' +
       esc(run.job) + "/runs/" + esc(run.run) + "/img/" + esc(sd.image) + '">' +
       '<svg viewBox="0 0 ' + W + " " + H + '" preserveAspectRatio="none">' + g + "</svg>" + tags +
-      (HOVER_ZOOM ? '<div class="v2-zbadge" aria-hidden="true"></div><div class="v2-znote" role="status"></div>' : "") + "</div>";
+      (HOVER_ZOOM ? '<div class="v2-zbadge" aria-hidden="true"></div></div><div class="v2-znote" role="status"></div></div>' : "</div>");
   }
 
   // กรอบแบบเดิม (ARTWORK_V2_BOX_STYLE=span) — รอบตัวอักษรที่ต่าง เผื่อ 3 px ของภาพที่ส่ง
@@ -1622,7 +1624,7 @@
         if (!rect && EST_BOX && sd && !sd.text && sd.est_box) {
           // ไม่มีข้อความฝั่งนี้ — ซูมไปที่ "ตำแหน่งประมาณ" จากบรรทัดที่ตรงกันข้างเคียง (เห็นบริบทกว้างกว่าปกติ)
           rect = zoomRect({ box: sd.est_box }, z.W, z.H, FRAME_PAD * 2, ZOOM.minCtx * 1.5);
-          if (rect) { note = "ฝั่งนี้ไม่พบข้อความนี้ — กรอบประสีส้ม = ตำแหน่งประมาณจากบรรทัดข้างเคียง (ไม่ใช่ตำแหน่งที่วัดได้)"; estNote = true; }
+          if (rect) { note = ZNOTE_EST; estNote = true; }
         }
         if (!rect) note = sd && sd.text ? "จุดนี้ไม่มีตำแหน่งบนภาพฝั่งนี้" : "ฝั่งนี้ไม่พบบรรทัดที่ตรงกับอีกฝั่ง";
         else if (z.sw > 0 && z.sh > 0 && z.W > 0 && z.H > 0 && z.img && z.img.naturalWidth) {
@@ -1631,7 +1633,7 @@
       }
       st.classList.toggle("zoomed", mine);
       st.querySelectorAll("[data-f]").forEach((el) => el.classList.toggle("hov", mine && ids.has(el.dataset.f)));
-      const nt = st.querySelector(".v2-znote"), bd = st.querySelector(".v2-zbadge");
+      const nt = noteOf(st), bd = st.querySelector(".v2-zbadge");
       if (nt) { nt.textContent = note; nt.classList.toggle("on", !!note); nt.classList.toggle("est", estNote); }
       if (bd) { bd.textContent = "🔍 ×" + to.s.toFixed(1); bd.classList.toggle("on", to.s > 1); }
       plans.push({ z: z, to: to, path: zoomPath(RZ.cur.get(st) || { s: 1, tx: 0, ty: 0 }, to, z.sw, z.sh, ZOOM) });
@@ -1705,12 +1707,38 @@
     RZ.ok = new Set();
   }
 
+  // ข้อความของกล่องภาพ (อยู่ในตัวห่อ ไม่ใช่ในกล่องภาพที่ตัดขอบ)
+  function noteOf(st) {
+    const w = st.parentNode;
+    return w && w.classList && w.classList.contains("v2-res-wrap") ? w.querySelector(".v2-znote") : st.querySelector(".v2-znote");
+  }
+  // ภาพเตี้ยกว่า ZNOTE_SHORT_PX ⇒ ข้อความอยู่ใต้ภาพ (จองที่ไว้ล่วงหน้า — ชี้แถวแล้วหน้าไม่กระโดด)
+  //   ภาพสูงพอ ⇒ ซ้อนบนภาพเหมือนเดิม (ไม่เสียพื้นที่ใต้ภาพทุกใบ)
+  const ZNOTE_SHORT_PX = 160;
+  const ZNOTE_EST = "ฝั่งนี้ไม่พบข้อความนี้ — กรอบประสีส้ม = ตำแหน่งประมาณจากบรรทัดข้างเคียง (ไม่ใช่ตำแหน่งที่วัดได้)";
+  function markShortStages() {
+    document.querySelectorAll("#v2PairsRes .v2-res-wrap").forEach((w) => {
+      const st = w.querySelector(".v2-res-stage"), n = w.querySelector(".v2-znote");
+      const h = st ? st.getBoundingClientRect().height : 0;
+      if (!(h > 0) || !n) return;
+      w.classList.toggle("short", h < ZNOTE_SHORT_PX);
+      n.style.minHeight = "";
+      if (h < ZNOTE_SHORT_PX) {       // จองที่เท่าข้อความที่ยาวที่สุดที่ความกว้างนี้ (จอแคบตัดหลายบรรทัด)
+        const t = n.textContent;
+        n.textContent = ZNOTE_EST;
+        n.style.minHeight = Math.ceil(n.getBoundingClientRect().height) + "px";
+        n.textContent = t;
+      }
+    });
+  }
+
   function zoomAfterRender() {
+    markShortStages();
     RZ.ok = new Set(Array.from(document.querySelectorAll("#v2PairsRes rect.f[data-f]")).map((x) => x.dataset.f));
     Object.keys(GRP).forEach((g) => { if (GRP[g].some((x) => RZ.ok.has(x))) RZ.ok.add(g); });   // แถวกลุ่ม
     // ภาพโหลดเสร็จทีหลัง (ขนาดกล่องเพิ่งรู้) ⇒ วางมุมมองที่ค้าง/ชี้อยู่ใหม่ทันที
     document.querySelectorAll("#v2PairsRes .v2-res-stage img").forEach((img) => {
-      img.addEventListener("load", () => { if (RZ.shown != null) zoomTo(RZ.shown, true); });
+      img.addEventListener("load", () => { markShortStages(); if (RZ.shown != null) zoomTo(RZ.shown, true); });
     });
     if (RZ.pin != null && RZ.ok.has(RZ.pin)) { zoomSelect(RZ.pin); zoomTo(RZ.pin, true); }
     else RZ.pin = null;
@@ -1743,6 +1771,7 @@
     window.addEventListener("resize", () => {
       if (window.innerWidth === RZ.vw) return;               // มือถือ: แถบที่อยู่ซ่อน/แสดง = ความสูงเปลี่ยนอย่างเดียว
       RZ.vw = window.innerWidth;
+      markShortStages();
       if (RZ.shown != null) zoomTo(RZ.shown, true);
     });
     RZ.vw = window.innerWidth;

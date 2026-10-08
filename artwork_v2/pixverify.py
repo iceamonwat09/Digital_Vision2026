@@ -90,31 +90,46 @@ def zone_raster(page, rect_pt) -> Optional[dict]:
     (ข้อความที่มองเห็น/เส้น/พื้นไล่สี) — artwork ที่วางข้อความเวกเตอร์ทับภาพพื้นหลังความละเอียดต่ำ
     (AvoDerm M2: ภาพ 72 dpi คลุมโซน 92% + เส้น 1,187 ชิ้น) ต้องไม่เข้าเงื่อนไข ไม่งั้นเทียบที่ 72 dpi
     ความละเอียดจริง = จำนวนพิกเซลต่อความยาวบนหน้า (ไม่ขึ้นกับการหมุนภาพบนหน้า) · ใช้แกนที่หยาบกว่า"""
+    return raster_check(page, rect_pt)[0]
+
+
+def raster_check(page, rect_pt):
+    """เหมือน ``zone_raster`` แต่คืน ``(ผล, เหตุผล)`` — เหตุผลเป็นข้อความสั้นสำหรับ Log เสมอ
+    (ทั้งตอนเป็นและไม่เป็นภาพสแกน) ⇒ ไฟล์ที่คาดว่าเป็นสแกนแต่ไม่เข้าเงื่อนไข บอกได้ว่าติดข้อไหน"""
     zr = fitz.Rect(*rect_pt)
     if page.rotation:        # get_image_info/get_bboxlog ใช้พิกัดของหน้าที่ยังไม่หมุน
         zr = zr * page.derotation_matrix
         zr.normalize()
     za = zr.get_area()
     if za <= 0:
-        return None
-    best = None
+        return None, "โซนว่าง"
+    best, top_cov, n_img = None, 0.0, 0
     for im in page.get_image_info():
         t = im.get("transform") or (0, 0, 0, 0, 0, 0)
         sx, sy = math.hypot(t[0], t[1]), math.hypot(t[2], t[3])
         if sx <= 0 or sy <= 0 or not im.get("width") or not im.get("height"):
             continue
+        n_img += 1
         cov = (fitz.Rect(im["bbox"]) & zr).get_area() / za
+        top_cov = max(top_cov, cov)
         if cov >= RASTER_COVER and (best is None or cov > best["cover"]):
             best = {"cover": round(cov, 3),
                     "dpi": round(min(im["width"] / (sx / 72.0), im["height"] / (sy / 72.0)), 1)}
-    if best is None or best["dpi"] < RASTER_MIN_DPI:
-        return None
+    if best is None:
+        return None, "ไม่มีภาพเดียวคลุมโซน ≥ %d%% (ภาพ %d ชิ้น · คลุมมากสุด %d%%)" % (
+            RASTER_COVER * 100, n_img, round(top_cov * 100))
+    if best["dpi"] < RASTER_MIN_DPI:
+        return None, "ภาพคลุม %d%% แต่ %g dpi < %g" % (round(best["cover"] * 100), best["dpi"], RASTER_MIN_DPI)
+    kinds = {}
     for kind, r in page.get_bboxlog():
         if kind.startswith(_RASTER_SKIP):
             continue
         if not (fitz.Rect(r) & zr).is_empty:
-            return None
-    return best
+            kinds[kind] = kinds.get(kind, 0) + 1
+    if kinds:
+        return None, "ภาพ %g dpi คลุม %d%% แต่มีของเวกเตอร์ในโซน %s" % (
+            best["dpi"], round(best["cover"] * 100), dict(sorted(kinds.items())))
+    return best, "ภาพสแกน %g dpi คลุม %d%%" % (best["dpi"], round(best["cover"] * 100))
 
 
 def _odd(n) -> int:
@@ -178,14 +193,16 @@ class PairCheck:
         self.ginfo: dict = {}
         # ภาพสแกน (``zone_raster``) ต่อฝั่ง · ปิดธง/ตรวจไม่ได้ = None = เส้นทางเดิมทุกพิกเซล
         self.raster = {"A": None, "B": None}
+        self.raster_why = {}     # เหตุผลต่อฝั่ง (Log) — ตรวจไม่ได้ ≠ ไม่ใช่ภาพสแกน ต้องเห็นต่างกัน
         if config.PIXEL_RASTER:
             for s, d in (("A", self.dA), ("B", self.dB)):
                 try:
                     z = self.z[s]
-                    self.raster[s] = zone_raster(d.doc[z["page"]],
-                                                 self._box_pt(s, (0, 0, z["W"], z["H"])))
-                except Exception:    # noqa: BLE001
+                    self.raster[s], self.raster_why[s] = raster_check(
+                        d.doc[z["page"]], self._box_pt(s, (0, 0, z["W"], z["H"])))
+                except Exception as e:    # noqa: BLE001
                     self.raster[s] = None
+                    self.raster_why[s] = "ตรวจไม่ได้ (%s: %s)" % (type(e).__name__, str(e)[:120])
         self.ok = self._global_align()
         if self.ok and (self.raster["A"] or self.raster["B"]):
             self.ginfo["raster"] = {s.lower(): self.raster[s] for s in ("A", "B")}
@@ -332,6 +349,8 @@ def _align(pa, pb):
             _, warp = cv2.findTransformECC(
                 fa, fb, warp, cv2.MOTION_AFFINE,
                 (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 60, 1e-5), None, 3)
+            if config.PIXEL_WARP_GUARD and not _warp_ok(warp, ml, pb.shape, pa.shape):
+                return pb2, float(mx)       # บิดภาพเกินจริง (กลบความต่างได้) ⇒ เลื่อนอย่างเดียว
             w2 = cv2.warpAffine(pb, warp, (pa.shape[1], pa.shape[0]),
                                 flags=cv2.INTER_LINEAR | cv2.WARP_INVERSE_MAP,
                                 borderMode=cv2.BORDER_REPLICATE)
@@ -341,6 +360,18 @@ def _align(pa, pb):
         except cv2.error:
             pass
     return pb2, float(mx)
+
+
+def _warp_ok(warp, ml, shb, sha) -> bool:
+    """การจัดละเอียดต่อจุดต้องใกล้ "เลื่อนอย่างเดียว" — ภาพสองฝั่งถูกเรนเดอร์ที่สเกลเดียวกันแล้ว
+    (การจัดทั้งโซนจัดการสเกลไปแล้ว) ⇒ สเกล/เฉือนที่เหลือมีแต่เศษเล็ก ๆ · วัดบนสถานี 13 รอบ: p99 0.04 ·
+    เลื่อนต้องอยู่ในหน้าต่างค้นหา (ไม่ออกนอกภาพ B ที่เผื่อขอบไว้)"""
+    m = float(config.PIXEL_WARP_MAX)
+    if max(abs(warp[0, 0] - 1), abs(warp[1, 1] - 1), abs(warp[0, 1]), abs(warp[1, 0])) > m:
+        return False
+    tx, ty = float(warp[0, 2]), float(warp[1, 2])
+    return (abs(tx - ml[0]) <= max(2.0, 0.5 * (shb[1] - sha[1]) + 1) and
+            abs(ty - ml[1]) <= max(2.0, 0.5 * (shb[0] - sha[0]) + 1))
 
 
 def _inkmask(g, dpi):
@@ -496,6 +527,7 @@ def run(pairs: List[dict], srcs: dict, rd: str, warnings: List[str], say=None) -
     """ตรวจทุกจุดของทุกคู่ · แก้ ``pairs`` ในที่ · คืนสรุปสำหรับ Log"""
     log = {"enabled": config.PIXEL_VERIFY, "line_mode": config.PIXEL_LINE_MODE,
            "raster": config.PIXEL_RASTER,
+           "pymupdf": getattr(fitz, "VersionBind", None) if fitz is not None else None,
            "pairs": [], "same": 0, "diff": 0, "unverifiable": 0, "skipped": 0, "ms": 0}
     if not config.PIXEL_VERIFY:
         return log
@@ -528,6 +560,8 @@ def run(pairs: List[dict], srcs: dict, rd: str, warnings: List[str], say=None) -
             warnings.append("คู่ %d: ตรวจด้วยภาพไม่ได้ (%s)" % (pr["n"], str(e)[:80]))
             continue
         plog["align"] = pc.ginfo
+        if pc.raster_why:
+            plog["raster_check"] = {k.lower(): v for k, v in pc.raster_why.items()}
         if pc.ok and pc.ginfo.get("raster"):
             plog["raster"] = pc.ginfo["raster"]
             warnings.append("คู่ %d: %s — หลักฐานภาพเทียบที่ความละเอียดของภาพสแกน (เบลอ σ %g px "
