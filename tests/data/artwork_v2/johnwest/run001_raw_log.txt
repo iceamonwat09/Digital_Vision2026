@@ -1,0 +1,560 @@
+=== ARTWORK V2 · CLOUD VISION OCR · DIAGNOSTIC LOG ===
+version=2026.10.04-v2restore job=20261007_095316_e39698 run=run_001 at=2026-10-07 09:54:04 owner=admin
+VERDICT=FAIL (ไม่ผ่าน)
+  - พบจุดต่างที่มั่นใจ 6 จุด
+  - จุดที่ไม่มั่นใจ 10 จุด (ต้องดูด้วยตา)
+time_ms: render=648 vision=18509 compare=204 reread=0 ai=126 total=19491
+sharpness=standard (ภาพที่ส่ง: มาตรฐาน 400 dpi)
+api_key: source=ui masked=••••L_6g length=39
+
+[SETTINGS]
+  ENDPOINT=https://eu-vision.googleapis.com
+  MODEL=builtin/stable
+  LANGUAGE_HINTS=[]
+  TIMEOUT_S=120.0
+  RETRIES=2
+  MAX_REQUEST_BYTES=9500000
+  MAX_IMAGE_BYTES=7121928
+  MAX_IMAGE_MP=40.0
+  JPEG_QUALITIES=[92, 88, 84, 80, 75, 70]
+  PDF_ZONE_DPI=400
+  PDF_ZONE_DPI_MAX=1200
+  ZONE_MIN_LONG_SIDE=1600
+  SHARPNESS=standard
+  SHARP_FILL=0.92
+  SHARP_MAX_RENDERS=4
+  CONF_FAIL=0.8
+  CONF_LOW=0.6
+  COVERAGE_MIN=0.9
+  PAIR_MIN_SIM=0.6
+  PAIR_MIN_RUN=0.4
+  PAIR_MAX_DIST=0.12
+  ROW_MERGE_ENABLED=True
+  ROW_MAX_ANGLE=10.0
+  PUNCT_CAN_FAIL=True
+  CURVED_GROUP_ENABLED=True
+  TILT_ANGLE=10.0
+  CURVED_NEIGHBOR_MAX_CHARS=8
+  DEBRIS_ENABLED=True
+  DEBRIS_CONF=0.6
+  SEAM_FILLER=True
+  CROSS_ROW_JOIN=True
+  SYMBOL_TOKEN=True
+  FRACTION_YELLOW=True
+  REREAD_ENABLED=False
+  REREAD_MAX=12
+  REREAD_SCALE=2.0
+  REREAD_MAX_SIDE=2400
+  AI_MODE=assist
+  AI_REVIEW_URL=http://127.0.0.1:5678/webhook/artwork-v2-review
+  AI_RAW_URL=http://127.0.0.1:5678/webhook/artwork-v2-raw
+  AI_TIMEOUT_S=180.0
+  AI_RAW_TIMEOUT_S=300.0
+  AI_RAW_SAFETY=True
+  AI_RETRIES=1
+  AI_JUDGE_PUNCT_YELLOW=True
+  AI_QUOTE_RECOVER=True
+  AI_QUOTE_RECOVER_MAX_SHIFT=2
+  AI_EQUIV_NOISE=True
+  AI_SEND_CURVED=True
+  AI_JUDGE_KEEP_ALGO_RED=True
+  AI_JUDGE_NOISE_GUARD=True
+  AI_JUDGE_CURVED_YELLOW=True
+  AI_JUDGE_ONESIDED_GUARD=True
+  ONE_REQUEST_PER_PAIR=True
+  RUN_GUARD=True
+  RUN_MAX_CONCURRENT=2
+  RUN_COOLDOWN_S=3.0
+
+[FILES]
+  A: name=Final printer AW-N-2026-00000836 5KZ02335N000001007 1.pdf type=pdf bytes=1702931 sha1=848e8db5a312 pages=1 page_mm=[297.0, 210.0]
+  B: name=Original file LBL 3AAOCN2NKALL5IJWUFSJ CH N SFO 5KZ02335N000001005 1.pdf type=pdf bytes=1365121 sha1=7feb327a3362 pages=1 page_mm=[297.0, 210.0]
+
+[VISION REQUESTS]
+  #0 phase=main images=p1_a,p1_b json_bytes=2288158 http=200 attempts=1 ms=18498 model=builtin/stable at=2026-10-07 09:54:04
+
+[PAIR 1] verdict=FAIL coverage=0.957 (A=0.957 B=0.980) same_request=True methods={'exact': 66, 'content': 8, 'position': 11}
+  A: page=1 bbox=[0.05261, 0.30179, 0.91243, 0.16095] render_dpi=400.0 zone_mm=[271.0, 33.8] render_px=[4268, 533] image_scale=- sent_px=[4268, 533] jpeg_q=92 downscale=1.0 jpeg_bytes=817625 sha1=42b131a5f7b3 req=0 ok=True
+     sharp: mode=standard base_dpi=400.0 → dpi=400.0 (×1.0) budget=-k tries=[]
+     ocr: blocks=63 by_type={'TEXT': 63} paragraphs=69 words=308 symbols=1238 lines=92 chars=1238 conf_mean=0.969 conf_min=0.265 low_conf(<0.6)=0.013 langs=['ar', 'en', 'en-Arab'] breaks={'LINE_BREAK': 69, 'EOL_SURE_SPACE': 23} soft_hyphen_lines=0 angles={90: 8, 0: 296, 270: 4} skipped_blocks=0 text_len=1502 pages=[(4268, 533)]
+  B: page=1 bbox=[0.05613, 0.26919, 0.90955, 0.16299] render_dpi=400.0 zone_mm=[270.1, 34.2] render_px=[4255, 540] image_scale=- sent_px=[4255, 540] jpeg_q=92 downscale=1.0 jpeg_bytes=898323 sha1=21376e6022a9 req=0 ok=True
+     sharp: mode=standard base_dpi=400.0 → dpi=400.0 (×1.0) budget=-k tries=[]
+     ocr: blocks=61 by_type={'TEXT': 61} paragraphs=68 words=303 symbols=1206 lines=89 chars=1206 conf_mean=0.966 conf_min=0.387 low_conf(<0.6)=0.017 langs=['ar', 'en', 'sd', 'fa'] breaks={'LINE_BREAK': 68, 'EOL_SURE_SPACE': 21} soft_hyphen_lines=0 angles={0: 300, 270: 3} skipped_blocks=0 text_len=1462 pages=[(4255, 540)]
+  pairing: line_pairs=85 unpaired_a=[0, 39, 59, 63, 66, 85] unpaired_b=[0, 33, 43, 79] reflow_lines_a=[59] reflow_lines_b=[] reflow_edges=['B:52%', 'A:ت']
+  row_merges (1) — ต่อแถวที่ OCR ตัดตรงเส้นตกแต่ง:
+     A: "WEIGHT" + ". تستند النسبة المئوية للقيم اليومية على أساس نظام غذائي ٢٠٠٠ سعرة حرارية."
+  curved_lines (เอียง > 10° จากแนวหลัก + เศษติดกัน): A=[0, 83, 85, 90] B=[88]
+  findings (16):
+   F1 YELLOW PUNCT method=content score=0.996
+      A line=5 frag="" word="زيت" conf=0.991 box=[1972,33,1976,54]
+        text="المكونات تونا زيت دوار الشمس، ماء، ملح."
+      B line=5 frag="،" word="تونا،" conf=0.642 box=[1944,24,1949,47]
+        text="المكونات تونا، زيت دوار الشمس، ماء، ملح."
+   F2 YELLOW PUNCT method=content score=0.995
+      A line=21 frag="" word="يحفظ" conf=0.979 box=[1976,146,1980,168]
+        text="شروط التخزين يحفظ في مكان جاف بارد وجيد التهوية."
+      B line=9 frag=":" word="التخزين:" conf=0.635 box=[1939,137,1944,161]
+        text="شروط التخزين: يحفظ في مكان جاف بارد وجيد التهوية."
+   F3 YELLOW PUNCT method=content score=0.995
+      A line=8 frag="" word=")" conf=0.455 box=[2408,120,2410,133]
+        text="حجم الحصة 1/2 كوب (١٠٠غ )"
+      B line=12 frag="(" word="(" conf=0.424 box=[2384,111,2387,125]
+        text="حجم الحصة 1/2 كوب (۱۰۰غ) ("
+   F4 YELLOW TEXT method=content score=0.993
+      A line=65 frag="WEIGHT ." word="WEIGHT ." conf=0.714 box=[1890,469,2519,496]
+        text="WEIGHT . تستند النسبة المئوية للقيم اليومية على أساس نظام غذائي ٢٠٠٠ سعرة حرارية."
+      B line=81 frag="" word="تستند" conf=0.977 box=[2494,461,2496,476]
+        text="تستند النسبة المئوية للقيم اليومية على أساس نظام غذائي ٢٠٠٠ سعرة حرارية."
+   F5 YELLOW PUNCT method=content score=0.970
+      A line=16 frag="" word="Serving" conf=0.994 box=[2120,120,2122,134]
+        text="Serving size ½ cup (100g.)"
+      B line=19 frag="|" word="|" conf=0.404 box=[2100,112,2104,128]
+        text="| Serving size 2 cup (100g.)"
+   F6 YELLOW TEXT method=content score=0.970
+      A line=16 frag="½" word="½" conf=0.265 box=[2182,120,2191,134]
+        text="Serving size ½ cup (100g.)"
+      B line=19 frag="" word="2" conf=0.707 box=[2161,111,2163,127]
+        text="| Serving size 2 cup (100g.)"
+   F7 YELLOW NUMBER method=content score=0.952
+      A line=37 frag="1" word="1" conf=0.937 box=[2258,269,2264,280]
+        text="1 g"
+      B line=56 frag="0" word="0g" conf=0.538 box=[2241,375,2249,388]
+        text="0g"
+   F8 RED NUMBER method=position score=0.999
+      A line=45 frag="4" word="24%" conf=0.970 box=[2320,329,2329,338]
+        text="24%"
+      B line=49 frag="0" word="20%" conf=0.982 box=[2305,320,2312,330]
+        text="20%"
+      note: ไม่ได้อ่านซ้ำ (ปิดอยู่)
+   F9 YELLOW MISSING_IN_B method=unpaired score=-
+      A line=39 frag="Og" word="" conf=0.684 box=[2256,288,2276,299]
+        text="Og"
+      B line=None frag="" word="" conf=- box=-
+        text=""
+   F10 RED MISSING_IN_B method=unpaired score=-
+      A line=63 frag="170g" word="" conf=0.985 box=[1668,436,1773,519]
+        text="170g"
+      B line=None frag="" word="" conf=- box=-
+        text=""
+      note: ไม่ได้อ่านซ้ำ (ปิดอยู่)
+   F11 RED MISSING_IN_B method=unpaired score=-
+      A line=66 frag="120g" word="" conf=0.982 box=[1983,440,2093,514]
+        text="120g"
+      B line=None frag="" word="" conf=- box=-
+        text=""
+      note: ไม่ได้อ่านซ้ำ (ปิดอยู่)
+   F12 YELLOW EXTRA_IN_B method=unpaired score=-
+      A line=None frag="" word="" conf=- box=-
+        text=""
+      B line=0 frag="כ"ז" word="" conf=0.713 box=[1449,427,1540,464]
+        text="כ"ז"
+   F13 RED EXTRA_IN_B method=unpaired score=-
+      A line=None frag="" word="" conf=- box=-
+        text=""
+      B line=33 frag="170gDWEIGHT 120g" word="" conf=0.903 box=[1648,427,2078,507]
+        text="170gDWEIGHT 120g"
+      note: ไม่ได้อ่านซ้ำ (ปิดอยู่)
+   F14 RED EXTRA_IN_B method=unpaired score=-
+      A line=None frag="" word="" conf=- box=-
+        text=""
+      B line=43 frag="19" word="" conf=0.828 box=[2241,260,2259,271]
+        text="19"
+      note: ไม่ได้อ่านซ้ำ (ปิดอยู่)
+   F15 RED EXTRA_IN_B method=unpaired score=-
+      A line=None frag="" word="" conf=- box=-
+        text=""
+      B line=79 frag="٢٦ جم" word="" conf=0.823 box=[2344,414,2377,425]
+        text="٢٦ جم"
+      note: ไม่ได้อ่านซ้ำ (ปิดอยู่)
+   F16 YELLOW CURVED method=group score=-
+      A line=None frag="" word="" conf=0.969 box=[170,67,2577,450]
+        text="خال من الزيوت المهدرجة · Free from hydrogenated oils"
+      B line=None frag="" word="" conf=- box=-
+        text=""
+      note: ข้อความโค้ง/เอียง — OCR อ่านไม่นิ่ง ดูด้วยตา (2 จุด)
+       · F- YELLOW MISSING_IN_B method=unpaired score=- curved
+       ·    A line=0 frag="خال من الزيوت المهدرجة" word="" conf=0.978 box=[170,67,205,393]
+       ·      text="خال من الزيوت المهدرجة"
+       ·    B line=None frag="" word="" conf=- box=-
+       ·      text=""
+       ·    note: ข้อความโค้ง/เอียงต้องยืนยันด้วยการอ่านซ้ำ (ปิดอยู่) — ยังไม่ยืนยัน
+       · F- YELLOW MISSING_IN_B method=unpaired score=- curved
+       ·    A line=85 frag="Free from hydrogenated oils" word="" conf=0.969 box=[2552,181,2577,450]
+       ·      text="Free from hydrogenated oils"
+       ·    B line=None frag="" word="" conf=- box=-
+       ·      text=""
+       ·    note: ข้อความโค้ง/เอียงต้องยืนยันด้วยการอ่านซ้ำ (ปิดอยู่) — ยังไม่ยืนยัน
+  debris — เศษอักขระ / ขอบโซน ไม่นับในผลตัดสิน (0):
+  OCR lines A (91):
+   A000 conf=0.98 min=0.78 ang=90 box=[170,67,205,393] "خال من الزيوت المهدرجة"
+   A001 conf=0.99 min=0.97 ang=1 box=[779,52,967,90] "منذ 1857"
+   A002 conf=0.96 min=0.93 ang=2 box=[439,52,1308,259] "جون وست"
+   A003 conf=0.99 min=0.96 ang=0 box=[525,246,1217,321] "لحم تونا خفيف قطع كبيرة"
+   A004 conf=0.99 min=0.95 ang=1 box=[529,322,1222,428] "في زيت دوار الشمس"
+   A005 conf=0.96 min=0.65 ang=0 box=[1713,33,2088,54] "المكونات تونا زيت دوار الشمس، ماء، ملح."
+   A006 conf=0.97 min=0.71 ang=0 box=[1680,58,2523,89] "معلومات غذائية Nutritional information تم إنتاجه في تايلاند لشركة جون ويست فودز ليمتد"
+   A007 conf=0.93 min=0.55 ang=0 box=[2404,106,2525,121] "تحتوي العبوة على ١٢ حصة"
+   A008 conf=0.78 min=0.31 ang=0 box=[2405,120,2526,133] "حجم الحصة 1/2 كوب (١٠٠غ )"
+   A009 conf=0.98 min=0.85 ang=0 box=[2413,148,2525,160] "محتوى الحصة الواحدة"
+   A010 conf=0.99 min=0.98 ang=0 box=[2443,169,2525,182] "السعرات الحرارية"
+   A011 conf=0.95 min=0.42 ang=358 box=[2445,196,2525,209] "الحصة اليومية 7"
+   A012 conf=0.99 min=0.99 ang=0 box=[2313,171,2339,181] "170"
+   A013 conf=0.97 min=0.96 ang=0 box=[2314,191,2349,200] "الحصة"
+   A014 conf=0.94 min=0.67 ang=358 box=[2306,201,2346,214] "اليومية."
+   A015 conf=0.99 min=0.98 ang=0 box=[2122,106,2245,119] "1.2 Serving per container"
+   A016 conf=0.96 min=0.27 ang=0 box=[2121,120,2250,135] "Serving size ½ cup (100g.)"
+   A017 conf=0.98 min=0.94 ang=0 box=[2120,147,2229,159] "Amount per serving"
+   A018 conf=0.99 min=0.98 ang=359 box=[2122,168,2164,180] "Calories"
+   A019 conf=0.97 min=0.67 ang=0 box=[1627,88,2089,115] "ليفربول، إنجلترا من قبل شركة تاي يونيون للتصنيع"
+   A020 conf=0.98 min=0.81 ang=0 box=[1710,116,2089,139] "المحدودة ساموت ساخون 74000 ، تايلاند"
+   A021 conf=0.98 min=0.80 ang=0 box=[1617,146,2089,168] "شروط التخزين يحفظ في مكان جاف بارد وجيد التهوية."
+   A022 conf=0.96 min=0.56 ang=0 box=[1780,171,2089,196] "تاريخ الإنتاج والانتهاء: أنظر العبوة."
+   A023 conf=0.97 min=0.73 ang=0 box=[1698,199,2093,227] "الوزن المصفى : 120جم الوزن الصافي: 170 جم"
+   A024 conf=0.98 min=0.81 ang=0 box=[1561,230,2090,258] "Ingredients: Tuna, Sunflower Oil, Water, Salt."
+   A025 conf=0.98 min=0.94 ang=0 box=[1550,262,2093,285] "Produced in Thailand for John West Foods Ltd,"
+   A026 conf=0.98 min=0.92 ang=0 box=[1708,295,2092,323] "Liverpool, England by Thai Union"
+   A027 conf=0.98 min=0.92 ang=0 box=[1462,326,2090,352] "Manufacturing Co., Ltd, Samut Sakhon 74000, Thailand."
+   A028 conf=0.98 min=0.88 ang=0 box=[1640,354,2187,383] "Storage: Cool, dry in ventilated place. Dietary fibre"
+   A029 conf=0.98 min=0.89 ang=0 box=[1518,406,2094,427] "FOR PRODUCTION AND EXPIRY DATE SEE ON CAN"
+   A030 conf=0.98 min=0.97 ang=0 box=[2315,217,2342,227] "Daily"
+   A031 conf=0.99 min=0.99 ang=4 box=[2313,226,2343,237] "value"
+   A032 conf=0.99 min=0.98 ang=0 box=[2121,247,2167,257] "Total fat"
+   A033 conf=0.92 min=0.91 ang=0 box=[2257,250,2275,260] "7 g"
+   A034 conf=0.98 min=0.98 ang=0 box=[2315,252,2339,262] "10%"
+   A035 conf=0.98 min=0.96 ang=0 box=[2122,267,2190,277] "Saturated fat"
+   A036 conf=0.99 min=0.98 ang=0 box=[2122,286,2166,295] "Trans fat"
+   A037 conf=0.95 min=0.94 ang=0 box=[2258,269,2275,280] "1 g"
+   A038 conf=0.96 min=0.94 ang=0 box=[2314,270,2332,281] "5%"
+   A039 conf=0.68 min=0.51 ang=3 box=[2256,288,2276,299] "Og"
+   A040 conf=0.99 min=0.98 ang=0 box=[2122,304,2184,315] "Cholesterol"
+   A041 conf=0.99 min=0.97 ang=0 box=[2121,325,2162,334] "Sodium"
+   A042 conf=0.83 min=0.75 ang=6 box=[2258,307,2292,320] "50 mg"
+   A043 conf=0.97 min=0.96 ang=0 box=[2316,310,2338,318] "17%"
+   A044 conf=0.99 min=0.99 ang=3 box=[2256,326,2299,338] "475 mg"
+   A045 conf=0.98 min=0.97 ang=0 box=[2315,329,2339,338] "24%"
+   A046 conf=0.99 min=0.98 ang=1 box=[2122,342,2225,356] "Total carbohydrate"
+   A047 conf=0.70 min=0.54 ang=3 box=[2256,345,2276,357] "Og"
+   A048 conf=0.96 min=0.95 ang=0 box=[2314,348,2332,358] "0%"
+   A049 conf=0.62 min=0.40 ang=3 box=[2256,365,2276,376] "Og"
+   A050 conf=0.96 min=0.95 ang=0 box=[2314,367,2333,377] "0%"
+   A051 conf=0.99 min=0.97 ang=2 box=[2122,382,2180,394] "Total sugar"
+   A052 conf=0.99 min=0.98 ang=3 box=[2121,401,2195,414] "Added sugars"
+   A053 conf=0.99 min=0.99 ang=0 box=[2122,421,2161,431] "Protein"
+   A054 conf=0.69 min=0.64 ang=3 box=[2257,384,2276,394] "وہ"
+   A055 conf=0.97 min=0.97 ang=0 box=[2315,386,2330,395] "0%"
+   A056 conf=0.71 min=0.55 ang=3 box=[2256,403,2276,416] "Og"
+   A057 conf=0.97 min=0.96 ang=0 box=[2315,405,2331,415] "0%"
+   A058 conf=0.99 min=0.98 ang=0 box=[2257,422,2282,434] "26 g"
+   A059 conf=0.98 min=0.97 ang=0 box=[2315,425,2338,434] "52%"
+   A060 conf=0.99 min=0.99 ang=1 box=[1490,479,1531,493] "STEEL"
+   A061 conf=0.99 min=0.99 ang=0 box=[1618,438,1662,462] "NET"
+   A062 conf=0.99 min=0.98 ang=1 box=[1573,471,1663,494] "WEIGHT"
+   A063 conf=0.98 min=0.98 ang=359 box=[1668,436,1773,519] "170g"
+   A064 conf=0.99 min=0.99 ang=359 box=[1877,437,1979,462] "DRAINED"
+   A065 conf=0.96 min=0.68 ang=0 box=[1890,469,2519,496] "WEIGHT . تستند النسبة المئوية للقيم اليومية على أساس نظام غذائي ٢٠٠٠ سعرة حرارية."
+   A066 conf=0.98 min=0.96 ang=1 box=[1983,440,2093,514] "120g"
+   A067 conf=0.98 min=0.97 ang=3 box=[2458,246,2526,260] "دهون كلية"
+   A068 conf=0.99 min=0.96 ang=3 box=[2454,266,2526,280] "دهون مشبعة"
+   A069 conf=0.81 min=0.53 ang=0 box=[2366,249,2394,260] "٧جم"
+   A070 conf=0.95 min=0.91 ang=0 box=[2367,269,2394,279] "اجم"
+   A071 conf=0.98 min=0.96 ang=1 box=[2450,286,2526,297] "دهون مهدرجة"
+   A072 conf=0.98 min=0.96 ang=359 box=[2457,305,2525,317] "كوليسترول"
+   A073 conf=0.99 min=0.98 ang=0 box=[2473,328,2525,336] "صوديوم"
+   A074 conf=0.88 min=0.62 ang=358 box=[2357,307,2394,317] "٥٠ ملجم"
+   A075 conf=0.93 min=0.82 ang=0 box=[2352,325,2393,336] "٤٧٥ ملجم"
+   A076 conf=0.98 min=0.94 ang=2 box=[2426,342,2525,357] "كربوهيدات كلية"
+   A077 conf=0.98 min=0.95 ang=0 box=[2465,362,2527,375] "ألياف غذائية"
+   A078 conf=0.98 min=0.97 ang=0 box=[2369,367,2387,375] "جم"
+   A079 conf=0.98 min=0.96 ang=0 box=[2484,384,2526,394] "سكريات"
+   A080 conf=0.98 min=0.82 ang=0 box=[2129,445,2403,460] "*The % daily values are based on a 2000 calorie diet."
+   A081 conf=0.98 min=0.96 ang=2 box=[2465,403,2525,413] "سكر مضاف"
+   A082 conf=0.99 min=0.98 ang=0 box=[2487,422,2526,432] "بروتين"
+   A083 conf=0.96 min=0.92 ang=359 box=[2576,132,2690,180] "SAFE"
+   A084 conf=0.49 min=0.49 ang=0 box=[2694,176,2708,189] "Ⓡ"
+   A085 conf=0.97 min=0.68 ang=91 box=[2552,181,2577,450] "Free from hydrogenated oils"
+   A086 conf=0.98 min=0.97 ang=360 box=[3110,53,3392,91] "SINCE 1857"
+   A087 conf=0.98 min=0.96 ang=358 box=[2807,97,3684,267] "JOHN WEST"
+   A088 conf=0.99 min=0.99 ang=0 box=[2839,291,3666,339] "LIGHT MEAT TUNA CHUNKS"
+   A089 conf=0.99 min=0.99 ang=0 box=[2902,353,3599,411] "IN SUNFLOWER OIL"
+   A090 conf=0.96 min=0.61 ang=270 box=[4207,85,4241,498] "5 000171 054326""
+  OCR lines B (89):
+   B000 conf=0.71 min=0.47 ang=0 box=[1449,427,1540,464] "כ"ז"
+   B001 conf=0.99 min=0.97 ang=0 box=[765,46,951,83] "منذ 1857"
+   B002 conf=0.93 min=0.70 ang=0 box=[652,109,1294,225] "جون وسـ"
+   B003 conf=0.99 min=0.96 ang=0 box=[510,238,1201,312] "لحم تونا خفيف قطع كبيرة"
+   B004 conf=0.99 min=0.97 ang=1 box=[515,309,1205,426] "في زيت دوار الشمس"
+   B005 conf=0.95 min=0.64 ang=0 box=[1697,24,2072,47] "المكونات تونا، زيت دوار الشمس، ماء، ملح."
+   B006 conf=0.97 min=0.70 ang=0 box=[1664,50,2507,80] "معلومات غذائية Nutritional information تم إنتاجه في تايلاند لشركة جون ويست فودز ليمتد"
+   B007 conf=0.97 min=0.65 ang=0 box=[1610,79,2073,107] "ليفربول، إنجلترا من قبل شركة تاي يونيون للتصنيع"
+   B008 conf=0.97 min=0.74 ang=0 box=[1693,108,2073,130] "المحدودة ساموت ساخون 74000 ، تايلاند"
+   B009 conf=0.97 min=0.64 ang=0 box=[1602,137,2073,161] "شروط التخزين: يحفظ في مكان جاف بارد وجيد التهوية."
+   B010 conf=0.96 min=0.59 ang=0 box=[1764,162,2072,188] "تاريخ الإنتاج والانتهاء: أنظر العبوة."
+   B011 conf=0.93 min=0.52 ang=2 box=[2388,97,2509,111] "تحتوي العبوة على ١٢ حصة"
+   B012 conf=0.75 min=0.39 ang=0 box=[2384,111,2510,125] "حجم الحصة 1/2 كوب (۱۰۰غ) ("
+   B013 conf=0.98 min=0.77 ang=2 box=[2398,139,2509,152] "محتوى الحصة الواحدة"
+   B014 conf=0.99 min=0.98 ang=2 box=[2427,162,2510,174] "السعرات الحرارية"
+   B015 conf=0.99 min=0.99 ang=0 box=[2297,162,2322,173] "170"
+   B016 conf=0.98 min=0.96 ang=0 box=[2298,183,2330,192] "الحصة"
+   B017 conf=0.92 min=0.64 ang=0 box=[2292,193,2331,202] "اليومية."
+   B018 conf=0.99 min=0.98 ang=0 box=[2106,98,2230,110] "1.2 Serving per container"
+   B019 conf=0.93 min=0.40 ang=0 box=[2100,110,2232,128] "| Serving size 2 cup (100g.)"
+   B020 conf=0.99 min=0.97 ang=1 box=[2105,138,2213,150] "Amount per serving"
+   B021 conf=0.99 min=0.98 ang=359 box=[2105,159,2148,171] "Calories"
+   B022 conf=0.97 min=0.72 ang=0 box=[1683,193,2077,218] "الوزن المصفى : 120جم الوزن الصافي: 170 جم"
+   B023 conf=0.98 min=0.80 ang=0 box=[1545,222,2075,250] "Ingredients: Tuna, Sunflower Oil, Water, Salt."
+   B024 conf=0.98 min=0.93 ang=0 box=[1535,253,2078,276] "Produced in Thailand for John West Foods Ltd,"
+   B025 conf=0.98 min=0.96 ang=359 box=[1693,286,2075,315] "Liverpool, England by Thai Union"
+   B026 conf=0.98 min=0.92 ang=0 box=[1449,319,2076,344] "Manufacturing Co., Ltd, Samut Sakhon 74000, Thailand."
+   B027 conf=0.98 min=0.87 ang=0 box=[1624,346,2173,374] "Storage: Cool, dry in ventilated place. Dietary fibre"
+   B028 conf=0.98 min=0.95 ang=0 box=[1501,398,2078,418] "FOR PRODUCTION AND EXPIRY DATE SEE ON CAN"
+   B029 conf=0.99 min=0.98 ang=0 box=[1602,429,1646,454] "NET"
+   B030 conf=0.99 min=0.97 ang=0 box=[1861,429,1965,453] "DRAINED"
+   B031 conf=0.99 min=0.98 ang=359 box=[1557,462,1646,487] "WEIGHT"
+   B032 conf=0.99 min=0.99 ang=0 box=[1473,471,1516,485] "STEEL"
+   B033 conf=0.90 min=0.51 ang=2 box=[1648,427,2078,507] "170gDWEIGHT 120g"
+   B034 conf=0.98 min=0.97 ang=0 box=[2299,209,2325,219] "Daily"
+   B035 conf=0.99 min=0.98 ang=358 box=[2298,219,2325,229] "value"
+   B036 conf=0.99 min=0.99 ang=0 box=[2106,239,2151,249] "Total fat"
+   B037 conf=0.97 min=0.96 ang=0 box=[2240,241,2259,253] "7 g"
+   B038 conf=0.97 min=0.96 ang=0 box=[2300,243,2321,252] "10%"
+   B039 conf=0.99 min=0.97 ang=0 box=[2105,257,2173,268] "Saturated fat"
+   B040 conf=0.99 min=0.98 ang=0 box=[2105,277,2150,287] "Trans fat"
+   B041 conf=0.99 min=0.98 ang=1 box=[2106,296,2169,306] "Cholesterol"
+   B042 conf=0.99 min=0.97 ang=0 box=[2105,315,2144,326] "Sodium"
+   B043 conf=0.83 min=0.71 ang=3 box=[2241,260,2259,271] "19"
+   B044 conf=0.96 min=0.94 ang=0 box=[2299,263,2315,272] "5%"
+   B045 conf=0.74 min=0.69 ang=3 box=[2242,280,2259,291] "وہ"
+   B046 conf=0.92 min=0.90 ang=4 box=[2241,298,2276,311] "50 mg"
+   B047 conf=0.97 min=0.96 ang=0 box=[2299,302,2321,311] "17%"
+   B048 conf=0.98 min=0.97 ang=4 box=[2241,318,2282,328] "475 mg"
+   B049 conf=0.98 min=0.98 ang=0 box=[2299,320,2321,330] "20%"
+   B050 conf=0.99 min=0.97 ang=0 box=[2105,336,2209,347] "Total carbohydrate"
+   B051 conf=0.71 min=0.56 ang=3 box=[2240,337,2260,349] "Og"
+   B052 conf=0.96 min=0.94 ang=0 box=[2299,340,2315,349] "0%"
+   B053 conf=0.70 min=0.54 ang=3 box=[2240,356,2260,368] "Og"
+   B054 conf=0.96 min=0.94 ang=0 box=[2299,359,2314,368] "0%"
+   B055 conf=0.99 min=0.99 ang=0 box=[2106,374,2164,385] "Total sugar"
+   B056 conf=0.71 min=0.54 ang=3 box=[2241,375,2260,388] "0g"
+   B057 conf=0.96 min=0.95 ang=0 box=[2299,379,2314,387] "0%"
+   B058 conf=0.99 min=0.98 ang=3 box=[2105,392,2179,405] "Added sugars"
+   B059 conf=0.69 min=0.52 ang=0 box=[2241,395,2260,407] "Og"
+   B060 conf=0.97 min=0.97 ang=0 box=[2299,398,2314,406] "0%"
+   B061 conf=0.99 min=0.99 ang=0 box=[2106,413,2145,422] "Protein"
+   B062 conf=0.98 min=0.97 ang=0 box=[2241,414,2320,426] "26 g 52%"
+   B063 conf=0.95 min=0.42 ang=0 box=[2429,187,2508,201] "الحصة اليومية 7"
+   B064 conf=0.98 min=0.98 ang=3 box=[2442,237,2510,251] "دهون كلية"
+   B065 conf=0.82 min=0.56 ang=0 box=[2350,240,2378,251] "٧جم"
+   B066 conf=0.99 min=0.97 ang=2 box=[2438,258,2510,270] "دهون مشبعة"
+   B067 conf=0.97 min=0.95 ang=0 box=[2351,261,2379,270] "اجم"
+   B068 conf=0.99 min=0.96 ang=2 box=[2434,278,2510,289] "دهون مهدرجة"
+   B069 conf=0.98 min=0.96 ang=359 box=[2441,296,2509,309] "كوليسترول"
+   B070 conf=0.99 min=0.98 ang=0 box=[2457,319,2509,328] "صوديوم"
+   B071 conf=0.98 min=0.95 ang=2 box=[2410,333,2510,348] "كربوهيدات كلية"
+   B072 conf=0.98 min=0.95 ang=0 box=[2449,352,2509,367] "ألياف غذائية"
+   B073 conf=0.89 min=0.64 ang=358 box=[2341,297,2379,310] "٥٠ ملجم"
+   B074 conf=0.95 min=0.84 ang=0 box=[2336,317,2378,329] "٤٧٥ ملجم"
+   B075 conf=0.98 min=0.96 ang=1 box=[2468,375,2509,386] "سكريات"
+   B076 conf=0.98 min=0.98 ang=0 box=[2353,378,2371,386] "جم"
+   B077 conf=0.98 min=0.94 ang=0 box=[2449,394,2511,404] "سكر مضاف"
+   B078 conf=0.99 min=0.98 ang=0 box=[2471,414,2510,424] "بروتين"
+   B079 conf=0.82 min=0.60 ang=0 box=[2344,414,2377,425] "٢٦ جم"
+   B080 conf=0.98 min=0.74 ang=0 box=[2113,439,2388,451] "*The % daily values are based on a 2000 calorie diet."
+   B081 conf=0.97 min=0.73 ang=0 box=[2145,461,2499,476] "تستند النسبة المئوية للقيم اليومية على أساس نظام غذائي ٢٠٠٠ سعرة حرارية."
+   B082 conf=0.98 min=0.97 ang=1 box=[2557,122,2676,162] "SAFE"
+   B083 conf=0.46 min=0.46 ang=4 box=[2676,167,2692,181] "Ⓡ"
+   B084 conf=0.99 min=0.98 ang=360 box=[3095,45,3376,83] "SINCE 1857"
+   B085 conf=0.98 min=0.94 ang=358 box=[2791,91,3671,260] "JOHN WEST"
+   B086 conf=0.99 min=0.99 ang=0 box=[2823,283,3652,330] "LIGHT MEAT TUNA CHUNKS"
+   B087 conf=0.99 min=0.98 ang=0 box=[2886,344,3583,402] "IN SUNFLOWER OIL"
+   B088 conf=0.97 min=0.79 ang=270 box=[4192,77,4224,491] "5 000171054326""
+  RAW lines A ที่ส่งให้ AI (92):
+   rA000 conf=0.98 min=0.78 ang=90 box=[170,67,205,393] "خال من الزيوت المهدرجة"
+   rA001 conf=0.99 min=0.97 ang=1 box=[779,52,967,90] "منذ 1857"
+   rA002 conf=0.96 min=0.93 ang=2 box=[439,52,1308,259] "جون وست"
+   rA003 conf=0.99 min=0.96 ang=0 box=[525,246,1217,321] "لحم تونا خفيف قطع كبيرة"
+   rA004 conf=0.99 min=0.95 ang=1 box=[529,322,1222,428] "في زيت دوار الشمس"
+   rA005 conf=0.96 min=0.65 ang=0 box=[1713,33,2088,54] "المكونات تونا زيت دوار الشمس، ماء، ملح."
+   rA006 conf=0.97 min=0.71 ang=0 box=[1680,58,2523,89] "معلومات غذائية Nutritional information تم إنتاجه في تايلاند لشركة جون ويست فودز ليمتد"
+   rA007 conf=0.93 min=0.55 ang=0 box=[2404,106,2525,121] "تحتوي العبوة على ١٢ حصة"
+   rA008 conf=0.78 min=0.31 ang=0 box=[2405,120,2526,133] "حجم الحصة 1/2 كوب (١٠٠غ )"
+   rA009 conf=0.98 min=0.85 ang=0 box=[2413,148,2525,160] "محتوى الحصة الواحدة"
+   rA010 conf=0.99 min=0.98 ang=0 box=[2443,169,2525,182] "السعرات الحرارية"
+   rA011 conf=0.95 min=0.42 ang=358 box=[2445,196,2525,209] "الحصة اليومية 7"
+   rA012 conf=0.99 min=0.99 ang=0 box=[2313,171,2339,181] "170"
+   rA013 conf=0.97 min=0.96 ang=0 box=[2314,191,2349,200] "الحصة"
+   rA014 conf=0.94 min=0.67 ang=358 box=[2306,201,2346,214] "اليومية."
+   rA015 conf=0.99 min=0.98 ang=0 box=[2122,106,2245,119] "1.2 Serving per container"
+   rA016 conf=0.96 min=0.27 ang=0 box=[2121,120,2250,135] "Serving size ½ cup (100g.)"
+   rA017 conf=0.98 min=0.94 ang=0 box=[2120,147,2229,159] "Amount per serving"
+   rA018 conf=0.99 min=0.98 ang=359 box=[2122,168,2164,180] "Calories"
+   rA019 conf=0.97 min=0.67 ang=0 box=[1627,88,2089,115] "ليفربول، إنجلترا من قبل شركة تاي يونيون للتصنيع"
+   rA020 conf=0.98 min=0.81 ang=0 box=[1710,116,2089,139] "المحدودة ساموت ساخون 74000 ، تايلاند"
+   rA021 conf=0.98 min=0.80 ang=0 box=[1617,146,2089,168] "شروط التخزين يحفظ في مكان جاف بارد وجيد التهوية."
+   rA022 conf=0.96 min=0.56 ang=0 box=[1780,171,2089,196] "تاريخ الإنتاج والانتهاء: أنظر العبوة."
+   rA023 conf=0.97 min=0.73 ang=0 box=[1698,199,2093,227] "الوزن المصفى : 120جم الوزن الصافي: 170 جم"
+   rA024 conf=0.98 min=0.81 ang=0 box=[1561,230,2090,258] "Ingredients: Tuna, Sunflower Oil, Water, Salt."
+   rA025 conf=0.98 min=0.94 ang=0 box=[1550,262,2093,285] "Produced in Thailand for John West Foods Ltd,"
+   rA026 conf=0.98 min=0.92 ang=0 box=[1708,295,2092,323] "Liverpool, England by Thai Union"
+   rA027 conf=0.98 min=0.92 ang=0 box=[1462,326,2090,352] "Manufacturing Co., Ltd, Samut Sakhon 74000, Thailand."
+   rA028 conf=0.98 min=0.88 ang=0 box=[1640,354,2187,383] "Storage: Cool, dry in ventilated place. Dietary fibre"
+   rA029 conf=0.98 min=0.89 ang=0 box=[1518,406,2094,427] "FOR PRODUCTION AND EXPIRY DATE SEE ON CAN"
+   rA030 conf=0.98 min=0.97 ang=0 box=[2315,217,2342,227] "Daily"
+   rA031 conf=0.99 min=0.99 ang=4 box=[2313,226,2343,237] "value"
+   rA032 conf=0.99 min=0.98 ang=0 box=[2121,247,2167,257] "Total fat"
+   rA033 conf=0.92 min=0.91 ang=0 box=[2257,250,2275,260] "7 g"
+   rA034 conf=0.98 min=0.98 ang=0 box=[2315,252,2339,262] "10%"
+   rA035 conf=0.98 min=0.96 ang=0 box=[2122,267,2190,277] "Saturated fat"
+   rA036 conf=0.99 min=0.98 ang=0 box=[2122,286,2166,295] "Trans fat"
+   rA037 conf=0.95 min=0.94 ang=0 box=[2258,269,2275,280] "1 g"
+   rA038 conf=0.96 min=0.94 ang=0 box=[2314,270,2332,281] "5%"
+   rA039 conf=0.68 min=0.51 ang=3 box=[2256,288,2276,299] "Og"
+   rA040 conf=0.99 min=0.98 ang=0 box=[2122,304,2184,315] "Cholesterol"
+   rA041 conf=0.99 min=0.97 ang=0 box=[2121,325,2162,334] "Sodium"
+   rA042 conf=0.83 min=0.75 ang=6 box=[2258,307,2292,320] "50 mg"
+   rA043 conf=0.97 min=0.96 ang=0 box=[2316,310,2338,318] "17%"
+   rA044 conf=0.99 min=0.99 ang=3 box=[2256,326,2299,338] "475 mg"
+   rA045 conf=0.98 min=0.97 ang=0 box=[2315,329,2339,338] "24%"
+   rA046 conf=0.99 min=0.98 ang=1 box=[2122,342,2225,356] "Total carbohydrate"
+   rA047 conf=0.70 min=0.54 ang=3 box=[2256,345,2276,357] "Og"
+   rA048 conf=0.96 min=0.95 ang=0 box=[2314,348,2332,358] "0%"
+   rA049 conf=0.62 min=0.40 ang=3 box=[2256,365,2276,376] "Og"
+   rA050 conf=0.96 min=0.95 ang=0 box=[2314,367,2333,377] "0%"
+   rA051 conf=0.99 min=0.97 ang=2 box=[2122,382,2180,394] "Total sugar"
+   rA052 conf=0.99 min=0.98 ang=3 box=[2121,401,2195,414] "Added sugars"
+   rA053 conf=0.99 min=0.99 ang=0 box=[2122,421,2161,431] "Protein"
+   rA054 conf=0.69 min=0.64 ang=3 box=[2257,384,2276,394] "وہ"
+   rA055 conf=0.97 min=0.97 ang=0 box=[2315,386,2330,395] "0%"
+   rA056 conf=0.71 min=0.55 ang=3 box=[2256,403,2276,416] "Og"
+   rA057 conf=0.97 min=0.96 ang=0 box=[2315,405,2331,415] "0%"
+   rA058 conf=0.99 min=0.98 ang=0 box=[2257,422,2282,434] "26 g"
+   rA059 conf=0.98 min=0.97 ang=0 box=[2315,425,2338,434] "52%"
+   rA060 conf=0.99 min=0.99 ang=1 box=[1490,479,1531,493] "STEEL"
+   rA061 conf=0.99 min=0.99 ang=0 box=[1618,438,1662,462] "NET"
+   rA062 conf=0.99 min=0.98 ang=1 box=[1573,471,1663,494] "WEIGHT"
+   rA063 conf=0.98 min=0.98 ang=359 box=[1668,436,1773,519] "170g"
+   rA064 conf=0.99 min=0.99 ang=359 box=[1877,437,1979,462] "DRAINED"
+   rA065 conf=0.99 min=0.98 ang=0 box=[1890,472,1981,496] "WEIGHT"
+   rA066 conf=0.98 min=0.96 ang=1 box=[1983,440,2093,514] "120g"
+   rA067 conf=0.98 min=0.97 ang=3 box=[2458,246,2526,260] "دهون كلية"
+   rA068 conf=0.99 min=0.96 ang=3 box=[2454,266,2526,280] "دهون مشبعة"
+   rA069 conf=0.81 min=0.53 ang=0 box=[2366,249,2394,260] "٧جم"
+   rA070 conf=0.95 min=0.91 ang=0 box=[2367,269,2394,279] "اجم"
+   rA071 conf=0.98 min=0.96 ang=1 box=[2450,286,2526,297] "دهون مهدرجة"
+   rA072 conf=0.98 min=0.96 ang=359 box=[2457,305,2525,317] "كوليسترول"
+   rA073 conf=0.99 min=0.98 ang=0 box=[2473,328,2525,336] "صوديوم"
+   rA074 conf=0.88 min=0.62 ang=358 box=[2357,307,2394,317] "٥٠ ملجم"
+   rA075 conf=0.93 min=0.82 ang=0 box=[2352,325,2393,336] "٤٧٥ ملجم"
+   rA076 conf=0.98 min=0.94 ang=2 box=[2426,342,2525,357] "كربوهيدات كلية"
+   rA077 conf=0.98 min=0.95 ang=0 box=[2465,362,2527,375] "ألياف غذائية"
+   rA078 conf=0.98 min=0.97 ang=0 box=[2369,367,2387,375] "جم"
+   rA079 conf=0.98 min=0.96 ang=0 box=[2484,384,2526,394] "سكريات"
+   rA080 conf=0.98 min=0.82 ang=0 box=[2129,445,2403,460] "*The % daily values are based on a 2000 calorie diet."
+   rA081 conf=0.98 min=0.96 ang=2 box=[2465,403,2525,413] "سكر مضاف"
+   rA082 conf=0.99 min=0.98 ang=0 box=[2487,422,2526,432] "بروتين"
+   rA083 conf=0.96 min=0.68 ang=0 box=[2162,469,2519,484] ". تستند النسبة المئوية للقيم اليومية على أساس نظام غذائي ٢٠٠٠ سعرة حرارية."
+   rA084 conf=0.96 min=0.92 ang=359 box=[2576,132,2690,180] "SAFE"
+   rA085 conf=0.49 min=0.49 ang=0 box=[2694,176,2708,189] "Ⓡ"
+   rA086 conf=0.97 min=0.68 ang=91 box=[2552,181,2577,450] "Free from hydrogenated oils"
+   rA087 conf=0.98 min=0.97 ang=360 box=[3110,53,3392,91] "SINCE 1857"
+   rA088 conf=0.98 min=0.96 ang=358 box=[2807,97,3684,267] "JOHN WEST"
+   rA089 conf=0.99 min=0.99 ang=0 box=[2839,291,3666,339] "LIGHT MEAT TUNA CHUNKS"
+   rA090 conf=0.99 min=0.99 ang=0 box=[2902,353,3599,411] "IN SUNFLOWER OIL"
+   rA091 conf=0.96 min=0.61 ang=270 box=[4207,85,4241,498] "5 000171 054326""
+  RAW lines B ที่ส่งให้ AI (89):
+   rB000 conf=0.71 min=0.47 ang=0 box=[1449,427,1540,464] "כ"ז"
+   rB001 conf=0.99 min=0.97 ang=0 box=[765,46,951,83] "منذ 1857"
+   rB002 conf=0.93 min=0.70 ang=0 box=[652,109,1294,225] "جون وسـ"
+   rB003 conf=0.99 min=0.96 ang=0 box=[510,238,1201,312] "لحم تونا خفيف قطع كبيرة"
+   rB004 conf=0.99 min=0.97 ang=1 box=[515,309,1205,426] "في زيت دوار الشمس"
+   rB005 conf=0.95 min=0.64 ang=0 box=[1697,24,2072,47] "المكونات تونا، زيت دوار الشمس، ماء، ملح."
+   rB006 conf=0.97 min=0.70 ang=0 box=[1664,50,2507,80] "معلومات غذائية Nutritional information تم إنتاجه في تايلاند لشركة جون ويست فودز ليمتد"
+   rB007 conf=0.97 min=0.65 ang=0 box=[1610,79,2073,107] "ليفربول، إنجلترا من قبل شركة تاي يونيون للتصنيع"
+   rB008 conf=0.97 min=0.74 ang=0 box=[1693,108,2073,130] "المحدودة ساموت ساخون 74000 ، تايلاند"
+   rB009 conf=0.97 min=0.64 ang=0 box=[1602,137,2073,161] "شروط التخزين: يحفظ في مكان جاف بارد وجيد التهوية."
+   rB010 conf=0.96 min=0.59 ang=0 box=[1764,162,2072,188] "تاريخ الإنتاج والانتهاء: أنظر العبوة."
+   rB011 conf=0.93 min=0.52 ang=2 box=[2388,97,2509,111] "تحتوي العبوة على ١٢ حصة"
+   rB012 conf=0.75 min=0.39 ang=0 box=[2384,111,2510,125] "حجم الحصة 1/2 كوب (۱۰۰غ) ("
+   rB013 conf=0.98 min=0.77 ang=2 box=[2398,139,2509,152] "محتوى الحصة الواحدة"
+   rB014 conf=0.99 min=0.98 ang=2 box=[2427,162,2510,174] "السعرات الحرارية"
+   rB015 conf=0.99 min=0.99 ang=0 box=[2297,162,2322,173] "170"
+   rB016 conf=0.98 min=0.96 ang=0 box=[2298,183,2330,192] "الحصة"
+   rB017 conf=0.92 min=0.64 ang=0 box=[2292,193,2331,202] "اليومية."
+   rB018 conf=0.99 min=0.98 ang=0 box=[2106,98,2230,110] "1.2 Serving per container"
+   rB019 conf=0.93 min=0.40 ang=0 box=[2100,110,2232,128] "| Serving size 2 cup (100g.)"
+   rB020 conf=0.99 min=0.97 ang=1 box=[2105,138,2213,150] "Amount per serving"
+   rB021 conf=0.99 min=0.98 ang=359 box=[2105,159,2148,171] "Calories"
+   rB022 conf=0.97 min=0.72 ang=0 box=[1683,193,2077,218] "الوزن المصفى : 120جم الوزن الصافي: 170 جم"
+   rB023 conf=0.98 min=0.80 ang=0 box=[1545,222,2075,250] "Ingredients: Tuna, Sunflower Oil, Water, Salt."
+   rB024 conf=0.98 min=0.93 ang=0 box=[1535,253,2078,276] "Produced in Thailand for John West Foods Ltd,"
+   rB025 conf=0.98 min=0.96 ang=359 box=[1693,286,2075,315] "Liverpool, England by Thai Union"
+   rB026 conf=0.98 min=0.92 ang=0 box=[1449,319,2076,344] "Manufacturing Co., Ltd, Samut Sakhon 74000, Thailand."
+   rB027 conf=0.98 min=0.87 ang=0 box=[1624,346,2173,374] "Storage: Cool, dry in ventilated place. Dietary fibre"
+   rB028 conf=0.98 min=0.95 ang=0 box=[1501,398,2078,418] "FOR PRODUCTION AND EXPIRY DATE SEE ON CAN"
+   rB029 conf=0.99 min=0.98 ang=0 box=[1602,429,1646,454] "NET"
+   rB030 conf=0.99 min=0.97 ang=0 box=[1861,429,1965,453] "DRAINED"
+   rB031 conf=0.99 min=0.98 ang=359 box=[1557,462,1646,487] "WEIGHT"
+   rB032 conf=0.99 min=0.99 ang=0 box=[1473,471,1516,485] "STEEL"
+   rB033 conf=0.90 min=0.51 ang=2 box=[1648,427,2078,507] "170gDWEIGHT 120g"
+   rB034 conf=0.98 min=0.97 ang=0 box=[2299,209,2325,219] "Daily"
+   rB035 conf=0.99 min=0.98 ang=358 box=[2298,219,2325,229] "value"
+   rB036 conf=0.99 min=0.99 ang=0 box=[2106,239,2151,249] "Total fat"
+   rB037 conf=0.97 min=0.96 ang=0 box=[2240,241,2259,253] "7 g"
+   rB038 conf=0.97 min=0.96 ang=0 box=[2300,243,2321,252] "10%"
+   rB039 conf=0.99 min=0.97 ang=0 box=[2105,257,2173,268] "Saturated fat"
+   rB040 conf=0.99 min=0.98 ang=0 box=[2105,277,2150,287] "Trans fat"
+   rB041 conf=0.99 min=0.98 ang=1 box=[2106,296,2169,306] "Cholesterol"
+   rB042 conf=0.99 min=0.97 ang=0 box=[2105,315,2144,326] "Sodium"
+   rB043 conf=0.83 min=0.71 ang=3 box=[2241,260,2259,271] "19"
+   rB044 conf=0.96 min=0.94 ang=0 box=[2299,263,2315,272] "5%"
+   rB045 conf=0.74 min=0.69 ang=3 box=[2242,280,2259,291] "وہ"
+   rB046 conf=0.92 min=0.90 ang=4 box=[2241,298,2276,311] "50 mg"
+   rB047 conf=0.97 min=0.96 ang=0 box=[2299,302,2321,311] "17%"
+   rB048 conf=0.98 min=0.97 ang=4 box=[2241,318,2282,328] "475 mg"
+   rB049 conf=0.98 min=0.98 ang=0 box=[2299,320,2321,330] "20%"
+   rB050 conf=0.99 min=0.97 ang=0 box=[2105,336,2209,347] "Total carbohydrate"
+   rB051 conf=0.71 min=0.56 ang=3 box=[2240,337,2260,349] "Og"
+   rB052 conf=0.96 min=0.94 ang=0 box=[2299,340,2315,349] "0%"
+   rB053 conf=0.70 min=0.54 ang=3 box=[2240,356,2260,368] "Og"
+   rB054 conf=0.96 min=0.94 ang=0 box=[2299,359,2314,368] "0%"
+   rB055 conf=0.99 min=0.99 ang=0 box=[2106,374,2164,385] "Total sugar"
+   rB056 conf=0.71 min=0.54 ang=3 box=[2241,375,2260,388] "0g"
+   rB057 conf=0.96 min=0.95 ang=0 box=[2299,379,2314,387] "0%"
+   rB058 conf=0.99 min=0.98 ang=3 box=[2105,392,2179,405] "Added sugars"
+   rB059 conf=0.69 min=0.52 ang=0 box=[2241,395,2260,407] "Og"
+   rB060 conf=0.97 min=0.97 ang=0 box=[2299,398,2314,406] "0%"
+   rB061 conf=0.99 min=0.99 ang=0 box=[2106,413,2145,422] "Protein"
+   rB062 conf=0.98 min=0.97 ang=0 box=[2241,414,2320,426] "26 g 52%"
+   rB063 conf=0.95 min=0.42 ang=0 box=[2429,187,2508,201] "الحصة اليومية 7"
+   rB064 conf=0.98 min=0.98 ang=3 box=[2442,237,2510,251] "دهون كلية"
+   rB065 conf=0.82 min=0.56 ang=0 box=[2350,240,2378,251] "٧جم"
+   rB066 conf=0.99 min=0.97 ang=2 box=[2438,258,2510,270] "دهون مشبعة"
+   rB067 conf=0.97 min=0.95 ang=0 box=[2351,261,2379,270] "اجم"
+   rB068 conf=0.99 min=0.96 ang=2 box=[2434,278,2510,289] "دهون مهدرجة"
+   rB069 conf=0.98 min=0.96 ang=359 box=[2441,296,2509,309] "كوليسترول"
+   rB070 conf=0.99 min=0.98 ang=0 box=[2457,319,2509,328] "صوديوم"
+   rB071 conf=0.98 min=0.95 ang=2 box=[2410,333,2510,348] "كربوهيدات كلية"
+   rB072 conf=0.98 min=0.95 ang=0 box=[2449,352,2509,367] "ألياف غذائية"
+   rB073 conf=0.89 min=0.64 ang=358 box=[2341,297,2379,310] "٥٠ ملجم"
+   rB074 conf=0.95 min=0.84 ang=0 box=[2336,317,2378,329] "٤٧٥ ملجم"
+   rB075 conf=0.98 min=0.96 ang=1 box=[2468,375,2509,386] "سكريات"
+   rB076 conf=0.98 min=0.98 ang=0 box=[2353,378,2371,386] "جم"
+   rB077 conf=0.98 min=0.94 ang=0 box=[2449,394,2511,404] "سكر مضاف"
+   rB078 conf=0.99 min=0.98 ang=0 box=[2471,414,2510,424] "بروتين"
+   rB079 conf=0.82 min=0.60 ang=0 box=[2344,414,2377,425] "٢٦ جم"
+   rB080 conf=0.98 min=0.74 ang=0 box=[2113,439,2388,451] "*The % daily values are based on a 2000 calorie diet."
+   rB081 conf=0.97 min=0.73 ang=0 box=[2145,461,2499,476] "تستند النسبة المئوية للقيم اليومية على أساس نظام غذائي ٢٠٠٠ سعرة حرارية."
+   rB082 conf=0.98 min=0.97 ang=1 box=[2557,122,2676,162] "SAFE"
+   rB083 conf=0.46 min=0.46 ang=4 box=[2676,167,2692,181] "Ⓡ"
+   rB084 conf=0.99 min=0.98 ang=360 box=[3095,45,3376,83] "SINCE 1857"
+   rB085 conf=0.98 min=0.94 ang=358 box=[2791,91,3671,260] "JOHN WEST"
+   rB086 conf=0.99 min=0.99 ang=0 box=[2823,283,3652,330] "LIGHT MEAT TUNA CHUNKS"
+   rB087 conf=0.99 min=0.98 ang=0 box=[2886,344,3583,402] "IN SUNFLOWER OIL"
+   rB088 conf=0.97 min=0.79 ang=270 box=[4192,77,4224,491] "5 000171054326""
+
+[REREAD] enabled=False candidates=8 crops=0 done=0 confirmed=0 downgraded=0 skipped_cap=0 errors=0
+
+[AI REVIEW] mode=raw url=http://127.0.0.1:5678/webhook/artwork-v2-raw pairs_ok=0 pairs_failed=1
+  pair 1: status=failed engine=- http=200 ms=123 attempts=1 request_bytes=24047 candidates=0 ERROR=N8N ตอบไม่ใช่ JSON: 
+
+[WARNINGS] 1
+  - คู่ 1: AI ตรวจทานไม่สำเร็จ — ใช้ผลของอัลกอริทึม (N8N ตอบไม่ใช่ JSON: )

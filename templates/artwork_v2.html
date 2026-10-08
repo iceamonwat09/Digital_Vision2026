@@ -1,0 +1,499 @@
+{% extends "base.html" %}
+{% block title %}Artwork V2 — เทียบข้อความด้วย Cloud Vision{% endblock %}
+
+{% block extra_css %}
+<style>
+  .main-content { max-width: none; overflow: visible; }   /* overflow:auto ทำให้ sticky (ตารางข้างภาพ) ไม่ทำงาน */
+  .v2 { max-width: 1600px; margin: 20px auto; padding: 0 16px; }
+  .v2-head { display:flex; align-items:baseline; justify-content:space-between; flex-wrap:wrap; gap:8px; }
+  .v2-head h2 { margin:0; }
+  .v2-sub { color:#64748b; font-size:13px; }
+  .v2-card { background:#fff; border:1px solid #e2e8f0; border-radius:10px; padding:14px 16px; margin:14px 0; box-shadow:0 1px 2px rgba(15,23,42,.04); }
+  .v2-card h3 { margin:0 0 10px; font-size:16px; }
+  .v2-row { display:flex; flex-wrap:wrap; gap:10px; align-items:center; }
+  .v2-row label { font-size:13px; color:#334155; }
+  .v2-muted { color:#64748b; font-size:13px; }
+  .v2-ok { color:#15803d; } .v2-bad { color:#b91c1c; } .v2-warn { color:#a16207; }
+  .v2-btn { border:1px solid #cbd5e1; background:#fff; border-radius:6px; padding:7px 12px; cursor:pointer; font:inherit; font-size:14px; }
+  .v2-btn:hover { background:#f8fafc; }
+  .v2-btn.primary { background:#1d4ed8; color:#fff; border-color:#1d4ed8; }
+  .v2-btn.primary:hover { background:#1e40af; }
+  .v2-btn.danger { color:#b91c1c; border-color:#fca5a5; }
+  .v2-btn:disabled { opacity:.5; cursor:not-allowed; }
+  .v2-input { border:1px solid #cbd5e1; border-radius:6px; padding:7px 10px; font:inherit; font-size:14px; min-width:0; }
+  .v2-key { width:min(420px,100%); font-family:monospace; }
+  #v2Recent { max-width:calc(100vw - 72px); }   /* ชื่องานยาว ⇒ ไม่ดันหน้าให้เลื่อนแนวนอนบนจอแคบ */
+  .v2-panes { display:grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap:14px; }
+  @media (max-width: 900px) { .v2-panes { grid-template-columns: minmax(0,1fr); } }
+  .v2-pane-h { display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:6px; flex-wrap:wrap; }
+  .v2-pane-h b { font-size:14px; }
+  /* กล่องเลื่อนได้ (ซูม/เลื่อนภาพแบบหน้า Artwork เดิม) · ความกว้างของ .v2-stage = ภาพ × ซูม (JS ตั้งเป็น px) */
+  .v2-stage-box { position:relative; overflow:auto; max-height:72vh; border:1px solid #cbd5e1; border-radius:6px; background:#f1f5f9; overscroll-behavior:contain; }
+  .v2-stage { position:relative; width:100%; user-select:none; touch-action:none; }
+  .v2-stage img { display:block; width:100%; height:auto; pointer-events:none; -webkit-user-drag:none; }
+  .v2-stage .v2-ov { position:absolute; inset:0; cursor:crosshair; }
+  .v2-mode-pan .v2-stage .v2-ov, .v2-space .v2-stage .v2-ov { cursor:grab; }
+  /* หมุนจอ (ต่อไฟล์) — .v2-rot มีขนาดหลังหมุน · .v2-stage หมุนด้วย transform (โซนหมุนตามเอง พิกัดยังเป็นของหน้าที่ไม่หมุน) */
+  .v2-rot { position:relative; }
+  .v2-rot.on > .v2-stage { position:absolute; left:0; top:0; transform-origin:0 0; }
+  .v2-zone .v2-zrot { position:absolute; right:-2px; top:-20px; font-size:11px; font-weight:700; line-height:16px; padding:0 5px;
+                      border-radius:3px; background:#fff; border:1px solid currentColor; cursor:pointer; white-space:nowrap; }
+  .v2-zone .v2-zrot.on { background:#0f172a; color:#fff !important; border-color:#0f172a; }
+  /* จอหมุน: ป้ายคู่/ชิปมุมย้ายไปชั้นที่ไม่หมุน (.v2-rlab) ⇒ ตัวหนังสือตั้งตรง อยู่มุมซ้ายบน/ขวาบนของกรอบบนจอ */
+  .v2-rot.on .v2-zone > span, .v2-rot.on .v2-zone .v2-zrot { display:none; }
+  .v2-rlab { position:absolute; z-index:2; font-size:12px; font-weight:600; color:#fff; padding:1px 5px; border-radius:3px;
+             white-space:nowrap; pointer-events:none; transform:translateY(-100%); margin-top:-2px; }
+  .v2-rlab.in { transform:none; margin-top:2px; margin-left:2px; }
+  .v2-rlab.v2-zrot { position:absolute; color:inherit; pointer-events:auto; font-size:11px; font-weight:700; line-height:16px;
+                     padding:0 5px; background:#fff; border:1px solid currentColor; cursor:pointer; }
+  .v2-rlab.v2-zrot.on { background:#0f172a; color:#fff !important; border-color:#0f172a; }
+  .v2-thumb { margin-top:10px; display:flex; flex-direction:column; gap:4px; align-items:flex-start; }
+  .v2-thumb canvas { max-width:min(420px,100%); max-height:240px; border:1px solid #cbd5e1; border-radius:6px; background:#fff; }
+  .v2-stage-box.panning, .v2-stage-box.panning .v2-ov { cursor:grabbing !important; }
+  .v2-zone { position:absolute; border:2px solid; box-sizing:border-box; cursor:move; }
+  .v2-space .v2-zone { pointer-events:none; }
+  .v2-zone.draft { border-style:dashed; pointer-events:none; }
+  .v2-ign { position:absolute; box-sizing:border-box; border:1.5px dashed #b91c1c; pointer-events:none;
+    background:repeating-linear-gradient(135deg, rgba(185,28,28,.16) 0 5px, rgba(185,28,28,.04) 5px 10px); }
+  .v2-ign.draft { border-color:#0f172a; }
+  .v2-ign b { position:absolute; right:-1px; top:-1px; transform:translate(50%,-50%); width:16px; height:16px; line-height:15px;
+    text-align:center; font-size:11px; border-radius:50%; background:#b91c1c; color:#fff; cursor:pointer; pointer-events:auto; }
+  .v2-mode-ign .v2-stage .v2-ov { cursor:crosshair; }
+  .v2-mode-ign .v2-zone { pointer-events:none; }
+  .v2-res-stage rect.est { fill:rgba(217,119,6,.08); stroke:#d97706; stroke-width:1.5; stroke-dasharray:6 4; vector-effect:non-scaling-stroke; opacity:0; transition:opacity .2s; }
+  .v2-res-stage rect.est.hov { opacity:1; }
+  .v2-res-stage rect.ign { fill:rgba(185,28,28,.10); stroke:#b91c1c; stroke-width:1; stroke-dasharray:4 3; vector-effect:non-scaling-stroke; }
+  .v2-zone.sel { box-shadow:0 0 0 1px #fff, 0 0 0 3px rgba(15,23,42,.35); }
+  .v2-zone span { position:absolute; left:-2px; top:-20px; font-size:12px; font-weight:600; color:#fff; padding:1px 5px; border-radius:3px; white-space:nowrap; pointer-events:none; }
+  .v2-h { position:absolute; width:10px; height:10px; background:#fff; border:2px solid #0f172a; border-radius:2px; box-sizing:border-box; }
+  .v2-h-nw { left:-6px; top:-6px; cursor:nwse-resize; } .v2-h-ne { right:-6px; top:-6px; cursor:nesw-resize; }
+  .v2-h-sw { left:-6px; bottom:-6px; cursor:nesw-resize; } .v2-h-se { right:-6px; bottom:-6px; cursor:nwse-resize; }
+  .v2-h-n { left:calc(50% - 5px); top:-6px; cursor:ns-resize; } .v2-h-s { left:calc(50% - 5px); bottom:-6px; cursor:ns-resize; }
+  .v2-h-w { top:calc(50% - 5px); left:-6px; cursor:ew-resize; } .v2-h-e { top:calc(50% - 5px); right:-6px; cursor:ew-resize; }
+  .v2-zbar { display:flex; flex-wrap:wrap; align-items:center; gap:4px; margin-bottom:6px; font-size:13px; }
+  .v2-zbar button, .v2-tools button { border:1px solid #cbd5e1; background:#fff; border-radius:5px; padding:3px 8px; cursor:pointer; font:inherit; font-size:13px; }
+  .v2-zbar button:hover, .v2-tools button:hover { background:#f8fafc; }
+  .v2-zbar button.on, .v2-tools button.on { background:#dbeafe; border-color:#93c5fd; }
+  .v2-zbar input[type=range] { width:110px; }
+  .v2-zpct { min-width:42px; text-align:right; color:#334155; font-variant-numeric:tabular-nums; }
+  .v2-tools { display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin-top:8px; font-size:13px; }
+  .v2-pairs { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
+  .v2-chip { display:inline-flex; gap:6px; align-items:center; border:1px solid #cbd5e1; border-radius:14px; padding:3px 4px 3px 10px; font-size:13px; }
+  .v2-chip button { border:0; background:#f1f5f9; border-radius:10px; cursor:pointer; padding:1px 7px; }
+  .v2-verdict { border-radius:10px; padding:12px 16px; font-size:20px; font-weight:700; }
+  .v2-verdict small { display:block; font-size:13px; font-weight:400; margin-top:4px; }
+  .v2-v-PASS { background:#dcfce7; color:#14532d; }
+  .v2-v-REVIEW { background:#fef9c3; color:#713f12; }
+  .v2-v-FAIL { background:#fee2e2; color:#7f1d1d; }
+  .v2-v-UNREADABLE { background:#e2e8f0; color:#1e293b; }
+  .v2-res-stage { position:relative; border:1px solid #cbd5e1; border-radius:6px; overflow:hidden; background:#fff; }
+  .v2-res-stage img { display:block; width:100%; height:auto; }
+  .v2-res-stage svg { position:absolute; inset:0; width:100%; height:100%; }
+  .v2-res-stage rect.f { fill:none; stroke-width:3; vector-effect:non-scaling-stroke; }
+  .v2-res-stage rect.f.red { stroke:#dc2626; }
+  .v2-res-stage rect.f.yellow { stroke:#d97706; stroke-dasharray:6 3; }
+  .v2-res-stage rect.ocr { fill:none; stroke:#2563eb; stroke-width:1; vector-effect:non-scaling-stroke; opacity:.55; }
+  .v2-res-stage rect.skip { fill:rgba(100,116,139,.18); stroke:#64748b; stroke-width:1; vector-effect:non-scaling-stroke; }
+  .v2-res-stage rect.f.hot { stroke-width:6; }
+  .v2-res-stage text { font-size:14px; font-weight:700; paint-order:stroke; stroke:#fff; stroke-width:3px; }
+  /* กรอบแบบ "word" (ค่าเริ่มต้น): เส้นบาง 1.25 px ไม่ย่อ/ขยายตามภาพ · อยู่ในที่ว่างรอบคำ */
+  .v2-restore { background:#e8f5e9; border-left:4px solid #2e7d32; color:#1b5e20;
+                padding:8px 12px; border-radius:4px; font-size:13px; margin-bottom:10px;
+                display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  .v2-restore b { overflow-wrap:anywhere; }
+  #v2Root[data-box-style="word"] .v2-res-stage rect.f { stroke-width:1.25; }
+  #v2Root[data-box-style="word"] .v2-res-stage rect.f.yellow { stroke-dasharray:4 2; }
+  #v2Root[data-box-style="word"] .v2-res-stage rect.f.hot { stroke-width:2.5; }
+  .v2-res-stage rect.d { stroke:none; }
+  .v2-res-stage rect.d.red { fill:rgba(220,38,38,.20); }
+  .v2-res-stage rect.d.yellow { fill:rgba(217,119,6,.22); }
+  .v2-res-stage rect.d.ins { fill-opacity:1; }
+  .v2-res-stage rect.d.red.ins { fill:rgba(220,38,38,.55); }
+  .v2-res-stage rect.d.yellow.ins { fill:rgba(217,119,6,.55); }
+  .v2-res-stage rect.d.hot.red { fill:rgba(220,38,38,.32); }
+  .v2-res-stage rect.d.hot.yellow { fill:rgba(217,119,6,.34); }
+  .v2-tag { position:absolute; transform:translateY(-100%); margin-top:-1px; padding:0 3px; border-radius:3px;
+            font:700 9px/11px system-ui, sans-serif; opacity:.92; color:#fff; pointer-events:none; white-space:nowrap; }
+  .v2-tag.below { transform:none; margin-top:1px; }
+  .v2-tag.red { background:#dc2626; }
+  .v2-tag.yellow { background:#b45309; }
+  .v2-tag.hot { outline:2px solid #0f172a; }
+  /* ซูมตามแถว (ARTWORK_V2_HOVER_ZOOM · แสดงผลล้วน) — ภาพขยายด้วย transform · กรอบขยายด้วย viewBox (เส้นบางเท่าเดิม)
+     · ป้ายเลขเลื่อนตามโดยไม่ขยาย · กรอบอื่นจางลงระหว่างซูม */
+  .v2-res-stage img { transform-origin:0 0; }
+  .v2-res-stage rect.f, .v2-res-stage rect.d, .v2-tag { transition:opacity .22s ease; }
+  .v2-res-stage.zoomed rect.f:not(.hov), .v2-res-stage.zoomed rect.d:not(.hov),
+  .v2-res-stage.zoomed .v2-tag:not(.hov) { opacity:.3; }
+  .v2-res-stage rect.f.hov { stroke-width:6; }
+  #v2Root[data-box-style="word"] .v2-res-stage rect.f.hov { stroke-width:2.5; }
+  .v2-res-stage rect.d.hov.red { fill:rgba(220,38,38,.32); }
+  .v2-res-stage rect.d.hov.yellow { fill:rgba(217,119,6,.34); }
+  .v2-tag.hov { outline:2px solid #0f172a; opacity:1; }
+  .v2-zbadge { position:absolute; right:6px; bottom:6px; padding:0 8px; border-radius:10px; background:rgba(15,23,42,.72);
+               color:#fff; font:600 11px/18px system-ui, sans-serif; opacity:0; transform:translateY(4px);
+               transition:opacity .2s ease, transform .2s ease; pointer-events:none; }
+  .v2-zbadge.on { opacity:1; transform:none; }
+  .v2-znote { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); max-width:86%; padding:6px 10px;
+              border-radius:8px; background:rgba(255,255,255,.95); border:1px solid #cbd5e1; color:#334155;
+              font-size:12px; text-align:center; box-shadow:0 2px 8px rgba(15,23,42,.12); opacity:0;
+              transition:opacity .2s ease; pointer-events:none; }
+  .v2-znote.on { opacity:1; }
+  .v2-znote.est { top:auto; bottom:6px; transform:translateX(-50%); font-size:11px; padding:3px 8px; }
+  /* ข้อความอยู่ในตัวห่อ (ไม่ถูกกล่องภาพตัดขอบ) · ภาพสูงพอ = ซ้อนบนภาพ · ภาพเตี้ย (.short) = บรรทัดใต้ภาพ จองที่ไว้ */
+  .v2-res-wrap { position:relative; }
+  .v2-res-wrap.short .v2-znote, .v2-res-wrap.short .v2-znote.est { position:static; transform:none; max-width:none;
+              margin-top:4px; min-height:2.9em; padding:3px 8px; font-size:11px; box-shadow:none; background:#f8fafc; }
+  .v2-tbl tr.hov { background:#f1f5f9; box-shadow:inset 3px 0 0 #2563eb; }
+  @media (prefers-reduced-motion: reduce) {
+    .v2-res-stage rect.f, .v2-res-stage rect.d, .v2-tag, .v2-zbadge, .v2-znote { transition:none; }
+  }
+  .v2-tbl-wrap { overflow-x:auto; margin-top:10px; }
+  table.v2-tbl { border-collapse:collapse; width:100%; font-size:13px; }
+  .v2-tbl th, .v2-tbl td { border-bottom:1px solid #e2e8f0; padding:6px 8px; text-align:left; vertical-align:top; }
+  .v2-tbl tr.click { cursor:pointer; } .v2-tbl tr.click:hover { background:#f8fafc; }
+  .v2-tbl tr.sel { background:#eff6ff; }
+  .v2-sev { display:inline-block; border-radius:4px; padding:1px 6px; font-weight:600; font-size:12px; }
+  .v2-sev.red { background:#fee2e2; color:#991b1b; } .v2-sev.yellow { background:#fef3c7; color:#92400e; } .v2-sev.debris { background:#f1f5f9; color:#475569; }
+  .v2-debris summary { cursor:pointer; color:#475569; font-size:13px; }
+  .v2-sev.dismissed { background:#f1f5f9; color:#475569; }
+  .v2-sev.moved { background:#f1f5f9; color:#475569; } .v2-sev.pixel_same { background:#dcfce7; color:#166534; }
+  .v2-sev.excluded { background:#fee2e2; color:#7f1d1d; }
+  .v2-pv { display:block; margin-top:4px; } .v2-pv img { display:block; max-width:100%; max-height:110px; border:1px solid #e2e8f0; border-radius:4px; background:#fff; }
+  /* แถวที่รวมหลายจุดในบรรทัดเดียว (ARTWORK_V2_LINE_GROUP · แสดงผลล้วน) — รายการสมาชิกในช่องหมายเหตุ */
+  .v2-gm { padding:3px 0; border-top:1px dashed #e2e8f0; }
+  .v2-gm:first-child { border-top:0; padding-top:0; }
+  /* ตารางจุดต่างแสดง N แถวแล้วเลื่อนในตาราง (ARTWORK_V2_TABLE_ROWS · แสดงผลล้วน) — หัวตารางค้างไว้ */
+  .v2-tbl-wrap.v2-capped { overflow-y:auto; border:1px solid #e2e8f0; border-radius:6px; }
+  .v2-tbl-wrap.v2-capped thead th { position:sticky; top:0; z-index:1; background:#f8fafc; box-shadow:inset 0 -1px 0 #e2e8f0; }
+  .v2-tbl-more { font-size:12px; margin-top:4px; }
+  .v2-gm code { background:#f1f5f9; border-radius:3px; padding:0 3px; font-size:12px; }
+  .v2-conf { font-weight:600; white-space:nowrap; } .v2-conf.lo { color:#b45309; }
+  .v2-ai { background:#f5f3ff; border:1px solid #ddd6fe; border-radius:6px; padding:8px 10px; font-size:13px; margin-top:10px; }
+  .v2-ai h4 { margin:0 0 4px; font-size:14px; } .v2-ai ul { margin:4px 0 0 18px; padding:0; }
+  .v2-ai-note { display:block; margin-top:3px; color:#5b21b6; }
+  .v2-ai-tag { display:inline-block; border-radius:4px; padding:0 5px; font-size:11px; background:#ede9fe; color:#5b21b6; margin-left:4px; }
+  mark.v2-d { background:#fecaca; color:inherit; padding:0 1px; border-radius:2px; }
+  .v2-log { width:100%; min-height:280px; font-family:ui-monospace,Consolas,monospace; font-size:12px; white-space:pre; border:1px solid #cbd5e1; border-radius:6px; padding:8px; box-sizing:border-box; }
+  .v2-spin { display:inline-block; width:14px; height:14px; border:2px solid #93c5fd; border-top-color:#1d4ed8; border-radius:50%; animation:v2s 0.8s linear infinite; vertical-align:-2px; }
+  @keyframes v2s { to { transform:rotate(360deg); } }
+  .v2-warnbox { background:#fffbeb; border:1px solid #fde68a; border-radius:6px; padding:8px 10px; font-size:13px; margin-top:8px; }
+  .v2-hidden { display:none !important; }
+  /* ผลตรวจ: ภาพ 🅰 | ภาพ 🅱 | ตารางจุดต่าง (ARTWORK_V2_SIDE_TABLE · แสดงผลล้วน) */
+  .v2-resgrid { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(380px,0.95fr); gap:14px; margin-top:8px; align-items:start; }
+  .v2-rescol { min-width:0; }
+  .v2-side { min-width:0; position:sticky; top:64px; display:flex; flex-direction:column; gap:6px; }   /* ใต้แถบเมนูบน (sticky ~56 px) */
+  .v2-side-h { display:flex; flex-wrap:wrap; align-items:center; gap:6px; font-size:13px; }
+  .v2-side-tip { margin-left:auto; font-size:12px; }
+  .v2-side-empty { border:1px dashed #cbd5e1; border-radius:8px; padding:24px 12px; text-align:center; font-size:13px; }
+  .v2-tbl-wrap.v2-side-in { margin-top:0; overflow:auto; border:1px solid #e2e8f0; border-radius:8px; background:#fff; }
+  .v2-tbl-side { font-size:12.5px; }
+  .v2-tbl-side thead th { position:sticky; top:0; z-index:1; background:#f8fafc; box-shadow:inset 0 -1px 0 #e2e8f0;
+                          font-size:12px; color:#475569; font-weight:600; padding:6px; white-space:nowrap; }
+  .v2-tbl-side td { padding:6px; word-break:break-word; line-height:1.35; }
+  .v2-tbl-side td:nth-child(1) { color:#64748b; font-variant-numeric:tabular-nums; white-space:nowrap; width:1%; }
+  .v2-tbl-side td:nth-child(2) { width:1%; white-space:nowrap; }
+  .v2-tbl-side td:nth-child(5), .v2-tbl-side td:nth-child(6) { width:1%; white-space:nowrap; text-align:center; }
+  .v2-tbl-side .v2-cls { color:#64748b; font-size:11px; margin-top:2px; white-space:normal; max-width:9em; }
+  .v2-tbl-side tr.v2-s-red > td:first-child { box-shadow:inset 3px 0 0 #dc2626; }
+  .v2-tbl-side tr.v2-s-yellow > td:first-child { box-shadow:inset 3px 0 0 #d97706; }
+  .v2-tbl-side tr.v2-note > td { background:#f8fafc; color:#334155; font-size:12px; border-bottom:1px solid #e2e8f0; padding-top:4px; }
+  .v2-tbl-side tr.v2-note + tr > td { border-top:0; }
+  /* รีวิวจุดต่างโดยคน (ARTWORK_V2_REVIEW) */
+  .v2-rv { display:flex; flex-wrap:wrap; align-items:center; gap:3px; margin-top:5px; }
+  .v2-rvb { border:1px solid #cbd5e1; background:#fff; color:#334155; border-radius:4px; padding:1px 6px;
+            font-size:11px; line-height:1.5; cursor:pointer; white-space:nowrap; }
+  .v2-rvb:hover { background:#f1f5f9; }
+  .v2-rvb:disabled { opacity:.5; cursor:wait; }
+  .v2-rvb.real.on { background:#b91c1c; border-color:#b91c1c; color:#fff; }
+  .v2-rvb.false.on { background:#475569; border-color:#475569; color:#fff; }
+  .v2-rvs { font-size:11px; color:#64748b; white-space:nowrap; max-width:12em; overflow:hidden; text-overflow:ellipsis; }
+  .v2-tbl tr.v2-rv-real > td { background:#fff5f5; }
+  .v2-tbl tr.v2-rv-false > td { background:#f8fafc; color:#64748b; }
+  .v2-tbl tr.v2-rv-false mark { opacity:.6; }
+  #v2PairsRes.v2-rv-todo-only tr.v2-rv-done { display:none; }
+  .v2-revbar { margin-top:10px; border:1px solid #e2e8f0; border-radius:8px; padding:8px 10px; background:#fff; font-size:13px; }
+  .v2-revbar.done { border-color:#86efac; background:#f0fdf4; }
+  .v2-revbar .v2-revtop { display:flex; flex-wrap:wrap; align-items:center; gap:6px 12px; }
+  .v2-revprog { flex:1 1 140px; min-width:120px; max-width:260px; height:8px; border-radius:999px; background:#e2e8f0; overflow:hidden; display:flex; }
+  .v2-revprog i { display:block; height:100%; }
+  .v2-revprog i.r { background:#dc2626; } .v2-revprog i.f { background:#64748b; }
+  .v2-revtodo { margin-top:6px; display:flex; flex-wrap:wrap; gap:4px; align-items:center; }
+  .v2-revtodo button { border:1px solid #cbd5e1; background:#fff; border-radius:999px; padding:0 7px; font-size:11px; cursor:pointer; }
+  .v2-revtodo button.red { border-color:#fca5a5; color:#991b1b; }
+  .v2-revmsg { color:#b91c1c; font-size:12px; }
+  @media (max-width: 760px) {      /* จอแคบ: ปุ่มเหลือแค่สัญลักษณ์ (ชื่อเต็มอยู่ใน title) ⇒ คอลัมน์ข้อความไม่ถูกบีบ */
+    .v2-rvt, .v2-rvs { display:none; }
+    .v2-rvb { padding:1px 7px; font-size:13px; }
+  }
+  .v2-nbtn { border:1px solid #cbd5e1; background:#fff; color:#475569; border-radius:999px; width:22px; height:22px; padding:0;
+             font:600 12px/20px system-ui, sans-serif; cursor:pointer; }
+  .v2-nbtn:hover { background:#f1f5f9; }
+  .v2-nbtn.on { background:#1d4ed8; border-color:#1d4ed8; color:#fff; }
+  @media (max-width: 1199px) {
+    .v2-resgrid { grid-template-columns:minmax(0,1fr) minmax(0,1fr); }
+    .v2-side { grid-column:1 / -1; position:static; }
+  }
+  @media (max-width: 700px) { .v2-resgrid { grid-template-columns:minmax(0,1fr); } }
+  /* ── หน้าตาการ์ดผลตรวจแบบใหม่ (ARTWORK_V2_CARD_STYLE · แสดงผลล้วน · ทุกกฎผูกกับ data-card-style="polish") ── */
+  #v2Root[data-card-style="polish"] {
+    --v2-red:#dc2626; --v2-amber:#d97706; --v2-green:#16a34a; --v2-slate:#64748b; --v2-line:#e2e8f0; --v2-soft:#f8fafc;
+  }
+  #v2Root[data-card-style="polish"] #v2ResCard { padding:18px 20px; border-radius:14px; box-shadow:0 1px 3px rgba(15,23,42,.06), 0 8px 24px -12px rgba(15,23,42,.10); }
+  #v2Root[data-card-style="polish"] #v2ResCard > h3 { font-size:17px; letter-spacing:.1px; margin-bottom:12px; }
+  /* แถบผลตัดสิน: ไอคอนกลม + หัวเรื่อง + เหตุผล + ชิปข้อมูลรอบ */
+  #v2Root[data-card-style="polish"] .v2-verdict.v2-vx { display:flex; gap:14px; align-items:flex-start; padding:14px 18px;
+    border-radius:12px; border:1px solid transparent; font-size:inherit; font-weight:400; }
+  #v2Root[data-card-style="polish"] .v2-vic { flex:0 0 auto; width:40px; height:40px; border-radius:50%; display:grid; place-items:center;
+    font:800 20px/1 system-ui, sans-serif; color:#fff; background:var(--v2-slate); box-shadow:0 2px 6px rgba(15,23,42,.15); }
+  #v2Root[data-card-style="polish"] .v2-vbody { min-width:0; flex:1; }
+  #v2Root[data-card-style="polish"] .v2-vt { font-size:21px; font-weight:800; line-height:1.25; }
+  #v2Root[data-card-style="polish"] .v2-vt span { font-weight:600; opacity:.85; }
+  #v2Root[data-card-style="polish"] .v2-vr { margin-top:3px; font-size:14px; font-weight:500; }
+  #v2Root[data-card-style="polish"] .v2-vmeta { display:flex; flex-wrap:wrap; gap:5px; margin-top:8px; }
+  #v2Root[data-card-style="polish"] .v2-vmeta span { background:rgba(255,255,255,.65); border:1px solid rgba(15,23,42,.08);
+    border-radius:999px; padding:1px 9px; font-size:11.5px; color:#334155; overflow-wrap:anywhere; }
+  #v2Root[data-card-style="polish"] .v2-vx.v2-v-PASS { background:linear-gradient(90deg,#dcfce7,#f0fdf4); border-color:#bbf7d0; }
+  #v2Root[data-card-style="polish"] .v2-vx.v2-v-REVIEW { background:linear-gradient(90deg,#fef3c7,#fffbeb); border-color:#fde68a; }
+  #v2Root[data-card-style="polish"] .v2-vx.v2-v-FAIL { background:linear-gradient(90deg,#fee2e2,#fef2f2); border-color:#fecaca; }
+  #v2Root[data-card-style="polish"] .v2-vx.v2-v-UNREADABLE { background:linear-gradient(90deg,#e2e8f0,#f8fafc); border-color:#cbd5e1; }
+  #v2Root[data-card-style="polish"] .v2-vx.v2-v-PASS .v2-vic { background:var(--v2-green); }
+  #v2Root[data-card-style="polish"] .v2-vx.v2-v-REVIEW .v2-vic { background:var(--v2-amber); }
+  #v2Root[data-card-style="polish"] .v2-vx.v2-v-FAIL .v2-vic { background:var(--v2-red); }
+  /* คำเตือน + แถบรีวิว + คำอธิบายสัญลักษณ์ */
+  #v2Root[data-card-style="polish"] .v2-warnbox { border-radius:10px; border-left:4px solid #f59e0b; padding:9px 12px; }
+  #v2Root[data-card-style="polish"] .v2-revbar { border-radius:12px; padding:10px 14px; background:var(--v2-soft); }
+  #v2Root[data-card-style="polish"] .v2-revbar.done { background:#f0fdf4; }
+  #v2Root[data-card-style="polish"] .v2-revprog { height:10px; box-shadow:inset 0 1px 2px rgba(15,23,42,.08); }
+  #v2Root[data-card-style="polish"] .v2-revtodo button { background:#fff; padding:1px 9px; font-weight:600; transition:background .15s, border-color .15s; }
+  #v2Root[data-card-style="polish"] .v2-revtodo button:hover { background:#eff6ff; border-color:#93c5fd; }
+  #v2Root[data-card-style="polish"] .v2-legend { background:var(--v2-soft); border:1px solid var(--v2-line); border-radius:10px; padding:7px 12px; gap:6px 14px; }
+  /* การ์ดต่อคู่: แถบสีซ้ายตามผล + หัวการ์ด */
+  #v2Root[data-card-style="polish"] .v2-pcard { margin:16px 0; padding:14px 16px 16px; border-radius:12px; border-left:4px solid var(--v2-slate);
+    box-shadow:0 1px 2px rgba(15,23,42,.05); }
+  #v2Root[data-card-style="polish"] .v2-pcard.v2-pv-PASS { border-left-color:var(--v2-green); }
+  #v2Root[data-card-style="polish"] .v2-pcard.v2-pv-REVIEW { border-left-color:var(--v2-amber); }
+  #v2Root[data-card-style="polish"] .v2-pcard.v2-pv-FAIL { border-left-color:var(--v2-red); }
+  #v2Root[data-card-style="polish"] .v2-ph { display:flex; flex-wrap:wrap; align-items:center; gap:8px 10px; }
+  #v2Root[data-card-style="polish"] .v2-pnum { font-size:16px; font-weight:800; color:#0f172a; }
+  #v2Root[data-card-style="polish"] .v2-vpill { display:inline-flex; align-items:center; gap:4px; border-radius:999px; padding:2px 10px;
+    font-size:12px; font-weight:700; letter-spacing:.3px; }
+  #v2Root[data-card-style="polish"] .v2-covm { display:inline-flex; align-items:center; gap:7px; font-size:12px; color:#475569;
+    background:var(--v2-soft); border:1px solid var(--v2-line); border-radius:999px; padding:2px 10px; white-space:nowrap; }
+  #v2Root[data-card-style="polish"] .v2-covm i { display:inline-block; width:72px; height:6px; border-radius:999px; background:#e2e8f0; overflow:hidden; }
+  #v2Root[data-card-style="polish"] .v2-covm i b { display:block; height:100%; background:var(--v2-green); }
+  #v2Root[data-card-style="polish"] .v2-covm.lo i b { background:var(--v2-amber); }
+  #v2Root[data-card-style="polish"] .v2-preason { margin-top:4px; font-size:13px; color:#475569; }
+  /* หัวคอลัมน์ภาพ + กล่องภาพ */
+  #v2Root[data-card-style="polish"] .v2-colh { display:flex; align-items:center; gap:8px; min-height:26px; margin-bottom:6px; }
+  #v2Root[data-card-style="polish"] .v2-sbadge { font-size:18px; line-height:1; }
+  #v2Root[data-card-style="polish"] .v2-colm { min-width:0; font-size:12px; color:#64748b; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; cursor:help; }
+  #v2Root[data-card-style="polish"] .v2-colerr { font-size:12px; margin:-2px 0 6px; }
+  #v2Root[data-card-style="polish"] .v2-res-stage { border-color:#d6dde6; border-radius:10px; background:var(--v2-soft);
+    box-shadow:0 1px 2px rgba(15,23,42,.06); }
+  #v2Root[data-card-style="polish"] .v2-resgrid { margin-top:12px; gap:16px; }
+  /* ตารางจุดต่าง */
+  #v2Root[data-card-style="polish"] .v2-side-h { min-height:26px; }
+  #v2Root[data-card-style="polish"] .v2-side-h > b { font-size:14px; }
+  #v2Root[data-card-style="polish"] .v2-sev { border-radius:999px; padding:1px 8px; }
+  #v2Root[data-card-style="polish"] .v2-tbl-wrap.v2-side-in { border-radius:10px; box-shadow:0 1px 2px rgba(15,23,42,.05); }
+  #v2Root[data-card-style="polish"] .v2-tbl tr.click { transition:background .12s ease; }
+  #v2Root[data-card-style="polish"] .v2-tbl-side tr.v2-note > td { background:#f8fafc; border-left:0; }
+  /* ปุ่มรีวิวเป็นกลุ่มเดียวกัน (segmented) */
+  #v2Root[data-card-style="polish"] .v2-rv { gap:0; }
+  #v2Root[data-card-style="polish"] .v2-rv .v2-rvb { border-radius:0; padding:2px 8px; margin-left:-1px; transition:background .12s, color .12s; }
+  #v2Root[data-card-style="polish"] .v2-rv .v2-rvb:first-child { border-radius:999px 0 0 999px; margin-left:0; }
+  #v2Root[data-card-style="polish"] .v2-rv .v2-rvb.false { border-radius:0 999px 999px 0; }
+  #v2Root[data-card-style="polish"] .v2-rv .v2-rvb.real:hover:not(.on) { background:#fef2f2; color:#991b1b; }
+  #v2Root[data-card-style="polish"] .v2-rv .v2-rvs { margin-left:6px; }
+  /* ในตารางข้างภาพ (คอลัมน์แคบ): ปุ่มรีวิวซ้อนเป็นกลุ่มแนวตั้งกว้างเท่ากัน — ไม่ตัดเป็นรูปทรงไม่เท่ากัน */
+  #v2Root[data-card-style="polish"] .v2-tbl-side .v2-rv { display:inline-grid; grid-template-columns:auto; margin-top:6px; }
+  #v2Root[data-card-style="polish"] .v2-tbl-side .v2-rv .v2-rvb { margin:-1px 0 0; border-radius:0; text-align:left; padding:2px 7px; }
+  #v2Root[data-card-style="polish"] .v2-tbl-side .v2-rv .v2-rvb:first-child { margin-top:0; border-radius:8px 8px 0 0; }
+  #v2Root[data-card-style="polish"] .v2-tbl-side .v2-rv .v2-rvb.false { border-radius:0 0 8px 8px; }
+  #v2Root[data-card-style="polish"] .v2-tbl-side .v2-rv .v2-rvs { margin:3px 0 0; max-width:8.5em; }
+  #v2Root[data-card-style="polish"] .v2-ai { border-radius:10px; }
+  #v2Root[data-card-style="polish"] .v2-debris { border:1px solid var(--v2-line); border-radius:10px; padding:6px 10px; background:var(--v2-soft); }
+  #v2Root[data-card-style="polish"] .v2-debris > summary { font-weight:600; }
+  #v2Root[data-card-style="polish"] .v2-debris .v2-tbl-wrap { background:#fff; border-radius:8px; }
+  /* จอแคบ: แถวจุดต่างเป็นการ์ด — #/ระดับ/% บรรทัดแรก · 🅰 · 🅱 เต็มความกว้าง (ไม่ตัดกลางคำ) */
+  @media (max-width: 640px) {
+    #v2Root[data-card-style="polish"] #v2ResCard { padding:14px 12px; }
+    #v2Root[data-card-style="polish"] .v2-vic { width:32px; height:32px; font-size:16px; }
+    #v2Root[data-card-style="polish"] .v2-vt { font-size:18px; }
+    #v2Root[data-card-style="polish"] .v2-pcard { padding:12px 10px 12px 12px; }
+    #v2Root[data-card-style="polish"][data-side-table="1"] .v2-tbl,
+    #v2Root[data-card-style="polish"][data-side-table="1"] .v2-tbl > tbody { display:block; width:100%; }
+    #v2Root[data-card-style="polish"][data-side-table="1"] .v2-tbl > thead { display:none; }
+    #v2Root[data-card-style="polish"][data-side-table="1"] .v2-tbl tr[data-f] { display:grid; grid-template-columns:auto 1fr auto auto;
+      grid-template-areas:"id sev conf nb" "a a a a" "b b b b"; column-gap:8px; row-gap:2px; padding:8px 10px;
+      border-bottom:1px solid var(--v2-line); }
+    #v2Root[data-card-style="polish"][data-side-table="1"] .v2-tbl tr[data-f] > td { display:block; border:0; padding:0; width:auto; white-space:normal; }
+    #v2Root[data-card-style="polish"][data-side-table="1"] .v2-tbl tr[data-f] > td:nth-child(1) { grid-area:id; padding-top:1px; }
+    #v2Root[data-card-style="polish"][data-side-table="1"] .v2-tbl tr[data-f] > td:nth-child(2) { grid-area:sev; }
+    #v2Root[data-card-style="polish"][data-side-table="1"] .v2-tbl tr[data-f] > td:nth-child(3) { grid-area:a; margin-top:4px; }
+    #v2Root[data-card-style="polish"][data-side-table="1"] .v2-tbl tr[data-f] > td:nth-child(4) { grid-area:b; }
+    #v2Root[data-card-style="polish"][data-side-table="1"] .v2-tbl tr[data-f] > td:nth-child(5) { grid-area:conf; text-align:right; }
+    #v2Root[data-card-style="polish"][data-side-table="1"] .v2-tbl tr[data-f] > td:nth-child(6) { grid-area:nb; }
+    #v2Root[data-card-style="polish"][data-side-table="1"] .v2-tbl tr[data-f] > td:nth-child(3)::before { content:"🅰 "; }
+    #v2Root[data-card-style="polish"][data-side-table="1"] .v2-tbl tr[data-f] > td:nth-child(4)::before { content:"🅱 "; }
+    #v2Root[data-card-style="polish"][data-side-table="1"] .v2-tbl tr[data-f] .v2-cls { display:inline; margin-left:6px; max-width:none; }
+    #v2Root[data-card-style="polish"][data-side-table="1"] .v2-tbl tr.v2-s-red[data-f] { box-shadow:inset 3px 0 0 var(--v2-red); }
+    #v2Root[data-card-style="polish"][data-side-table="1"] .v2-tbl tr.v2-s-yellow[data-f] { box-shadow:inset 3px 0 0 var(--v2-amber); }
+    #v2Root[data-card-style="polish"][data-side-table="1"] .v2-tbl tr[data-f] > td:first-child { box-shadow:none; }
+    #v2Root[data-card-style="polish"][data-side-table="1"] .v2-tbl tr[data-f] > td { background:transparent !important; }
+    #v2Root[data-card-style="polish"][data-side-table="1"] .v2-tbl tr.v2-rv-real[data-f] { background:#fff5f5; }
+    #v2Root[data-card-style="polish"][data-side-table="1"] .v2-tbl tr.v2-rv-false[data-f] { background:#f8fafc; color:#64748b; }
+    #v2Root[data-card-style="polish"][data-side-table="1"] .v2-tbl tr.v2-note:not([hidden]) { display:block; }
+    #v2Root[data-card-style="polish"][data-side-table="1"] .v2-tbl tr.v2-note > td:first-child { display:none; }
+    #v2Root[data-card-style="polish"][data-side-table="1"] .v2-tbl tr.v2-note > td { display:block; padding:6px 10px 8px; }
+    #v2Root[data-card-style="polish"] #v2PairsRes.v2-rv-todo-only tr.v2-rv-done { display:none; }
+    #v2Root[data-card-style="polish"] .v2-rvt, #v2Root[data-card-style="polish"] .v2-rvs { display:inline; }
+    #v2Root[data-card-style="polish"] .v2-rv .v2-rvb { font-size:11.5px; padding:2px 9px; }
+    #v2Root[data-card-style="polish"] .v2-tbl-side .v2-rv { display:flex; flex-wrap:wrap; max-width:none; }
+    #v2Root[data-card-style="polish"] .v2-tbl-side .v2-rv .v2-rvb { margin:0 0 0 -1px; text-align:center; }
+    #v2Root[data-card-style="polish"] .v2-tbl-side .v2-rv .v2-rvb:first-child { margin-left:0; border-radius:999px 0 0 999px; }
+    #v2Root[data-card-style="polish"] .v2-tbl-side .v2-rv .v2-rvb.false { border-radius:0 999px 999px 0; }
+    #v2Root[data-card-style="polish"] .v2-tbl-side .v2-rv .v2-rvs { margin:0 0 0 6px; align-self:center; }
+  }
+  .v2-legend span { display:inline-flex; align-items:center; gap:4px; margin-right:12px; font-size:12px; color:#475569; }
+  .v2-legend i { display:inline-block; width:14px; height:10px; border:2px solid; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="v2" id="v2Root" data-can-manage="{{ 1 if can_manage_key else 0 }}" data-version="{{ v2_version }}" data-box-style="{{ v2_box_style }}" data-restore-confirm="{{ 1 if v2_restore_confirm else 0 }}" data-restore-days="{{ v2_restore_days }}" data-hover-zoom="{{ 1 if v2_hover_zoom else 0 }}" data-line-group="{{ 1 if v2_line_group else 0 }}" data-sort-severity="{{ 1 if v2_sort_severity else 0 }}" data-table-rows="{{ v2_table_rows }}" data-side-table="{{ 1 if v2_side_table else 0 }}" data-zone-ignore="{{ 1 if v2_zone_ignore else 0 }}" data-ignore-max="{{ v2_ignore_max }}" data-est-box="{{ 1 if v2_est_box else 0 }}" data-review="{{ 1 if v2_review else 0 }}" data-card-style="{{ 'polish' if v2_card_style else 'classic' }}">
+  <div class="v2-head">
+    <h2>Artwork V2 <span class="v2-sub">เทียบข้อความสองไฟล์ด้วย Google Cloud Vision OCR · PoC</span></h2>
+    <span class="v2-sub">โมดูล {{ v2_version }}</span>
+  </div>
+
+  <!-- ① ตั้งค่า API key -->
+  <section class="v2-card" id="v2KeyCard">
+    <h3>① Cloud Vision API key</h3>
+    <div class="v2-row"><span id="v2KeyStatus" class="v2-muted">กำลังตรวจสถานะ…</span></div>
+    <div class="v2-row" id="v2KeyForm" style="margin-top:8px">
+      <input type="password" id="v2KeyInput" class="v2-input v2-key" placeholder="วาง API key (AIza…)" autocomplete="off" spellcheck="false">
+      <button class="v2-btn primary" id="v2KeySave">บันทึก</button>
+      <button class="v2-btn" id="v2KeyTest">ทดสอบกุญแจ</button>
+      <button class="v2-btn danger" id="v2KeyDel">ลบกุญแจ</button>
+    </div>
+    <div class="v2-row" style="margin-top:6px"><span id="v2KeyMsg" class="v2-muted"></span></div>
+    <div class="v2-muted" style="margin-top:6px">กุญแจเก็บฝั่งเซิร์ฟเวอร์ (ไม่เก็บในเบราว์เซอร์ · ไม่แสดงเต็มอีก · ไม่อยู่ใน Log) · ตั้งใน Google Cloud ให้จำกัดเฉพาะ Cloud Vision API และ IP ของโรงงาน</div>
+  </section>
+
+  <!-- ② อัปโหลด -->
+  <section class="v2-card">
+    <h3>② ไฟล์ที่จะเทียบ</h3>
+    <div id="v2Restore" class="v2-restore" style="display:none"></div>
+    <div class="v2-row">
+      <label>🅰 ไฟล์ต้นฉบับ <input type="file" id="v2FileA" accept=".pdf,.jpg,.jpeg,.png,.webp,.tif,.tiff,.bmp"></label>
+      <label>🅱 ไฟล์ที่ตรวจ <input type="file" id="v2FileB" accept=".pdf,.jpg,.jpeg,.png,.webp,.tif,.tiff,.bmp"></label>
+      <button class="v2-btn primary" id="v2Upload">เริ่มงานใหม่</button>
+      <span id="v2UpMsg" class="v2-muted"></span>
+    </div>
+    <div class="v2-row" style="margin-top:8px">
+      <label>หรือเปิดงานเดิม <select id="v2Recent" class="v2-input"><option value="">— เลือก —</option></select></label>
+    </div>
+  </section>
+
+  <!-- ③ วาดโซน -->
+  <section class="v2-card v2-hidden" id="v2DrawCard">
+    <h3>③ วาดโซนคู่ <span class="v2-muted" id="v2JobLabel"></span></h3>
+    <div class="v2-muted">ลากกรอบบน 🅰 แล้วลากกรอบที่ตรงกันบน 🅱 (1 คู่ = 1 โซนต่อฝั่ง · สูงสุด 8 คู่) — ส่งให้ Google เฉพาะภาพในกรอบเท่านั้น · ลากกรอบให้ครอบบรรทัดเต็ม ๆ ไม่ตัดผ่านตัวหนังสือ</div>
+    <div class="v2-tools">
+      <button data-mode="pan" class="on" title="ลากที่ว่าง = เลื่อนภาพ · คลิกโซน = เลือก · ลากโซน = ย้าย · ลากจุดจับ = ย่อขยาย">🖐 เลือก / เลื่อนภาพ</button>
+      <button data-mode="draw" title="ลากบนภาพเพื่อวาดโซนใหม่ (Esc = ยกเลิก)">✏️ วาดโซน</button>
+      {% if v2_zone_ignore %}<button data-mode="ign" title="ลากภายในโซนเพื่อกำหนดพื้นที่ที่ไม่ต้องตรวจ (เช่นช่องพิมพ์ inkjet · ป้ายขนาดของโรงพิมพ์) — จุดต่างในพื้นที่นี้ไปอยู่รายการพับ ไม่นับในผลตัดสิน · คลิก ✕ บนกรอบเพื่อลบ">⛔ พื้นที่ยกเว้น</button>{% endif %}
+      <label class="v2-muted" title="ติ๊กไว้ = วาดได้หลายโซนติดกันโดยไม่ต้องกดปุ่มวาดใหม่ · คลิกเปล่า/Esc = เลิกวาด"><input type="checkbox" id="v2DrawCont"> วาดต่อเนื่อง</label>
+      <span class="v2-muted">ล้อเมาส์ = ซูม · ปุ่มกลางลาก / Space ค้างแล้วลาก = เลื่อนภาพทุกโหมด · ลูกศร = ขยับโซนที่เลือก (Shift = ×10) · Delete = ลบ · ↻ ที่มุมโซน = มุมที่ส่งให้ Vision</span>
+    </div>
+    <div class="v2-panes" style="margin-top:8px">
+      <div>
+        <div class="v2-pane-h"><b>🅰 <span id="v2NameA"></span></b><label class="v2-muted">หน้า <select id="v2PageA" class="v2-input"></select></label></div>
+        <div class="v2-zbar" data-side="a">
+          <button data-z="out" title="ซูมออก">−</button><input type="range" data-z="range" min="10" max="400" value="100" aria-label="ซูม 🅰"><button data-z="in" title="ซูมเข้า">+</button>
+          <span class="v2-zpct">100%</span>
+          <button data-z="fitw" title="ย่อ/ขยายให้พอดีความกว้างกล่อง">⤢ พอดีความกว้าง</button>
+          <button data-z="fitp" title="เห็นทั้งหน้าในกล่องเดียว">⛶ ทั้งหน้า</button>
+          <button data-z="100">100%</button>
+          <button data-z="rot" class="v2-rotbtn" title="หมุนจอของไฟล์นี้ 90° ตามเข็ม — หมุนให้อ่านตัวหนังสือได้ตรง · โซนของไฟล์นี้จะส่งภาพให้ Vision ในแนวที่เห็นบนจอ (เปลี่ยนรายโซนได้ที่ ↻ มุมโซน)">↻ <span class="v2-rotdeg">0°</span></button>
+        </div>
+        <div class="v2-stage-box" id="v2BoxA"><div class="v2-rot" id="v2RotA"><div class="v2-stage" id="v2StageA"><img id="v2ImgA" alt="ภาพตัวอย่างไฟล์ A" draggable="false"><div class="v2-ov" data-side="a"></div></div></div></div>
+      </div>
+      <div>
+        <div class="v2-pane-h"><b>🅱 <span id="v2NameB"></span></b><label class="v2-muted">หน้า <select id="v2PageB" class="v2-input"></select></label></div>
+        <div class="v2-zbar" data-side="b">
+          <button data-z="out" title="ซูมออก">−</button><input type="range" data-z="range" min="10" max="400" value="100" aria-label="ซูม 🅱"><button data-z="in" title="ซูมเข้า">+</button>
+          <span class="v2-zpct">100%</span>
+          <button data-z="fitw" title="ย่อ/ขยายให้พอดีความกว้างกล่อง">⤢ พอดีความกว้าง</button>
+          <button data-z="fitp" title="เห็นทั้งหน้าในกล่องเดียว">⛶ ทั้งหน้า</button>
+          <button data-z="100">100%</button>
+          <button data-z="rot" class="v2-rotbtn" title="หมุนจอของไฟล์นี้ 90° ตามเข็ม — หมุนให้อ่านตัวหนังสือได้ตรง · โซนของไฟล์นี้จะส่งภาพให้ Vision ในแนวที่เห็นบนจอ (เปลี่ยนรายโซนได้ที่ ↻ มุมโซน)">↻ <span class="v2-rotdeg">0°</span></button>
+        </div>
+        <div class="v2-stage-box" id="v2BoxB"><div class="v2-rot" id="v2RotB"><div class="v2-stage" id="v2StageB"><img id="v2ImgB" alt="ภาพตัวอย่างไฟล์ B" draggable="false"><div class="v2-ov" data-side="b"></div></div></div></div>
+      </div>
+    </div>
+    <div class="v2-pairs" id="v2Pairs"></div>
+    <div class="v2-thumb v2-hidden" id="v2Thumb"><div class="v2-muted" id="v2ThumbCap"></div><canvas id="v2ThumbCv"></canvas></div>
+    <div class="v2-row" style="margin-top:10px">
+      <button class="v2-btn primary" id="v2Run">ตรวจ</button>
+      <button class="v2-btn" id="v2Clear">ล้างโซนทั้งหมด</button>
+      <label class="v2-muted" title="คมสูงสุด = เรนเดอร์ PDF ที่ dpi สูงสุดที่คู่ภาพยังส่งในคำขอเดียวกันได้ (ภาพถ่ายส่งพิกเซลต้นฉบับอยู่แล้ว)">ภาพที่ส่ง
+        <select id="v2Sharp" class="v2-input">
+          <option value="max"{% if v2_sharpness == "max" %} selected{% endif %}>คมสูงสุด (ทดลอง)</option>
+          <option value="standard"{% if v2_sharpness == "standard" %} selected{% endif %}>มาตรฐาน 400 dpi (แนะนำ)</option>
+        </select></label>
+      <label class="v2-muted" title="สีของภาพที่ส่งให้ Vision (ทดลอง A/B) · เทา = ความสว่างครบ ไม่ตัดเกณฑ์ · ขาวดำ = ตัดเกณฑ์เฉพาะที่ อาจทำให้จุดอักษรเล็ก ๆ หาย · การตรวจด้วยภาพ (หลักฐานภาพ) ยังเทียบจากไฟล์ต้นฉบับเสมอ">สีของภาพ
+        <select id="v2Color" class="v2-input">
+          <option value="color"{% if v2_color_mode == "color" %} selected{% endif %}>สี (เดิม · แนะนำ)</option>
+          <option value="gray"{% if v2_color_mode == "gray" %} selected{% endif %}>เทา (ทดลอง)</option>
+          <option value="bw"{% if v2_color_mode == "bw" %} selected{% endif %}>ขาวดำ (ทดลอง)</option>
+        </select></label>
+      <label class="v2-muted" title="ส่งข้อความที่ Vision อ่านได้ให้ Gemini (ผ่าน N8N) ตรวจทาน — ไม่ส่งภาพ ไม่ยิง Vision ซ้ำ · % ความมั่นใจคิดจาก Vision เสมอ">AI ตรวจทาน
+        <select id="v2Ai" class="v2-input">
+          <option value="assist"{% if v2_ai_mode == "assist" %} selected{% endif %}>อัลกอริทึมตัดสิน + AI เสริม</option>
+          {% if v2_ai_experimental or v2_ai_mode in ('judge', 'raw') %}
+          <option value="judge"{% if v2_ai_mode == "judge" %} selected{% endif %}>AI ตัดสินหลัก (ทดลอง)</option>
+          <option value="raw"{% if v2_ai_mode == "raw" %} selected{% endif %} title="ส่งบรรทัดตามที่ Vision อ่านได้ตรง ๆ (ไม่ผ่านอัลกอริทึม) ให้ Gemini เทียบเองแบบคิดนาน · กรอบ/% ยังมาจาก Vision · ใช้เวลานานขึ้น">AI ตัดสินจากข้อมูลดิบ (ทดลอง)</option>
+          {% endif %}
+          <option value="off"{% if v2_ai_mode == "off" %} selected{% endif %}>ปิด AI</option>
+        </select></label>
+      <span id="v2RunMsg" class="v2-muted"></span>
+    </div>
+  </section>
+
+  <!-- ④ ผล -->
+  <section class="v2-card v2-hidden" id="v2ResCard">
+    <h3>④ ผลการตรวจ</h3>
+    <div id="v2Verdict"></div>
+    <div id="v2Warn"></div>
+    {% if v2_review %}<div id="v2Review"></div>{% endif %}
+    <div class="v2-row v2-legend" style="margin-top:10px">
+      <span><i style="border-color:#dc2626"></i>ต่าง (มั่นใจ)</span>
+      <span><i style="border-color:#d97706;border-style:dashed"></i>ไม่มั่นใจ — ดูด้วยตา</span>
+      <label><input type="checkbox" id="v2ShowOcr"> แสดงกรอบบรรทัดที่ OCR อ่านได้</label>
+      <label><input type="checkbox" id="v2ShowSkip" checked> แสดงพื้นที่ที่ไม่ได้ตรวจ (ภาพ/บาร์โค้ด)</label>
+      {% if v2_hover_zoom %}<span class="v2-muted" id="v2ZoomHint">🔍 ชี้เมาส์ที่แถวในตาราง = ซูมภาพไปที่จุดนั้น · คลิกแถว = ค้างไว้ (คลิกซ้ำ/Esc = ปล่อย)</span>{% endif %}
+    </div>
+    <div id="v2PairsRes"></div>
+  </section>
+
+  <!-- ⑤ Log -->
+  <section class="v2-card v2-hidden" id="v2LogCard">
+    <h3>⑤ Log สำหรับวิเคราะห์</h3>
+    <div class="v2-muted">กด “คัดลอก Log” แล้ววางส่งให้ Claude ได้ทันที — มีทุกค่าที่ใช้ตัดสิน และไม่มี API key</div>
+    <div class="v2-row" style="margin:8px 0">
+      <button class="v2-btn primary" id="v2CopyLog">คัดลอก Log</button>
+      <a class="v2-btn" id="v2DlLog" href="#">ดาวน์โหลด log.txt</a>
+      <a class="v2-btn" id="v2DlJson" href="#" download>ดาวน์โหลด result.json</a>
+      <span id="v2RawLinks" class="v2-muted"></span>
+      <span id="v2CopyMsg" class="v2-muted"></span>
+    </div>
+    <textarea class="v2-log" id="v2Log" readonly spellcheck="false"></textarea>
+  </section>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/artwork_v2.js') }}?v={{ v2_version }}"></script>
+{% endblock %}

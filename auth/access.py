@@ -48,6 +48,8 @@ _PERM_RULES = [
     ("/label_paper",           "inspect_label_paper"),
     ("/api/label_paper",       "inspect_label_paper"),
     ("/artwork_check",         "inspect_artwork"),
+    ("/artwork_v2",            "inspect_artwork"),
+    ("/api/artwork_v2",        "inspect_artwork"),
     ("/api/artwork",           "inspect_artwork"),
     # Live detection + snapshot + camera/model control + the home page.
     ("/video_feed",            "run_live_detection"),

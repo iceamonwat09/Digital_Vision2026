@@ -29,6 +29,7 @@
                 {% endif %}
                 {% if has_perm('inspect_artwork') %}
                 <li><a href="/artwork_check" class="nav-link{{ ' active' if p.startswith('/artwork_check') else '' }}">ตรวจ Artwork</a></li>
+                <li><a href="/artwork_v2" class="nav-link{{ ' active' if p.startswith('/artwork_v2') else '' }}">Artwork V2</a></li>
                 {% endif %}
                 {% if has_perm('view_dashboard') %}
                 <li><a href="/dashboard" class="nav-link{{ ' active' if p.startswith('/dashboard') else '' }}">แดชบอร์ด</a></li>

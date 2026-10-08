@@ -1,0 +1,371 @@
+=== ARTWORK V2 · CLOUD VISION OCR · DIAGNOSTIC LOG ===
+version=2026.10.03-v2sharp job=20261003_125941_34edee run=run_002 at=2026-10-03 13:31:49 owner=admin
+VERDICT=FAIL (ไม่ผ่าน)
+  - พบจุดต่างที่มั่นใจ 7 จุด
+  - จุดที่ไม่มั่นใจ 8 จุด (ต้องดูด้วยตา)
+time_ms: render=5827 vision=69665 compare=747 reread=25866 total=102114
+sharpness=max (ภาพที่ส่ง: คมสูงสุด)
+api_key: source=ui masked=••••L_6g length=39
+
+[SETTINGS]
+  ENDPOINT=https://eu-vision.googleapis.com
+  MODEL=builtin/stable
+  LANGUAGE_HINTS=[]
+  TIMEOUT_S=120.0
+  RETRIES=2
+  MAX_REQUEST_BYTES=9500000
+  MAX_IMAGE_BYTES=7121928
+  MAX_IMAGE_MP=40.0
+  JPEG_QUALITIES=[92, 88, 84, 80, 75, 70]
+  PDF_ZONE_DPI=400
+  PDF_ZONE_DPI_MAX=1200
+  ZONE_MIN_LONG_SIDE=1600
+  SHARPNESS=max
+  SHARP_FILL=0.92
+  SHARP_MAX_RENDERS=4
+  CONF_FAIL=0.8
+  CONF_LOW=0.6
+  COVERAGE_MIN=0.9
+  PAIR_MIN_SIM=0.6
+  PAIR_MIN_RUN=0.4
+  PAIR_MAX_DIST=0.12
+  ROW_MERGE_ENABLED=True
+  ROW_MAX_ANGLE=10.0
+  PUNCT_CAN_FAIL=True
+  CURVED_GROUP_ENABLED=True
+  TILT_ANGLE=10.0
+  CURVED_NEIGHBOR_MAX_CHARS=8
+  DEBRIS_ENABLED=True
+  DEBRIS_CONF=0.6
+  REREAD_ENABLED=True
+  REREAD_MAX=12
+  REREAD_SCALE=2.0
+  REREAD_MAX_SIDE=2400
+
+[FILES]
+  A: name=LBL Avoderm_Master-1 (ผิด) (1).pdf type=pdf bytes=657986 sha1=0789255e7f9e pages=1 page_mm=[297.0, 210.0]
+  B: name=LBL Avoderm_Master-2 (ถูก) (1).pdf type=pdf bytes=1381438 sha1=3039f7fd6e04 pages=2 page_mm=[303.0, 216.0]
+
+[VISION REQUESTS]
+  #0 phase=main images=p1_a,p1_b json_bytes=8762190 http=200 attempts=1 ms=69612 model=builtin/stable at=2026-10-03 13:31:22
+  #1 phase=reread:main images=rr1_a,rr1_b,rr2_a,rr2_b,rr3_a,rr3_b,rr4_a,rr4_b,rr5_a,rr5_b,rr6_a,rr6_b,rr7_a,rr7_b,rr8_a,rr8_b json_bytes=2182406 http=200 attempts=1 ms=17003 model=builtin/stable at=2026-10-03 13:31:43
+  #2 phase=reread:main images=rr9_a,rr9_b json_bytes=647578 http=200 attempts=1 ms=6161 model=builtin/stable at=2026-10-03 13:31:49
+
+[PAIR 1] verdict=FAIL coverage=0.991 (A=0.991 B=0.994) same_request=True methods={'exact': 53, 'content': 11, 'position': 3}
+  A: page=1 bbox=[0.08321, 0.29929, 0.79111, 0.44954] render_dpi=763.0 zone_mm=[235.0, 94.4] render_px=[7059, 2837] image_scale=- sent_px=[7059, 2837] jpeg_q=92 downscale=1.0 jpeg_bytes=3324090 sha1=fa0d6e201ae5 req=0 ok=True
+     sharp: mode=max base_dpi=400.0 → dpi=763.0 (×1.907) budget=3560k tries=[400:1346k 624:2482k 763:3324k]
+     ocr: blocks=33 by_type={'TEXT': 33} paragraphs=48 words=568 symbols=2514 lines=74 chars=2514 conf_mean=0.957 conf_min=0.088 low_conf(<0.6)=0.024 langs=['en'] breaks={'LINE_BREAK': 48, 'EOL_SURE_SPACE': 26} soft_hyphen_lines=0 angles={0: 567, 270: 1} skipped_blocks=0 text_len=2930 pages=[(7059, 2837)]
+  B: page=1 bbox=[0.16899, 0.34494, 0.70447, 0.38851] render_dpi=865.3 zone_mm=[213.5, 83.9] render_px=[7273, 2859] image_scale=- sent_px=[7273, 2859] jpeg_q=92 downscale=1.0 jpeg_bytes=3247382 sha1=7f21e2a57423 req=0 ok=True
+     sharp: mode=max base_dpi=400.0 → dpi=865.3 (×2.163) budget=3560k tries=[400:1091k 693:2387k 865:3247k]
+     ocr: blocks=34 by_type={'TEXT': 34} paragraphs=47 words=563 symbols=2498 lines=78 chars=2498 conf_mean=0.961 conf_min=0.097 low_conf(<0.6)=0.018 langs=['en'] breaks={'LINE_BREAK': 47, 'EOL_SURE_SPACE': 31} soft_hyphen_lines=0 angles={0: 561, 90: 1, 270: 1} skipped_blocks=0 text_len=2919 pages=[(7273, 2859)]
+  pairing: line_pairs=67 unpaired_a=[24, 40, 55] unpaired_b=[16, 19, 39, 63, 71, 72] reflow_lines_a=[55] reflow_lines_b=[] reflow_edges=['B:product,returntheunusedportiontoyour']
+  row_merges (9) — ต่อแถวที่ OCR ตัดตรงเส้นตกแต่ง:
+     A: "Calcium (min)......" + "....0.20%"
+     A: "Ash (max)..........." + ".4.0%"
+     A: "Metabolizable Energy (calculated).........." + "..797 kcal/kg"
+     A: "Metabolizable Energy (calculated)" + ".294 kcal/can"
+     B: "Crude Fat (min)..........." + "..2.0%"
+     B: "Moisture (max)....……………….." + "..84.0%"
+     B: "Metabolizable Energy (calculated).........." + "...........797 kcal/kg"
+     B: "Metabolizable Energy (calculated)" + "....."
+     B: "Metabolizable Energy (calculated) ....." + ".294 kcal/can"
+  curved_lines (เอียง > 10° จากแนวหลัก + เศษติดกัน): A=[21, 22, 40] B=[39, 40, 41]
+  findings (15):
+   F1 YELLOW TEXT method=content score=0.999
+      A line=28 frag="." word=".294" conf=0.903 box=[1730,1701,1741,1738]
+        text="Metabolizable Energy (calculated) .294 kcal/can"
+      B line=25 frag="..... ." word="..... .294" conf=0.628 box=[1193,1708,1745,1758]
+        text="Metabolizable Energy (calculated) ..... .294 kcal/can"
+   F2 YELLOW PUNCT method=content score=0.999
+      A line=10 frag="" word="(max)....….……………………….....2.0%" conf=0.465 box=[789,1228,795,1272]
+        text="Crude Fiber (max)....….……………………….....2.0%"
+      B line=14 frag="." word="(max.)..................2.0%" conf=0.395 box=[761,1225,782,1271]
+        text="Crude Fiber (max.)..................2.0%"
+   F3 RED CASE method=content score=0.999
+      A line=33 frag="c" word="D-calcium" conf=0.977 box=[510,2093,530,2139]
+        text="D-calcium Pantothenate, Thiamine Mononitrate, Beta-carotene, Biotin, Riboflavin"
+      B line=30 frag="C" word="D-Calcium" conf=0.987 box=[494,2104,518,2150]
+        text="D-Calcium Pantothenate, Thiamine Mononitrate, Beta-carotene, Biotin, Riboflavin"
+      note: ยืนยันด้วยการอ่านซ้ำแบบซูมแล้ว
+   F4 YELLOW PUNCT method=content score=0.997
+      A line=9 frag="." word="(min.)............2.0%" conf=0.374 box=[726,1154,747,1198]
+        text="Crude Fat (min.)............2.0%"
+      B line=13 frag="" word="(min)..........." conf=0.626 box=[728,1151,734,1193]
+        text="Crude Fat (min)........... ..2.0%"
+   F5 YELLOW NUMBER method=content score=0.992
+      A line=12 frag="..............0.16%" word="(min)..............0.16%" conf=0.501 box=[1563,1149,1944,1198]
+        text="Phosphorus (min)..............0.16%"
+      B line=18 frag="" word="(min)" conf=0.962 box=[1568,1146,1576,1195]
+        text="Phosphorus (min)"
+   F6 YELLOW NUMBER method=content score=0.985
+      A line=51 frag="/2" word="1/2" conf=0.433 box=[5649,980,5704,1044]
+        text="Feed adult dogs 1/2 - 1 can per 5-10 lbs body weight per day."
+      B line=52 frag="" word="-" conf=0.866 box=[5761,974,5771,1040]
+        text="Feed adult dogs 1 - 1 can per 5-10 lbs body weight per day."
+   F7 RED TEXT method=content score=0.973
+      A line=42 frag="" word="&" conf=0.985 box=[4181,2462,4193,2538]
+        text="for All Breed & Lifestages"
+      B line=43 frag="s" word="Breeds" conf=0.977 box=[4206,2482,4240,2556]
+        text="for All Breeds & Lifestages"
+      note: ยืนยันด้วยการอ่านซ้ำแบบซูมแล้ว
+   F8 RED PUNCT method=content score=0.889
+      A line=63 frag="," word="Hwy," conf=0.982 box=[5867,1913,5880,1964]
+        text="16321 Arrow Hwy, Irwindale Park, CA 91706"
+      B line=65 frag="" word="Irwindale," conf=0.934 box=[5950,1922,5958,1971]
+        text="16321 Arrow Hwy Irwindale, CA 91706 USA"
+      note: ยืนยันด้วยการอ่านซ้ำแบบซูมแล้ว
+   F9 RED TEXT method=content score=0.889
+      A line=63 frag="Park" word="Park," conf=0.979 box=[6108,1913,6202,1964]
+        text="16321 Arrow Hwy, Irwindale Park, CA 91706"
+      B line=65 frag="" word="Irwindale," conf=0.981 box=[6168,1922,6176,1971]
+        text="16321 Arrow Hwy Irwindale, CA 91706 USA"
+      note: ยืนยันด้วยการอ่านซ้ำแบบซูมแล้ว
+   F10 RED TEXT method=content score=0.889
+      A line=63 frag="" word="91706" conf=0.988 box=[6424,1913,6432,1964]
+        text="16321 Arrow Hwy, Irwindale Park, CA 91706"
+      B line=65 frag="USA" word="USA" conf=0.977 box=[6419,1922,6508,1971]
+        text="16321 Arrow Hwy Irwindale, CA 91706 USA"
+      note: ยืนยันด้วยการอ่านซ้ำแบบซูมแล้ว
+   F11 RED TEXT method=content score=0.879
+      A line=36 frag="phate Pentahydr" word="Sulphate Pentahydrate." conf=0.987 box=[1778,2308,2102,2357]
+        text="Potassium Iodide), Choline Chloride, Magnesium Sulfate, Copper Sulphate Pentahydrate."
+      B line=33 frag="f" word="Sulfate." conf=0.994 box=[1786,2322,1806,2372]
+        text="Potassium Iodide), Choline Chloride, Magnesium Sulfate, Copper Sulfate."
+      note: ยืนยันด้วยการอ่านซ้ำแบบซูมแล้ว
+   F12 RED MISSING_IN_B method=unpaired score=-
+      A line=24 frag="Ash (max)........... .4.0%" word="" conf=0.819 box=[461,1371,1142,1420]
+        text="Ash (max)........... .4.0%"
+      B line=None frag="" word="" conf=- box=-
+        text=""
+      note: ยืนยันด้วยการอ่านซ้ำแบบซูมแล้ว
+   F13 YELLOW EXTRA_IN_B method=unpaired score=-
+      A line=None frag="" word="" conf=- box=-
+        text=""
+      B line=16 frag="..4.0%" word="" conf=0.923 box=[1019,1375,1139,1410]
+        text="..4.0%"
+      note: อ่านซ้ำแบบซูมแล้วไม่พบความต่างเดิม — อาจเป็น OCR อ่านเพี้ยน (ยังแสดงไว้ ไม่ลบ)
+   F14 YELLOW EXTRA_IN_B method=unpaired score=-
+      A line=None frag="" word="" conf=- box=-
+        text=""
+      B line=19 frag="0.16%" word="" conf=0.899 box=[1837,1144,1964,1194]
+        text="0.16%"
+      note: อ่านซ้ำแบบซูมแล้วไม่พบความต่างเดิม — อาจเป็น OCR อ่านเพี้ยน (ยังแสดงไว้ ไม่ลบ)
+   F15 YELLOW CURVED method=group score=-
+      A line=None frag="" word="" conf=0.606 box=[4301,1890,4669,2096]
+        text="OMEGA-6 · 5 & -3 FATTY"
+      B line=None frag="" word="" conf=0.496 box=[4038,1673,4747,2091]
+        text="& -3 FATTY I · WITH"
+      note: ข้อความโค้ง/เอียง — OCR อ่านไม่นิ่ง ดูด้วยตา (3 จุด)
+       · F- YELLOW NUMBER method=content score=0.996 curved
+       ·    A line=21 frag="" word="OMEGA-6" conf=0.606 box=[4338,2005,4352,2096]
+       ·      text="OMEGA-6"
+       ·    B line=41 frag="& -3 FATTY I" word="& -3 FATTY I" conf=0.496 box=[4391,1869,4747,2091]
+       ·      text="OMEGA-6 & -3 FATTY I"
+       · F- YELLOW MISSING_IN_B method=unpaired score=- curved
+       ·    A line=40 frag="5 & -3 FATTY" word="" conf=0.881 box=[4301,1890,4669,2076]
+       ·      text="5 & -3 FATTY"
+       ·    B line=None frag="" word="" conf=- box=-
+       ·      text=""
+       ·    note: อ่านซ้ำแบบซูมแล้วไม่พบความต่างเดิม — อาจเป็น OCR อ่านเพี้ยน (ยังแสดงไว้ ไม่ลบ)
+       · F- YELLOW EXTRA_IN_B method=unpaired score=- curved
+       ·    A line=None frag="" word="" conf=- box=-
+       ·      text=""
+       ·    B line=39 frag="WITH" word="" conf=0.986 box=[4038,1673,4126,1853]
+       ·      text="WITH"
+       ·    note: อ่านซ้ำแบบซูมแล้วไม่พบความต่างเดิม — อาจเป็น OCR อ่านเพี้ยน (ยังแสดงไว้ ไม่ลบ)
+  debris — เศษอักขระ / ขอบโซน ไม่นับในผลตัดสิน (3):
+   F16 DEBRIS EXTRA_IN_B method=unpaired score=-
+      A line=None frag="" word="" conf=- box=-
+        text=""
+      B line=63 frag="Ⓡ" word="" conf=0.505 box=[6326,1812,6339,1824]
+        text="Ⓡ"
+      note: เศษอักขระ / ขอบโซน — ไม่มีตัวอักษรหรือตัวเลข และความมั่นใจต่ำหรือชิดขอบโซน (ไม่นับในผลตัดสิน)
+   F17 DEBRIS EXTRA_IN_B method=unpaired score=-
+      A line=None frag="" word="" conf=- box=-
+        text=""
+      B line=71 frag="|" word="" conf=0.828 box=[7241,97,7261,169]
+        text="|"
+      note: เศษอักขระ / ขอบโซน — ไม่มีตัวอักษรหรือตัวเลข และความมั่นใจต่ำหรือชิดขอบโซน (ไม่นับในผลตัดสิน)
+   F18 DEBRIS EXTRA_IN_B method=unpaired score=-
+      A line=None frag="" word="" conf=- box=-
+        text=""
+      B line=72 frag="|" word="" conf=0.552 box=[7228,243,7261,310]
+        text="|"
+      note: เศษอักขระ / ขอบโซน — ไม่มีตัวอักษรหรือตัวเลข และความมั่นใจต่ำหรือชิดขอบโซน (ไม่นับในผลตัดสิน)
+  OCR lines A (70):
+   A000 conf=0.99 min=0.96 ang=0 box=[654,94,2023,186] "CHICKEN & VEGGIES"
+   A001 conf=0.99 min=0.97 ang=0 box=[773,244,1920,338] "RECIPE IN GRAVY"
+   A002 conf=0.97 min=0.34 ang=0 box=[458,552,2231,609] "AvoDermⓇ Dog Stews are crafted in small batches and formulated for"
+   A003 conf=0.98 min=0.93 ang=0 box=[463,635,2227,695] "healthy skin and coat. Our Chicken & Veggies Recipe in Gravy features"
+   A004 conf=0.99 min=0.92 ang=0 box=[464,719,2233,779] "boneless chicken, fresh carrots, green beans, pumpkin and other"
+   A005 conf=0.99 min=0.94 ang=0 box=[459,801,2229,862] "vegetables to support healthy digestion. Our special stew recipe has"
+   A006 conf=0.99 min=0.94 ang=0 box=[463,883,1886,946] "a delicious gravy that will satisfy even the pickiest dogs."
+   A007 conf=0.99 min=0.98 ang=0 box=[463,1006,1146,1044] "GUARANTEED ANALYSIS"
+   A008 conf=0.80 min=0.46 ang=0 box=[461,1079,1138,1124] "Crude Protein (min)................7.0%"
+   A009 conf=0.74 min=0.37 ang=0 box=[461,1154,1129,1198] "Crude Fat (min.)............2.0%"
+   A010 conf=0.60 min=0.10 ang=0 box=[461,1228,1136,1272] "Crude Fiber (max)....….……………………….....2.0%"
+   A011 conf=0.87 min=0.48 ang=1 box=[1224,1078,1953,1123] "Calcium (min)...... ....0.20%"
+   A012 conf=0.81 min=0.50 ang=359 box=[1225,1149,1944,1201] "Phosphorus (min)..............0.16%"
+   A013 conf=0.91 min=0.64 ang=0 box=[1223,1223,1949,1276] "Omega-6 Fatty Acid (min)......0.40%"
+   A014 conf=0.91 min=0.60 ang=0 box=[1224,1295,1951,1349] "Omega-3 Fatty Acid* (min)......0.10%"
+   A015 conf=0.99 min=0.96 ang=0 box=[3020,93,4390,188] "CHICKEN & VEGGIES"
+   A016 conf=0.99 min=0.98 ang=0 box=[3138,244,4291,335] "RECIPE IN GRAVY"
+   A017 conf=0.95 min=0.82 ang=1 box=[2777,514,4587,886] "AvoDerm"
+   A018 conf=0.98 min=0.97 ang=0 box=[3180,953,4221,1036] "DOG FOOD STEW"
+   A019 conf=0.99 min=0.98 ang=2 box=[4123,1298,4637,1448] "FOR HEALTHY"
+   A020 conf=0.98 min=0.96 ang=0 box=[4021,1535,4753,1615] "SKIN & COAT"
+   A021 conf=0.91 min=0.61 ang=34 box=[4030,1844,4345,2096] "OMEGA-6"
+   A022 conf=0.99 min=0.98 ang=290 box=[4636,1693,4764,1908] "ACIDS"
+   A023 conf=0.70 min=0.09 ang=0 box=[464,1300,1139,1344] "Moisture (max).……………….84.0%"
+   A024 conf=0.82 min=0.51 ang=1 box=[461,1371,1142,1420] "Ash (max)........... .4.0%"
+   A025 conf=0.98 min=0.89 ang=0 box=[463,1446,2037,1496] "*Not recognized as an essential nutrient by the AAFCO Dog Food Nutrient Profiles."
+   A026 conf=0.99 min=0.98 ang=0 box=[462,1553,992,1592] "CALORIE CONTENT"
+   A027 conf=0.91 min=0.50 ang=0 box=[464,1624,1963,1677] "Metabolizable Energy (calculated).......... ..797 kcal/kg"
+   A028 conf=0.98 min=0.90 ang=0 box=[464,1697,1982,1752] "Metabolizable Energy (calculated) .294 kcal/can"
+   A029 conf=0.98 min=0.93 ang=0 box=[464,1801,2259,1857] "INGREDIENTS Chicken Broth, Chicken, Carrots, Green Beans, Pumpkin, Tapioca Starch,"
+   A030 conf=0.98 min=0.89 ang=0 box=[463,1877,2259,1926] "Potato Protein, Tuna, Sunflower Oil, Seaweed, Spinach, Flaxseed Oil, Tricalcium Phosphate,"
+   A031 conf=0.98 min=0.89 ang=0 box=[462,1950,2259,1999] "Salmon Oil, Salt, Guar Gum, Avocado Oil, Sodium Tripolyphosphate, Potassium Chloride,"
+   A032 conf=0.98 min=0.85 ang=0 box=[462,2021,2258,2071] "Inulin, Vitamins (Vitamin E Supplement, Vitamin A Supplement, Niacin Supplement,"
+   A033 conf=0.97 min=0.85 ang=0 box=[462,2093,2257,2139] "D-calcium Pantothenate, Thiamine Mononitrate, Beta-carotene, Biotin, Riboflavin"
+   A034 conf=0.99 min=0.93 ang=0 box=[461,2165,2259,2215] "Supplement, Vitamin B12 Supplement, Pyridoxine Hydrochloride, Folic Acid), Minerals (Zinc"
+   A035 conf=0.98 min=0.92 ang=0 box=[462,2237,2256,2286] "Oxide, Reduced Iron, Copper Amino Acid Complex, Manganese Sulfate, Sodium Selenite,"
+   A036 conf=0.98 min=0.59 ang=0 box=[462,2308,2171,2357] "Potassium Iodide), Choline Chloride, Magnesium Sulfate, Copper Sulphate Pentahydrate."
+   A037 conf=0.97 min=0.39 ang=0 box=[458,2454,2260,2503] "AvoDermⓇ Dog Food Stew Chicken & Veggies Recipe in Gravy is formulated to meet the"
+   A038 conf=0.98 min=0.90 ang=0 box=[464,2528,2258,2576] "nutritional levels established by the AAFCO Dog Food Nutrient Profiles for All Life Stages"
+   A039 conf=0.98 min=0.76 ang=0 box=[462,2601,1689,2650] "including growth of large size dogs (70 lbs or more as an adult)."
+   A040 conf=0.88 min=0.39 ang=350 box=[4301,1890,4669,2076] "5 & -3 FATTY"
+   A041 conf=0.99 min=0.95 ang=359 box=[3826,2341,4712,2430] "Complete & Balanced"
+   A042 conf=0.99 min=0.97 ang=1 box=[3674,2456,4716,2545] "for All Breed & Lifestages"
+   A043 conf=0.98 min=0.95 ang=0 box=[3831,2672,4700,2751] "NET WT 13 OZ (369 g)"
+   A044 conf=0.99 min=0.96 ang=0 box=[5243,94,6615,190] "CHICKEN & VEGGIES"
+   A045 conf=0.99 min=0.98 ang=0 box=[5360,245,6510,337] "RECIPE IN GRAVY"
+   A046 conf=0.99 min=0.98 ang=0 box=[5448,538,6460,590] "DAILY FEEDING INSTRUCTIONS"
+   A047 conf=0.98 min=0.94 ang=0 box=[5187,624,6717,694] "Amount of food your dog requires will depend on activity, age,"
+   A048 conf=0.99 min=0.97 ang=0 box=[5190,713,6719,780] "environment and breed. Feed at room temperature and refrigerate"
+   A049 conf=0.98 min=0.93 ang=0 box=[5192,807,6720,870] "unused portion. Adjust feeding to maintain optimum weight. Always"
+   A050 conf=0.99 min=0.90 ang=360 box=[5189,892,5918,956] "provide access to clean, fresh water."
+   A051 conf=0.94 min=0.36 ang=0 box=[5284,979,6628,1049] "Feed adult dogs 1/2 - 1 can per 5-10 lbs body weight per day."
+   A052 conf=0.99 min=0.90 ang=0 box=[5259,1072,6647,1134] "Puppies and Gestating/Lactating Dogs (consult your veterinarian):"
+   A053 conf=0.99 min=0.93 ang=0 box=[5279,1163,6630,1226] "Feed up to twice as much per pound of body weight as an adult."
+   A054 conf=0.98 min=0.93 ang=359 box=[5820,1298,6613,1360] "If for any reason you are dissatisfied with this"
+   A055 conf=0.98 min=0.94 ang=0 box=[5820,1366,6615,1419] "product, return the unused portion to your"
+   A056 conf=0.99 min=0.98 ang=359 box=[5288,1333,5782,1394] "100% Satisfaction"
+   A057 conf=0.97 min=0.32 ang=359 box=[5285,1416,6611,1502] "Guaranteed! AvoDerm Natural" dog food retailer along with"
+   A058 conf=0.99 min=0.93 ang=359 box=[5818,1488,6483,1545] "your receipt for replacement or refund."
+   A059 conf=0.99 min=0.98 ang=360 box=[5655,1590,6246,1646] "Product of Thailand"
+   A060 conf=0.99 min=0.99 ang=0 box=[5719,1672,6181,1716] "Manufactured for"
+   A061 conf=0.97 min=0.71 ang=0 box=[5650,1734,6242,1815] "Breeder's Choice"
+   A062 conf=0.98 min=0.94 ang=0 box=[5617,1843,6299,1889] "Breeder's Choice Pet Foods, LLC"
+   A063 conf=0.98 min=0.96 ang=0 box=[5486,1913,6428,1964] "16321 Arrow Hwy, Irwindale Park, CA 91706"
+   A064 conf=0.87 min=0.87 ang=0 box=[5457,2449,5500,2495] "0"
+   A065 conf=0.96 min=0.33 ang=0 box=[5614,1986,6348,2042] "(866) 500-6286 • AvoDerm.com"
+   A066 conf=0.99 min=0.97 ang=0 box=[5619,2058,6356,2104] "REFRIGERATE AFTER OPENING"
+   A067 conf=0.99 min=0.99 ang=0 box=[5627,2433,6296,2498] "5290700241"
+   A068 conf=0.95 min=0.95 ang=0 box=[6418,2449,6459,2497] "0"
+   A069 conf=0.97 min=0.40 ang=0 box=[5459,2594,6449,2655] "AvoDerm® Chicken & Veggies Recipe in Gravy 13 oz"
+  OCR lines B (73):
+   B000 conf=0.99 min=0.96 ang=0 box=[641,72,2035,168] "CHICKEN & VEGGIES"
+   B001 conf=0.99 min=0.96 ang=0 box=[762,226,1935,318] "RECIPE IN GRAVY"
+   B002 conf=0.97 min=0.49 ang=360 box=[445,535,2245,599] "AvoDerm® Dog Stews are crafted in small batches and formulated for"
+   B003 conf=0.98 min=0.90 ang=0 box=[451,624,2242,684] "healthy skin and coat. Our Chicken & Veggies Recipe in Gravy features"
+   B004 conf=0.99 min=0.95 ang=0 box=[449,708,2246,770] "boneless chicken, fresh carrots, green beans, pumpkin and other"
+   B005 conf=0.99 min=0.94 ang=0 box=[447,790,2243,853] "vegetables to support healthy digestion. Our special stew recipe has"
+   B006 conf=0.99 min=0.94 ang=0 box=[448,875,1896,936] "a delicious gravy that will satisfy even the pickiest dogs."
+   B007 conf=0.99 min=0.98 ang=0 box=[449,998,1143,1038] "GUARANTEED ANALYSIS"
+   B008 conf=0.99 min=0.96 ang=0 box=[3044,70,4439,165] "CHICKEN & VEGGIES"
+   B009 conf=0.99 min=0.97 ang=0 box=[3165,224,4334,317] "RECIPE IN GRAVY"
+   B010 conf=0.94 min=0.81 ang=0 box=[2802,518,4608,856] "AvoDerm"
+   B011 conf=0.98 min=0.97 ang=0 box=[3210,946,4270,1031] "DOG FOOD STEW"
+   B012 conf=0.80 min=0.55 ang=0 box=[448,1074,1133,1119] "Crude Protein (min).................7.0%"
+   B013 conf=0.83 min=0.48 ang=1 box=[448,1148,1130,1195] "Crude Fat (min)........... ..2.0%"
+   B014 conf=0.75 min=0.39 ang=0 box=[449,1225,1132,1271] "Crude Fiber (max.)..................2.0%"
+   B015 conf=0.69 min=0.10 ang=0 box=[449,1298,1139,1342] "Moisture (max)....……………….. ..84.0%"
+   B016 conf=0.92 min=0.76 ang=0 box=[1019,1375,1139,1410] "..4.0%"
+   B017 conf=0.82 min=0.47 ang=0 box=[1224,1072,1961,1119] "Calcium (min)........... ....0.20%"
+   B018 conf=0.98 min=0.94 ang=0 box=[1223,1146,1572,1198] "Phosphorus (min)"
+   B019 conf=0.90 min=0.83 ang=359 box=[1837,1144,1964,1194] "0.16%"
+   B020 conf=0.91 min=0.57 ang=0 box=[1223,1220,1960,1274] "Omega-6 Fatty Acid (min)......0.40%"
+   B021 conf=0.92 min=0.56 ang=0 box=[1224,1293,1961,1347] "Omega-3 Fatty Acid* (min)......0.10%"
+   B022 conf=0.98 min=0.89 ang=0 box=[446,1446,2048,1496] "*Not recognized as an essential nutrient by the AAFCO Dog Food Nutrient Profiles."
+   B023 conf=0.99 min=0.96 ang=0 box=[449,1556,984,1595] "CALORIE CONTENT"
+   B024 conf=0.89 min=0.38 ang=0 box=[450,1627,1973,1681] "Metabolizable Energy (calculated).......... ...........797 kcal/kg"
+   B025 conf=0.96 min=0.63 ang=0 box=[449,1703,1993,1758] "Metabolizable Energy (calculated) ..... .294 kcal/can"
+   B026 conf=0.98 min=0.91 ang=0 box=[450,1814,2274,1863] "INGREDIENTS Chicken Broth, Chicken, Carrots, Green Beans, Pumpkin, Tapioca Starch,"
+   B027 conf=0.98 min=0.90 ang=0 box=[448,1887,2272,1936] "Potato Protein, Tuna, Sunflower Oil, Seaweed, Spinach, Flaxseed Oil, Tricalcium Phosphate,"
+   B028 conf=0.97 min=0.89 ang=0 box=[446,1958,2273,2008] "Salmon Oil, Salt, Guar Gum, Avocado Oil, Sodium Tripolyphosphate, Potassium Chloride,"
+   B029 conf=0.97 min=0.85 ang=0 box=[448,2031,2273,2082] "Inulin, Vitamins (Vitamin E Supplement, Vitamin A Supplement, Niacin Supplement,"
+   B030 conf=0.98 min=0.85 ang=0 box=[448,2104,2270,2150] "D-Calcium Pantothenate, Thiamine Mononitrate, Beta-carotene, Biotin, Riboflavin"
+   B031 conf=0.98 min=0.79 ang=0 box=[447,2177,2274,2227] "Supplement, Vitamin B12 Supplement, Pyridoxine Hydrochloride, Folic Acid), Minerals (Zinc"
+   B032 conf=0.98 min=0.86 ang=0 box=[447,2249,2270,2300] "Oxide, Reduced Iron, Copper Amino Acid Complex, Manganese Sulfate, Sodium Selenite,"
+   B033 conf=0.98 min=0.60 ang=0 box=[448,2322,1872,2372] "Potassium Iodide), Choline Chloride, Magnesium Sulfate, Copper Sulfate."
+   B034 conf=0.97 min=0.35 ang=0 box=[446,2471,2274,2521] "AvoDermⓇ Dog Food Stew Chicken & Veggies Recipe in Gravy is formulated to meet the"
+   B035 conf=0.98 min=0.92 ang=0 box=[449,2545,2272,2594] "nutritional levels established by the AAFCO Dog Food Nutrient Profiles for All Life Stages"
+   B036 conf=0.98 min=0.82 ang=0 box=[449,2621,1697,2670] "including growth of large size dogs (70 lbs or more as an adult)."
+   B037 conf=0.98 min=0.97 ang=0 box=[4172,1301,4689,1433] "FOR HEALTHY"
+   B038 conf=0.98 min=0.95 ang=0 box=[4065,1537,4810,1617] "SKIN & COAT"
+   B039 conf=0.99 min=0.98 ang=79 box=[4038,1673,4126,1853] "WITH"
+   B040 conf=0.99 min=0.97 ang=290 box=[4691,1696,4819,1912] "ACIDS"
+   B041 conf=0.94 min=0.50 ang=37 box=[4091,1853,4747,2091] "OMEGA-6 & -3 FATTY I"
+   B042 conf=0.99 min=0.96 ang=359 box=[3863,2359,4767,2445] "Complete & Balanced"
+   B043 conf=0.99 min=0.96 ang=1 box=[3675,2475,4773,2563] "for All Breeds & Lifestages"
+   B044 conf=0.99 min=0.98 ang=0 box=[3871,2687,4754,2773] "NET WT 13 OZ (369 g)"
+   B045 conf=0.99 min=0.96 ang=0 box=[5308,72,6699,169] "CHICKEN & VEGGIES"
+   B046 conf=0.99 min=0.98 ang=0 box=[5427,226,6593,320] "RECIPE IN GRAVY"
+   B047 conf=0.99 min=0.97 ang=0 box=[5515,524,6544,577] "DAILY FEEDING INSTRUCTIONS"
+   B048 conf=0.98 min=0.93 ang=0 box=[5248,611,6805,684] "Amount of food your dog requires will depend on activity, age,"
+   B049 conf=0.99 min=0.95 ang=0 box=[5253,703,6806,770] "environment and breed. Feed at room temperature and refrigerate"
+   B050 conf=0.99 min=0.95 ang=0 box=[5252,795,6806,862] "unused portion. Adjust feeding to maintain optimum weight. Always"
+   B051 conf=0.99 min=0.90 ang=360 box=[5254,883,5994,949] "provide access to clean, fresh water."
+   B052 conf=0.97 min=0.36 ang=0 box=[5347,972,6715,1045] "Feed adult dogs 1 - 1 can per 5-10 lbs body weight per day."
+   B053 conf=0.98 min=0.92 ang=0 box=[5324,1065,6734,1126] "Puppies and Gestating/Lactating Dogs (consult your veterinarian):"
+   B054 conf=0.98 min=0.91 ang=0 box=[5344,1158,6717,1224] "Feed up to twice as much per pound of body weight as an adult."
+   B055 conf=0.98 min=0.92 ang=359 box=[5890,1299,6698,1357] "If for any reason you are dissatisfied with this"
+   B056 conf=0.98 min=0.94 ang=2 box=[5352,1322,6702,1437] "100% Satisfaction product, return the unused portion to your"
+   B057 conf=0.97 min=0.35 ang=359 box=[5351,1417,6694,1503] "Guaranteed! AvoDerm Natural" dog food retailer along with"
+   B058 conf=0.99 min=0.92 ang=359 box=[5891,1487,6565,1547] "your receipt for replacement or refund."
+   B059 conf=0.99 min=0.98 ang=0 box=[5726,1593,6330,1646] "Product of Thailand"
+   B060 conf=0.90 min=0.90 ang=0 box=[5525,2466,5569,2513] "0"
+   B061 conf=0.99 min=0.99 ang=0 box=[5791,1677,6260,1720] "Manufactured for"
+   B062 conf=0.97 min=0.62 ang=0 box=[5716,1741,6324,1820] "Breeder's Choice"
+   B063 conf=0.51 min=0.51 ang=0 box=[6326,1812,6339,1824] "Ⓡ"
+   B064 conf=0.99 min=0.96 ang=0 box=[5686,1853,6381,1897] "Breeder's Choice Pet Foods, LLC"
+   B065 conf=0.98 min=0.93 ang=0 box=[5563,1922,6508,1971] "16321 Arrow Hwy Irwindale, CA 91706 USA"
+   B066 conf=0.96 min=0.38 ang=0 box=[5685,1998,6431,2055] "(866) 500-6286 • AvoDerm.com"
+   B067 conf=0.98 min=0.95 ang=0 box=[5689,2069,6438,2116] "REFRIGERATE AFTER OPENING"
+   B068 conf=0.99 min=0.99 ang=0 box=[5695,2448,6374,2515] "5290700241"
+   B069 conf=0.97 min=0.97 ang=0 box=[6500,2466,6543,2514] "0"
+   B070 conf=0.97 min=0.34 ang=0 box=[5526,2612,6534,2674] "AvoDermⓇ Chicken & Veggies Recipe in Gravy 13 oz"
+   B071 conf=0.83 min=0.83 ang=0 box=[7241,97,7261,169] "|"
+   B072 conf=0.55 min=0.55 ang=0 box=[7228,243,7261,310] "|"
+
+[REREAD] enabled=True candidates=11 crops=9 done=11 confirmed=7 downgraded=4 skipped_cap=0 errors=0
+  rr1 classes=['CASE'] results=['confirmed'] A={'px': [3201, 149], 'dpi': 1294.1, 'jpeg_bytes': 86986} B={'px': [3201, 147], 'dpi': 1446.9, 'jpeg_bytes': 81971} found_in_other=- crop_findings=[{'class': 'CASE', 'a': 'c', 'b': 'C'}] err=-
+     crop A: "D-calcium Pantothenate, Thiamine Mononitrate, Beta-carotene, Biotin, Riboflavin"
+     crop B: "D-Calcium Pantothenate, Thiamine Mononitrate, Beta-carotene, Biotin, Riboflavin"
+  rr2 classes=['TEXT'] results=['confirmed'] A={'px': [3201, 423], 'dpi': 2045.2, 'jpeg_bytes': 123567} B={'px': [3201, 398], 'dpi': 2222.7, 'jpeg_bytes': 141039} found_in_other=- crop_findings=[{'class': 'TEXT', 'a': '', 'b': 's'}] err=-
+     crop A: "for All Breed & Lifestages"
+     crop B: "for All Breeds & Lifestages"
+  rr3 classes=['TEXT', 'TEXT', 'PUNCT'] results=['confirmed', 'confirmed', 'confirmed'] A={'px': [3201, 298], 'dpi': 2339.0, 'jpeg_bytes': 110630} B={'px': [2893, 259], 'dpi': 2400.0, 'jpeg_bytes': 93890} found_in_other=- crop_findings=[{'class': 'PUNCT', 'a': ',', 'b': ''}, {'class': 'TEXT', 'a': 'Park', 'b': ''}, {'class': 'TEXT', 'a': '', 'b': 'USA'}] err=-
+     crop A: "16321 Arrow Hwy, Irwindale Park, CA 91706"
+     crop B: "16321 Arrow Hwy Irwindale, CA 91706 USA"
+  rr4 classes=['TEXT'] results=['confirmed'] A={'px': [3201, 166], 'dpi': 1351.4, 'jpeg_bytes': 103937} B={'px': [3201, 200], 'dpi': 1817.2, 'jpeg_bytes': 102813} found_in_other=- crop_findings=[{'class': 'TEXT', 'a': 'phate Pentahydr', 'b': 'f'}] err=-
+     crop A: "Potassium Iodide), Choline Chloride, Magnesium Sulfate, Copper Sulphate Pentahydrate."
+     crop B: "Potassium Iodide), Choline Chloride, Magnesium Sulfate, Copper Sulfate."
+  rr5 classes=['MISSING_IN_B'] results=['confirmed'] A={'px': [2420, 279], 'dpi': 2400.0, 'jpeg_bytes': 64085} B={'px': [2631, 446], 'dpi': 2400.0, 'jpeg_bytes': 157581} found_in_other=0.692 crop_findings=- err=-
+     crop A: "Ash (max)......... / ...4.0%"
+     crop B: ".4.0% / Ash (max)......... / *Not recognized as an essential nutrient by"
+  rr6 classes=['MISSING_IN_B'] results=['downgraded'] A={'px': [1549, 761], 'dpi': 2400.0, 'jpeg_bytes': 119700} B={'px': [3201, 1482], 'dpi': 2103.8, 'jpeg_bytes': 311195} found_in_other=0.889 crop_findings=- err=-
+     crop A: "4-6 & -3 FATTY P"
+     crop B: "OMEGA-6 & -3 FATTY AC"
+  rr7 classes=['EXTRA_IN_B'] results=['downgraded'] A={'px': [913, 356], 'dpi': 2400.0, 'jpeg_bytes': 36099} B={'px': [528, 186], 'dpi': 2400.0, 'jpeg_bytes': 15295} found_in_other=1.0 crop_findings=- err=-
+     crop A: ".........4.0%"
+     crop B: "....4.0%"
+  rr8 classes=['EXTRA_IN_B'] results=['downgraded'] A={'px': [1169, 508], 'dpi': 2400.0, 'jpeg_bytes': 67445} B={'px': [625, 262], 'dpi': 2400.0, 'jpeg_bytes': 19278} found_in_other=1.0 crop_findings=- err=-
+     crop A: "....0.20% / .....0.16% / 100%"
+     crop B: "....0.16%"
+  rr9 classes=['EXTRA_IN_B'] results=['downgraded'] A={'px': [3079, 1826], 'dpi': 2400.0, 'jpeg_bytes': 451655} B={'px': [550, 637], 'dpi': 2400.0, 'jpeg_bytes': 33856} found_in_other=1.0 crop_findings=- err=-
+     crop A: "SKIN & / WITH OMEGA / C"
+     crop B: "WITH"
+
+[WARNINGS] 0
+=== END ===

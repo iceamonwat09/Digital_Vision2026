@@ -87,6 +87,15 @@ try:
 except Exception as _aw_err:  # noqa: BLE001 — isolation by design
     logger.warning(f"Artwork Proof Check disabled: {_aw_err}")
 
+# Artwork V2 (เทียบข้อความด้วย Google Cloud Vision OCR) — โมดูลแยกขาดจาก
+# artwork_check 100% · ล้มเหลวที่นี่ = ปิดเฉพาะเมนูนี้ ไม่กระทบโหมดอื่น
+try:
+    from artwork_v2.routes import artwork_v2_bp
+    app.register_blueprint(artwork_v2_bp)
+    logger.info("Artwork V2 (Cloud Vision) registered (/artwork_v2)")
+except Exception as _aw2_err:  # noqa: BLE001 — isolation by design
+    logger.warning(f"Artwork V2 disabled: {_aw2_err}")
+
 # Authentication + RBAC (login, JWT cookies, per-route permission guard).
 # Isolated like the artwork blueprint: a failure here leaves the inspection
 # modes running (just without auth). When AUTH_ENABLED is false the guard is a
