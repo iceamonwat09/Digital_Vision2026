@@ -196,6 +196,10 @@ def build_text(r: dict) -> str:
             a("  excluded — อยู่ในพื้นที่ยกเว้นที่กำหนดในโซน ไม่นับ (%d):" % len(p["excluded"]))
             for f in p["excluded"]:
                 finding(f)
+        if p.get("lowmark"):
+            a("  lowmark — เครื่องหมายเดี่ยวที่ OCR อ่านไม่มั่นใจ (ฝั่งเดียว) ไม่นับ (%d):" % len(p["lowmark"]))
+            for f in p["lowmark"]:
+                finding(f)
         if p.get("algo_only") is not None:
             if p.get("raw_lines"):
                 a("  algo_only — ผลของอัลกอริทึม ไว้เทียบ ไม่นับ (โหมด raw · line= อ้างบรรทัด OCR lines) (%d):"
@@ -255,6 +259,9 @@ def build_text(r: dict) -> str:
         px.get("unverifiable", 0), px.get("skipped", 0), px.get("ms", 0),
         (" pymupdf=" + str(px["pymupdf"])) if px.get("pymupdf") else "",
         (" reason=" + px["reason"]) if px.get("reason") else ""))
+    if px.get("diff_raster"):
+        a("  diff_raster=%s — DIFF บนคู่ที่มีภาพสแกน ไม่ขึ้นป้าย \"ภาพยืนยันว่าต่าง\" (PIXEL_RASTER_NOTE)"
+          % px["diff_raster"])
     for pl in px.get("pairs") or []:
         a("  pair %s align=%s%s" % (pl.get("n"), pl.get("align"),
                                     (" error=" + str(pl["error"])) if pl.get("error") else ""))

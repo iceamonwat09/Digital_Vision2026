@@ -931,6 +931,7 @@
     FILLER: "จุดไข่ปลา/เส้นตกแต่ง", FRACTION: "เศษส่วน (OCR อ่านไม่นิ่ง)",
     MISSING_IN_B: "หายไปจาก 🅱", EXTRA_IN_B: "มีเฉพาะใน 🅱",
     CURVED: "ข้อความโค้ง/เอียง", MOVED: "ข้อความย้ายที่",
+    PLACEHOLDER: "ช่องว่างรอพิมพ์ ↔ ข้อมูลจริง",
   };
 
   // การ์ด "ข้อความโค้ง/เอียง" รวมหลายจุด — แสดงคำของทุกสมาชิก (ไม่มีจุดไหนถูกลบ)
@@ -942,7 +943,7 @@
   }
 
   const SEV_TH = { red: "ต่าง", yellow: "ไม่มั่นใจ", debris: "เศษ", dismissed: "AI: สัญญาณรบกวน",
-    moved: "ย้ายที่", pixel_same: "ภาพเหมือน", excluded: "ยกเว้น" };
+    moved: "ย้ายที่", pixel_same: "ภาพเหมือน", excluded: "ยกเว้น", lowmark: "เครื่องหมายไม่ชัด" };
   const AI_TH = { real: "ต่างจริง", noise: "สัญญาณรบกวนของ OCR", uncertain: "ไม่แน่ใจ" };
   function pct(v) { return v == null ? "-" : Math.round(v * 100) + "%"; }
 
@@ -1013,7 +1014,7 @@
   //    (อัลกอริทึม/AI) · จุดหาย/เกินฝั่งเดียว การ์ดโค้ง และจุดที่ไม่มีเลข ไม่ถูกจับกลุ่ม
   //  · ระดับของแถว = สมาชิกที่หนักที่สุด · แถวอยู่ตำแหน่งของสมาชิกตัวแรก
   const LINE_GROUP = root.dataset.lineGroup === "1";
-  const SEV_RANK = { red: 4, yellow: 3, debris: 2, moved: 2, dismissed: 1, pixel_same: 1, excluded: 1 };
+  const SEV_RANK = { red: 4, yellow: 3, debris: 2, moved: 2, lowmark: 2, dismissed: 1, pixel_same: 1, excluded: 1 };
   let GRP = {};                 // id ของแถวกลุ่ม ("g<id แรก>") → [id สมาชิก] — ใช้กับการซูม/เลือกแถว
   function lineGroups(list) {
     const out = [], at = {};
@@ -1518,6 +1519,7 @@
         folded("ภาพเหมือนกันทุกพิกเซล — OCR อ่านต่างเอง · ไม่นับในผลตัดสิน (เปิดดูภาพหลักฐานได้)", p.pixel_same) +
         folded("ข้อความมีอยู่ในอีกฝั่งตรงตำแหน่งเดียวกัน (OCR จัดบรรทัดต่างกัน) — ไม่นับในผลตัดสิน", p.relocated) +
         folded("เศษอักขระ / ขอบโซน — ไม่นับในผลตัดสิน", p.debris) +
+        folded("เครื่องหมายเดี่ยวที่ OCR อ่านไม่มั่นใจ (มีฝั่งเดียว) — ไม่นับในผลตัดสิน", p.lowmark) +
         folded(p.raw_lines && p.ai && p.ai.mode === "raw"
           ? "ผลของอัลกอริทึม — ไว้เทียบกับ AI เท่านั้น ไม่นับในผลตัดสิน (โหมด AI ตัดสินจากข้อมูลดิบ)"
           : "อัลกอริทึมพบ แต่ AI ไม่ได้ระบุ — ไม่นับในผลตัดสิน (โหมด AI ตัดสินหลัก)", p.algo_only) +

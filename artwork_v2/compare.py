@@ -51,10 +51,24 @@ FILLER = "\u2026"                       # … ตัวแทน "เส้น�
 FILLER_RUN = {".": 2, "_": 2, "·": 2, "-": 3}
 
 
+def _keep_as_is(ch: str) -> bool:
+    """ตัวยก/ตัวห้อย/ตัวเลขในวงกลม/ℓ — NFKC จะรวมกับตัวธรรมดา (² → 2) ซึ่งเปลี่ยนความหมาย
+    (m² ≠ m2 · H₂O ≠ H2O) · ยกเว้น ™ ℠ (ความหมายเท่ากับ TM/SM) และ ª º (Nº ↔ No —
+    Vision สลับสองแบบได้)"""
+    if ch in "™℠ªº":
+        return False
+    if ch == "ℓ":                  # ℓ (ลิตร)
+        return True
+    dec = unicodedata.decomposition(ch)
+    return dec.startswith(("<super>", "<sub>", "<circle>"))
+
+
 def _norm_char(ch: str) -> str:
     if ord(ch) in _DROP:
         return ""
-    ch = EQUIV_PRE.get(ord(ch), ch)
+    ch = EQUIV_PRE.get(ord(ch), ch)      # Ⓡ → ® ก่อน (Ⓡ เป็น <circle> — ห้ามหลุดไปด่านถัดไป)
+    if config.KEEP_SUPERSCRIPT and ord(ch) > 0x7F and _keep_as_is(ch):
+        return ch
     n = unicodedata.normalize("NFKC", ch)
     out = []
     for c in n:
@@ -622,6 +636,85 @@ def _neighbors_key(lines: List[dict], i: int) -> str:
     return "".join(keys)
 
 
+# เครื่องหมายเบาที่ Vision ใส่ ๆ หาย ๆ ท้ายบรรทัด — การตัดบรรทัดของชิ้นที่เป็นเครื่องหมายเหล่านี้ล้วน
+# ใช้กติกาเดิม (วัดบน Friskies 8 ต.ค.: ไม่เว้น ⇒ คอมมาที่ Vision ทิ้งขึ้นเป็นเหลืองเพิ่ม 2 จุด ทั้งที่พิมพ์เหมือนกัน)
+_SOFT_MARKS = set(",.;:'\"-·•|")
+
+
+# ช่องว่างรอพิมพ์ (``PLACEHOLDER``): ``xxxxxx`` · ``XX/XX/XXXX`` · ``xxxx-xx`` · TBD/TBC/TBA
+_PH_X = re.compile(r"^[xX]+(?:[-/.:][xX]+)*$")
+_PH_WORDS = {"TBD", "TBC", "TBA"}
+_PH_STRIP = ",;.:()[]{}\"'"
+
+
+def _is_placeholder(word: str) -> bool:
+    w = (word or "").strip(_PH_STRIP)
+    if w.upper() in _PH_WORDS:
+        return True
+    return bool(_PH_X.match(w)) and sum(c in "xX" for c in w) >= 4
+
+
+def placeholder_side(word_a: str, word_b: str) -> Optional[str]:
+    """ฝั่งที่เป็นช่องว่างรอพิมพ์ ('a'/'b') เมื่ออีกฝั่งเป็นข้อมูลจริง (ตัวอักษร/ตัวเลข ≥ 3 ตัว) · ไม่ใช่ ⇒ None"""
+    pa, pb = _is_placeholder(word_a), _is_placeholder(word_b)
+    if pa == pb:
+        return None
+    other = (word_b if pa else word_a).strip(_PH_STRIP)
+    if sum(c.isalnum() for c in other) < 3:
+        return None
+    return "a" if pa else "b"
+
+
+def _stream_key(lines: List[dict]) -> str:
+    return "".join(l["dk"] for l in lines)
+
+
+def reflow_conserved(text: str, mine: List[dict], other: List[dict], whole: bool = True) -> bool:
+    """การตัดบรรทัดคนละที่ "ย้าย" ข้อความไปบรรทัดอื่นเท่านั้น — จำนวนครั้งที่ข้อความนั้นปรากฏ
+    ในทั้งโซนจึงต้องเท่ากันสองฝั่ง · ไม่เท่า ⇒ ข้อความหาย/เพิ่มจริง ห้ามทิ้งเป็น reflow
+    (``REFLOW_CONSERVE`` · 8 ต.ค.: ``Pack of 12``→``Pack of 1`` เคยได้ PASS เพราะบรรทัดข้างเคียง
+    บังเอิญมีเลข 2) · ปิดธง/เครื่องหมายเบาล้วน ⇒ True = กติกาเดิม"""
+    if not config.REFLOW_CONSERVE or not text or all(c in _SOFT_MARKS for c in text):
+        return True
+    # ข้อความที่เป็น "คำเต็ม" ⇒ นับเป็นคำ (ความต่างจริงที่อื่นในโซน เช่น 20%→24% ต้องไม่ทำให้
+    # เลข 0 เดี่ยวของบาร์โค้ดที่แค่ย้ายบรรทัดกลายเป็น "หายจริง") · ไม่ใช่คำเต็มทั้งสองฝั่ง ⇒ นับสตริง
+    if whole:
+        ta, tb = _token_runs(mine, text), _token_runs(other, text)
+        if ta or tb:
+            return ta == tb
+    return _stream_key(mine).count(text) == _stream_key(other).count(text)
+
+
+def _whole_words(ln: dict, k1: int, k2: int) -> bool:
+    """ช่วงคีย์ ``[k1, k2)`` ของบรรทัดตรงกับ "คำเต็ม" (ขอบเป็นช่องว่าง/หัว-ท้ายบรรทัด) หรือไม่"""
+    try:
+        s, e = _orig_span(ln, k1, k2)
+    except Exception:
+        return False
+    t = ln.get("text") or ""
+    return (s <= 0 or t[s - 1].isspace()) and (e >= len(t) or t[e].isspace())
+
+
+UNBALANCED_NOTE = ("ข้อความนี้เจอในบรรทัดข้างเคียงของอีกฝั่ง (อาจแค่ตัดบรรทัดคนละที่) แต่จำนวนครั้งที่ปรากฏ"
+                   "ทั้งโซนไม่เท่ากันสองฝั่ง — อาจหาย/เพิ่มจริง โปรดดูด้วยตา")
+
+
+def _token_runs(lines: List[dict], text: str) -> int:
+    """จำนวนครั้งที่ ``text`` (คีย์เทียบ) ตรงกับ "คำเต็มที่ติดกัน" ในบรรทัดใดบรรทัดหนึ่ง"""
+    n = 0
+    for ln in lines:
+        keys = [diff_key(t)[0] for t in (ln.get("text") or "").split()]
+        for i in range(len(keys)):
+            acc = ""
+            for k in keys[i:]:
+                acc += k
+                if len(acc) >= len(text):
+                    break
+            if acc == text and keys[i]:
+                n += 1
+    return n
+
+
 def diff_pair(a: dict, b: dict, A: List[dict], B: List[dict],
               ia: int, ib: int) -> Tuple[List[dict], List[dict]]:
     """คืน ``(findings, reflow_notes)`` ของคู่บรรทัดหนึ่งคู่"""
@@ -639,6 +732,7 @@ def diff_pair(a: dict, b: dict, A: List[dict], B: List[dict],
     na, nb = len(a["dk"]), len(b["dk"])
     for tag, i1, i2, j1, j2 in merged:
         a_frag, b_frag = a["dk"][i1:i2], b["dk"][j1:j2]
+        unbalanced = False
         edge = (i1 == 0 and j1 == 0) or (i2 == na and j2 == nb)
         one_sided = not a_frag or not b_frag
         if edge and one_sided:
@@ -647,8 +741,12 @@ def diff_pair(a: dict, b: dict, A: List[dict], B: List[dict],
             other_lines, other_i = (B, ib) if a_frag else (A, ia)
             nb_key = _neighbors_key(other_lines, other_i)
             if frag and (frag in nb_key or frag in nb_key.replace("-", "")):
-                reflow.append({"side": "A" if a_frag else "B", "text": raw})
-                continue
+                if reflow_conserved(frag, A, B,
+                                    whole=_whole_words(a if a_frag else b, i1 if a_frag else j1,
+                                                       i2 if a_frag else j2)):
+                    reflow.append({"side": "A" if a_frag else "B", "text": raw})
+                    continue
+                unbalanced = True
             # ขีดตัดคำท้ายบรรทัดล้วน ๆ (รุ่นใหม่ของ Vision ส่ง "-" จริงมา)
             if (a_frag or b_frag) == "-" and i2 == na and j2 == nb:
                 reflow.append({"side": "A" if a_frag else "B", "text": "-"})
@@ -670,15 +768,26 @@ def diff_pair(a: dict, b: dict, A: List[dict], B: List[dict],
                 alone = _is_punct(t.strip()) and _standalone(ln_["text"], *sp)
             cls = classify(a_txt, b_txt, a_ctx, b_ctx, alone)
         ca, cb = _span_conf(a, *sa), _span_conf(b, *sb)
-        finds.append({
+        word_a, word_b = _word_at(a["text"], *sa), _word_at(b["text"], *sb)
+        ph = None
+        if config.PLACEHOLDER and a_txt and b_txt and cls in ("NUMBER", "TEXT", "CASE"):
+            ph = placeholder_side(word_a, word_b)
+            if ph:
+                cls = "PLACEHOLDER"
+        f = {
             "class": cls,
-            "word_a": _word_at(a["text"], *sa),
-            "word_b": _word_at(b["text"], *sb),
+            "word_a": word_a,
+            "word_b": word_b,
             "a": {"line": ia, "text": a["text"], "span": list(sa), "frag": a_txt,
                   "box": _span_box(a, *sa), "word_box": _word_box(a, *sa), "conf": ca},
             "b": {"line": ib, "text": b["text"], "span": list(sb), "frag": b_txt,
                   "box": _span_box(b, *sb), "word_box": _word_box(b, *sb), "conf": cb},
-        })
+        }
+        if ph:
+            f["placeholder"] = ph
+        if unbalanced:
+            f["_unbalanced"] = True
+        finds.append(f)
     return finds, reflow
 
 
@@ -716,6 +825,11 @@ def severity(f: dict) -> str:
     * ``PUNCT`` = แดงได้เมื่อ ``PUNCT_CAN_FAIL`` และความมั่นใจถึงเกณฑ์ — แต่ต้อง
       ผ่านการอ่านซ้ำแบบซูมก่อนเสมอ (ปิดการอ่านซ้ำ ⇒ ลดเป็นเหลือง ใน pipeline)
     """
+    if f["class"] == "PLACEHOLDER":
+        # ช่องว่างรอพิมพ์ ↔ ข้อมูลจริง = ต่างแน่นอน แม้ OCR อ่านรหัสฝั่งข้อมูลจริงไม่มั่นใจ · หลักฐานที่ต้อง
+        # มั่นใจคือ "ฝั่งนี้เป็น xxxx จริง" ⇒ ใช้ความมั่นใจของฝั่งช่องว่างเทียบ CONF_LOW
+        c = (f.get(f.get("placeholder") or "") or {}).get("conf")
+        return "red" if config.PLACEHOLDER_RED and c is not None and c >= config.CONF_LOW else "yellow"
     if f["class"] in ("FILLER", "FRACTION"):
         return "yellow"
     if f["class"] == "PUNCT" and not config.PUNCT_CAN_FAIL:
@@ -811,6 +925,53 @@ def _curved_base(lines: List[dict]) -> set:
                 out.add(i)
                 break
     return out
+
+
+# ── เครื่องหมายเดี่ยวที่ OCR ไม่มั่นใจ (``LOWMARK`` · 8 ต.ค. รอบ 4) ─────────────────────
+# ไม่แตะเครื่องหมายที่มีความหมายกับข้อมูล (เชิงอรรถ · เปอร์เซ็นต์ · เครื่องหมายการค้า · หน่วย · เทียบค่า)
+LOWMARK_PROTECT = set("*%®©℮#°±<>≤≥‰№")
+
+
+def is_lowmark(f: dict) -> bool:
+    """จุด PUNCT สีเหลืองที่มีเครื่องหมายฝั่งเดียว · Vision มั่นใจตัวเครื่องหมายนั้น < CONF_LOW · ไม่ติดตัวเลข ·
+    ไม่ใช่เครื่องหมายใน ``LOWMARK_PROTECT`` · ไม่อยู่บนข้อความโค้ง (การ์ดโค้งต้องครบสมาชิก)
+
+    วัดบน Friskies (8 ต.ค.): ``•`` ความมั่นใจ 0.33 = เส้นประไดคัทที่ขอบโซน (ตรวจด้วยตา) — คอมมาที่ Vision
+    มั่นใจ 0.98 ไม่เข้าเงื่อนไข · คอมมาจริงหลัง ``Hwy`` ของ AvoDerm (0.98/0.93) ไม่เข้าเงื่อนไข"""
+    if f.get("severity") != "yellow" or f.get("class") != "PUNCT" or f.get("curved"):
+        return False
+    fa, fb = (f["a"].get("frag") or "").strip(), (f["b"].get("frag") or "").strip()
+    if bool(fa) == bool(fb):
+        return False
+    side = f["a"] if fa else f["b"]
+    mark = fa or fb
+    conf = side.get("conf")
+    if conf is None or conf >= config.CONF_LOW or any(c in LOWMARK_PROTECT for c in mark):
+        return False
+    t = side.get("text") or ""
+    s, e = side.get("span") or (0, 0)
+    near_digit = (s > 0 and t[s - 1].isdigit()) or (e < len(t) and t[e].isdigit())
+    return not near_digit
+
+
+LOWMARK_NOTE = ("เครื่องหมายเดี่ยวที่ Vision อ่านไม่มั่นใจ (< %d%%) มีฝั่งเดียว — มักเป็นเส้นขอบ/ลายกราฟิก "
+                "ไม่นับในผลตัดสิน (ดูด้วยตาได้)")
+
+
+def fold_lowmark(findings: List[dict]) -> Tuple[List[dict], List[dict]]:
+    """คืน ``(คงไว้, ย้ายไปรายการพับ lowmark)`` — ไม่ลบ · ปิดธง ⇒ ไม่ย้ายอะไร"""
+    if not config.LOWMARK:
+        return list(findings), []
+    keep, fold = [], []
+    for f in findings:
+        if is_lowmark(f):
+            f["lowmark_from"] = f["severity"]
+            f["severity"] = "lowmark"
+            f.setdefault("notes", []).append(LOWMARK_NOTE % round(config.CONF_LOW * 100))
+            fold.append(f)
+        else:
+            keep.append(f)
+    return keep, fold
 
 
 def collapse_curved(findings: List[dict]) -> List[dict]:
@@ -947,8 +1108,9 @@ def compare(lines_a: List[dict], lines_b: List[dict],
         for i in uns:
             ln = mine[i]
             k = ln["dk"].replace("-", "")
-            if i in cancelled[side] or _crosses_lines(ln["dk"], other) \
-                    or any(k and k in t for t in edge_texts):
+            crossing = i not in cancelled[side] and (
+                _crosses_lines(ln["dk"], other) or any(k and k in t for t in edge_texts))
+            if i in cancelled[side] or (crossing and reflow_conserved(ln["dk"], mine, other)):
                 reflow_lines[side].append(i)
                 continue
             box = ln["box"]
@@ -963,6 +1125,8 @@ def compare(lines_a: List[dict], lines_b: List[dict],
                  "pair_method": "unpaired", "pair_score": None}
             # บรรทัดเครื่องหมายล้วน/สั้นมาก = OCR ไม่นิ่ง → เหลือง
             f["_short"] = len(ln["dk"]) < 2 or _is_punct(ln["dk"])
+            if crossing:
+                f["_unbalanced"] = True
             findings.append(f)
 
     if config.BALANCED_MOVE:
@@ -986,6 +1150,17 @@ def compare(lines_a: List[dict], lines_b: List[dict],
             if f["severity"] == "red":
                 f["severity"] = "yellow"
             f["notes"].append(S.CAP_NOTE.get(cap, cap))
+        if f.pop("_unbalanced", False):
+            f["reflow_unbalanced"] = True
+            if config.REFLOW_UNBALANCED_YELLOW and f["severity"] == "red" and f["class"] != "PLACEHOLDER":
+                f["severity"] = "yellow"
+            f["notes"].append(UNBALANCED_NOTE)
+        if f["class"] == "PLACEHOLDER":
+            ph = f.get("placeholder")
+            f["notes"].append("ฝั่ง %s เป็นช่องว่างรอพิมพ์ (%s) แต่ฝั่ง %s เป็นข้อมูลจริง (%s) — ต่างแน่นอน "
+                              "ตรวจว่าตั้งใจหรือไม่ (รหัส/เลขทะเบียน/Lot)"
+                              % (ph.upper(), f["word_" + ph],
+                                 "B" if ph == "a" else "A", f["word_" + ("b" if ph == "a" else "a")]))
         if f["class"] == "FRACTION":
             f["notes"].append("เศษส่วน — Vision อ่านตัวเดียวกันไม่นิ่ง (วัดแล้ว: ½ · 1/2 · 2 · 1 · หาย) "
                               "แยกจากการแก้งานจริงด้วยข้อความไม่ได้ โปรดดูด้วยตา")

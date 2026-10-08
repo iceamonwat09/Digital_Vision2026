@@ -521,6 +521,9 @@ def _evidence(c: dict, path: str) -> bool:
 _TH = {"SAME": "ภาพเหมือนกันทุกพิกเซล — OCR อ่านต่างเอง",
        "DIFF": "ภาพยืนยันว่าต่าง",
        "UNVERIFIABLE": "ตรวจด้วยภาพไม่ได้"}
+# ``PIXEL_RASTER_NOTE`` (8 ต.ค. รอบ 4): คู่ที่ฝั่งใดเป็นภาพสแกน — ภาพสแกนกับเวกเตอร์ต่างกันเสมอ (ขอบตัวอักษร ·
+# จุดรบกวน · บรรทัดที่ตัดคนละที่) ⇒ DIFF ไม่ใช่หลักฐานว่าข้อความต่าง (Friskies: ผิด 20/22) · SAME ยังเชื่อได้
+_TH_RASTER_DIFF = "ตรวจด้วยภาพแล้วยังไม่ยืนยันว่าเหมือน — ฝั่งหนึ่งเป็นภาพสแกน ภาพจึงต่างกันเสมอ (ไม่ใช่หลักฐานว่าข้อความต่าง)"
 
 
 def run(pairs: List[dict], srcs: dict, rd: str, warnings: List[str], say=None) -> dict:
@@ -528,7 +531,7 @@ def run(pairs: List[dict], srcs: dict, rd: str, warnings: List[str], say=None) -
     log = {"enabled": config.PIXEL_VERIFY, "line_mode": config.PIXEL_LINE_MODE,
            "raster": config.PIXEL_RASTER,
            "pymupdf": getattr(fitz, "VersionBind", None) if fitz is not None else None,
-           "pairs": [], "same": 0, "diff": 0, "unverifiable": 0, "skipped": 0, "ms": 0}
+           "pairs": [], "same": 0, "diff": 0, "diff_raster": 0, "unverifiable": 0, "skipped": 0, "ms": 0}
     if not config.PIXEL_VERIFY:
         return log
     t_all = time.time()
@@ -578,6 +581,7 @@ def run(pairs: List[dict], srcs: dict, rd: str, warnings: List[str], say=None) -
         cmp_lines = {"a": pr.get("lines", {}).get("a") or [], "b": pr.get("lines", {}).get("b") or []}
         raw_lines = {"a": (pr.get("_raw") or {}).get("a") or [], "b": (pr.get("_raw") or {}).get("b") or []}
         keep, same = [], []
+        raster_pair = bool(config.PIXEL_RASTER_NOTE and pc.ginfo.get("raster"))
         for f in fs:
             if time.time() > deadline:
                 log["skipped"] += 1
@@ -601,6 +605,10 @@ def run(pairs: List[dict], srcs: dict, rd: str, warnings: List[str], say=None) -
                           "checks": [{k: c.get(k) for k in ("side", "status", "ncc", "dpi", "tone", "ms", "line")}
                                      | {"blobs": len(c.get("sig") or [])} for c in checks]}
             note = _TH[st]
+            if st == "DIFF" and raster_pair:
+                note = _TH_RASTER_DIFF
+                f["pixel"]["raster"] = True
+                log["diff_raster"] += 1
             f.setdefault("notes", []).append(note)
             plog["items"].append({"id": f.get("id"), "status": st, "n_checks": len(checks),
                                   "ms": int((time.time() - t0) * 1000)})

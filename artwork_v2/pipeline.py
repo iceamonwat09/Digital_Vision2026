@@ -403,6 +403,11 @@ def _run(job_id, raw_pairs, poster, progress, sharpness, ai_mode, ai_poster,
     # ── 5) เลขจุด ────────────────────────────────────────────────────
     fid = 0
     for pr in pairs:
+        # เครื่องหมายเดี่ยวที่ OCR ไม่มั่นใจ ⇒ รายการพับ (LOWMARK) — หลังอ่านซ้ำ (ระดับสุดท้ายแล้ว) ก่อนยุบการ์ดโค้ง
+        if config.LOWMARK and pr.get("findings"):
+            pr["findings"], lm = compare.fold_lowmark(pr["findings"])
+            if lm:
+                pr["lowmark"] = lm
         if config.CURVED_GROUP_ENABLED and pr.get("findings"):
             pr["findings"] = compare.collapse_curved(pr["findings"])
         for f in pr.get("findings", []):
@@ -415,6 +420,9 @@ def _run(job_id, raw_pairs, poster, progress, sharpness, ai_mode, ai_poster,
             fid += 1
             f["id"] = fid
         for f in pr.get("excluded", []):
+            fid += 1
+            f["id"] = fid
+        for f in pr.get("lowmark", []):
             fid += 1
             f["id"] = fid
 
@@ -435,7 +443,8 @@ def _run(job_id, raw_pairs, poster, progress, sharpness, ai_mode, ai_poster,
         pr.pop("_cmp", None)
         pr.pop("_raw", None)
         # ห้ามใช้ชื่อ ``key`` — ทับกุญแจ API ข้างบน แล้ว redact() ลบชื่อคีย์ทิ้งแทนกุญแจจริง
-        for lk in ("findings", "debris", "algo_only", "ai_dismissed", "relocated", "pixel_same", "excluded"):
+        for lk in ("findings", "debris", "algo_only", "ai_dismissed", "relocated", "pixel_same", "excluded",
+                   "lowmark"):
             for f in pr.get(lk) or []:
                 if "confidence" not in f:
                     f["confidence"] = ai_review.confidence(f)
@@ -454,6 +463,8 @@ def _run(job_id, raw_pairs, poster, progress, sharpness, ai_mode, ai_poster,
                       % len(pr["pixel_same"]))
         if pr.get("excluded"):
             rs.append("อยู่ในพื้นที่ยกเว้น %d จุด (รายการพับ — ไม่นับ)" % len(pr["excluded"]))
+        if pr.get("lowmark"):
+            rs.append("เครื่องหมายเดี่ยวที่ OCR อ่านไม่มั่นใจ %d จุด (รายการพับ — ไม่นับ)" % len(pr["lowmark"]))
         pr["verdict"] = v
         pr["reasons"] = rs
     verdict, reasons = verdict_of(pairs)
@@ -466,6 +477,9 @@ def _run(job_id, raw_pairs, poster, progress, sharpness, ai_mode, ai_poster,
     n_exc = sum(len(pr.get("excluded") or []) for pr in pairs)
     if n_exc:
         reasons.append("อยู่ในพื้นที่ยกเว้น %d จุด (รายการพับ — ไม่นับ)" % n_exc)
+    n_lm = sum(len(pr.get("lowmark") or []) for pr in pairs)
+    if n_lm:
+        reasons.append("เครื่องหมายเดี่ยวที่ OCR อ่านไม่มั่นใจ %d จุด (รายการพับ — ไม่นับ)" % n_lm)
     stage["total_ms"] = int((time.time() - t_all) * 1000)
     result = {
         "version": VERSION, "job": job_id, "run": run_name,
@@ -516,7 +530,9 @@ def settings_snapshot() -> dict:
         "GEO_PAIRING", "RECOMPOSE", "MOVED_TEXT", "RELOCATE", "BALANCED_MOVE",
         "VERTICAL_UPRIGHT", "QUOTE_PUNCT", "SPLIT_MERGED", "AI_EXPERIMENTAL_MODES",
         "PIXEL_VERIFY", "PIXEL_LINE_MODE", "PIXEL_TIME_BUDGET_S", "PIXEL_RASTER", "PIXEL_WARP_GUARD", "PIXEL_WARP_MAX",
-        "ZONE_IGNORE", "IGNORE_COVER", "EST_BOX")}
+        "ZONE_IGNORE", "IGNORE_COVER", "EST_BOX",
+        "REFLOW_CONSERVE", "REFLOW_UNBALANCED_YELLOW", "PLACEHOLDER", "PLACEHOLDER_RED", "LOWMARK", "KEEP_SUPERSCRIPT",
+        "PIXEL_RASTER_NOTE")}
 
 
 def _reread(pairs, srcs, rd, poster, key, calls, warnings, say) -> dict:

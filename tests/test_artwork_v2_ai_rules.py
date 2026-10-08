@@ -321,7 +321,11 @@ def test_payload_marks_curved_lines(monkeypatch):
 # ── ⑤ เล่นซ้ำคำตอบจริงของ Gemini จาก Log สถานี ─────────────────────────
 
 def _replay_pr(name):
-    d = load_log(os.path.join(REPLAY, name))[1]
+    path = os.path.join(REPLAY, name)
+    if not os.path.isfile(path):
+        # ``.gitignore`` มี ``*.log`` ⇒ Log สถานีชุดนี้ไม่เคยถูก commit — ข้ามแทนล้ม (วางไฟล์แล้วเทสต์กลับมาทำงานเอง)
+        pytest.skip("ไม่มี Log สถานี %s (ถูก .gitignore *.log กันไว้)" % name)
+    d = load_log(path)[1]
     L = {s: textmodel.parse(fta_from_lines(d[s][2], d[s][0], d[s][1]), d[s][0], d[s][1])["lines"]
          for s in "AB"}
     r = compare.compare(L["A"], L["B"], tuple(d["A"][:2]), tuple(d["B"][:2]))

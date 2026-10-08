@@ -16,10 +16,16 @@ _NEW_DEFAULTS_TESTED_IN = {"test_artwork_v2_ai_review"}
 # ⇒ ตรึงค่าเดิมให้ · ค่าใหม่ทดสอบในโมดูลด้านล่าง (+ ``ARTWORK_V2_TEST_NEW_RULES=1`` = รันเทสต์รุ่นก่อนด้วยค่าใหม่)
 # (7 ต.ค. รอบ 5: + แยกบรรทัดที่รวมข้ามคอลัมน์ · ภาพสแกน · พื้นที่ยกเว้น — ทดสอบในโมดูลของตัวเอง)
 _STRUCT_TESTED_IN = {"test_artwork_v2_structure", "test_artwork_v2_pixverify", "test_artwork_v2_split",
-                     "test_artwork_v2_raster", "test_artwork_v2_ignore", "test_artwork_v2_est"}
+                     "test_artwork_v2_raster", "test_artwork_v2_ignore", "test_artwork_v2_est",
+                     "test_artwork_v2_noise_round"}
 _STRUCT_FLAGS = ("GEO_PAIRING", "RECOMPOSE", "MOVED_TEXT", "RELOCATE", "BALANCED_MOVE",
                  "VERTICAL_UPRIGHT", "QUOTE_PUNCT", "PIXEL_VERIFY", "SPLIT_MERGED")
 _GUARD_TESTED_IN = {"test_artwork_v2_zone_guard"}
+# 8 ต.ค. (รอบลดเหลือง): กติกาใหม่ของชั้นเทียบเปิดเป็นค่าเริ่มต้น — เทสต์รุ่นก่อนล็อกผลของตัวเทียบรุ่นเดิม
+# (เช่น "ชิ้นท้ายบรรทัดที่เจอในบรรทัดข้างเคียง = ตัดบรรทัด" โดยไม่นับจำนวน) ⇒ ตรึงค่าเดิมให้ · ค่าใหม่ทดสอบใน
+# ``test_artwork_v2_noise_round.py`` (+ ``ARTWORK_V2_TEST_NEW_RULES=1`` = รันเทสต์รุ่นก่อนด้วยค่าใหม่)
+_NOISE_TESTED_IN = {"test_artwork_v2_noise_round"}
+_NOISE_FLAGS = ("REFLOW_CONSERVE", "PLACEHOLDER", "LOWMARK", "KEEP_SUPERSCRIPT", "PIXEL_RASTER_NOTE")
 
 
 @pytest.fixture(autouse=True)
@@ -33,6 +39,9 @@ def _artwork_v2_legacy_defaults(request, monkeypatch):
     monkeypatch.setattr(config, "AI_MODE", "off")
     if name not in _STRUCT_TESTED_IN and os.getenv("ARTWORK_V2_TEST_NEW_RULES") != "1":
         for k in _STRUCT_FLAGS:
+            monkeypatch.setattr(config, k, False)
+    if name not in _NOISE_TESTED_IN and os.getenv("ARTWORK_V2_TEST_NEW_RULES") != "1":
+        for k in _NOISE_FLAGS:
             monkeypatch.setattr(config, k, False)
     # 4 ต.ค.: 1 คู่ = 1 คำขอ + ด่านกันยิงรัว — เทสต์รุ่นก่อนยิง /run ติดกันบนงานเดียว
     # และล็อกการรวมคู่ลงคำขอเดียว ⇒ ตรึงค่าเดิม (ค่าใหม่ทดสอบใน test_artwork_v2_zone_guard.py)

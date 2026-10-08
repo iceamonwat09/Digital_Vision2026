@@ -1,0 +1,603 @@
+{
+ "job": "20261008_213541_17022a",
+ "note": "เฉลยตรวจด้วยตาบนไฟล์ PDF ต้นฉบับทั้งสองฉบับ (ผู้ตัดสิน 2 คนแบบไม่เห็นกัน ทุกข้อเห็นตรงกัน) · 🅰 = O-AW-N (PDF สแกน 300 dpi) · 🅱 = F-AW-N (เวกเตอร์) · ของจริง 3 จุด: CFPR เป็นช่องว่างรอพิมพ์ ในฝั่ง B (F18) · INKJET area + L5.5 CM x W2.0 CM (F27/F28 — หมายเหตุโรงพิมพ์) · ไม้เอก กิโลแคลอรี่ (F7) = OCR ฝั่ง B อ่านผิด ไม่ใช่ของจริง (text layer ของ B พิมพ์ 'แคลอรีต่อ')",
+ "items": [
+  {
+   "item": "F1",
+   "key": [
+    ",,",
+    "|",
+    "Unggas Terhidrolisa; Perisa; Ekstrak Ikan.,, oleh: PT Nestlé Indonesia, Jakarta, 12520, Indonesia",
+    "Unggas Terhidrolisa; Perisa; Ekstrak Ikan. | oleh: PT Nestlé Indonesia, Jakarta, 12520, Indonesia"
+   ],
+   "truth": "NO_DIFF",
+   "real_kind": "none",
+   "noise_cause": "script_misread",
+   "importance": "critical",
+   "a_shows": "Unggas Terhidrolisa; Perisa; Ekstrak Ikan. 정제수, 참치, 결착제 합제(변성전분,",
+   "b_shows": "Unggas Terhidrolisa; Perisa; Ekstrak Ikan. 정제수, 참치, 결착제 합제(변성전분,",
+   "evidence": "The Korean ingredient words '정제수, 참치,' are printed the same on both sides (zoom/F1.jpg). Vision read the Korean glyphs as punctuation (',,' on A and '|' on B), so the system saw a difference that isn't printed."
+  },
+  {
+   "item": "F3",
+   "key": [
+    "",
+    "•",
+    "Company Limited",
+    "• Company Limited"
+   ],
+   "truth": "NO_DIFF",
+   "real_kind": "none",
+   "noise_cause": "edge_or_graphic",
+   "importance": "minor",
+   "a_shows": "Company Limited (light blue/white panel-edge stripe on the far left)",
+   "b_shows": "Company Limited (green dashed dieline on the far left; no bullet printed)",
+   "evidence": "zoom/F3.jpg shows B has no printed bullet before 'Company Limited'. The '•' (conf 0.33) at x=0-16 is a segment of the green dashed guide line at the zone edge."
+  },
+  {
+   "item": "F4",
+   "key": [
+    "|",
+    "",
+    "MY: 1-800-88-7462 |",
+    "MY: 1-800-88-7462"
+   ],
+   "truth": "NO_DIFF",
+   "real_kind": "none",
+   "noise_cause": "edge_or_graphic",
+   "importance": "minor",
+   "a_shows": "MY: 1-800-88-7462 (then the black panel ends and a light green stripe starts)",
+   "b_shows": "MY: 1-800-88-7462",
+   "evidence": "The phone number is identical on both sides (zoom/F4.jpg). A's '|' at x 1147-1165 falls on the border between the black panel and the light green stripe, which sits closer to the text in A. It is not a printed character."
+  },
+  {
+   "item": "F6",
+   "key": [
+    "'' > N",
+    "\">",
+    "8 \"850124079 4 7 3'' > N: 1800 103 1947 บ.เนสท์เล่ (ไทย) จำกัด เลขที่ 999/9 ถนนพระราม 1 แขวง",
+    "8 \"850124079473\"> : 1800 103 1947 บ.เนสท์เล่ (ไทย) จำกัด เลขที่ 999/9 ถนนพระราม 1 แขวง"
+   ],
+   "truth": "NO_DIFF",
+   "real_kind": "none",
+   "noise_cause": "garbled_both",
+   "importance": "critical",
+   "a_shows": "8 850124 079473 >   IN: 1800 103 1947",
+   "b_shows": "8 850124 079473 >   IN: 1800 103 1947",
+   "evidence": "The barcode digits '8 850124 079473 >' and 'IN: 1800 103 1947' read the same on both sides (zoom/F6.jpg). Vision garbled the guard bars and the black 'IN:' box differently on each side: A gives \"3'' > N:\" and B gives '473\"> :'."
+  },
+  {
+   "item": "F7",
+   "key": [
+    "",
+    "่",
+    "6 kcal /sachet ค่าพลังงานที่สัตว์สามารถนำไปใช้ 42 กิโลแคลอรีต่อ 100 กรัม",
+    "6 kcal /sachet ค่าพลังงานที่สัตว์สามารถนำไปใช้ 42 กิโลแคลอรี่ต่อ 100"
+   ],
+   "truth": "NO_DIFF",
+   "real_kind": "none",
+   "noise_cause": "ocr_char_misread",
+   "importance": "critical",
+   "a_shows": "42 กิโลแคลอรีต่อ 100 กรัม (ไม้เอก over ต, none over รี)",
+   "b_shows": "42 กิโลแคลอรีต่อ 100 (ไม้เอก over ต, none over รี)",
+   "evidence": "At 6x zoom (zoom/F7_tight.jpg) both sides show ี on ร and a single ไม้เอก on ต, in the same relative positions; there is no stacked tone mark on รี in B. B's vector text layer confirms 'กิโลแคลอรีตอ100', so Vision added a ไม้เอก that isn't there when it read 'กิโลแคลอรี่'."
+  },
+  {
+   "item": "F8",
+   "key": [
+    "กรัม",
+    "",
+    "6 kcal /sachet ค่าพลังงานที่สัตว์สามารถนำไปใช้ 42 กิโลแคลอรีต่อ 100 กรัม",
+    "6 kcal /sachet ค่าพลังงานที่สัตว์สามารถนำไปใช้ 42 กิโลแคลอรี่ต่อ 100"
+   ],
+   "truth": "NO_DIFF",
+   "real_kind": "none",
+   "noise_cause": "line_wrap_or_split",
+   "importance": "critical",
+   "a_shows": "...42 กิโลแคลอรีต่อ 100 กรัม (กรัม at end of line)",
+   "b_shows": "...42 กิโลแคลอรีต่อ 100 / next line: กรัม 제품명:",
+   "evidence": "B prints 'กรัม' at the start of the next line, before '제품명:', instead of after '100'. The B text layer has '100\\nกรัม'. This is the same word on a different line (zoom/F29.jpg)."
+  },
+  {
+   "item": "F11",
+   "key": [
+    "a",
+    "",
+    "INGREDIENTS/ abuus:nous/KOMPOSISI",
+    "INGREDIENTS/ buus:noɔ̃/ KOMPOSISI"
+   ],
+   "truth": "NO_DIFF",
+   "real_kind": "none",
+   "noise_cause": "script_misread",
+   "importance": "normal",
+   "a_shows": "INGREDIENTS/ ส่วนประกอบอาหารสัตว์/ KOMPOSISI/",
+   "b_shows": "INGREDIENTS/ ส่วนประกอบอาหารสัตว์/ KOMPOSISI/",
+   "evidence": "At x3 zoom both sides print the same Thai heading 'ส่วนประกอบอาหารสัตว์', and the ไม้เอก is on ส่ on both. Vision turned the Thai into Latin-like garbage that differs between sides ('abuus:nous' vs 'buus:noɔ̃'). Zoom: zoom/F11_z.jpg"
+  },
+  {
+   "item": "F14",
+   "key": [
+    "2",
+    "1)",
+    "(2:56 g (144):",
+    "(1):56 g (14g x 47)"
+   ],
+   "truth": "NO_DIFF",
+   "real_kind": "none",
+   "noise_cause": "script_misread",
+   "importance": "critical",
+   "a_shows": "(일월년 순) 중량: 56 g (14g × 4개입) 대사에너지:",
+   "b_shows": "(일월년 순) 중량: 56 g (14g × 4개입) 대사에너지:",
+   "evidence": "The red box sits on the Korean '순)' in both crops. Vision read that glyph as the digit '2' on A and as '1)' on B. The weight '56 g (14g × 4개입)' is identical on both sides (zoom/F14_F15_z.jpg). The only visible difference is font weight from the different rendering."
+  },
+  {
+   "item": "F15",
+   "key": [
+    "4):",
+    "g x 47)",
+    "(2:56 g (144):",
+    "(1):56 g (14g x 47)"
+   ],
+   "truth": "NO_DIFF",
+   "real_kind": "none",
+   "noise_cause": "script_misread",
+   "importance": "critical",
+   "a_shows": "56 g (14g × 4개입) 대사에너지:",
+   "b_shows": "56 g (14g × 4개입) 대사에너지:",
+   "evidence": "Both sides print '(14g × 4개입)' followed by '대사에너지:'. Vision read '4개입' as '4)' on A and as '47)' on B. The × sign is drawn in a different font (A looks larger) but it is the same character with the same meaning. Zoom: zoom/F14_F15_z.jpg"
+  },
+  {
+   "item": "F16",
+   "key": [
+    "L-알라딘), 가다랑어추출물 제조일자:",
+    "",
+    "L-알라딘), 가다랑어추출물 제조일자: 제품에 별도 표시(일월년 순) 유통기한:",
+    "제품에 별도 표시 (일월년 순) 중량:"
+   ],
+   "truth": "NO_DIFF",
+   "real_kind": "none",
+   "noise_cause": "wrong_line_pairing",
+   "importance": "critical",
+   "a_shows": "L-알라닌), 가다랑어추출물 제조일자: 제품에 별도 표시(일월년 순) 유통기한: / 제품에 별도 표시 (일월년 순) 중량: 56 g (14g × 4개입) 대사에너지:",
+   "b_shows": "L-알라닌), 가다랑어추출물 제조일자: 제품에 별도 표시(일월년 순) 유통기한: / 제품에 별도 표시 (일월년 순) 중량: 56 g (14g × 4개입) 대사에너지:",
+   "evidence": "Both sides have the same two Korean rows with identical wrapping (zoom/F17_z.jpg, zoom/F16_wide.jpg). The system paired A's 'L-알라닌)… 유통기한:' row with B's next row '제품에 별도 표시 (일월년 순) 중량:'. 'L-알라딘' is also an OCR misread: both sides print 'L-알라닌'."
+  },
+  {
+   "item": "F17",
+   "key": [
+    "유통기한",
+    "중량",
+    "L-알라딘), 가다랑어추출물 제조일자: 제품에 별도 표시(일월년 순) 유통기한:",
+    "제품에 별도 표시 (일월년 순) 중량:"
+   ],
+   "truth": "NO_DIFF",
+   "real_kind": "none",
+   "noise_cause": "wrong_line_pairing",
+   "importance": "critical",
+   "a_shows": "…표시(일월년 순) 유통기한: / 제품에 별도 표시 (일월년 순) 중량: 56 g",
+   "b_shows": "…표시(일월년 순) 유통기한: / 제품에 별도 표시 (일월년 순) 중량: 56 g",
+   "evidence": "'유통기한:' ends the 'L-알라닌…' row and '중량:' sits in the next row, on both sides, with identical wrapping (zoom/F17_z.jpg). This red flag compares A's row 1 with B's row 2, so it is a false red caused by wrong line pairing."
+  },
+  {
+   "item": "F18",
+   "key": [
+    "SF-CF12-26-172683205264",
+    "XXXXXX",
+    "IM-610, D-13-291, IN-233; CFPR No. SF-CF12-26-172683205264",
+    "Reg No.: IM-610, D-13-291, IN-233; CFPR No. XXXXXX"
+   ],
+   "truth": "REAL_DIFF",
+   "real_kind": "placeholder_vs_code",
+   "noise_cause": "not_noise",
+   "importance": "critical",
+   "a_shows": "IM-610, D-13-291, IN-233; CFPR No. SF-CFI2-26-172683205264",
+   "b_shows": "Reg No.: IM-610, D-13-291, IN-233; CFPR No. xxxxxx",
+   "evidence": "At x3 zoom, A prints the full CFPR number 'SF-CFI2-26-172683205264' (OCR read it as CF12). B prints the placeholder 'xxxxxx' in its place (zoom/F18_z.jpg)."
+  },
+  {
+   "item": "F19",
+   "key": [
+    "non",
+    "kɩ",
+    "4. Thailand: nonnu",
+    "4. Thailand: kɩnuſnu:"
+   ],
+   "truth": "NO_DIFF",
+   "real_kind": "none",
+   "noise_cause": "script_misread",
+   "importance": "normal",
+   "a_shows": "Thailand: จัดจำหน่ายโดย:",
+   "b_shows": "Thailand: จัดจำหน่ายโดย:",
+   "evidence": "Zoomed both lines (zoom/F19_line.jpg, zoom/F19_thai.jpg): both print 'จัดจำหน่ายโดย:' with the same ่ tone mark on หน่าย and the trailing colon. Vision read the Thai as Latin junk ('nonnu' / 'kɩnuſnu:'), differently on each side."
+  },
+  {
+   "item": "F20",
+   "key": [
+    "",
+    "ſnu:",
+    "4. Thailand: nonnu",
+    "4. Thailand: kɩnuſnu:"
+   ],
+   "truth": "NO_DIFF",
+   "real_kind": "none",
+   "noise_cause": "script_misread",
+   "importance": "normal",
+   "a_shows": "Thailand: จัดจำหน่ายโดย:",
+   "b_shows": "Thailand: จัดจำหน่ายโดย:",
+   "evidence": "Same line as F19. The end 'โดย:' is identical in A and B, colon included (zoom/F19_thai.jpg). 'ſnu:' is just Vision's Latin misread of the Thai."
+  },
+  {
+   "item": "F21",
+   "key": [
+    "e",
+    "H",
+    "THeusimnine 1162 nsa",
+    "THHussamina 1162 isa"
+   ],
+   "truth": "NO_DIFF",
+   "real_kind": "none",
+   "noise_cause": "script_misread",
+   "importance": "normal",
+   "a_shows": "TH: ประเทศไทย 1162 หรือ 0-2657-8601",
+   "b_shows": "TH: ประเทศไทย 1162 หรือ 0-2657-8601",
+   "evidence": "zoom/F21_line.jpg shows the same white-on-black line on both sides: 'TH: ประเทศไทย 1162 หรือ 0-2657-8601'. 'THeus…' vs 'THHuss…' is Vision reading the Thai and the colon as Latin letters."
+  },
+  {
+   "item": "F22",
+   "key": [
+    "imn",
+    "sam",
+    "THeusimnine 1162 nsa",
+    "THHussamina 1162 isa"
+   ],
+   "truth": "NO_DIFF",
+   "real_kind": "none",
+   "noise_cause": "script_misread",
+   "importance": "normal",
+   "a_shows": "TH: ประเทศไทย 1162 หรือ",
+   "b_shows": "TH: ประเทศไทย 1162 หรือ",
+   "evidence": "The flagged span is inside the word ประเทศไทย, which is printed identically in A and B (zoom/F21_line.jpg). 'imn' vs 'sam' is a Latin misread of the Thai script."
+  },
+  {
+   "item": "F23",
+   "key": [
+    "e",
+    "a",
+    "THeusimnine 1162 nsa",
+    "THHussamina 1162 isa"
+   ],
+   "truth": "NO_DIFF",
+   "real_kind": "none",
+   "noise_cause": "script_misread",
+   "importance": "normal",
+   "a_shows": "TH: ประเทศไทย 1162 หรือ",
+   "b_shows": "TH: ประเทศไทย 1162 หรือ",
+   "evidence": "Same word ประเทศไทย, identical on both sides (zoom/F21_line.jpg). 'e' vs 'a' comes from Vision transliterating the Thai glyphs inconsistently."
+  },
+  {
+   "item": "F24",
+   "key": [
+    "n",
+    "i",
+    "THeusimnine 1162 nsa",
+    "THHussamina 1162 isa"
+   ],
+   "truth": "NO_DIFF",
+   "real_kind": "none",
+   "noise_cause": "script_misread",
+   "importance": "normal",
+   "a_shows": "TH: ประเทศไทย 1162 หรือ",
+   "b_shows": "TH: ประเทศไทย 1162 หรือ",
+   "evidence": "The ไทย part of ประเทศไทย is identical in A and B (zoom/F21_line.jpg). 'n' vs 'i' is a script misread."
+  },
+  {
+   "item": "F25",
+   "key": [
+    "ปทุมวัน เขตปทุมวัน กรุงเทพมหานคร",
+    "Unusu amunujungbinwunmuns",
+    "ปทุมวัน เขตปทุมวัน กรุงเทพมหานคร 10330 (9) ±5=0||||",
+    "Unusu amunujungbinwunmuns 10330 (주의) 반추동물에게"
+   ],
+   "truth": "NO_DIFF",
+   "real_kind": "none",
+   "noise_cause": "script_misread",
+   "importance": "critical",
+   "a_shows": "ปทุมวัน เขตปทุมวัน กรุงเทพมหานคร 10330",
+   "b_shows": "ปทุมวัน เขตปทุมวัน กรุงเทพมหานคร 10330",
+   "evidence": "zoom/F25_addr.jpg: the Thai distributor address 'ปทุมวัน เขตปทุมวัน กรุงเทพมหานคร' reads the same on both sides. Vision read A correctly (conf 0.97) but read B's Thai as Latin junk 'Unusu amunujungbinwunmuns' (conf 0.17)."
+  },
+  {
+   "item": "F26",
+   "key": [
+    "9) ±5=0||||",
+    "주의) 반추동물에게",
+    "ปทุมวัน เขตปทุมวัน กรุงเทพมหานคร 10330 (9) ±5=0||||",
+    "Unusu amunujungbinwunmuns 10330 (주의) 반추동물에게"
+   ],
+   "truth": "NO_DIFF",
+   "real_kind": "none",
+   "noise_cause": "script_misread",
+   "importance": "normal",
+   "a_shows": "10330 (주의) 반추동물에게",
+   "b_shows": "10330 (주의) 반추동물에게",
+   "evidence": "zoom/F26_kr.jpg: both print '10330 (주의) 반추동물에게' with the same postcode and the same Korean warning. A's '(9) ±5=0||||' is Vision misreading the Korean on the scanned image (conf 0.12)."
+  },
+  {
+   "item": "F27",
+   "key": [
+    "INKJET area",
+    "",
+    "INKJET area",
+    ""
+   ],
+   "truth": "REAL_DIFF",
+   "real_kind": "printer_annotation",
+   "noise_cause": "not_noise",
+   "importance": "normal",
+   "a_shows": "INKJET area (blue text inside the white inkjet box)",
+   "b_shows": "(white inkjet box present but empty — no text)",
+   "evidence": "Wide view zoom/F27_wide.jpg: A's white box carries blue 'INKJET area / L5.5 CM x W2.0 CM'; B has the same white box at the same place but it is blank. This is a print-house note, not label wording."
+  },
+  {
+   "item": "F28",
+   "key": [
+    "L5.5 CM x W2.0 CM",
+    "",
+    "L5.5 CM x W2.0 CM",
+    ""
+   ],
+   "truth": "REAL_DIFF",
+   "real_kind": "printer_annotation",
+   "noise_cause": "not_noise",
+   "importance": "normal",
+   "a_shows": "L5.5 CM x W2.0 CM (blue, inside the white inkjet box)",
+   "b_shows": "(empty white inkjet box — no text)",
+   "evidence": "Same box as F27 (zoom/F27_wide.jpg): A prints the inkjet-area dimensions 'L5.5 CM x W2.0 CM'; B's box is blank. Print-house annotation only."
+  },
+  {
+   "item": "F29",
+   "key": [
+    "",
+    "nsu",
+    "",
+    "nsu"
+   ],
+   "truth": "NO_DIFF",
+   "real_kind": "none",
+   "noise_cause": "line_wrap_or_split",
+   "importance": "critical",
+   "a_shows": "กรัม (at end of the '...ต่อ 100 กรัม' line)",
+   "b_shows": "กรัม (wrapped to start of the '제품명:' line)",
+   "evidence": "B's 'extra' line 'nsu' is the Thai word 'กรัม' wrapped to the next line, which Vision misread as Latin. A prints the same 'กรัม' at the end of the previous line (zoom/F29.jpg). F8 and F29 are the same wrapping."
+  },
+  {
+   "item": "F30",
+   "key": [
+    "",
+    "LE), CO ||",
+    "",
+    "LE), CO ||"
+   ],
+   "truth": "NO_DIFF",
+   "real_kind": "none",
+   "noise_cause": "script_misread",
+   "importance": "critical",
+   "a_shows": "L-알라닌), 가다랑어추출물 제조일자:",
+   "b_shows": "L-알라닌), 가다랑어추출물 제조일자:",
+   "evidence": "Both crops show the identical Korean ingredient row 'L-알라닌), 가다랑어추출물 제조일자:'. Vision garbled B's copy into 'LE), CO ||', which made it look like extra text that exists only on B."
+  },
+  {
+   "item": "F31",
+   "key": [
+    "",
+    "7|",
+    "",
+    "7|"
+   ],
+   "truth": "NO_DIFF",
+   "real_kind": "none",
+   "noise_cause": "script_misread",
+   "importance": "critical",
+   "a_shows": "순) 유통기한:",
+   "b_shows": "순) 유통기한:",
+   "evidence": "The red box covers the '기' of '유통기한:', which is printed identically on both sides. Vision split that Korean syllable into '7|' on B only."
+  },
+  {
+   "item": "F32",
+   "key": [
+    "",
+    "(14gx47)",
+    "",
+    "(14gx47)"
+   ],
+   "truth": "NO_DIFF",
+   "real_kind": "none",
+   "noise_cause": "line_wrap_or_split",
+   "importance": "critical",
+   "a_shows": "56 g (14g × 4개입) 대사에너지:",
+   "b_shows": "56 g (14g × 4개입) 대사에너지:",
+   "evidence": "Both sides print '(14g × 4개입)' at the same place in the weight row. Vision cut B's copy out as a separate line, '(14gx47)', with '개입' misread as '7', so it was flagged as extra in B."
+  },
+  {
+   "item": "F33",
+   "key": [
+    "CURVED",
+    [
+     "",
+     "E DISPOSE OF T"
+    ],
+    [
+     "",
+     "응."
+    ],
+    [
+     "DISPOSE",
+     ""
+    ],
+    [
+     "GHTFULLY",
+     ""
+    ],
+    [
+     "L",
+     "UL."
+    ],
+    [
+     "OF",
+     ""
+    ]
+   ],
+   "truth": "NO_DIFF",
+   "real_kind": "none",
+   "noise_cause": "curved_text",
+   "importance": "minor",
+   "a_shows": "PLEASE DISPOSE OF THOUGHTFULLY (curved, tidyman logo) + recycle 5 / PP",
+   "b_shows": "PLEASE DISPOSE OF THOUGHTFULLY (curved, tidyman logo) + recycle 5 / PP",
+   "evidence": "zoom/F33_logo.jpg: both logos carry the full curved text 'PLEASE DISPOSE OF THOUGHTFULLY', and both have the recycle 5 with 'PP' (the size difference matches the ~1.12 zone scale). The members (HOUGHTFL, GHTFULLY, '응.') are fragmented OCR of the curved text and graphics."
+  },
+  {
+   "item": "F2",
+   "key": [
+    "",
+    "1",
+    "sachet per day. This product is a treat and is intended for",
+    "1 sachet per day. This product is a treat and is intended for"
+   ],
+   "truth": "NO_DIFF",
+   "real_kind": "none",
+   "noise_cause": "ocr_char_misread",
+   "importance": "critical",
+   "a_shows": "1 sachet per day.This product is a treat and is intended for",
+   "b_shows": "1 sachet per day.This product is a treat and is intended for",
+   "evidence": "zoom/F2_zoom.jpg shows a clear leading '1' before 'sachet' on both A and B; A's OCR line simply starts at 'sachet' (box x=1210 vs line above at 1185), i.e. Vision dropped the '1' on the scan."
+  },
+  {
+   "item": "F5",
+   "key": [
+    ".....",
+    "",
+    ".....PP",
+    "PP"
+   ],
+   "truth": "NO_DIFF",
+   "real_kind": "none",
+   "noise_cause": "punctuation_ocr",
+   "importance": "minor",
+   "a_shows": "PP / 내포장:OTHER (under the 비닐류 recycle mark; faint scan speckle left of PP)",
+   "b_shows": "PP / 내포장:OTHER",
+   "evidence": "zoom/F5_zoom.jpg: both show only 'PP' above '내포장:OTHER'; no dots are printed. A's '.....' comes from light scan speckle beside the recycle arrow that OCR read as dots."
+  },
+  {
+   "item": "F9",
+   "key": [
+    "us",
+    "บริ",
+    "Thailand usษัท ไอ-เทล คอร์ปอเรชั่น จำกัด",
+    "Thailand บริษัท ไอ-เทล คอร์ปอเรชั่น จำกัด"
+   ],
+   "truth": "NO_DIFF",
+   "real_kind": "none",
+   "noise_cause": "script_misread",
+   "importance": "critical",
+   "a_shows": "Thailand บริษัท ไอ-เทล คอร์ปอเรชั่น จำกัด",
+   "b_shows": "Thailand บริษัท ไอ-เทล คอร์ปอเรชั่น จำกัด",
+   "evidence": "zoom/F9_zoom.jpg: identical Thai company name on both; A's OCR turned 'บริ' into Latin 'us' (conf 0.65) on the scanned raster."
+  },
+  {
+   "item": "F10",
+   "key": [
+    "nnnn",
+    "",
+    "Ash 2% (Max), Crude Fibre mn Tuunnnn1% (Max),",
+    "Ash 2% (Max), Crude Fibre mn Tuu1% (Max),"
+   ],
+   "truth": "NO_DIFF",
+   "real_kind": "none",
+   "noise_cause": "script_misread",
+   "importance": "critical",
+   "a_shows": "Ash 2% (Max), Crude Fibre กาก ไม่มากกว่า1% (Max),",
+   "b_shows": "Ash 2% (Max), Crude Fibre กาก ไม่มากกว่า1% (Max),",
+   "evidence": "zoom/F10_zoom.jpg: both lines read 'Crude Fibre กาก ไม่มากกว่า1% (Max)'; the Thai was garbled into Latin by OCR differently on each side ('Tuunnnn1%' vs 'Tuu1%')."
+  },
+  {
+   "item": "F12",
+   "key": [
+    "us",
+    "ɔ̃",
+    "INGREDIENTS/ abuus:nous/KOMPOSISI",
+    "INGREDIENTS/ buus:noɔ̃/ KOMPOSISI"
+   ],
+   "truth": "NO_DIFF",
+   "real_kind": "none",
+   "noise_cause": "script_misread",
+   "importance": "normal",
+   "a_shows": "INGREDIENTS/ ส่วนประกอบอาหารสัตว์/ KOMPOSISI/",
+   "b_shows": "INGREDIENTS/ ส่วนประกอบอาหารสัตว์/ KOMPOSISI/",
+   "evidence": "zoom/F12_zoom.jpg: heading identical on both; OCR transliterated the bold Thai into Latin garbage ('abuus:nous' vs 'buus:noɔ̃') at very low confidence (0.15-0.36)."
+  },
+  {
+   "item": "F13",
+   "key": [
+    "nu",
+    "umsiños:aðu",
+    "should be available at all times Usunnu",
+    "should be available at all times Usunumsiños:aðu"
+   ],
+   "truth": "NO_DIFF",
+   "real_kind": "none",
+   "noise_cause": "script_misread",
+   "importance": "normal",
+   "a_shows": "should be available at all times ปริมาณการให้อาหารที่แนะนำต่อวัน",
+   "b_shows": "should be available at all times ปริมาณการให้อาหารที่แนะนำต่อวัน",
+   "evidence": "zoom/F13_zoom.jpg: the Thai phrase after 'all times' is the same full text on both sides; A's OCR line stops at x=1785 ('Usunnu') and B's garbles it ('Usunumsiños:aðu') — Thai misread as Latin."
+  },
+  {
+   "item": "P1new_2",
+   "key": [
+    ",",
+    "",
+    "구아검), 농어, 가수분해단백질(닭, 칠면조, 오리), 아미노산제 합제(L-로이신,",
+    "구아검), 농어, 가수분해단백질(닭, 칠면조, 오리), 아미노산제 합제(L-로이신"
+   ],
+   "truth": "NO_DIFF",
+   "real_kind": "none",
+   "noise_cause": "line_wrap_or_split",
+   "importance": "minor",
+   "a_shows": "아미노산제 합제(L-로이신,",
+   "b_shows": "아미노산제 합제(L-로이신,",
+   "evidence": "zoom/P1new_2.jpg shows a comma printed after '로이신' on both sides. In B, Vision put that comma into its own one-character line (see R_B18), so the main B line looks like it has no comma."
+  },
+  {
+   "item": "P1new_3",
+   "key": [
+    ",",
+    "",
+    "공정거래위원회고시 소비자분쟁해결기준에 의거하여 교환,",
+    "공정거래위원회고시 소비자분쟁해결기준에 의거하여 교환"
+   ],
+   "truth": "NO_DIFF",
+   "real_kind": "none",
+   "noise_cause": "punctuation_ocr",
+   "importance": "minor",
+   "a_shows": "의거하여 교환,",
+   "b_shows": "의거하여 교환,",
+   "evidence": "Both sides print a comma after '교환' (zoom/P1new_3.jpg). In B the comma touches the green dashed dieline at the right edge, and Vision dropped it."
+  },
+  {
+   "item": "R_T",
+   "key": [
+    "",
+    "T",
+    "0.05% (Min), Mineral(calcium) 0.001%",
+    "T 0.05% (Min), Mineral(calcium) 0.001%"
+   ],
+   "truth": "NO_DIFF",
+   "real_kind": "none",
+   "noise_cause": "script_misread",
+   "importance": "critical",
+   "a_shows": "ไม่น้อยกว่า 0.05% (Min), Mineral(calcium) 0.001%",
+   "b_shows": "ไม่น้อยกว่า 0.05% (Min), Mineral(calcium) 0.001%",
+   "evidence": "both lines start with the Thai 'ไม่น้อยกว่า' before '0.05%'; there is no printed 'T' — B's OCR read the Thai word as 'T' and A's OCR dropped it"
+  }
+ ]
+}
