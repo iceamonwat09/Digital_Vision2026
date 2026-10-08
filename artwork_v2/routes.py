@@ -14,10 +14,10 @@ import os
 import re
 import time
 
-from flask import (Blueprint, abort, g, jsonify, render_template, request,
+from flask import (Blueprint, Response, abort, g, jsonify, render_template, request,
                    send_file)
 
-from . import VERSION, config, jobs, keystore, pipeline, runguard, vision_client
+from . import VERSION, config, jobs, keystore, pipeline, review, runguard, vision_client
 
 logger = logging.getLogger(__name__)
 
@@ -90,7 +90,8 @@ def page():
                            v2_side_table=config.SIDE_TABLE,
                            v2_zone_ignore=config.ZONE_IGNORE,
                            v2_ignore_max=config.IGNORE_MAX,
-                           v2_est_box=config.EST_BOX)
+                           v2_est_box=config.EST_BOX,
+                           v2_review=config.REVIEW)
 
 
 # ── API key ──────────────────────────────────────────────────────────
@@ -289,8 +290,63 @@ def run_log(job_id, run):
         abort(404)
     if not os.path.isfile(path):
         abort(404)
-    return send_file(path, mimetype="text/plain; charset=utf-8", as_attachment=True,
-                     download_name="artwork_v2_%s_%s_log.txt" % (job_id, run))
+    name = "artwork_v2_%s_%s_log.txt" % (job_id, run)
+    extra = ""
+    if config.REVIEW:
+        try:
+            extra = review.load(job_id, run)["log_text"]
+        except (OSError, ValueError):
+            extra = ""
+    if not extra:
+        return send_file(path, mimetype="text/plain; charset=utf-8", as_attachment=True,
+                         download_name=name)
+    with open(path, "r", encoding="utf-8") as f:
+        body = f.read()
+    resp = Response(body + extra, mimetype="text/plain; charset=utf-8")
+    resp.headers["Content-Disposition"] = 'attachment; filename="%s"' % name
+    return resp
+
+
+# ── รีวิวจุดต่างโดยคน (ARTWORK_V2_REVIEW · ไม่แตะผลตรวจ/ผลตัดสิน) ─────────────────
+
+@artwork_v2_bp.route("/api/artwork_v2/jobs/<job_id>/runs/<run>/review", methods=["GET"])
+def run_review_get(job_id, run):
+    if not config.REVIEW:
+        abort(404)
+    try:
+        return jsonify(review.load(job_id, run))
+    except (ValueError, FileNotFoundError) as e:
+        return _err(str(e), 404)
+
+
+@artwork_v2_bp.route("/api/artwork_v2/jobs/<job_id>/runs/<run>/review", methods=["POST"])
+def run_review_set(job_id, run):
+    if not config.REVIEW:
+        abort(404)
+    try:
+        if not os.path.isfile(os.path.join(jobs.run_dir(job_id, run), "result.json")):
+            raise FileNotFoundError("รอบ %s ยังไม่มีผลตรวจ" % run)
+    except (ValueError, FileNotFoundError) as e:
+        return _err(str(e), 404)
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        return _err("ข้อมูลไม่ถูกต้อง")
+    ids = body.get("ids")
+    if not isinstance(ids, list) or not all(isinstance(x, (int, str)) and not isinstance(x, bool)
+                                            for x in ids):
+        return _err("ids ต้องเป็นรายการเลขจุด")
+    status = body.get("status")
+    note = body.get("note")
+    if note is not None and not isinstance(note, str):
+        return _err("note ต้องเป็นข้อความ")
+    viewer = _viewer() or {}
+    try:
+        return jsonify(review.set_status(job_id, run, ids, status, note,
+                                         user=viewer.get("username") or ""))
+    except FileNotFoundError as e:
+        return _err(str(e), 404)
+    except ValueError as e:
+        return _err(str(e))
 
 
 @artwork_v2_bp.route("/api/artwork_v2/jobs/<job_id>/runs/<run>/raw/<name>")

@@ -198,6 +198,33 @@
   .v2-tbl-side tr.v2-s-yellow > td:first-child { box-shadow:inset 3px 0 0 #d97706; }
   .v2-tbl-side tr.v2-note > td { background:#f8fafc; color:#334155; font-size:12px; border-bottom:1px solid #e2e8f0; padding-top:4px; }
   .v2-tbl-side tr.v2-note + tr > td { border-top:0; }
+  /* รีวิวจุดต่างโดยคน (ARTWORK_V2_REVIEW) */
+  .v2-rv { display:flex; flex-wrap:wrap; align-items:center; gap:3px; margin-top:5px; }
+  .v2-rvb { border:1px solid #cbd5e1; background:#fff; color:#334155; border-radius:4px; padding:1px 6px;
+            font-size:11px; line-height:1.5; cursor:pointer; white-space:nowrap; }
+  .v2-rvb:hover { background:#f1f5f9; }
+  .v2-rvb:disabled { opacity:.5; cursor:wait; }
+  .v2-rvb.real.on { background:#b91c1c; border-color:#b91c1c; color:#fff; }
+  .v2-rvb.false.on { background:#475569; border-color:#475569; color:#fff; }
+  .v2-rvs { font-size:11px; color:#64748b; white-space:nowrap; max-width:12em; overflow:hidden; text-overflow:ellipsis; }
+  .v2-tbl tr.v2-rv-real > td { background:#fff5f5; }
+  .v2-tbl tr.v2-rv-false > td { background:#f8fafc; color:#64748b; }
+  .v2-tbl tr.v2-rv-false mark { opacity:.6; }
+  #v2PairsRes.v2-rv-todo-only tr.v2-rv-done { display:none; }
+  .v2-revbar { margin-top:10px; border:1px solid #e2e8f0; border-radius:8px; padding:8px 10px; background:#fff; font-size:13px; }
+  .v2-revbar.done { border-color:#86efac; background:#f0fdf4; }
+  .v2-revbar .v2-revtop { display:flex; flex-wrap:wrap; align-items:center; gap:6px 12px; }
+  .v2-revprog { flex:1 1 140px; min-width:120px; max-width:260px; height:8px; border-radius:999px; background:#e2e8f0; overflow:hidden; display:flex; }
+  .v2-revprog i { display:block; height:100%; }
+  .v2-revprog i.r { background:#dc2626; } .v2-revprog i.f { background:#64748b; }
+  .v2-revtodo { margin-top:6px; display:flex; flex-wrap:wrap; gap:4px; align-items:center; }
+  .v2-revtodo button { border:1px solid #cbd5e1; background:#fff; border-radius:999px; padding:0 7px; font-size:11px; cursor:pointer; }
+  .v2-revtodo button.red { border-color:#fca5a5; color:#991b1b; }
+  .v2-revmsg { color:#b91c1c; font-size:12px; }
+  @media (max-width: 760px) {      /* จอแคบ: ปุ่มเหลือแค่สัญลักษณ์ (ชื่อเต็มอยู่ใน title) ⇒ คอลัมน์ข้อความไม่ถูกบีบ */
+    .v2-rvt, .v2-rvs { display:none; }
+    .v2-rvb { padding:1px 7px; font-size:13px; }
+  }
   .v2-nbtn { border:1px solid #cbd5e1; background:#fff; color:#475569; border-radius:999px; width:22px; height:22px; padding:0;
              font:600 12px/20px system-ui, sans-serif; cursor:pointer; }
   .v2-nbtn:hover { background:#f1f5f9; }
@@ -213,7 +240,7 @@
 {% endblock %}
 
 {% block content %}
-<div class="v2" id="v2Root" data-can-manage="{{ 1 if can_manage_key else 0 }}" data-version="{{ v2_version }}" data-box-style="{{ v2_box_style }}" data-restore-confirm="{{ 1 if v2_restore_confirm else 0 }}" data-restore-days="{{ v2_restore_days }}" data-hover-zoom="{{ 1 if v2_hover_zoom else 0 }}" data-line-group="{{ 1 if v2_line_group else 0 }}" data-sort-severity="{{ 1 if v2_sort_severity else 0 }}" data-table-rows="{{ v2_table_rows }}" data-side-table="{{ 1 if v2_side_table else 0 }}" data-zone-ignore="{{ 1 if v2_zone_ignore else 0 }}" data-ignore-max="{{ v2_ignore_max }}" data-est-box="{{ 1 if v2_est_box else 0 }}">
+<div class="v2" id="v2Root" data-can-manage="{{ 1 if can_manage_key else 0 }}" data-version="{{ v2_version }}" data-box-style="{{ v2_box_style }}" data-restore-confirm="{{ 1 if v2_restore_confirm else 0 }}" data-restore-days="{{ v2_restore_days }}" data-hover-zoom="{{ 1 if v2_hover_zoom else 0 }}" data-line-group="{{ 1 if v2_line_group else 0 }}" data-sort-severity="{{ 1 if v2_sort_severity else 0 }}" data-table-rows="{{ v2_table_rows }}" data-side-table="{{ 1 if v2_side_table else 0 }}" data-zone-ignore="{{ 1 if v2_zone_ignore else 0 }}" data-ignore-max="{{ v2_ignore_max }}" data-est-box="{{ 1 if v2_est_box else 0 }}" data-review="{{ 1 if v2_review else 0 }}">
   <div class="v2-head">
     <h2>Artwork V2 <span class="v2-sub">เทียบข้อความสองไฟล์ด้วย Google Cloud Vision OCR · PoC</span></h2>
     <span class="v2-sub">โมดูล {{ v2_version }}</span>
@@ -319,6 +346,7 @@
     <h3>④ ผลการตรวจ</h3>
     <div id="v2Verdict"></div>
     <div id="v2Warn"></div>
+    {% if v2_review %}<div id="v2Review"></div>{% endif %}
     <div class="v2-row v2-legend" style="margin-top:10px">
       <span><i style="border-color:#dc2626"></i>ต่าง (มั่นใจ)</span>
       <span><i style="border-color:#d97706;border-style:dashed"></i>ไม่มั่นใจ — ดูด้วยตา</span>

@@ -193,6 +193,9 @@
     $("v2Warn").innerHTML = "";
     if (HOVER_ZOOM) { RZ.pin = null; zoomReset(); }
     $("v2PairsRes").innerHTML = "";
+    $("v2PairsRes").classList.remove("v2-rv-todo-only");
+    if ($("v2Review")) $("v2Review").innerHTML = "";
+    S.review = null;
     $("v2Log").value = "";
     $("v2RunMsg").textContent = "";
   }
@@ -995,11 +998,11 @@
     const notes = (f.notes || []).filter((n) => !/^AI: /.test(n)).map(esc).join("<br>") + pixelEvidence(f);
     if (SIDE_TABLE) {
       return sideRow(f.id, f.severity, sev, esc(CLASS_TH[f.class] || f.class) +
-        (f.source === "ai" ? '<span class="v2-ai-tag">AI</span>' : ""),
+        (f.source === "ai" ? '<span class="v2-ai-tag">AI</span>' : "") + rvHtml([f.id]),
         cellText(f, "a"), cellText(f, "b"), confShort(f), notes + aiNote(f), {});
     }
     return '<tr class="click" data-f="' + f.id + '"><td>' + f.id + '</td><td><span class="v2-sev ' + f.severity + '">' +
-      sev + "</span></td><td>" + esc(CLASS_TH[f.class] || f.class) +
+      sev + "</span>" + rvHtml([f.id]) + "</td><td>" + esc(CLASS_TH[f.class] || f.class) +
       (f.source === "ai" ? '<span class="v2-ai-tag">AI</span>' : "") +
       "</td><td>" + cellText(f, "a") + "</td><td>" + cellText(f, "b") + "</td><td>" + confCell(f) +
       "</td><td>" + notes + aiNote(f) + "</td></tr>";
@@ -1064,15 +1067,15 @@
     if (SIDE_TABLE) {
       return sideRow(g.id, g.severity, SEV_TH[g.severity] || g.severity,
         ms.length + " จุดในบรรทัดเดียวกัน" + (f0.source === "ai" ? '<span class="v2-ai-tag">AI</span>' : "") +
-        "<br>" + esc(cls.join(" · ")),
+        "<br>" + esc(cls.join(" · ")) + rvHtml(ids),
         markedMulti(f0.a.text, ms.map((m) => m.a.span)), markedMulti(f0.b.text, ms.map((m) => m.b.span)),
         confShort({ confidence: lo(ms.map((m) => m.confidence)), a: { conf: lo(ms.map((m) => m.a.conf)) },
                     b: { conf: lo(ms.map((m) => m.b.conf)) } }),
         per, { cls: " v2-grp", attr: ' data-members="' + ids.join(",") + '"', label: ids.join("·") });
     }
     return '<tr class="click v2-grp" data-f="' + g.id + '" data-members="' + ids.join(",") + '"><td>' + ids.join("·") +
-      '</td><td><span class="v2-sev ' + g.severity + '">' + (SEV_TH[g.severity] || g.severity) + "</span></td><td>" +
-      ms.length + " จุดในบรรทัดเดียวกัน" + (f0.source === "ai" ? '<span class="v2-ai-tag">AI</span>' : "") +
+      '</td><td><span class="v2-sev ' + g.severity + '">' + (SEV_TH[g.severity] || g.severity) + "</span>" + rvHtml(ids) +
+      "</td><td>" + ms.length + " จุดในบรรทัดเดียวกัน" + (f0.source === "ai" ? '<span class="v2-ai-tag">AI</span>' : "") +
       '<br><span class="v2-muted">' + esc(cls.join(" · ")) + "</span></td><td>" +
       markedMulti(f0.a.text, ms.map((m) => m.a.span)) + "</td><td>" + markedMulti(f0.b.text, ms.map((m) => m.b.span)) +
       "</td><td>" + conf + "</td><td>" + per + "</td></tr>";
@@ -1088,13 +1091,16 @@
       .map((p) => p[0]);
   }
 
-  function rowsHtml(list) {
-    if (!LINE_GROUP) return bySeverity(list).map(findingRow).join("");
-    return bySeverity(lineGroups(list)).map((x) => {
-      if (!x.group) return findingRow(x);
-      GRP[x.id] = x.members.map((m) => String(m.id));
-      return groupRow(x);
-    }).join("");
+  function rowsHtml(list, main) {
+    RV_ROW = !!(main && REVIEW);           // ปุ่มรีวิวเฉพาะตารางหลัก (รายการพับไม่นับในผลตัดสิน — ไม่ต้องรีวิว)
+    try {
+      if (!LINE_GROUP) return bySeverity(list).map(findingRow).join("");
+      return bySeverity(lineGroups(list)).map((x) => {
+        if (!x.group) return findingRow(x);
+        GRP[x.id] = x.members.map((m) => String(m.id));
+        return groupRow(x);
+      }).join("");
+    } finally { RV_ROW = false; }
   }
   // id ของแถว → ชุด id ของจุดบนภาพ (แถวเดี่ยว = ตัวเอง)
   function idsOf(id) { return new Set(id == null ? [] : (GRP[id] || [String(id)])); }
@@ -1118,6 +1124,150 @@
       return { text: members[0][s] && members[0][s].text, word_box: bx, box: bx };
     };
     return { a: side("a"), b: side("b") };
+  }
+
+  // ── รีวิวจุดต่างโดยคน (ARTWORK_V2_REVIEW · ไม่แตะผลตรวจ/ผลตัดสิน) ─────────────────────
+  //  · "✓ ยืนยัน" = เป็นข้อผิดพลาดจริงของงาน · "⚑ รายงานปัญหา" = ระบบแจ้งผิด (ไม่ใช่ข้อผิดพลาด) + เหตุผล
+  //  · กดปุ่มเดิมซ้ำ = ยกเลิก (กลับเป็นยังไม่รีวิว) · แถวกลุ่ม = ทุกจุดในแถวพร้อมกัน
+  //  · เก็บที่เซิร์ฟเวอร์ (run_<n>/review.json) ⇒ เห็นตรงกันทุกเครื่อง · ส่วน [REVIEW] ต่อท้าย Log
+  const REVIEW = root.dataset.review === "1";
+  const RV_TH = { real: "✓ ผิดจริง", false: "⚑ ระบบแจ้งผิด", mixed: "รีวิวบางจุด" };
+  let RV_ROW = false;
+  function rvHtml(ids) {
+    if (!RV_ROW) return "";
+    return '<div class="v2-rv" data-rv="' + esc(ids.join(",")) + '">' +
+      '<button type="button" class="v2-rvb real" data-st="real" title="ยืนยัน — จุดนี้เป็นข้อผิดพลาดจริงของงาน (กดซ้ำ = ยกเลิก)">✓<span class="v2-rvt"> ยืนยัน</span></button>' +
+      '<button type="button" class="v2-rvb false" data-st="false" title="รายงานปัญหา — ระบบแจ้งผิด ไม่ใช่ข้อผิดพลาดของงาน (กดซ้ำ = ยกเลิก)">⚑<span class="v2-rvt"> รายงานปัญหา</span></button>' +
+      '<span class="v2-rvs"></span></div>';
+  }
+  function rvState(ids) {
+    const items = (S.review && S.review.items) || {};
+    const st = ids.map((x) => (items[x] || {}).status || null);
+    if (st.every((x) => x === null)) return null;
+    if (st.every((x) => x === st[0])) return st[0];
+    return "mixed";
+  }
+  function rvTitle(ids) {
+    const items = (S.review && S.review.items) || {};
+    return ids.filter((x) => items[x]).map((x) => {
+      const it = items[x];
+      return (ids.length > 1 ? "#" + x + " " : "") + (RV_TH[it.status] || it.status) +
+        (it.note ? " — " + it.note : "") + (it.by ? " · " + it.by : "") + (it.at ? " · " + it.at : "");
+    }).join("\n");
+  }
+  function applyReview() {
+    if (!REVIEW) return;
+    document.querySelectorAll("#v2PairsRes .v2-rv").forEach((el) => {
+      const ids = (el.dataset.rv || "").split(",").filter((x) => x);
+      const st = rvState(ids);
+      el.querySelectorAll(".v2-rvb").forEach((b) => b.classList.toggle("on", st === b.dataset.st));
+      const lab = el.querySelector(".v2-rvs");
+      lab.textContent = st ? RV_TH[st] : "";
+      lab.title = rvTitle(ids);
+      const tr = el.closest("tr");
+      if (!tr) return;
+      tr.classList.toggle("v2-rv-real", st === "real");
+      tr.classList.toggle("v2-rv-false", st === "false");
+      const done = st === "real" || st === "false";
+      tr.classList.toggle("v2-rv-done", done);
+      const nt = tr.nextElementSibling;
+      if (nt && nt.classList.contains("v2-note")) nt.classList.toggle("v2-rv-done", done);
+    });
+    renderReviewBar();
+  }
+  function renderReviewBar(msg) {
+    const box = $("v2Review");
+    if (!REVIEW || !box) return;
+    const sm = S.review && S.review.summary;
+    if (!S.result || !sm || !sm.total) { box.innerHTML = ""; return; }
+    const pctW = (n) => (100 * n / sm.total).toFixed(1) + "%";
+    const todoOnly = $("v2PairsRes").classList.contains("v2-rv-todo-only");
+    const reds = new Set((sm.red_todo || []).map(String));
+    box.innerHTML = '<div class="v2-revbar' + (sm.complete ? " done" : "") + '"><div class="v2-revtop">' +
+      "<b>" + (sm.complete ? "✅ รีวิวครบทุกจุดแล้ว" : "📝 รีวิวแล้ว " + sm.reviewed + "/" + sm.total + " จุด") + "</b>" +
+      '<span class="v2-revprog" title="แดง = ผิดจริง · เทา = ระบบแจ้งผิด"><i class="r" style="width:' + pctW(sm.real.length) +
+      '"></i><i class="f" style="width:' + pctW(sm.false.length) + '"></i></span>' +
+      '<span>✓ ผิดจริง <b>' + sm.real.length + "</b></span>" +
+      '<span>⚑ ระบบแจ้งผิด <b>' + sm.false.length + "</b></span>" +
+      '<span>ยังไม่รีวิว <b>' + sm.todo.length + "</b>" + (reds.size ? ' (แดง ' + reds.size + ")" : "") + "</span>" +
+      (sm.todo.length && sm.reviewed ? '<label class="v2-muted"><input type="checkbox" id="v2RevTodoOnly"' +
+        (todoOnly ? " checked" : "") + "> แสดงเฉพาะที่ยังไม่รีวิว</label>" : "") +
+      (msg ? '<span class="v2-revmsg">' + esc(msg) + "</span>" : "") + "</div>" +
+      (sm.todo.length ? '<div class="v2-revtodo"><span class="v2-muted">ยังไม่รีวิว:</span>' +
+        sm.todo.map((x) => '<button type="button" data-go="' + esc(x) + '"' + (reds.has(String(x)) ? ' class="red"' : "") +
+          ' title="ไปที่จุด #' + esc(x) + '">#' + esc(x) + "</button>").join("") + "</div>" : "") +
+      (sm.real.length ? '<div class="v2-revtodo"><span class="v2-muted">ผิดจริง:</span>' +
+        sm.real.map((x) => '<button type="button" data-go="' + esc(x) + '" class="red">#' + esc(x) + "</button>").join("") + "</div>" : "") +
+      "</div>";
+    if (!sm.todo.length || !sm.reviewed) $("v2PairsRes").classList.remove("v2-rv-todo-only");
+  }
+  // แถวในตารางหลักที่มีจุดนี้ (แถวเดี่ยว หรือแถวกลุ่มที่มีจุดนี้เป็นสมาชิก)
+  function rowOfFinding(id) {
+    let tr = document.querySelector('#v2PairsRes .v2-main tr[data-f="' + CSS.escape(String(id)) + '"]');
+    if (tr) return tr;
+    document.querySelectorAll("#v2PairsRes .v2-main tr[data-members]").forEach((x) => {
+      if (!tr && x.dataset.members.split(",").indexOf(String(id)) >= 0) tr = x;
+    });
+    return tr;
+  }
+  async function loadReview(r) {
+    if (!REVIEW || !r) return;
+    S.review = { items: {}, summary: null };
+    try {
+      const d = await api("/api/artwork_v2/jobs/" + encodeURIComponent(r.job) + "/runs/" + encodeURIComponent(r.run) + "/review");
+      if (S.result !== r) return;                    // เปิดผลอื่นไปแล้วระหว่างรอ
+      S.review = d;
+      $("v2Log").value = (r.log_text || "") + (d.log_text || "");
+      applyReview();
+    } catch (e) {
+      if (S.result === r) renderReviewBar("โหลดผลรีวิวไม่ได้: " + e.message);
+    }
+  }
+  async function sendReview(el, st) {
+    const r = S.result;
+    if (!r || !el) return;
+    const ids = (el.dataset.rv || "").split(",").filter((x) => x);
+    const cur = rvState(ids);
+    let status = cur === st ? null : st;             // กดปุ่มเดิมซ้ำ = ยกเลิก
+    let note = null;
+    if (status === "false") {
+      const items = (S.review && S.review.items) || {};
+      const old = ids.map((x) => (items[x] || {}).note).find((x) => x) || "";
+      note = window.prompt("รายงานปัญหา: ระบบแจ้งจุด #" + ids.join(", #") +
+        " ผิด เพราะอะไร? (ไม่บังคับ — เว้นว่างได้)", old);
+      if (note === null) return;                     // ยกเลิก = ไม่บันทึก
+    }
+    const btns = el.querySelectorAll(".v2-rvb");
+    btns.forEach((b) => { b.disabled = true; });
+    try {
+      const d = await api("/api/artwork_v2/jobs/" + encodeURIComponent(r.job) + "/runs/" + encodeURIComponent(r.run) + "/review", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: ids, status: status, note: note }),
+      });
+      if (S.result !== r) return;
+      S.review = d;
+      $("v2Log").value = (r.log_text || "") + (d.log_text || "");
+      applyReview();
+    } catch (e) {
+      renderReviewBar("บันทึกไม่สำเร็จ: " + e.message);
+    } finally {
+      btns.forEach((b) => { b.disabled = false; });
+    }
+  }
+  if (REVIEW && $("v2Review")) {
+    $("v2Review").addEventListener("click", (ev) => {
+      const go = ev.target.closest ? ev.target.closest("[data-go]") : null;
+      if (!go) return;
+      const tr = rowOfFinding(go.dataset.go);
+      if (!tr) return;
+      tr.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      if (!tr.classList.contains("sel") && !(HOVER_ZOOM && RZ.pin === tr.dataset.f)) tr.click();
+    });
+    $("v2Review").addEventListener("change", (ev) => {
+      if (ev.target.id !== "v2RevTodoOnly") return;
+      $("v2PairsRes").classList.toggle("v2-rv-todo-only", ev.target.checked);
+      fitRows();
+    });
   }
 
   const TBL_HEAD = SIDE_TABLE
@@ -1293,6 +1443,7 @@
 
   function showResult(r) {
     S.result = r;
+    S.review = null;                                 // ผลใหม่ = เลขจุดชุดใหม่ ⇒ ไม่ใช้ผลรีวิวของผลเดิม
     $("v2ResCard").classList.remove("v2-hidden");
     $("v2LogCard").classList.remove("v2-hidden");
     $("v2Verdict").innerHTML = '<div class="v2-verdict v2-v-' + esc(r.verdict) + '">' + esc(r.verdict) + " — " +
@@ -1307,6 +1458,7 @@
     if (HOVER_ZOOM) RZ.pin = null;                 // ผลใหม่ = เลขจุดชุดใหม่ ⇒ ไม่ค้างการซูมของผลเดิม
     renderPairs();
     $("v2Log").value = r.log_text || "";
+    if (REVIEW) loadReview(r);
     const base = "/api/artwork_v2/jobs/" + r.job + "/runs/" + r.run;
     $("v2DlLog").href = base + "/log.txt";
     $("v2DlJson").href = base;
@@ -1321,7 +1473,7 @@
     if (HOVER_ZOOM) zoomReset();
     GRP = {};
     $("v2PairsRes").innerHTML = (r.pairs || []).map((p) => {
-      const rows = rowsHtml(p.findings);
+      const rows = rowsHtml(p.findings, true);
       const debHtml = folded("อยู่ในพื้นที่ยกเว้นที่กำหนดในโซน — ไม่นับในผลตัดสิน", p.excluded) +
         folded("ภาพเหมือนกันทุกพิกเซล — OCR อ่านต่างเอง · ไม่นับในผลตัดสิน (เปิดดูภาพหลักฐานได้)", p.pixel_same) +
         folded("ข้อความมีอยู่ในอีกฝั่งตรงตำแหน่งเดียวกัน (OCR จัดบรรทัดต่างกัน) — ไม่นับในผลตัดสิน", p.relocated) +
@@ -1341,6 +1493,7 @@
         aiBox(p) + debHtml + "</div>";
     }).join("");
     if (HOVER_ZOOM) zoomAfterRender();
+    if (REVIEW) applyReview();
     fitRows();
     if (SIDE_TABLE) {
       fitSide();
@@ -1426,6 +1579,13 @@
   }
 
   $("v2PairsRes").addEventListener("click", (ev) => {
+    const rb = ev.target.closest ? ev.target.closest(".v2-rvb") : null;
+    if (rb) {
+      // ปุ่มรีวิว: ไม่เลือกแถว ไม่ค้างการซูม
+      ev.stopPropagation();
+      sendReview(rb.closest(".v2-rv"), rb.dataset.st);
+      return;
+    }
     const nb = ev.target.closest ? ev.target.closest(".v2-nbtn") : null;
     if (nb) {
       // หมายเหตุ: เปิด/ปิดแถวย่อย — ไม่เลือกแถว ไม่ค้างการซูม
@@ -1764,9 +1924,10 @@
       if (ev.key === "Escape" && RZ.pin != null) zoomUnpin();
     });
     document.addEventListener("click", (ev) => {
-      // คลิกที่อื่น = ปล่อย · ยกเว้นแถวในตาราง (สลับค้างเอง) และตัวเลือกการแสดงผลเหนือภาพ
+      // คลิกที่อื่น = ปล่อย · ยกเว้นแถวในตาราง (สลับค้างเอง) ตัวเลือกการแสดงผลเหนือภาพ และแถบรีวิว (กดเลขจุด = ไปที่แถวนั้น)
       const t = ev.target && ev.target.closest ? ev.target : null;
-      if (RZ.pin != null && !(t && (t.closest("#v2PairsRes tr[data-f]") || t.closest(".v2-legend")))) zoomUnpin();
+      if (RZ.pin != null && !(t && (t.closest("#v2PairsRes tr[data-f]") || t.closest(".v2-legend") ||
+                                    t.closest("#v2Review")))) zoomUnpin();
     });
     window.addEventListener("resize", () => {
       if (window.innerWidth === RZ.vw) return;               // มือถือ: แถบที่อยู่ซ่อน/แสดง = ความสูงเปลี่ยนอย่างเดียว
