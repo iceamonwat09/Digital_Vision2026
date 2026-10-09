@@ -358,3 +358,26 @@ def test_warp_guard_rejects_degenerate_stretch():
     assert not pixverify._warp_ok(bad, (6, 6), (44, 43), (32, 31))
     assert not pixverify._warp_ok(shear, (6, 6), (44, 43), (32, 31))
     assert not pixverify._warp_ok(far, (6, 6), (44, 43), (32, 31))
+
+
+def test_works_on_pymupdf_without_rect_get_area(tmp_path, monkeypatch):
+    """สถานี (PyMuPDF 1.26.5) ไม่มี ``Rect.get_area`` ⇒ ``raster_check`` เคยโยน AttributeError ทุกครั้ง
+    ชั้นภาพสแกนจึงไม่เคยทำงานบนสถานี (run_005: ``raster_check: A=ตรวจไม่ได้ (AttributeError …)``)"""
+    import fitz
+    monkeypatch.delattr(fitz.Rect, "get_area", raising=False)
+    monkeypatch.delattr(fitz.Rect, "getArea", raising=False)
+    src = _vec(str(tmp_path / "v.pdf"))
+    scan = _scan(str(tmp_path / "s.pdf"), src, dpi=300)
+    with fitz.open(scan) as d:
+        r, why = pixverify.raster_check(d[0], tuple(d[0].rect))
+    assert r is not None and r["dpi"] >= 299, why
+    assert pixverify._rect_area(fitz.Rect(0, 0, 2, 3)) == 6.0
+    assert pixverify._rect_area(fitz.Rect(5, 5, 2, 3)) == 0.0          # กลับด้าน/ว่าง = 0
+
+
+def test_no_version_sensitive_rect_area_calls():
+    root = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "artwork_v2")
+    for fn in os.listdir(root):
+        if fn.endswith(".py"):
+            src = open(os.path.join(root, fn), encoding="utf-8").read()
+            assert ".get_area(" not in src and ".getArea(" not in src, fn

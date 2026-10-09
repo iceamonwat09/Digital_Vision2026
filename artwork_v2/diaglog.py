@@ -300,8 +300,9 @@ def build_text(r: dict) -> str:
               x.get("reviews_valid"), x.get("reviews_total"), x.get("reviewed", "-"),
               x.get("reviewable", "-"), x.get("extra_added"), x.get("extra_duplicate"),
               x.get("extra_noise"), _f(vc.get("a")), _f(vc.get("b")), x.get("usage")))
-        a("     recovered=%s equivalent=%s algo_red_kept=%s" % (
-            x.get("recovered", "-"), x.get("items_equivalent", "-"), x.get("algo_red_kept", "-")))
+        a("     recovered=%s equivalent=%s algo_red_kept=%s extra_folded=%s" % (
+            x.get("recovered", "-"), x.get("items_equivalent", "-"), x.get("algo_red_kept", "-"),
+            x.get("extra_folded", "-")))
         if x.get("mode") == "raw":
             a("     raw: algo_compare=%s coverage_ignored=%s (ผลของอัลกอริทึมพับไว้เทียบ · ความครอบคลุมไม่ใช้ตัดสิน)"
               % (x.get("algo_compare", "-"), p.get("coverage_ignored", False)))

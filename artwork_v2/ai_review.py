@@ -23,6 +23,7 @@ import copy
 import json
 import re
 import time
+import unicodedata
 from difflib import SequenceMatcher
 from typing import Callable, Dict, List, Optional, Tuple
 
@@ -382,6 +383,37 @@ def overlaps(f: dict, g: dict) -> bool:
     return False
 
 
+# รายการพับของอัลกอริทึมที่มีอยู่แล้วตอน AI ตรวจ (pixel_same เกิดหลัง AI)
+FOLDED_KEYS = ("lowmark", "debris", "relocated", "excluded")
+
+
+def _alnum_key(s: str) -> str:
+    """ตัวอักษร/ตัวเลขล้วน (NFKC · คงตัวพิมพ์ — ตัวพิมพ์ต่างคือความต่างจริง)"""
+    return "".join(c for c in unicodedata.normalize("NFKC", s or "") if c.isalnum())
+
+
+def folded_twin(f: dict, pr: dict) -> Optional[Tuple[str, dict]]:
+    """จุดที่ AI พบเพิ่ม ``f`` คือจุดเดียวกับที่อัลกอริทึมพับไว้แล้วหรือไม่ · คืน ``(ชื่อรายการ, จุดนั้น)``
+
+    ต้องครบทุกข้อ (แคบโดยตั้งใจ — ห้ามกลบความต่างของตัวอักษร/ตัวเลข):
+    ① ชี้ตำแหน่งทับกัน (``overlaps``) · ② ทุกฝั่งที่ ``f`` อ้าง อยู่บรรทัดเดียวกับจุดที่พับ ·
+    ③ คู่บรรทัดของจุดที่พับมีตัวอักษร/ตัวเลขเหมือนกันทุกตัว (ต่างแค่เครื่องหมาย/ช่องว่าง)"""
+    for lk in FOLDED_KEYS:
+        for g in pr.get(lk) or []:
+            if not overlaps(f, g):
+                continue
+            ga, gb = g.get("a") or {}, g.get("b") or {}
+            if ga.get("line") is None or gb.get("line") is None:
+                continue
+            if any((f.get(s) or {}).get("line") is not None
+                   and f[s]["line"] != (g.get(s) or {}).get("line") for s in ("a", "b")):
+                continue
+            if _alnum_key(ga.get("text")) != _alnum_key(gb.get("text")):
+                continue
+            return lk, g
+    return None
+
+
 def _ai_note(ai: dict) -> str:
     return "AI: %s" % VERDICT_TH.get(ai.get("verdict"), ai.get("verdict") or "-")
 
@@ -390,7 +422,7 @@ def merge(mode: str, pr: dict, resp: dict, A: List[dict], B: List[dict]) -> dict
     """รวมคำตอบของ AI เข้ากับคู่โซน ``pr`` (แก้ ``pr`` ตรง ๆ) · คืนสถิติ"""
     st = {"items_total": 0, "items_valid": 0, "reviews_total": 0, "reviews_valid": 0,
           "invalid": [], "extra_added": 0, "extra_duplicate": 0, "extra_noise": 0,
-          "items_equivalent": 0, "equivalent": [], "recovered": 0}
+          "items_equivalent": 0, "equivalent": [], "recovered": 0, "extra_folded": 0}
     findings = pr.get("findings") or []
     cl = pr.get("curved_lines") or {}
     curved = {"a": set(cl.get("A") or ()), "b": set(cl.get("B") or ())}
@@ -444,6 +476,15 @@ def merge(mode: str, pr: dict, resp: dict, A: List[dict], B: List[dict]) -> dict
                 st["extra_duplicate"] += 1
                 if not dup.get("ai"):
                     dup["ai"] = dict(f["ai"])
+                continue
+            tw = folded_twin(f, pr) if config.AI_DEDUP_FOLDED else None
+            if tw is not None:
+                # อัลกอริทึมเห็นจุดนี้แล้วและพับไว้พร้อมเหตุผล — ไม่เพิ่มซ้ำเป็นเหลือง · แนบคำตอบ AI ไว้ที่จุดที่พับ
+                st["extra_folded"] += 1
+                g = tw[1]
+                if not g.get("ai"):
+                    g["ai"] = dict(f["ai"])
+                    g.setdefault("notes", []).append(_ai_note(f["ai"]))
                 continue
             if f["ai"]["verdict"] == "noise":
                 st["extra_noise"] += 1

@@ -93,6 +93,13 @@ def zone_raster(page, rect_pt) -> Optional[dict]:
     return raster_check(page, rect_pt)[0]
 
 
+def _rect_area(r) -> float:
+    """พื้นที่ของ ``fitz.Rect`` ที่ไม่ขึ้นกับรุ่นของ PyMuPDF — เมธอด ``get_area`` ของ Rect ไม่มีในบางรุ่น
+    (สถานีใช้ 1.26.5 แล้วได้ ``AttributeError`` ⇒ ชั้นภาพสแกนไม่เคยทำงานบนสถานี) · สี่เหลี่ยมว่าง/กลับด้าน = 0"""
+    r = fitz.Rect(r)
+    return max(0.0, float(r.width)) * max(0.0, float(r.height))
+
+
 def raster_check(page, rect_pt):
     """เหมือน ``zone_raster`` แต่คืน ``(ผล, เหตุผล)`` — เหตุผลเป็นข้อความสั้นสำหรับ Log เสมอ
     (ทั้งตอนเป็นและไม่เป็นภาพสแกน) ⇒ ไฟล์ที่คาดว่าเป็นสแกนแต่ไม่เข้าเงื่อนไข บอกได้ว่าติดข้อไหน"""
@@ -100,7 +107,7 @@ def raster_check(page, rect_pt):
     if page.rotation:        # get_image_info/get_bboxlog ใช้พิกัดของหน้าที่ยังไม่หมุน
         zr = zr * page.derotation_matrix
         zr.normalize()
-    za = zr.get_area()
+    za = _rect_area(zr)
     if za <= 0:
         return None, "โซนว่าง"
     best, top_cov, n_img = None, 0.0, 0
@@ -110,7 +117,7 @@ def raster_check(page, rect_pt):
         if sx <= 0 or sy <= 0 or not im.get("width") or not im.get("height"):
             continue
         n_img += 1
-        cov = (fitz.Rect(im["bbox"]) & zr).get_area() / za
+        cov = _rect_area(fitz.Rect(im["bbox"]) & zr) / za
         top_cov = max(top_cov, cov)
         if cov >= RASTER_COVER and (best is None or cov > best["cover"]):
             best = {"cover": round(cov, 3),
