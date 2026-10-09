@@ -1,6 +1,6 @@
 # Artwork V2 — เอกสารพัฒนา (อ้างอิง + ปัญหาที่พบ)
 
-> อัปเดต **9 ต.ค. 2026** · branch `claude/trusting-archimedes-qoynbp` · `CONFIG_VERSION` = `2026.10.09-v2-aiimage` ·
+> อัปเดต **9 ต.ค. 2026** · branch `claude/trusting-archimedes-qoynbp` · `CONFIG_VERSION` = `2026.10.09-v2-aicrops` ·
 > โมดูล `artwork_v2/` `VERSION` = `2026.10.09-v2rasterstrict` · เทสต์ V2 ทั้งชุด **1393 ผ่าน** (รวม robust 717)
 >
 > ไฟล์นี้คือ **เอกสารอ้างอิงฉบับรวม** — อธิบายว่าระบบทำงานอย่างไร ค่าตั้งทุกตัว และ **รายการปัญหาที่ยังเปิดอยู่**
@@ -299,6 +299,10 @@ data/artwork_v2/
 | `AI_RAW_URL` · `AI_RAW_TIMEOUT_S` | `…/artwork-v2-raw` · 300 | |
 | `AI_IMAGE_URL` · `AI_IMAGE_TIMEOUT_S` | `…/artwork-v2-image` · 300 | โหมด **`image`** (ทดลอง · 9 ต.ค.) — ส่งภาพที่ส่ง Vision + ข้อความ Vision + จุดของอัลกอริทึม (มีกรอบ) ให้ Gemini ดูภาพตัดสิน · real = แดง · ภาพเหมือน = พับ `ai_dismissed` · ไม่แน่ใจ = เหลือง · ไม่ตอบ = คงเดิม · แสดงบนหน้าเว็บเสมอ (ไม่ซ่อนด้วย `AI_EXPERIMENTAL_MODES`) · ดู `docs/N8N_ARTWORK_V2_IMAGE_PROMPT.md` |
 | `AI_IMAGE_SAFETY` | **0** | ผู้ใช้เลือก "Gemini ตัดสินเต็มที่" · `1` = "ภาพเหมือน" กับตัวอักษร/ตัวเลข/ตัวพิมพ์ที่ Vision อ่านชัด ≥ 80% ทั้งสองฝั่ง ⇒ คงเหลือง |
+| `AI_IMAGE_CROPS` | **1** | 9 ต.ค. รอบ 4 (ผลสถานี: ภาพทั้งโซนถูก Gemini นับ 258 token ≈ 768 px ⇒ อ่านตัวอักษรเองไม่ได้ · ลอก "5&-3" ของ Vision) — ส่ง **ครอปรอบแต่ละจุด ฝั่งละ 1 รูป** จากไฟล์ JPEG ที่ส่ง Vision · ความละเอียดจริง · 1 คำขอต่อคู่ · `0` = ภาพทั้งโซนแบบเดิม (contract `/1`) |
+| `AI_IMAGE_CROP_MAX_SIDE` · `_CROP_MIN_W` · `_CROP_JPEG_Q` | 768 · 480 · 95 | ด้านยาวสูงสุดของครอป (เกิน ⇒ ตัดบริบทก่อน · ย่อเมื่อตัวจุดเองกว้างเกิน) · กว้างขั้นต่ำ (เห็นคำข้าง ๆ) · JPEG 4:4:4 |
+| `AI_IMAGE_MAX_CANDIDATES` | **40** | แผน ก (ผู้ใช้เลือก): เกิน ⇒ จุดที่เหลือ **คงระดับของอัลกอริทึม** + หมายเหตุ "AI ไม่ได้ตรวจจุดนี้" · ส่งแดงก่อนเหลือง · ไม่ยิงคำขอที่ 2 · จุดที่ไม่มีตำแหน่งบนภาพฝั่งใด ⇒ ไม่ส่งเช่นกัน · `0` = ไม่จำกัด |
+| `AI_IMAGE_CURVED_YELLOW` | **1** | AI ตอบ real บนข้อความโค้ง/การ์ด CURVED ⇒ เหลือง (กติกาเดียวกับ judge) · `0` = แดงได้ |
 | `AI_RETRIES` | 1 | เฉพาะต่อไม่ติด/5xx |
 | `AI_JUDGE_PUNCT_YELLOW` · `AI_QUOTE_RECOVER` (+`_MAX_SHIFT` 2) · `AI_EQUIV_NOISE` · `AI_SEND_CURVED` · `AI_JUDGE_KEEP_ALGO_RED` · `AI_JUDGE_NOISE_GUARD` · `AI_JUDGE_CURVED_YELLOW` · `AI_JUDGE_ONESIDED_GUARD` · `AI_RAW_SAFETY` | 1 | ชั้นตรวจคำตอบ AI |
 | `AI_DEDUP_FOLDED` | 1 | assist: จุดที่ AI "พบเพิ่ม" แต่ทับจุดที่พับไว้แล้ว (lowmark/debris/relocated/excluded) **และคู่บรรทัดนั้นมีตัวอักษร/ตัวเลขเหมือนกันทุกตัว** ⇒ ไม่เพิ่มซ้ำ · แนบคำตอบ AI ไว้ที่จุดที่พับ · Log `extra_folded=` |
@@ -330,6 +334,7 @@ python -m pytest tests/test_artwork_v2_robust.py                                
 | `test_artwork_v2_runs.py` | 9 | ชุดข้อมูลสถานี + ความแปรปรวนข้ามรอบ (`cross_run_known` — **ห้ามเติมเพื่อให้ผ่าน**) |
 | `test_artwork_v2_curved_debris.py` | 22 | โค้ง/เอียง · เศษ |
 | `test_artwork_v2_ai_image.py` | 22 | โหมด image: ภาพที่ส่ง = ไฟล์ `img/` ทุกไบต์ · real/noise/uncertain/ไม่ตอบ · payload assist ไม่เปลี่ยน · N8N ล่ม/อ่านภาพไม่ได้ ⇒ ผลอัลกอริทึม · workflow + เอกสารตรงกัน |
+| `test_artwork_v2_ai_image_crops.py` | 18 | ครอปต่อจุด: พิกเซลมาจากภาพที่ส่ง Vision ตรงตำแหน่ง · ความละเอียดจริง · 1 คำขอ · เพดานแดงก่อน + จุดที่ไม่ส่งคงระดับ · `est_box` · ข้อความโค้ง real ⇒ เหลือง · workflow ประกอบครอปตามลำดับ/ปฏิเสธครอปไม่ครบ · prompt ดูภาพก่อน |
 | `test_artwork_v2_sharp.py` | 17 | คมสูงสุด · `standard` = ไบต์เดิม |
 | `test_artwork_v2_evidence_compare.py` | 28 | ชั้นหลักฐาน 4 ธง (ปิดทั้งหมด = ผลเท่า `685ddcc`) |
 | `test_artwork_v2_ai_review.py` / `_ai_rules.py` / `_ai_raw.py` | 54 / 34 / 39 | AI ทุกโหมด · Code node จริงผ่าน node · prompt ↔ workflow ตรงกัน |
@@ -445,7 +450,7 @@ python -m pytest tests/test_artwork_v2_robust.py                                
 | D6 | ข้อเสนอ: PNG (lossless) เมื่อพอดีงบ · `legacy_layout` ของ Vision · อ่านไม่ได้ ≠ หายไป · `languageHints` | ยังไม่ได้วัด · **`languageHints` มีเครื่องมือแล้ว (8 ต.ค.):** `artwork_v2_eval.py <รอบ> --hints` (Friskies แนะนำ `ko,th,en`) → ตั้ง env → ตรวจคู่เดิมโซนเดิม → `artwork_v2_eval.py <รอบใหม่> --labels …` เทียบตาราง (ไม่ควรเปิดถาวรก่อน A/B — Google แนะนำให้ว่าง และใส่ผิดเป็นผลเสีย) |
 | D8 | **`PLACEHOLDER` แดงหรือเหลือง** | ค่าเริ่มต้นแดง (ต่างแน่นอน) · `PLACEHOLDER_RED=0` = เหลืองเสมอ · ⚠️ **สถานี run_005: CFPR ขึ้นเหลือง** เพราะ Vision อ่าน `XXXXXX` ฝั่ง 🅱 ได้ conf 0.412 < `CONF_LOW` 0.6 (รอบ fixture สูงกว่านี้) ⇒ ถามผู้ใช้: ให้เกณฑ์ของช่องว่างรอพิมพ์ต่ำลง (เช่นนับตัว `X` ซ้ำ ≥ 4 ตัวโดยไม่ดู conf) หรือคงเดิม |
 | D7 | งานใหญ่ที่เลื่อนไว้: **ชั้น C** (เทียบทั้งโซนเป็นสายโทเคนเดียว) · AI แบบตัวจำแนก | (ส่งภาพให้ AI ทำแล้วเป็นโหมด `image` — ดู D9) |
-| D9 | **โหมด `image` ยังไม่เคยยิง Gemini จริง** | Import `n8n_artwork_v2_image.workflow.json` → ตรวจคู่ AvoDerm/Friskies/John West เดิม → ใช้ปุ่ม ✓/⚑ เก็บเฉลย → นับว่าจุดที่ AI ตอบ "ภาพเหมือน" (พับ) มีของจริงหลุดไปกี่จุด · ⚠️ 30 ก.ย. Gemini เห็นสองภาพในคำขอเดียวแล้ว **ลอก B ตาม A** กลืนของจริง 4/4 ในโซนใหญ่ ⇒ ถ้าหลุด: เปิด `AI_IMAGE_SAFETY=1` หรือแยกคำขอต่อภาพ |
+| D9 | **โหมด `image` (ครอปต่อจุด) ยังไม่เคยยิงจริง** — รอบแรกบนสถานี (ภาพทั้งโซน · AvoDerm) ของจริง 6/6 แดง · แดงปลอม 0 · แต่ภาพละ 258 token และ `b_seen` ลอก "5&-3" ของ Vision ⇒ ตราโค้งได้ real (รอดเพราะหลักฐานภาพ SAME) | Import workflow ใหม่ทับ → รัน AvoDerm/Friskies เดิม → Log `usage.promptTokensDetails IMAGE` ต้อง ≈ 258 × จำนวนครอป · `a_seen`/`b_seen` ต้องไม่ลอกคำที่ Vision อ่านผิด · ปุ่ม ✓/⚑ นับของจริงที่ถูกพับ |
 
 ---
 

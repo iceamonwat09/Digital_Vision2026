@@ -274,6 +274,20 @@ AI_IMAGE_TIMEOUT_S = _f("ARTWORK_V2_AI_IMAGE_TIMEOUT_S", "300")
 # อ่านชัด ≥ CONF_FAIL ทั้งสองฝั่ง ⇒ คงไว้เป็นเหลือง (ไม่พับ) — 30 ก.ย. วัดได้ว่า Gemini ที่เห็นสองภาพ
 # ในคำขอเดียว "ลอก" ภาพ B ตาม A แล้วกลืนความต่างจริง
 AI_IMAGE_SAFETY = _b("ARTWORK_V2_AI_IMAGE_SAFETY", "0")
+# 9 ต.ค. (รอบ 4): ผลสถานีรอบแรก — Gemini นับภาพทั้งโซน (3682 px) เป็น **258 token = ราว 1 ไทล์ 768 px**
+# ⇒ ตัวอักษร ~28 px เหลือ ~6 px · คำตอบที่ถูกมาจากข้อความของ Vision (ลอก "5&-3" ที่ Vision อ่านผิดมาด้วย)
+# ``AI_IMAGE_CROPS=1`` = ส่ง **ภาพครอปรอบแต่ละจุด** (ตัดจากไฟล์ JPEG เดียวกับที่ส่ง Vision · A/B แยกรูป)
+# ด้านยาวไม่เกิน ``AI_IMAGE_CROP_MAX_SIDE`` ⇒ ตัวอักษรขนาดจริง · ``0`` = ภาพทั้งโซนแบบเดิมเป๊ะ
+AI_IMAGE_CROPS = _b("ARTWORK_V2_AI_IMAGE_CROPS", "1")
+AI_IMAGE_CROP_MAX_SIDE = _i("ARTWORK_V2_AI_IMAGE_CROP_MAX_SIDE", "768")
+AI_IMAGE_CROP_MIN_W = _i("ARTWORK_V2_AI_IMAGE_CROP_MIN_W", "480")
+AI_IMAGE_CROP_JPEG_Q = _i("ARTWORK_V2_AI_IMAGE_CROP_JPEG_Q", "95")
+# เพดานจุดต่อคำขอ (แผน ก ที่ผู้ใช้เลือก): เกิน ⇒ จุดที่เหลือ **คงระดับของอัลกอริทึม** + หมายเหตุ
+# "AI ไม่ได้ตรวจ" (ไม่ยิงคำขอที่ 2) · เลือกส่งแดงก่อนเหลือง · 0 = ไม่จำกัด
+AI_IMAGE_MAX_CANDIDATES = _i("ARTWORK_V2_AI_IMAGE_MAX_CANDIDATES", "40")
+# AI ตอบ "ต่างจริง" บนข้อความโค้ง/เอียง ⇒ **เหลือง** (กติกาเดียวกับอัลกอริทึม/judge) — สถานี 9 ต.ค.:
+# ตรา OMEGA-6 ที่เหมือนกันทั้งสองไฟล์ AI ตอบ real เพราะลอกคำที่ Vision อ่านผิด · 0 = แดงได้แบบเดิม
+AI_IMAGE_CURVED_YELLOW = _b("ARTWORK_V2_AI_IMAGE_CURVED_YELLOW", "1")
 # โหมด judge: จุดที่ต่างแค่เครื่องหมายวรรคตอน ⇒ เหลืองเสมอ (กติกาเดียวกับอัลกอริทึม —
 # PUNCT แดงได้เฉพาะเมื่อการอ่านซ้ำยืนยัน · คำตอบของ AI ไม่ใช่การอ่านซ้ำ) · 0 = แดงได้แบบเดิม
 AI_JUDGE_PUNCT_YELLOW = _b("ARTWORK_V2_AI_JUDGE_PUNCT_YELLOW", "1")

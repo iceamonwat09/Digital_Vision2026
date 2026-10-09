@@ -315,6 +315,9 @@ def build_text(r: dict) -> str:
         if x.get("mode") == "image":
             a("     image: verdicts=%s items_ignored=%s (AI ดูภาพที่ส่ง Vision แล้วตัดสินจุดของอัลกอริทึม)"
               % (x.get("image_verdicts"), x.get("items_ignored", 0)))
+            if x.get("crops") is not None:
+                a("     image_crops: crops=%s not_sent=%s crop_px_max=%s (ครอปรอบแต่ละจุดจากภาพที่ส่ง Vision · A/B แยกรูป)"
+                  % (x.get("crops"), x.get("not_sent"), x.get("crop_px_max")))
         for eq in x.get("equivalent") or []:
             a("     equivalent %s (AI=%s): %s" % (eq.get("what"), eq.get("verdict"), eq.get("reason")))
         for bad in x.get("invalid") or []:

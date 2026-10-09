@@ -114,8 +114,12 @@ def _cand_box(f: dict, s: str, size) -> Optional[List[int]]:
                       max(b[2] for b in bs), max(b[3] for b in bs)], size)
 
 
-def _candidates(findings: List[dict], sizes: Optional[dict] = None) -> List[dict]:
-    """``sizes`` (โหมด image) = ``{"a": (W, H), "b": (W, H)}`` ⇒ ใส่กรอบ 0-1000 บนภาพให้ทุกฝั่ง"""
+def _candidates(findings: List[dict], sizes: Optional[dict] = None,
+                crops: Optional[dict] = None) -> List[dict]:
+    """``sizes`` (โหมด image) = ``{"a": (W, H), "b": (W, H)}`` ⇒ ใส่กรอบ 0-1000 บนภาพให้ทุกฝั่ง
+
+    ``crops`` (โหมด image แบบครอป) = ``{"F<n>": {"a": {w, h, box}, "b": {...}}}`` ⇒ ``c[s]["crop"]``
+    (``box`` = ตำแหน่งของจุดในภาพครอป 0-1000)"""
     out = []
     for f in findings:
         if f.get("id") is None:
@@ -125,6 +129,9 @@ def _candidates(findings: List[dict], sizes: Optional[dict] = None) -> List[dict
         if sizes:
             for s in ("a", "b"):
                 c[s]["box"] = _cand_box(f, s, sizes.get(s))
+        if crops and c["id"] in crops:
+            for s in ("a", "b"):
+                c[s]["crop"] = crops[c["id"]][s]
         if f.get("members"):
             c["members"] = [{"a": _cand_side(m, "a"), "b": _cand_side(m, "b")}
                             for m in f["members"]]
@@ -133,7 +140,8 @@ def _candidates(findings: List[dict], sizes: Optional[dict] = None) -> List[dict
 
 
 def build_payload(n: int, mode: str, A: List[dict], B: List[dict], size_a, size_b,
-                  findings: List[dict], curved: Optional[dict] = None) -> dict:
+                  findings: List[dict], curved: Optional[dict] = None,
+                  crops: Optional[dict] = None) -> dict:
     """ข้อมูลที่ส่งให้ N8N — มีแต่สิ่งที่ Vision อ่านได้ (+ รายการของอัลกอริทึมในโหมด assist)
 
     ``curved`` = ``{"A": [ดัชนีบรรทัด], "B": [...]}`` จาก ``compare.curved_lines`` ⇒ บรรทัดนั้น
@@ -145,8 +153,8 @@ def build_payload(n: int, mode: str, A: List[dict], B: List[dict], size_a, size_
          "zone_b": _side_payload(B, "B", size_b, curved.get("B"))}
     # โหมด judge/raw ไม่ส่งผลของอัลกอริทึม — ให้ AI หาเองอย่างอิสระ (ใช้ A/B เทียบสองแนวทางได้จริง)
     if mode == "image":
-        p["contract"] = "artwork-v2-image/1"
-        p["candidates"] = _candidates(findings, {"a": size_a, "b": size_b})
+        p["contract"] = "artwork-v2-image/2" if crops is not None else "artwork-v2-image/1"
+        p["candidates"] = _candidates(findings, {"a": size_a, "b": size_b}, crops)
     else:
         p["candidates"] = _candidates(findings) if mode == "assist" else []
     return p
@@ -164,6 +172,130 @@ def image_part(path: str, size) -> Optional[dict]:
     W, H = (size or (0, 0))
     return {"mime": "image/jpeg", "w": int(W), "h": int(H),
             "b64": base64.b64encode(data).decode("ascii")}
+
+
+def _load_image(path: str):
+    """ภาพที่ส่ง Vision → array (BGR) · อ่าน/ถอดรหัสไม่ได้ = ``None``"""
+    try:
+        import cv2
+        import numpy as np
+        with open(path, "rb") as fh:
+            data = fh.read()
+        im = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR) if data else None
+    except Exception:                                # noqa: BLE001 — ไฟล์เสีย = ใช้ผลอัลกอริทึม
+        return None
+    return im
+
+
+def _spot_px(f: dict, s: str):
+    """กรอบของจุดบนภาพฝั่ง ``s`` (พิกเซลของภาพที่ส่ง) + ความสูงบรรทัด
+
+    คำเต็ม → ตัวอักษรที่ต่าง → ตำแหน่งประมาณ (``est_box`` — ฝั่งที่ไม่มีข้อความ) · การ์ดโค้ง = union
+    ของสมาชิก · ไม่มีเลย = ``(None, None)`` (ไม่เดาตำแหน่ง)"""
+    bs, hs = [], []
+    for g in [f] + list(f.get("members") or []):
+        d = g.get(s) or {}
+        b = d.get("word_box") or d.get("box") or d.get("est_box")
+        if b:
+            bs.append(b)
+            hs.append(b[3] - b[1])
+    if not bs:
+        return None, None
+    hs.sort()
+    return ([min(b[0] for b in bs), min(b[1] for b in bs),
+             max(b[2] for b in bs), max(b[3] for b in bs)], hs[len(hs) // 2])
+
+
+def crop_rect(box, lh, W: int, H: int) -> List[int]:
+    """กรอบครอปรอบจุด (พิกเซล · อยู่ในภาพเสมอ) — เห็นคำข้าง ๆ และบรรทัดบน/ล่างบางส่วน
+
+    กว้างอย่างน้อย ``AI_IMAGE_CROP_MIN_W`` · ถ้าบริบทเกินด้านยาวสูงสุดแต่ตัวจุดเองพอดี ⇒ ตัดบริบท
+    ให้พอดี ``AI_IMAGE_CROP_MAX_SIDE`` (คงความละเอียดจริง ไม่ย่อ)"""
+    mx = max(64, int(config.AI_IMAGE_CROP_MAX_SIDE))
+    x0, y0, x1, y1 = [float(v) for v in box]
+    bw, bh = max(1.0, x1 - x0), max(1.0, y1 - y0)
+    lh = max(8.0, float(lh or bh))
+    cw = bw + 2 * max(4 * lh, 60.0)
+    cw = max(cw, float(min(config.AI_IMAGE_CROP_MIN_W, W)))
+    if cw > mx and bw + 2 * lh <= mx:
+        cw = float(mx)
+    ch = bh + 2 * max(1.5 * lh, 16.0)
+    if ch > mx and bh + 2 * lh <= mx:
+        ch = float(mx)
+    cw, ch = min(cw, float(W)), min(ch, float(H))
+    X0 = min(max(0.0, (x0 + x1) / 2 - cw / 2), W - cw)
+    Y0 = min(max(0.0, (y0 + y1) / 2 - ch / 2), H - ch)
+    return [int(round(X0)), int(round(Y0)), int(round(X0 + cw)), int(round(Y0 + ch))]
+
+
+def crop_part(im, box, lh) -> Optional[Tuple[dict, dict]]:
+    """ครอปรอบจุดจากภาพที่ส่ง Vision → ``(ส่วนที่ส่ง {mime, w, h, b64}, ข้อมูลใน candidate {w, h, box})``
+
+    ย่อเฉพาะเมื่อครอปยังใหญ่กว่า ``AI_IMAGE_CROP_MAX_SIDE`` (ตัวจุดเองกว้างมาก) · JPEG คุณภาพสูง"""
+    import cv2
+    H, W = im.shape[:2]
+    r = crop_rect(box, lh, W, H)
+    c = im[r[1]:r[3], r[0]:r[2]]
+    if c.size == 0:
+        return None
+    ch, cw = c.shape[:2]
+    k = min(1.0, float(config.AI_IMAGE_CROP_MAX_SIDE) / max(cw, ch))
+    if k < 1.0:
+        c = cv2.resize(c, (max(1, int(round(cw * k))), max(1, int(round(ch * k)))),
+                       interpolation=cv2.INTER_AREA)
+    try:
+        from . import imaging          # ตัวเข้ารหัสเดียวกับภาพที่ส่ง Vision (4:4:4 · ไม่ลดสี)
+        data = imaging.encode_jpeg(c, int(config.AI_IMAGE_CROP_JPEG_Q))
+    except Exception:                                # noqa: BLE001
+        return None
+    h2, w2 = c.shape[:2]
+    rel = [max(0, min(1000, int(round((box[0] - r[0]) / float(cw) * 1000)))),
+           max(0, min(1000, int(round((box[1] - r[1]) / float(ch) * 1000)))),
+           max(0, min(1000, int(round((box[2] - r[0]) / float(cw) * 1000)))),
+           max(0, min(1000, int(round((box[3] - r[1]) / float(ch) * 1000))))]
+    return ({"mime": "image/jpeg", "w": int(w2), "h": int(h2),
+             "b64": base64.b64encode(data).decode("ascii")},
+            {"w": int(w2), "h": int(h2), "box": rel, "region": r, "scale": round(k, 4)})
+
+
+def plan_crops(findings: List[dict], ims: dict) -> Tuple[List[dict], List[dict], dict, dict]:
+    """เลือกจุดที่ส่ง (แดงก่อนเหลือง · ไม่เกิน ``AI_IMAGE_MAX_CANDIDATES``) + ครอป A/B ของแต่ละจุด
+
+    คืน ``(จุดที่ส่ง ตามลำดับเดิม, ส่วนภาพเรียงตามจุด, ข้อมูลครอปต่อจุด, {F<n>: เหตุที่ไม่ส่ง})``"""
+    cap = int(config.AI_IMAGE_MAX_CANDIDATES or 0)
+    order = sorted([f for f in findings if f.get("id") is not None],
+                   key=lambda f: (0 if f.get("severity") == "red" else 1, f["id"]))
+    chosen, info, parts, skip = set(), {}, {}, {}
+    for f in order:
+        fid = "F%d" % f["id"]
+        if cap and len(chosen) >= cap:
+            skip[fid] = "เกินเพดาน %d จุดต่อคำขอ" % cap
+            continue
+        got = {}
+        for s in ("a", "b"):
+            box, lh = _spot_px(f, s)
+            if box is None:
+                skip[fid] = "ไม่มีตำแหน่งของจุดนี้บนภาพฝั่ง %s" % s.upper()
+                break
+            cp = crop_part(ims[s], box, lh)
+            if cp is None:
+                skip[fid] = "ครอปภาพฝั่ง %s ไม่ได้" % s.upper()
+                break
+            got[s] = cp
+        if fid in skip:
+            continue
+        chosen.add(fid)
+        info[fid] = {s: got[s][1] for s in ("a", "b")}
+        parts[fid] = got
+    sent = [f for f in findings if f.get("id") is not None and "F%d" % f["id"] in chosen]
+    crops = []
+    for f in sent:
+        fid = "F%d" % f["id"]
+        for s in ("a", "b"):
+            crops.append(dict(parts[fid][s][0], candidate=fid, side=s))
+    pub = {k: {s: {kk: v[s][kk] for kk in ("w", "h", "box")} for s in ("a", "b")}
+           for k, v in info.items()}
+    return sent, crops, pub, skip
 
 
 def call(url: str, payload: dict, poster: Optional[Callable] = None,
@@ -655,6 +787,11 @@ def _merge_image(pr: dict, resp: dict, findings: List[dict], st: dict) -> None:
     cnt = {"real": 0, "noise": 0, "uncertain": 0, "unanswered": 0, "guarded": 0}
     for f in findings:
         ai = got.get("F%d" % f["id"]) if f.get("id") is not None else None
+        if ai is None and (f.get("ai") or {}).get("not_sent"):
+            # ไม่ได้ส่งให้ AI (เกินเพดาน / ไม่มีตำแหน่งบนภาพ) — หมายเหตุใส่ไว้แล้วตอนเลือกจุด
+            cnt["not_sent"] = cnt.get("not_sent", 0) + 1
+            kept.append(f)
+            continue
         if ai is None:
             cnt["unanswered"] += 1
             f["ai"] = {"verdict": None, "reason": "", "suggestion": "", "image": True}
@@ -676,7 +813,13 @@ def _merge_image(pr: dict, resp: dict, findings: List[dict], st: dict) -> None:
             f["notes"].append("AI ดูภาพแล้วตัดสินว่าสองฝั่งพิมพ์เหมือนกัน (Vision อ่านผิด) — ไม่นับในผลตัดสิน")
             dismissed.append(f)
             continue
-        if v == "real":
+        if v == "real" and config.AI_IMAGE_CURVED_YELLOW and (
+                f.get("curved") or f.get("class") == "CURVED"):
+            cnt["curved_yellow"] = cnt.get("curved_yellow", 0) + 1
+            f["severity"] = "yellow"
+            f["notes"].append("AI ดูภาพแล้วบอกว่าต่าง แต่เป็นข้อความโค้ง/เอียง (OCR และ AI อ่านไม่นิ่ง) "
+                              "— คงไว้เป็นเหลือง โปรดดูด้วยตา")
+        elif v == "real":
             f["severity"] = "red"
             f["notes"].append("AI ดูภาพแล้วยืนยันว่าต่างจริง")
         else:
@@ -686,8 +829,8 @@ def _merge_image(pr: dict, resp: dict, findings: List[dict], st: dict) -> None:
     pr["findings"] = kept
     pr["ai_dismissed"] = dismissed
     st["image_verdicts"] = cnt
-    st["reviewed"] = len(findings) - cnt["unanswered"]
-    st["reviewable"] = len(findings)
+    st["reviewed"] = len(findings) - cnt["unanswered"] - cnt.get("not_sent", 0)
+    st["reviewable"] = len(findings) - cnt.get("not_sent", 0)
 
 
 def _short_onesided(f: dict) -> str:
@@ -844,7 +987,30 @@ def run_all(pairs: List[dict], mode: str, warnings: List[str], say: Callable,
                         "vision_conf": vc}
             continue
         imgs = None
-        if mode == "image":
+        crops = crop_info = None
+        sendable = pr.get("findings") or []
+        if mode == "image" and config.AI_IMAGE_CROPS:
+            # ครอปรอบแต่ละจุดจากไฟล์ JPEG เดียวกับที่ส่ง Vision (ไม่เรนเดอร์ใหม่) · A/B แยกรูป
+            ims = {s: (_load_image(os.path.join(img_dir or "", pr["sides"][s].get("image") or ""))
+                       if img_dir and pr["sides"][s].get("image") else None) for s in ("a", "b")}
+            if ims["a"] is None or ims["b"] is None:
+                summary["pairs_failed"] += 1
+                pr["ai"] = {"mode": mode, "status": "failed", "error": "อ่านภาพที่ส่ง Vision ไม่ได้",
+                            "vision_conf": vc}
+                warnings.append("คู่ %d: AI ดูภาพไม่ได้ (อ่านไฟล์ภาพไม่ได้) — ใช้ผลของอัลกอริทึม" % pr["n"])
+                continue
+            sendable, crops, crop_info, skip = plan_crops(pr.get("findings") or [], ims)
+            for f in pr.get("findings") or []:
+                why = skip.get("F%d" % f["id"]) if f.get("id") is not None else None
+                if why:
+                    f["ai"] = {"verdict": None, "reason": "", "suggestion": "", "image": True,
+                               "not_sent": why}
+                    f["notes"].append("AI ไม่ได้ตรวจจุดนี้ (%s) — คงระดับของอัลกอริทึม" % why)
+            if not sendable:
+                pr["ai"] = {"mode": mode, "status": "skipped", "vision_conf": vc,
+                            "reason": "ไม่มีจุดที่ครอปภาพส่งได้", "not_sent": len(skip)}
+                continue
+        elif mode == "image":
             imgs = {s: (image_part(os.path.join(img_dir or "", pr["sides"][s].get("image") or ""),
                                    pr["sides"][s].get("sent_px"))
                         if img_dir and pr["sides"][s].get("image") else None) for s in ("a", "b")}
@@ -863,10 +1029,14 @@ def run_all(pairs: List[dict], mode: str, warnings: List[str], say: Callable,
             A, B = cmp_["lines_a"], cmp_["lines_b"]
             curved = pr.get("curved_lines")
         payload = build_payload(pr["n"], mode, A, B, tuple(pr["sides"]["a"]["sent_px"]),
-                                tuple(pr["sides"]["b"]["sent_px"]), pr.get("findings") or [],
-                                curved=curved)
+                                tuple(pr["sides"]["b"]["sent_px"]), sendable,
+                                curved=curved, crops=crop_info)
         if imgs:
             payload["images"] = imgs
+        if crops is not None:
+            payload["crops"] = crops
+            payload["image_sizes"] = {s: {"w": int(pr["sides"][s]["sent_px"][0]),
+                                          "h": int(pr["sides"][s]["sent_px"][1])} for s in ("a", "b")}
         resp, info = call(url, payload, poster,
                           timeout={"raw": config.AI_RAW_TIMEOUT_S,
                                    "image": config.AI_IMAGE_TIMEOUT_S}.get(mode),
@@ -875,6 +1045,10 @@ def run_all(pairs: List[dict], mode: str, warnings: List[str], say: Callable,
               "http": info["http"], "ms": info["ms"], "attempts": info["attempts"],
               "request_bytes": info["bytes"], "error": info["error"], "vision_conf": vc,
               "candidates": len(payload["candidates"])}
+        if crops is not None:
+            ai["crops"] = len(crops)
+            ai["not_sent"] = len(pr.get("findings") or []) - len(sendable)
+            ai["crop_px_max"] = max([max(c["w"], c["h"]) for c in crops] or [0])
         if resp is None:
             summary["pairs_failed"] += 1
             warnings.append("คู่ %d: AI ตรวจทานไม่สำเร็จ — ใช้ผลของอัลกอริทึม (%s)"

@@ -23,7 +23,7 @@
 
 ## 🆕 Artwork V2 — เทียบข้อความด้วย Google Cloud Vision (2 ต.ค. 2026 · PoC)
 
-**Branch: `claude/trusting-archimedes-qoynbp`** (ต่อจาก `claude/laughing-fermat-i9aise`) · `CONFIG_VERSION` = **`2026.10.09-v2-aiimage`** ·
+**Branch: `claude/trusting-archimedes-qoynbp`** (ต่อจาก `claude/laughing-fermat-i9aise`) · `CONFIG_VERSION` = **`2026.10.09-v2-aicrops`** ·
 โมดูล `artwork_v2/` (VERSION `2026.10.09-v2rasterstrict`) · เมนู **"Artwork V2"** (`/artwork_v2`) ·
 เทสต์ `tests/test_artwork_v2.py` **73 ตัว** + `tests/test_artwork_v2_robust.py` **717 ตัว** (ข้อมูล OCR จริง · ~2.5 นาที)
 · V2 ทั้งชุด **596 + 717**
@@ -717,6 +717,27 @@ ECC **affine ไม่มีเพดาน** ⇒ ครอปที่ฝั่
 * ⚠️ **ยังไม่เคยยิง Gemini จริง** · ⚠️ ความเสี่ยงที่วัดไว้แล้ว 30 ก.ย.: Gemini ที่เห็นสองภาพในคำขอเดียว **ลอกภาพ B ตาม A** กลืนของจริง 4/4
   ในโซนใหญ่ ⇒ ในโหมดนี้ของจริงที่ AI ตอบ "ภาพเหมือน" จะ **ไปอยู่ในรายการพับ** (ยังเปิดดูได้แต่ไม่นับ) — ต้องวัดด้วยปุ่ม ✓/⚑ ก่อนเชื่อ ·
   ภาพทั้งโซนถูกหั่นไทล์ 768 px ⇒ ตัวเล็กมากอาจอ่านไม่ออก · คำขอ ~3-6 MB/คู่ (ต่ำกว่าเพดาน N8N 16 MB)
+
+#### 🔎 9 ต.ค. (รอบ 4) — ผลสถานีโหมด image รอบแรก → ส่ง **ครอปรอบแต่ละจุด** + ข้อความโค้ง real = เหลือง
+
+**ผลสถานี (AvoDerm M1↔M2 · งาน `20261008_165336_2d5cdc` run_002 · ภาพทั้งโซน):** ของจริง **6/6 แดง** (รวมคอมมา — โหมดอื่นเหลือง) ·
+แดงปลอม 0 · เหลือง 0 · `Avem`/`AvoDerm` ⇒ พับถูก · AI 21.8 วิ · **แต่** `usage.promptTokensDetails IMAGE = 516` = **258 token/ภาพ**
+(≈ ย่อเหลือ 768 px · ตัวอักษร ~28 px เหลือ ~6 px) และการ์ดตรา OMEGA (เหมือนกันทั้งสองไฟล์) ได้ `real` โดย `b_seen` =
+"OMEGA-6 **5&**-3 FATTY ACIDS" = **ลอกคำที่ Vision อ่านผิด** ⇒ รอดเพราะหลักฐานภาพ SAME (คู่ PDF↔ภาพถ่ายจะเป็นแดงปลอม)
+⇒ คำตอบที่ถูกน่าจะมาจาก **ข้อความของ Vision ไม่ใช่ภาพ** · ผู้ใช้เลือก **แผน ก** (เพดานจุด · เกิน = คงระดับ · 1 คำขอเสมอ)
+
+| ธง (`0` = เดิม) | ทำอะไร |
+|---|---|
+| `ARTWORK_V2_AI_IMAGE_CROPS` (1) | `ai_review.plan_crops/crop_part/crop_rect`: ครอปรอบจุด **ฝั่งละ 1 รูป** จาก `img/p<N>_<a\|b>.jpg` (ไฟล์ที่ส่ง Vision · ไม่เรนเดอร์ใหม่) · กรอบ = คำเต็ม → ตัวอักษร → `est_box` (การ์ดโค้ง = union) · กว้าง ≥ 480 · ด้านยาว ≤ 768 (เกิน ⇒ ตัดบริบทก่อน · ย่อเฉพาะเมื่อตัวจุดเองกว้างเกิน) · JPEG 4:4:4 q95 (`imaging.encode_jpeg` — cv2 ค่าเริ่มต้น 4:2:0 ทำสีเพี้ยนวัดได้) · payload `crops[]` + `candidates[].a/b.crop {w,h,box}` + `image_sizes` · contract `/2` · **1 คำขอต่อคู่** (10 จุด = 20 รูป ≈ 5,200 token ภาพ) · ถอดรหัส JPEG ไม่ได้ ⇒ ผลอัลกอริทึม + คำเตือน |
+| `ARTWORK_V2_AI_IMAGE_MAX_CANDIDATES` (40) | แดงก่อนเหลือง · เกิน/ไม่มีตำแหน่งบนภาพฝั่งใด ⇒ **ไม่ส่ง · คงระดับ** + หมายเหตุ "AI ไม่ได้ตรวจจุดนี้ (...)" (`f.ai.not_sent`) · ไม่มีจุดที่ส่งได้ ⇒ ไม่ยิง · Log `image_crops: crops= not_sent= crop_px_max=` |
+| `ARTWORK_V2_AI_IMAGE_CURVED_YELLOW` (1) | `real` บน `curved`/การ์ด `CURVED` ⇒ เหลือง + หมายเหตุ (`image_verdicts.curved_yellow`) |
+| workflow + prompt | Build node: ครอปเรียงตาม candidate (`F3 - A crop` → รูป → `F3 - B crop` → รูป) แล้วค่อย DATA · ครอปไม่ครบ A+B / side ผิด / mime ผิด ⇒ ปฏิเสธ · ยังรับ `images` ทั้งโซน (ธงปิด) · prompt: **LOOK FIRST** — `a_seen`/`b_seen` ต้องมาจากพิกเซลเท่านั้น ห้ามลอกข้อความ Vision (ยกตัวอย่าง "5&-3") · ข้อความโค้งอ่านไม่แน่ ⇒ uncertain · ⚠️ **ต้อง Import workflow ใหม่ทับ** (หรือวางโค้ด node Build ทับ) |
+
+* ตัวอย่างครอปจากกรอบจริงใน Log: `D-calcium` 480×92 · `Sulphate Pentahydrate.` 480×104 · ตราโค้ง 614×259 — ทุกครอปไม่ถูกย่อ
+* เทสต์ `tests/test_artwork_v2_ai_image_crops.py` **18** (ภาพลายสุ่มตรวจว่าครอปมาจากตำแหน่ง/ฝั่งที่ถูก · pipeline จริง · Code node จริง) ·
+  เทสต์เดิม `test_artwork_v2_ai_image.py` ตรึง `AI_IMAGE_CROPS=False` (ล็อกเส้นทางภาพทั้งโซน) · ย้อนโค้ด **8 จุด แดงทุกจุด** · V2 ไม่รวม robust **694 ผ่าน**
+* Chromium (Vision/N8N ปลอม · 1366/400): คำขอ contract `/2` ครอป 4 รูป (2 จุด) · FAIL แดง 1 + พับ 1 · กล่อง AI บอก "ส่งภาพครอปรอบจุด" · ไม่เลื่อนแนวนอน · ไม่มี JS error
+* ⏳ ยังไม่ได้ยิงจริง — ดู Log: IMAGE token ควร ≈ 258 × จำนวนครอป · `ai_seen` ต้องไม่ลอกคำที่ Vision อ่านผิด
 
 **📚 เอกสาร Google Vision (อ่าน 4 ต.ค. — `docs.cloud.google.com` ถูก proxy บล็อก อ่านจาก proto ทางการบน GitHub + ข้อความค้นหา):**
 `DOCUMENT_TEXT_DETECTION` สำหรับข้อความหนาแน่น ✅ (ใช้อยู่) · `languageHints` *"ส่วนใหญ่ปล่อยว่างดีที่สุด · ใส่ผิดเป็นอุปสรรคมาก"* ✅ (ว่าง) ·
@@ -6389,7 +6410,7 @@ A, B, C, …) ⇒ ทุกกลุ่มมีสมาชิก 1 ตัว �
   `tests/test_artwork_ownership.py` 30 ตัว (สิทธิ์เห็นประวัติ + ชื่อผู้ตรวจ).
   ⚠️ `tests/test_inspection_golden.py` **fail 5 ตัวอยู่แล้ว** (pre-existing, `NameError: FieldResult`
   ในโมดูล Label Paper) — ไม่เกี่ยวกับ artwork. ยืนยันด้วย `git stash` ก่อนโทษการแก้ของตัวเอง.
-- CONFIG_VERSION ปัจจุบัน: **`2026.10.09-v2-aiimage`** (เช็คที่ footer ว่ารันโค้ดใหม่จริง).
+- CONFIG_VERSION ปัจจุบัน: **`2026.10.09-v2-aicrops`** (เช็คที่ footer ว่ารันโค้ดใหม่จริง).
 - **ตาข่ายนิรภัยของชั้นเทียบ: `verify_compare.py`** — แก้อะไรที่ `panelmatch`/`confirm`
   **ต้องรันไฟล์นี้ก่อนและหลังเสมอ** (`--selftest` ใช้ได้โดยไม่ต้องมีไฟล์จริง)
 

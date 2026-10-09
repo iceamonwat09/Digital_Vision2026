@@ -958,7 +958,8 @@
   function aiNote(f) {
     const ai = f.ai;
     if (!ai) return "";
-    if (!ai.verdict) return '<span class="v2-ai-note v2-muted">🤖 AI ไม่ได้ตอบจุดนี้</span>';
+    if (!ai.verdict) return '<span class="v2-ai-note v2-muted">🤖 ' +
+      (ai.not_sent ? "AI ไม่ได้ตรวจจุดนี้ (" + esc(ai.not_sent) + ")" : "AI ไม่ได้ตอบจุดนี้") + "</span>";
     // โหมด image: สิ่งที่ AI เห็นบนภาพแต่ละฝั่ง (คำของ AI — ไม่ใช่การอ่านของ Vision)
     const seen = ai.image && (ai.a_seen || ai.b_seen)
       ? '<span class="v2-ai-note">🖼️ AI เห็นในภาพ — A: "' + esc(ai.a_seen || "—") + '" · B: "' + esc(ai.b_seen || "—") + '"</span>' : "";
@@ -1313,6 +1314,9 @@
         " จุด: ต่างจริง " + (iv.real || 0) + " · ภาพเหมือน (พับ) " + (iv.noise || 0) + " · ไม่แน่ใจ " + (iv.uncertain || 0);
       if (iv.unanswered) stat += " · ไม่ได้ตอบ " + iv.unanswered + " (คงระดับเดิม)";
       if (iv.guarded) stat += " · ภาพเหมือนแต่ Vision อ่านชัด คงไว้ " + iv.guarded;
+      if (iv.curved_yellow) stat += " · ข้อความโค้งที่ AI บอกว่าต่าง คงไว้เป็นเหลือง " + iv.curved_yellow;
+      if (iv.not_sent) stat += " · ไม่ได้ส่งให้ AI " + iv.not_sent + " จุด (คงระดับเดิม)";
+      if (ai.crops) stat += " · ส่งภาพครอปรอบจุด " + ai.crops + " รูป";
     }
     if (ai.algo_red_kept) stat += " · จุดแดงของอัลกอริทึมที่ AI ไม่ได้ระบุ คงไว้เป็นเหลือง " + ai.algo_red_kept + " จุด";
     if (ai.mode === "assist" && ai.reviewable) stat += " · ตอบครบ " + ai.reviewed + "/" + ai.reviewable + " จุด";

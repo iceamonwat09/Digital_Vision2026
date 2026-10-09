@@ -51,6 +51,8 @@ def _isolated(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "RETRY_WAIT_S", 0.0)
     monkeypatch.setattr(config, "REREAD_ENABLED", False)
     monkeypatch.setattr(config, "AI_IMAGE_SAFETY", False)
+    # ไฟล์นี้ล็อกเส้นทาง "ภาพทั้งโซน" (contract /1) — ครอปต่อจุดอยู่ใน test_artwork_v2_ai_image_crops.py
+    monkeypatch.setattr(config, "AI_IMAGE_CROPS", False)
     monkeypatch.setattr(config, "AI_REVIEW_URL", "http://127.0.0.1:9/webhook/artwork-v2-review")
     monkeypatch.setattr(config, "AI_RAW_URL", "http://127.0.0.1:9/webhook/artwork-v2-raw")
     monkeypatch.setattr(config, "AI_IMAGE_URL", "http://127.0.0.1:9/webhook/artwork-v2-image")

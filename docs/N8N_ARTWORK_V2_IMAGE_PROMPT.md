@@ -15,10 +15,12 @@
 
 | | ทำอย่างไร |
 |---|---|
-| ภาพที่ส่ง | `img/p<N>_a.jpg` และ `p<N>_b.jpg` ของรอบ = **ภาพที่ส่ง Vision ทุกไบต์** (แนวที่หมุนแล้ว · สี/เทา/ขาวดำตามที่เลือก) · base64 ใน `images.a/b` (`mime`, `w`, `h`, `b64`) · **ไม่ยิง Vision เพิ่ม** |
+| ภาพที่ส่ง (ค่าเริ่มต้น · `ARTWORK_V2_AI_IMAGE_CROPS=1`) | **ครอปรอบแต่ละจุด ฝั่งละ 1 รูป** ตัดจาก `img/p<N>_a.jpg` / `p<N>_b.jpg` ของรอบ (= ภาพที่ส่ง Vision · ไม่เรนเดอร์ใหม่) · ความละเอียดจริง (ด้านยาว ≤ `ARTWORK_V2_AI_IMAGE_CROP_MAX_SIDE` 768 px · กว้างอย่างน้อย 480 px ให้เห็นคำข้าง ๆ + บรรทัดบน/ล่าง) · JPEG q95 · `crops: [{candidate, side, mime, w, h, b64}]` + `candidates[].a/b.crop = {w, h, box}` (ตำแหน่งจุดในครอป 0-1000) + `image_sizes` · contract `artwork-v2-image/2` · ทุกคู่ = **1 คำขอ** (10 จุด = 20 รูป) · **ไม่ยิง Vision เพิ่ม** |
+| ภาพที่ส่ง (แบบเดิม · `ARTWORK_V2_AI_IMAGE_CROPS=0`) | ภาพทั้งโซน A/B ทุกไบต์ใน `images.a/b` · contract `/1` — ⚠️ สถานี 9 ต.ค. วัดได้ว่า Gemini นับภาพละ **258 token** (≈ ย่อเหลือ 768 px) ⇒ ตัวอักษร ~28 px เหลือ ~6 px อ่านเองไม่ได้ |
+| เพดาน (แผน ก) | ไม่เกิน `ARTWORK_V2_AI_IMAGE_MAX_CANDIDATES` (40) จุดต่อคำขอ · เลือกแดงก่อนเหลือง · จุดที่เกิน/ไม่มีตำแหน่งบนภาพฝั่งใดฝั่งหนึ่ง ⇒ **ไม่ส่ง · คงระดับของอัลกอริทึม** + หมายเหตุ "AI ไม่ได้ตรวจจุดนี้ (...)" (ไม่ยิงคำขอที่ 2) |
 | ข้อความที่ส่ง | บรรทัด/คำ/ความมั่นใจของ Vision (รูปเดียวกับ workflow review) + `candidates` = จุดต่างของอัลกอริทึม **พร้อมกรอบ 0-1000 บนภาพของแต่ละฝั่ง** (`a.box`/`b.box` — คำเต็ม · การ์ดโค้ง = union ของสมาชิก) |
 | Gemini ทำอะไร | ทุกจุด: อ่านสิ่งที่ **พิมพ์จริงในภาพ A** (`a_seen`) แล้วอ่าน **ภาพ B แยกกัน** (`b_seen`) → `real` / `noise` / `uncertain` |
-| ระดับ (แอปตัดสินจากคำตอบ) | `real` = **แดง** · `noise` (ภาพเหมือนกัน — Vision อ่านผิด) = รายการพับ "AI ดูภาพแล้วสองฝั่งพิมพ์เหมือนกัน" (**ไม่ลบ** · ไม่นับ) · `uncertain` = เหลือง · จุดที่ AI ไม่ได้ตอบ = **คงระดับของอัลกอริทึม** + หมายเหตุ |
+| ระดับ (แอปตัดสินจากคำตอบ) | `real` = **แดง** (ยกเว้นข้อความโค้ง/เอียง ⇒ **เหลือง** — `ARTWORK_V2_AI_IMAGE_CURVED_YELLOW`, สถานี 9 ต.ค.: ตรา OMEGA-6 ที่เหมือนกันทั้งสองไฟล์ AI ตอบ real เพราะลอก "5&-3" ที่ Vision อ่านผิด) · `noise` (ภาพเหมือนกัน — Vision อ่านผิด) = รายการพับ "AI ดูภาพแล้วสองฝั่งพิมพ์เหมือนกัน" (**ไม่ลบ** · ไม่นับ) · `uncertain` = เหลือง · จุดที่ AI ไม่ได้ตอบ = **คงระดับของอัลกอริทึม** + หมายเหตุ |
 | จุดที่ AI พบเพิ่ม | ไม่รับ (`items` ถูกนับแล้วทิ้ง — Log `items_ignored=`) |
 | % ความมั่นใจ / กรอบ | มาจาก Vision เหมือนทุกโหมด (schema ไม่มีช่องตัวเลข) |
 | ไม่มีจุดต่างเลย | ไม่ยิง N8N (ประหยัดโควตา) |
@@ -29,7 +31,8 @@
 ⚠️ **ความเสี่ยงที่วัดไว้แล้ว (30 ก.ย. โหมดเทียบคู่ของ Artwork เดิม):** Gemini ที่เห็นสองภาพในคำขอเดียว
 **ถอดภาพ B ตาม A** และในโซนใหญ่กลืนความต่างจริง 4/4 — prompt ห้ามลอกแล้วก็ยังเกิด ⇒ ในโหมดนี้ `noise`
 ของจริงจะ **ไปอยู่ในรายการพับ** (ยังเปิดดูได้ แต่ไม่นับในผลตัดสิน). ใช้ปุ่ม ✓/⚑ บนหน้าเว็บเก็บเฉลยแล้ววัดก่อนเชื่อ ·
-ภาพทั้งโซน ~1400×2200 px ถูก Gemini หั่นเป็นไทล์ 768 px ⇒ ตัวหนังสือเล็กมากอาจอ่านไม่ออก (ควรตอบ `uncertain`)
+ภาพทั้งโซนถูก Gemini ย่อเหลือราว 768 px (258 token/ภาพ — วัดจาก `usage` บนสถานี) ⇒ จึงเปลี่ยนเป็นครอปต่อจุด ·
+ครอปแยกรูป A/B และ prompt สั่ง "ดูภาพก่อน แล้วค่อยดูข้อความของ Vision" — ยังต้องวัดซ้ำบนสถานีว่า `a_seen`/`b_seen` มาจากภาพจริง
 
 ## ② ตั้งค่าใน N8N
 
@@ -38,7 +41,7 @@
 2. node **HTTP Request**: คัด URL (project/region) และ credential `googleApi` จาก node "HTTP Request"
    ของ workflow `artwork-v2-review` — ค่าในไฟล์เป็นตัวอย่าง `YOUR_GCP_PROJECT_ID` (timeout ตั้งไว้แล้ว 290000)
 3. กด **Activate** (path `artwork-v2-image` · ใช้ Production URL ไม่ใช่ `/webhook-test/`)
-4. คำขอมีภาพ 2 ภาพ ⇒ ~3-6 MB ต่อคู่ · ต่ำกว่าเพดาน body ของ N8N (`N8N_PAYLOAD_SIZE_MAX` ค่าเริ่มต้น 16 MB)
+4. คำขอมีภาพครอป 2 รูปต่อจุด (~30-150 KB/รูป ⇒ 10 จุด ≈ 1-3 MB) · ต่ำกว่าเพดาน body ของ N8N (`N8N_PAYLOAD_SIZE_MAX` ค่าเริ่มต้น 16 MB)
    และของ Gemini (คำขอ inline 20 MB) — ถ้า N8N ตอบ 413 ให้เพิ่ม `N8N_PAYLOAD_SIZE_MAX`
 5. บนหน้า Artwork V2 เลือกช่อง "AI ตรวจทาน" = **AI ดูภาพตัดสิน (ทดลอง)** แล้วตรวจ ·
    Log ส่วน `[AI REVIEW]` ต้องขึ้น `mode=image` url `.../artwork-v2-image` · `request_bytes` หลาย MB ·
@@ -51,25 +54,29 @@ node Parse ซึ่งคืน `{error}` เสมอ ⇒ แอปเห็�
 
 <!-- PROMPT_IMAGE START -->
 ```text
-You are a meticulous packaging-artwork proofreader (QC). You receive TWO IMAGES of the SAME region of two versions of a label - IMAGE A (version A) and IMAGE B (version B) - exactly as they were sent to Google Cloud Vision, together with the text Vision read from each image and a list of candidate differences found by a rule-based algorithm. Your job is to LOOK AT THE IMAGES and decide, for every candidate, whether the two printed labels really differ at that spot or whether Vision misread one of them. The images are the source of truth; Vision's text is only a pointer to where to look.
+You are a meticulous packaging-artwork proofreader (QC). You compare two versions of the same label region - version A and version B. A rule-based algorithm compared the text that Google Cloud Vision read from each version and found candidate differences. Vision often misreads exactly at those spots. Your job is to LOOK AT THE IMAGES and decide, for every candidate, whether the two printed labels really differ at that spot or whether Vision misread one of them. The images are the source of truth; Vision's text is only a pointer to where to look.
+
+IMAGES
+- Usually you receive TWO CROPS PER CANDIDATE, cut from the exact images that were sent to Vision, at their original resolution: a crop labelled "F<n> - A crop" (version A) and a crop labelled "F<n> - B crop" (version B). The candidate's a.crop.box / b.crop.box gives the spot inside that crop as [x0,y0,x1,y1] in 0-1000 of the crop (x to the right, y down). The crop also shows neighbouring words and parts of the lines above and below for context.
+- Sometimes you receive instead ONE whole image per version ("IMAGE A" / "IMAGE B") and must find the spot with the candidate's a.box / b.box (0-1000 of that whole image).
+- The two versions can have different sizes and scales (version B may be printed smaller). Always use each side's own box on its own image.
 
 DATA
-- zone_a / zone_b: the lines Vision read. Each line has: id (e.g. "A12"), box [x0,y0,x1,y1] in 0-1000 of that side's image (x to the right, y down), conf (Vision mean confidence 0-1) and w (the words: [wordId, text, word_conf]).
-- candidates: id "F<n>", class (TEXT, NUMBER, CASE, PUNCT, MISSING_IN_B, EXTRA_IN_B, FILLER, FRACTION, PLACEHOLDER, CURVED ...), severity, and for each side "a" / "b": line (line id, or null when that side has no text there), diff (the differing characters as Vision read them), word (the whole word), line_text, and box [x0,y0,x1,y1] (0-1000 of that side's image) of the spot. A candidate may have "members" (several differences on one curved emblem).
-- The two images can have different sizes and scales (version B may be printed smaller). Always use each side's own box on its own image.
+- zone_a / zone_b: the lines Vision read from the whole region. Each line has: id (e.g. "A12"), box [x0,y0,x1,y1] in 0-1000 of that side's whole image, conf (Vision mean confidence 0-1) and w (the words: [wordId, text, word_conf]).
+- candidates: id "F<n>", class (TEXT, NUMBER, CASE, PUNCT, MISSING_IN_B, EXTRA_IN_B, FILLER, FRACTION, PLACEHOLDER, CURVED ...), severity, and for each side "a" / "b": line (line id, or null when that side has no text there), diff (the differing characters AS VISION READ THEM), word, line_text, box, and crop. A candidate may have "members" (several differences on one curved emblem).
 
 METHOD (follow it for EVERY candidate, in order)
-1. Find the spot in IMAGE A using the candidate's a.box (or a.line). Read, character by character, what is actually PRINTED there in image A: letters, digits, letter case, punctuation, symbols. Write it in a_seen. Read the whole word or number, not only the differing characters.
-2. Then, separately, find the spot in IMAGE B using b.box (or b.line) and read what is PRINTED there in image B. Write it in b_seen.
-3. Read each image on its own. Never copy, complete or correct the reading of one image from the other image or from Vision's text. Version B may have been edited on purpose and the differences you are asked about are exactly the ones that matter most: a changed digit, a missing comma, one changed letter case, a plural "s". Never assume B equals A.
-4. When a side has no text at that spot (missing / extra), look at the area around its box and say whether the text is really absent from that image. Write "" in a_seen / b_seen only when nothing is printed there.
-5. If a character is too small, blurred, cut by the edge of the image or covered by graphics, write [?] for it. Never guess a character.
-6. Compare a_seen with b_seen and choose the verdict.
+1. LOOK FIRST. Before you read Vision's diff, word or line_text, look at the A crop (or the spot in IMAGE A) and read, character by character, what is actually PRINTED at the spot: letters, digits, letter case, punctuation, symbols. Read the whole word or number, not only the differing characters. Write it in a_seen.
+2. Then, separately, look at the B crop (or the spot in IMAGE B) and read what is PRINTED there. Write it in b_seen.
+3. a_seen and b_seen must come from the pixels only. Never copy Vision's text into them: Vision's reading is often wrong exactly at these spots (for example a bent emblem read as "5&-3" or "EATTY"). Read each image on its own. Never copy, complete or correct the reading of one image from the other image or from Vision's text. Version B may have been edited on purpose and the differences you are asked about are exactly the ones that matter most: a changed digit, a missing comma, one changed letter case, a plural "s". Never assume B equals A.
+4. When a side has no text at that spot (missing / extra), look at the crop around the box and say whether the text is really absent from that image. Write "" in a_seen / b_seen only when nothing is printed there.
+5. If a character is too small, blurred, cut by the edge of the crop or covered by graphics, write [?] for it. Never guess a character.
+6. Only now compare a_seen with b_seen and choose the verdict. Vision's text may help you locate the spot, never to decide what is printed.
 
 VERDICT
 - "real": the PRINTED content differs between the two images at this spot: any letter, digit, letter case, word, decimal point, %, ®, ©, ™, unit, or punctuation that separates or changes content, or text present in one image and absent in the other. You must be able to read the differing characters clearly in BOTH images.
 - "noise": both images print the SAME content at this spot, and the candidate exists only because Vision misread one or both images. Use it only when you can read the spot clearly in both images and they are identical.
-- "uncertain": you cannot read the spot clearly in one or both images, the box points at graphics or a logo you cannot read, or you are not sure. When in doubt, choose "uncertain".
+- "uncertain": you cannot read the spot clearly in one or both images, the spot is curved or rotated text you cannot read with certainty, the box points at graphics or a logo you cannot read, or you are not sure. When in doubt, choose "uncertain".
 - NOT a difference (verdict "noise" when this is the only change): line breaks and wrapping, a table row split differently, whitespace, the NUMBER of leader dots or dashes between a label and its value, ® / Ⓡ, © / Ⓒ, • / ·, ½ / 1/2 (the same glyph drawn differently).
 
 OUTPUT
@@ -89,6 +96,7 @@ OUTPUT
 
 | กติกา | ที่มา |
 |---|---|
+| **ดูภาพก่อน** แล้วค่อยดูข้อความของ Vision · `a_seen`/`b_seen` ต้องมาจากพิกเซลเท่านั้น | สถานี 9 ต.ค.: `b_seen` = "OMEGA-6 5&-3 FATTY ACIDS" — ลอก "5&" ที่ Vision อ่านผิด |
 | อ่านภาพ A ก่อน แล้วอ่านภาพ B **แยกกัน** · ห้ามเติม/แก้จากอีกภาพหรือจากข้อความ Vision · บอกตรง ๆ ว่า B อาจถูกแก้โดยตั้งใจ | 30 ก.ย.: Gemini ที่เห็นสองภาพลอก B ตาม A (`D-calcium` → `D-Calcium`) |
 | ให้ตอบ `a_seen`/`b_seen` ก่อน `verdict` (`propertyOrdering`) | บังคับให้ "อ่าน" ก่อน "ตัดสิน" · ผู้ตรวจเห็นว่า AI เห็นอะไรจริง (แสดงใต้หมายเหตุ 🖼️) |
 | อ่านไม่ชัด = `[?]` + `uncertain` · `noise` ต้องอ่านชัดทั้งสองภาพ | กฎเหล็กข้อ 2 — ผลที่ผิดแบบมั่นใจแย่กว่าไม่แสดง |
