@@ -532,7 +532,8 @@ def settings_snapshot() -> dict:
         "PIXEL_VERIFY", "PIXEL_LINE_MODE", "PIXEL_TIME_BUDGET_S", "PIXEL_RASTER", "PIXEL_WARP_GUARD", "PIXEL_WARP_MAX",
         "ZONE_IGNORE", "IGNORE_COVER", "EST_BOX",
         "REFLOW_CONSERVE", "REFLOW_UNBALANCED_YELLOW", "PLACEHOLDER", "PLACEHOLDER_RED", "LOWMARK", "KEEP_SUPERSCRIPT",
-        "PIXEL_RASTER_NOTE")}
+        "PIXEL_RASTER_NOTE", "PIXEL_RASTER_STRICT_GRAY",
+        "PIXEL_RASTER_INK_T", "PIXEL_RASTER_KEEP_NUMBER")}
 
 
 def _reread(pairs, srcs, rd, poster, key, calls, warnings, say) -> dict:

@@ -381,3 +381,178 @@ def test_no_version_sensitive_rect_area_calls():
         if fn.endswith(".py"):
             src = open(os.path.join(root, fn), encoding="utf-8").read()
             assert ".get_area(" not in src and ".getArea(" not in src, fn
+
+
+# ── 9 ต.ค.: คู่ภาพสแกนบนพื้นสีกลาง — เส้นบาง/จุดเล็กที่หายต้องไม่ได้ "ภาพเหมือน" ─────────────
+# ที่มา: Friskies จริง (ฉลากพื้นเขียว) — ลบขีด "/" ของ % ฝั่งสแกน ⇒ SAME · ลบเครื่องหมายเล็ก 463 ครั้ง พลาด 52
+
+_BG, _INK = 0.55, 0.25        # ตัวอักษรเข้มบนพื้นเทากลาง (เหมือนฉลากสีเขียวในภาพขาวดำ)
+
+
+def _vec_gray(path, fs=7):
+    d = fitz.open()
+    p = d.new_page(width=W_PT, height=H_PT)
+    p.draw_rect(p.rect, color=None, fill=(_BG,) * 3)
+    rnd = random.Random(5)
+    for i in range(14):
+        t = "Lot %d.%d%% l1|/ fat %d%% i!l %d/%d -1l" % (
+            rnd.randint(1, 99), rnd.randint(0, 9), rnd.randint(1, 99), rnd.randint(1, 9), rnd.randint(1, 9))
+        p.insert_text((20, 30 + 18 * i), t, fontsize=fs, color=(_INK,) * 3)
+    d.save(str(path))
+    return str(path)
+
+
+def _thin_marks(src, dpi=300):
+    """เส้นบาง (ก้าน l/1/| · ขีด / · - · จุด) เป็นกรอบ pt — กว้าง ≤ 3 px ที่ 300 dpi"""
+    with fitz.open(src) as d:
+        pix = d[0].get_pixmap(matrix=fitz.Matrix(dpi / 72, dpi / 72), alpha=False)
+    g = np.frombuffer(pix.samples, np.uint8).reshape(pix.h, pix.w, 3)[:, :, 0]
+    n, _, st, _ = cv2.connectedComponentsWithStats((g < 110).astype(np.uint8), 8)
+    k = dpi / 72
+    cand = [((x - 1) / k, (y - 1) / k, (x + w + 1) / k, (y + h + 1) / k)
+            for x, y, w, h, a in (st[i] for i in range(1, n)) if min(w, h) <= 3 and a >= 4 and max(w, h) <= 30]
+    random.Random(2).shuffle(cand)
+    pick = []
+    for c in cand:
+        if all(abs(c[0] - p[0]) > 25 or abs(c[1] - p[1]) > 12 for p in pick):
+            pick.append(c)
+        if len(pick) >= 30:
+            break
+    assert len(pick) >= 25
+    return pick
+
+
+def _scan_gray(dst, src, erase=(), dpi=300, q=92):
+    with fitz.open(src) as s:
+        pix = s[0].get_pixmap(matrix=fitz.Matrix(dpi / 72, dpi / 72), alpha=False)
+    a = np.frombuffer(pix.samples, np.uint8).reshape(pix.h, pix.w, 3).copy()
+    k = dpi / 72
+    for (x0, y0, x1, y1) in erase:       # ลบด้วยสีพื้น (ไม่ใช่สีขาว) — ของจริงไม่มีรอยขาว
+        a[int(y0 * k):int(np.ceil(y1 * k)), int(x0 * k):int(np.ceil(x1 * k))] = int(round(_BG * 255))
+    ok, buf = cv2.imencode(".jpg", cv2.cvtColor(a, cv2.COLOR_RGB2BGR), [cv2.IMWRITE_JPEG_QUALITY, q])
+    d = fitz.open()
+    p = d.new_page(width=W_PT, height=H_PT)
+    p.insert_image(p.rect, stream=buf.tobytes())
+    d.save(str(dst))
+    return str(dst)
+
+
+@pytest.mark.parametrize("fs", [7, 6])
+@pytest.mark.parametrize("scan_side", ["A", "B"])
+def test_thin_strokes_erased_on_a_gray_background_scan_are_never_same(tmp_path, fs, scan_side):
+    v = _vec_gray(tmp_path / "v.pdf", fs)
+    marks = _thin_marks(v)
+    pair = (lambda s: (s, v)) if scan_side == "A" else (lambda s: (v, s))
+    st, raster = _statuses(*pair(_scan_gray(tmp_path / "s.pdf", v)), marks)
+    assert raster[scan_side] is not None
+    assert st.count("SAME") >= 0.9 * len(marks), st          # ไม่ได้ลบอะไร ⇒ ยังพับได้
+    st, _ = _statuses(*pair(_scan_gray(tmp_path / "m.pdf", v, erase=marks)), marks)
+    assert "SAME" not in st, st
+
+
+def test_old_raster_thresholds_did_miss_thin_strokes(tmp_path, monkeypatch):
+    """ยืนยันว่าเทสต์ข้างบนจับปัญหาจริง — ปิดทั้งสองธง ⇒ เส้นบางที่หายได้ SAME"""
+    monkeypatch.setattr(config, "PIXEL_RASTER_STRICT_GRAY", False)
+    monkeypatch.setattr(config, "PIXEL_RASTER_INK_T", 0)
+    v = _vec_gray(tmp_path / "v.pdf", 7)
+    marks = _thin_marks(v)
+    st, _ = _statuses(_scan_gray(tmp_path / "m.pdf", v, erase=marks), v, marks)
+    assert st.count("SAME") >= 3, st
+
+
+def test_strict_gray_alone_fixes_7pt(tmp_path, monkeypatch):
+    """การวัดสีที่ตำแหน่งเดิม (ไม่ยอมเลื่อน) เป็นตัวแก้หลัก — แยกออกจากเกณฑ์หมึก"""
+    monkeypatch.setattr(config, "PIXEL_RASTER_INK_T", 0)
+    v = _vec_gray(tmp_path / "v.pdf", 7)
+    marks = _thin_marks(v)
+    st, _ = _statuses(_scan_gray(tmp_path / "m.pdf", v, erase=marks), v, marks)
+    assert "SAME" not in st, st
+
+
+@pytest.mark.parametrize("flags", [(True, 40.0), (False, 0)])
+def test_raster_strictness_never_touches_vector_pairs(tmp_path, monkeypatch, flags):
+    pa = _vec_gray(tmp_path / "a.pdf", 7)
+    pb = _vec_gray(tmp_path / "b.pdf", 7)
+    boxes = [(m[0] * SENT - 3, m[1] * SENT - 3, m[2] * SENT + 3, m[3] * SENT + 3) for m in _thin_marks(pa)[:10]]
+    out = {}
+    for on in (True, False):
+        monkeypatch.setattr(config, "PIXEL_RASTER_STRICT_GRAY", on and flags[0])
+        monkeypatch.setattr(config, "PIXEL_RASTER_INK_T", flags[1] if on else 0)
+        pc = pixverify.PairCheck(pa, pb, ZONE, ZONE)
+        out[on] = [(c["status"], c["inkA"], c["inkB"], len(c["sig"]))
+                   for c in (pc.check("A", b) for b in boxes)]
+        pc.close()
+    assert out[True] == out[False]
+
+
+def test_compare_defaults_are_the_old_path():
+    rnd = np.random.RandomState(0)
+    a = (rnd.rand(60, 90) * 255).astype(np.uint8)
+    b = np.roll(a, 1, axis=1)
+    c0 = pixverify._compare(a, b, 300.0)
+    c1 = pixverify._compare(a, b, 300.0, gray_tol=pixverify.TOL, ink_t=pixverify.INK_T)
+    assert [x["area"] for x in c0["sig"]] == [x["area"] for x in c1["sig"]] and c0["inkA"] == c1["inkA"]
+
+
+def _run_number_misread(tmp_path, monkeypatch):
+    pa = _vec(tmp_path / "a.pdf")
+    pb = _scan(tmp_path / "b.pdf", pa, 300, 92)
+    rows = _rows()
+    bad = rows[3].replace("vit B3", "vit B8")         # OCR อ่านตัวเลขผิดฝั่งภาพสแกน (ภาพเหมือนกันทุกจุด)
+    assert bad != rows[3]
+
+    def fake(groups, poster=None, key=None):
+        res = {}
+        for gi, g in enumerate(groups):
+            for it in g:
+                W, H = Image.open(io.BytesIO(it["jpeg"])).size
+                lines = _line_boxes(pa, W, H)
+                if it["id"].endswith("b"):
+                    lines = [(t.replace(rows[3], bad), b, c) for t, b, c in lines]
+                res[it["id"]] = {"ok": True, "error": "", "fta": fta_from_lines(lines, W, H),
+                                 "request_index": gi}
+        return {"results": res, "calls": [{"index": 0, "phase": "main", "images": [],
+                                           "json_bytes": 10, "status": 200, "attempts": 1,
+                                           "ms": 1, "error": "", "at": "t"}]}
+    jid = jobs.create(("a.pdf", open(pa, "rb").read()), ("b.pdf", open(pb, "rb").read()))["id"]
+    keystore.save(KEY)
+    monkeypatch.setattr(vision_client, "annotate", fake)
+    return pipeline.run(jid, [{"a": {"page": 0, "bbox": [0, 0, 1, 1]},
+                               "b": {"page": 0, "bbox": [0, 0, 1, 1]}}])
+
+
+def test_number_on_a_scan_pair_is_never_folded_as_same(tmp_path, monkeypatch):
+    r = _run_number_misread(tmp_path, monkeypatch)
+    p = r["pairs"][0]
+    assert not p.get("pixel_same")
+    f = next(f for f in p["findings"] if f["class"] == "NUMBER")
+    assert f["pixel"]["status"] == "UNVERIFIABLE" and f["pixel"].get("raster_number")
+    assert any("ไม่พับ" in n for n in f["notes"])
+    assert "raster_number_kept=1" in r["log_text"]
+    assert "PIXEL_RASTER_KEEP_NUMBER=True" in r["log_text"]
+
+
+def test_number_guard_flag_off_folds_as_before(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "PIXEL_RASTER_KEEP_NUMBER", False)
+    r = _run_number_misread(tmp_path, monkeypatch)
+    p = r["pairs"][0]
+    assert [f["class"] for f in p["pixel_same"]] == ["NUMBER"]
+    assert "raster_number_kept" not in r["log_text"]
+
+
+def test_lower_ink_threshold_only_on_low_contrast_crops(tmp_path, monkeypatch):
+    """พื้นขาว: เกณฑ์หมึกเดิม (ลดแล้วสแกน 200 dpi q75 พับได้น้อยลง 2/30 โดยไม่ได้อะไร) · พื้นเทา: ลด"""
+    pa = _vec(tmp_path / "a.pdf")
+    marks = _marks(pa)
+    s = _scan(tmp_path / "s.pdf", pa, 200, 75)
+    out = {}
+    for t in (40.0, 0):
+        monkeypatch.setattr(config, "PIXEL_RASTER_INK_T", t)
+        out[t] = _statuses(pa, s, marks)[0]
+    assert out[40.0] == out[0]
+    v = _vec_gray(tmp_path / "v.pdf", 7)
+    pc = pixverify.PairCheck(v, _scan_gray(tmp_path / "g.pdf", v), ZONE, ZONE)
+    m = _thin_marks(v)[0]
+    pa_, pb_, _ = pc._crops("A", (m[0] * SENT - 3, m[1] * SENT - 3, m[2] * SENT + 3, m[3] * SENT + 3))
+    pc.close()
+    assert pixverify._contrast(pa_, pb_) < pixverify.RASTER_LOW_CONTRAST

@@ -12,4 +12,4 @@ Artwork V2 — เทียบข้อความสองไฟล์ด้�
 ไฟล์ในแพ็กเกจนี้ไม่ import Flask ยกเว้น ``routes.py`` จึงทดสอบแยกได้
 """
 
-VERSION = "2026.10.09-v2rasterfix"
+VERSION = "2026.10.09-v2rasterstrict"

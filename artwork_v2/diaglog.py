@@ -262,6 +262,9 @@ def build_text(r: dict) -> str:
     if px.get("diff_raster"):
         a("  diff_raster=%s — DIFF บนคู่ที่มีภาพสแกน ไม่ขึ้นป้าย \"ภาพยืนยันว่าต่าง\" (PIXEL_RASTER_NOTE)"
           % px["diff_raster"])
+    if px.get("raster_number_kept"):
+        a("  raster_number_kept=%s — ภาพดูเหมือนแต่เป็นตัวเลขบนคู่ที่มีภาพสแกน ⇒ ไม่พับ (PIXEL_RASTER_KEEP_NUMBER)"
+          % px["raster_number_kept"])
     for pl in px.get("pairs") or []:
         a("  pair %s align=%s%s" % (pl.get("n"), pl.get("align"),
                                     (" error=" + str(pl["error"])) if pl.get("error") else ""))

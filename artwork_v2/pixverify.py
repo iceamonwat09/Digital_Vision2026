@@ -78,6 +78,7 @@ BIG = 600           # การ์ดรวมที่กรอบใหญ่�
 CHUNK = 280         # โหมดบรรทัด: แบ่งบรรทัดยาวเป็นท่อน ๆ (คงความละเอียด 1600 dpi)
 RASTER_COVER = 0.90  # ภาพเดียวต้องคลุมโซนอย่างน้อยเท่านี้ถึงนับว่าโซนเป็น "ภาพสแกน"
 RASTER_MIN_DPI = 200.0  # สแกนหยาบกว่านี้ = จุด/จุดทศนิยมเหลือ ~2 px (150 dpi ลบจุดทั้งจุดแล้วยังพลาด 3/30) ⇒ เส้นทางเดิม
+RASTER_LOW_CONTRAST = 120.0  # ``_contrast`` · สแกนพื้นขาว ≥ 144 · พื้นเทา (สังเคราะห์) ≤ 71 · Friskies ≤ 103 · ใช้กับ PIXEL_RASTER_INK_T
 RASTER_SIGMA = 0.8   # เบลอ (px ที่ความละเอียดจริง) ทั้งสองฝั่ง — วัดบน Friskies: σ 0.8 = 18 จุดภาพเหมือน · mutation 0/40 พลาด (σ 1.0 พลาด 1 · σ 0.7 ภาพเหมือนน้อยลง)
 # ทุกอย่างที่ "วาด" ลงหน้า ยกเว้นภาพ และข้อความที่มองไม่เห็น (ชั้น OCR ของไฟล์สแกน = ignore-text)
 _RASTER_SKIP = ("fill-image", "fill-imgmask", "ignore-text", "clip", "pop", "begin", "end")
@@ -321,7 +322,16 @@ class PairCheck:
         t0 = time.time()
         pa, pb, dpi = self._crops(side, box)
         pb2, ncc = _align(pa, pb)
-        c = _compare(pa, pb2, dpi)
+        # คู่ภาพสแกน: ตัดสิน "สีต่างจริงไหม" ที่ตำแหน่งเดิม (ไม่ยอมเลื่อน) — ที่ ~300 dpi เส้นบางกว้างแค่ 2-3 px
+        # การยอมเลื่อน ±TOL จะไปเจอพื้นหลังข้างเส้นเสมอ ⇒ เส้นที่หายทั้งเส้นถูกนับว่า "ไม่ต่าง" (``PIXEL_RASTER_STRICT_GRAY``)
+        scan = bool(self.raster["A"] or self.raster["B"])
+        strict = bool(config.PIXEL_RASTER_STRICT_GRAY and scan)
+        # คู่ภาพสแกนบนพื้นสีกลาง: จุดเล็ก (~0.17 mm ที่ 300 dpi) หลังเบลอเข้มไม่ถึง ``INK_T`` ทั้งสองฝั่ง ⇒ ถือว่า "ว่างทั้งคู่"
+        # (เฉพาะครอปที่ตัวอักษรกับพื้นต่างกันน้อย — พื้นขาวไม่ต้องลด: สแกน 200 dpi q75 จะพับได้น้อยลงโดยไม่ได้อะไร)
+        ink_t = None
+        if scan and 0 < float(config.PIXEL_RASTER_INK_T) < INK_T and _contrast(pa, pb2) < RASTER_LOW_CONTRAST:
+            ink_t = float(config.PIXEL_RASTER_INK_T)
+        c = _compare(pa, pb2, dpi, gray_tol=0 if strict else TOL, ink_t=ink_t)
         emptyA, emptyB = c["inkA"] < 15, c["inkB"] < 15
         if emptyA != emptyB:
             st = "DIFF"
@@ -381,12 +391,19 @@ def _warp_ok(warp, ml, shb, sha) -> bool:
             abs(ty - ml[1]) <= max(2.0, 0.5 * (shb[0] - sha[0]) + 1))
 
 
-def _inkmask(g, dpi):
+def _contrast(pa, pb2) -> float:
+    """ความต่างของพื้นกับหมึกที่เข้มที่สุดในครอป (มัธยฐาน − p0.5 ของฝั่งที่ต่ำกว่า) — ครอปรอบจุดเล็ก ๆ
+    บนพื้นขาวก็ยังได้ค่าสูง (มัธยฐาน = พื้น) ต่างจาก p95−p5 ที่ตกเมื่อหมึกน้อย"""
+    return float(min(np.median(g) - np.percentile(g, 0.5) for g in (pa, pb2)))
+
+
+def _inkmask(g, dpi, ink_t=None):
+    t = INK_T if ink_t is None else ink_t
     k = cv2.getStructuringElement(cv2.MORPH_RECT, (_odd(BG_MM / 25.4 * dpi),) * 2)
     gs = cv2.GaussianBlur(g, (0, 0), 0.8 * dpi / 1600)
     dark = cv2.morphologyEx(gs, cv2.MORPH_BLACKHAT, k)
     light = cv2.morphologyEx(gs, cv2.MORPH_TOPHAT, k)
-    return (dark > INK_T).astype(np.uint8), (light > INK_T).astype(np.uint8)
+    return (dark > t).astype(np.uint8), (light > t).astype(np.uint8)
 
 
 def _tol_absdiff(pa, pb2, tol):
@@ -419,11 +436,13 @@ def _diff_blobs(ma, mb, band, D):
     return out
 
 
-def _compare(pa, pb2, dpi):
-    ma, la = _inkmask(pa, dpi)
-    mb, lb = _inkmask(pb2, dpi)
+def _compare(pa, pb2, dpi, gray_tol=None, ink_t=None):
+    """``gray_tol`` = ระยะเลื่อนที่ยอมตอนวัด "สีต่างกันจริง" ของก้อนที่ต่าง (ไม่ส่ง = ``TOL`` = เดิมเป๊ะ) —
+    ตำแหน่งของก้อนยังยอมเลื่อน ±TOL ผ่านหน้ากากหมึกเสมอ · ``ink_t`` = เกณฑ์หมึก (ไม่ส่ง = ``INK_T``)"""
+    ma, la = _inkmask(pa, dpi, ink_t)
+    mb, lb = _inkmask(pb2, dpi, ink_t)
     band = _odd(BG_MM / 25.4 * dpi) // 2 + 2 * TOL + 1
-    D = _tol_absdiff(pa, pb2, TOL)
+    D = _tol_absdiff(pa, pb2, TOL if gray_tol is None else gray_tol)
     blobs = _diff_blobs(ma, mb, band, D) + _diff_blobs(la, lb, band, D)
     k = 1600.0 / dpi
     sig = [b for b in blobs if b["area"] * k * k >= MIN_AREA and b["g"] >= GRAY_FRAC]
@@ -531,6 +550,15 @@ _TH = {"SAME": "ภาพเหมือนกันทุกพิกเซล 
 # ``PIXEL_RASTER_NOTE`` (8 ต.ค. รอบ 4): คู่ที่ฝั่งใดเป็นภาพสแกน — ภาพสแกนกับเวกเตอร์ต่างกันเสมอ (ขอบตัวอักษร ·
 # จุดรบกวน · บรรทัดที่ตัดคนละที่) ⇒ DIFF ไม่ใช่หลักฐานว่าข้อความต่าง (Friskies: ผิด 20/22) · SAME ยังเชื่อได้
 _TH_RASTER_DIFF = "ตรวจด้วยภาพแล้วยังไม่ยืนยันว่าเหมือน — ฝั่งหนึ่งเป็นภาพสแกน ภาพจึงต่างกันเสมอ (ไม่ใช่หลักฐานว่าข้อความต่าง)"
+# ``PIXEL_RASTER_KEEP_NUMBER`` (9 ต.ค.): บนคู่ภาพสแกน จุดทศนิยม/จุลภาคขนาด ~0.17 mm เล็กกว่าที่ 300 dpi ยืนยันได้
+# บนพื้นสีกลาง ⇒ จุดต่างที่เป็นตัวเลขไม่พับเป็น "ภาพเหมือน" (1.5g ↔ 15g คือข้อมูลสำคัญที่สุดของฉลาก)
+_RASTER_NUMBER_CLASSES = ("NUMBER", "PLACEHOLDER", "FRACTION")
+_TH_RASTER_NUMBER = ("ภาพดูเหมือนกัน แต่ฝั่งหนึ่งเป็นภาพสแกน — จุดทศนิยม/เครื่องหมายเล็กของตัวเลขเล็กกว่าความละเอียด"
+                     "ที่ภาพสแกนยืนยันได้ จึงไม่พับ (โปรดดูด้วยตา)")
+
+
+def _is_number(f: dict) -> bool:
+    return any((t.get("class") in _RASTER_NUMBER_CLASSES) for t in [f] + list(f.get("members") or []))
 
 
 def run(pairs: List[dict], srcs: dict, rd: str, warnings: List[str], say=None) -> dict:
@@ -538,7 +566,8 @@ def run(pairs: List[dict], srcs: dict, rd: str, warnings: List[str], say=None) -
     log = {"enabled": config.PIXEL_VERIFY, "line_mode": config.PIXEL_LINE_MODE,
            "raster": config.PIXEL_RASTER,
            "pymupdf": getattr(fitz, "VersionBind", None) if fitz is not None else None,
-           "pairs": [], "same": 0, "diff": 0, "diff_raster": 0, "unverifiable": 0, "skipped": 0, "ms": 0}
+           "pairs": [], "same": 0, "diff": 0, "diff_raster": 0, "unverifiable": 0, "skipped": 0, "ms": 0,
+           "raster_number_kept": 0}
     if not config.PIXEL_VERIFY:
         return log
     t_all = time.time()
@@ -602,6 +631,11 @@ def run(pairs: List[dict], srcs: dict, rd: str, warnings: List[str], say=None) -
             except Exception as e:   # noqa: BLE001
                 st, checks = "UNVERIFIABLE", []
                 plog.setdefault("errors", []).append("F%s: %s" % (f.get("id"), str(e)[:120]))
+            number_kept = bool(st == "SAME" and config.PIXEL_RASTER_KEEP_NUMBER
+                               and pc.ginfo.get("raster") and _is_number(f))
+            if number_kept:
+                st = "UNVERIFIABLE"
+                log["raster_number_kept"] += 1
             ev = None
             show = next((c for c in checks if c["status"] == st), checks[0] if checks else None)
             if show is not None and st in ("SAME", "DIFF") and f.get("id") is not None:
@@ -611,7 +645,9 @@ def run(pairs: List[dict], srcs: dict, rd: str, warnings: List[str], say=None) -
             f["pixel"] = {"status": st, "evidence": ev,
                           "checks": [{k: c.get(k) for k in ("side", "status", "ncc", "dpi", "tone", "ms", "line")}
                                      | {"blobs": len(c.get("sig") or [])} for c in checks]}
-            note = _TH[st]
+            note = _TH_RASTER_NUMBER if number_kept else _TH[st]
+            if number_kept:
+                f["pixel"]["raster_number"] = True
             if st == "DIFF" and raster_pair:
                 note = _TH_RASTER_DIFF
                 f["pixel"]["raster"] = True
