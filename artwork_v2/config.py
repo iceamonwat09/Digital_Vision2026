@@ -288,6 +288,20 @@ AI_IMAGE_MAX_CANDIDATES = _i("ARTWORK_V2_AI_IMAGE_MAX_CANDIDATES", "40")
 # AI ตอบ "ต่างจริง" บนข้อความโค้ง/เอียง ⇒ **เหลือง** (กติกาเดียวกับอัลกอริทึม/judge) — สถานี 9 ต.ค.:
 # ตรา OMEGA-6 ที่เหมือนกันทั้งสองไฟล์ AI ตอบ real เพราะลอกคำที่ Vision อ่านผิด · 0 = แดงได้แบบเดิม
 AI_IMAGE_CURVED_YELLOW = _b("ARTWORK_V2_AI_IMAGE_CURVED_YELLOW", "1")
+# ``AI_IMAGE_CROP_HIRES=1`` (PDF เท่านั้น) — ครอปที่ตัวอักษรเล็ก (สูง < ``AI_IMAGE_CROP_TARGET_LH`` px บนภาพ
+# ที่ส่ง Vision) ถูก **เรนเดอร์ใหม่จากไฟล์ต้นฉบับ** ที่ dpi สูงขึ้น ให้ตัวอักษรสูงราว ``TARGET_LH`` px ·
+# เพดาน ``AI_IMAGE_CROP_DPI_MAX`` และไม่เกินความละเอียดจริงของ PDF ที่เป็นภาพสแกน · ด้านยาวยังไม่เกิน
+# ``AI_IMAGE_CROP_MAX_SIDE`` (บริบทรอบจุดแคบลงแทน) · ภาพถ่าย/เรนเดอร์ไม่ได้ ⇒ ครอปจาก JPEG แบบเดิม ·
+# ``0`` = ครอปจาก JPEG ที่ส่ง Vision เสมอ (เดิมเป๊ะ)
+AI_IMAGE_CROP_HIRES = _b("ARTWORK_V2_AI_IMAGE_CROP_HIRES", "1")
+AI_IMAGE_CROP_TARGET_LH = _f("ARTWORK_V2_AI_IMAGE_CROP_TARGET_LH", "36")
+AI_IMAGE_CROP_DPI_MAX = _f("ARTWORK_V2_AI_IMAGE_CROP_DPI_MAX", "1200")
+AI_IMAGE_CROP_HIRES_MIN = _f("ARTWORK_V2_AI_IMAGE_CROP_HIRES_MIN", "1.25")
+# ``AI_IMAGE_BLIND=1`` (ต้องใช้ครอป) — ส่ง **ภาพครอปอย่างเดียว ไม่ส่งข้อความของ Vision เลย**
+# (ไม่มีบรรทัด/คำ/diff) ⇒ Gemini อ่าน 🅰/🅱 เองจากพิกเซล แล้ว **แอปเทียบ a_seen กับ b_seen เอง**
+# (กติกาเทียบเดียวกับอัลกอริทึม: ช่องว่าง/จุดไข่ปลา/®Ⓡ/½) · อ่านไม่ออก ``[?]``/ว่างทั้งคู่/คำตอบของ AI
+# ขัดกับสิ่งที่อ่าน ⇒ ไม่แน่ใจ (เหลือง) · ``0`` = ส่งข้อความของ Vision ไปด้วยแบบเดิมเป๊ะ
+AI_IMAGE_BLIND = _b("ARTWORK_V2_AI_IMAGE_BLIND", "1")
 # โหมด judge: จุดที่ต่างแค่เครื่องหมายวรรคตอน ⇒ เหลืองเสมอ (กติกาเดียวกับอัลกอริทึม —
 # PUNCT แดงได้เฉพาะเมื่อการอ่านซ้ำยืนยัน · คำตอบของ AI ไม่ใช่การอ่านซ้ำ) · 0 = แดงได้แบบเดิม
 AI_JUDGE_PUNCT_YELLOW = _b("ARTWORK_V2_AI_JUDGE_PUNCT_YELLOW", "1")

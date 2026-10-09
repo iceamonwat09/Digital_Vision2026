@@ -177,6 +177,10 @@ def build_text(r: dict) -> str:
                 if ai.get("image"):
                     a("%s   ai_seen: A=%s B=%s" % (ind, _q(ai.get("a_seen") or "", 120),
                                                   _q(ai.get("b_seen") or "", 120)))
+                if ai.get("blind"):
+                    a("%s   blind: ai_said=%s app=%s%s" % (
+                        ind, ai.get("ai_verdict"), ai["verdict"],
+                        (" why=" + _q(ai.get("decided_why"), 160)) if ai.get("decided_why") else ""))
             for m in f.get("members") or []:
                 finding(m, ind + "    · ")
 
@@ -318,6 +322,10 @@ def build_text(r: dict) -> str:
             if x.get("crops") is not None:
                 a("     image_crops: crops=%s not_sent=%s crop_px_max=%s (ครอปรอบแต่ละจุดจากภาพที่ส่ง Vision · A/B แยกรูป)"
                   % (x.get("crops"), x.get("not_sent"), x.get("crop_px_max")))
+                a("     image_mode: blind=%s (AI ไม่เห็นข้อความของ Vision · แอปเทียบ a_seen/b_seen เอง) "
+                  "overruled=%s hires_crops=%s hires_dpi_max=%s (เรนเดอร์ครอปใหม่จาก PDF)"
+                  % (x.get("blind", False), x.get("blind_overruled", 0), x.get("crops_hires", "-"),
+                     x.get("crop_dpi_max", "-")))
         for eq in x.get("equivalent") or []:
             a("     equivalent %s (AI=%s): %s" % (eq.get("what"), eq.get("verdict"), eq.get("reason")))
         for bad in x.get("invalid") or []:

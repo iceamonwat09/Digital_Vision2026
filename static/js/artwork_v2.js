@@ -962,7 +962,9 @@
       (ai.not_sent ? "AI ไม่ได้ตรวจจุดนี้ (" + esc(ai.not_sent) + ")" : "AI ไม่ได้ตอบจุดนี้") + "</span>";
     // โหมด image: สิ่งที่ AI เห็นบนภาพแต่ละฝั่ง (คำของ AI — ไม่ใช่การอ่านของ Vision)
     const seen = ai.image && (ai.a_seen || ai.b_seen)
-      ? '<span class="v2-ai-note">🖼️ AI เห็นในภาพ — A: "' + esc(ai.a_seen || "—") + '" · B: "' + esc(ai.b_seen || "—") + '"</span>' : "";
+      ? '<span class="v2-ai-note">🖼️ AI ' + (ai.blind ? "อ่านภาพเอง (ไม่เห็นข้อความของ Vision)" : "เห็นในภาพ") +
+        ' — A: "' + esc(ai.a_seen || "—") + '" · B: "' + esc(ai.b_seen || "—") + '"' +
+        (ai.blind ? " · แอปเทียบสองฝั่งเอง" + (ai.decided_why ? " — " + esc(ai.decided_why) : "") : "") + "</span>" : "";
     const vth = ai.image && ai.verdict === "noise" ? "ภาพเหมือนกัน (Vision อ่านผิด)" : (AI_TH[ai.verdict] || ai.verdict);
     return '<span class="v2-ai-note">🤖 <b>' + esc(vth) + "</b>" +
       (ai.reason ? " — " + esc(ai.reason) : "") + "</span>" + seen +
@@ -1317,6 +1319,9 @@
       if (iv.curved_yellow) stat += " · ข้อความโค้งที่ AI บอกว่าต่าง คงไว้เป็นเหลือง " + iv.curved_yellow;
       if (iv.not_sent) stat += " · ไม่ได้ส่งให้ AI " + iv.not_sent + " จุด (คงระดับเดิม)";
       if (ai.crops) stat += " · ส่งภาพครอปรอบจุด " + ai.crops + " รูป";
+      if (ai.crops_hires) stat += " (เรนเดอร์ใหม่จาก PDF " + ai.crops_hires + " รูป ถึง " + Math.round(ai.crop_dpi_max || 0) + " dpi)";
+      if (ai.blind) stat += " · AI ไม่เห็นข้อความของ Vision — อ่านภาพเองแล้วแอปเทียบ" +
+        (ai.blind_overruled ? " (คำตอบของ AI ขัดกับสิ่งที่อ่าน ⇒ ไม่แน่ใจ " + ai.blind_overruled + ")" : "");
     }
     if (ai.algo_red_kept) stat += " · จุดแดงของอัลกอริทึมที่ AI ไม่ได้ระบุ คงไว้เป็นเหลือง " + ai.algo_red_kept + " จุด";
     if (ai.mode === "assist" && ai.reviewable) stat += " · ตอบครบ " + ai.reviewed + "/" + ai.reviewable + " จุด";

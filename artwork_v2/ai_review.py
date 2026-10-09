@@ -141,12 +141,19 @@ def _candidates(findings: List[dict], sizes: Optional[dict] = None,
 
 def build_payload(n: int, mode: str, A: List[dict], B: List[dict], size_a, size_b,
                   findings: List[dict], curved: Optional[dict] = None,
-                  crops: Optional[dict] = None) -> dict:
+                  crops: Optional[dict] = None, blind: bool = False) -> dict:
     """ข้อมูลที่ส่งให้ N8N — มีแต่สิ่งที่ Vision อ่านได้ (+ รายการของอัลกอริทึมในโหมด assist)
 
     ``curved`` = ``{"A": [ดัชนีบรรทัด], "B": [...]}`` จาก ``compare.curved_lines`` ⇒ บรรทัดนั้น
     ได้ธง ``"curved": true`` (ไม่ส่ง = ไม่มีธง = รูปแบบเดิม)
     """
+    if mode == "image" and blind and crops is not None:
+        # โหมด image แบบไม่เห็นข้อความ (``AI_IMAGE_BLIND``) — มีแต่รหัสจุด + ตำแหน่งในภาพครอป
+        # (ไม่มีบรรทัด/คำ/diff/ชนิดของจุดจาก Vision ⇒ Gemini อ่านจากพิกเซลเท่านั้น ลอกไม่ได้)
+        return {"contract": "artwork-v2-image/3", "pair": n, "mode": mode, "blind": True,
+                "candidates": [{"id": c["id"], "a": {"crop": c["a"].get("crop")},
+                                "b": {"crop": c["b"].get("crop")}}
+                               for c in _candidates(findings, None, crops) if c["id"] in crops]}
     curved = curved or {}
     p = {"contract": "artwork-v2-review/1", "pair": n, "mode": mode,
          "zone_a": _side_payload(A, "A", size_a, curved.get("A")),
@@ -228,14 +235,40 @@ def crop_rect(box, lh, W: int, H: int) -> List[int]:
     return [int(round(X0)), int(round(Y0)), int(round(X0 + cw)), int(round(Y0 + ch))]
 
 
-def crop_part(im, box, lh) -> Optional[Tuple[dict, dict]]:
+def hires_scale(box, lh, kmax: float) -> float:
+    """เท่าที่ควรขยาย (เรนเดอร์ใหม่จาก PDF) ให้ตัวอักษรสูงราว ``AI_IMAGE_CROP_TARGET_LH`` px
+
+    ไม่เกิน ``kmax`` (เพดาน dpi / ความละเอียดจริงของภาพสแกน) · ตัวจุด + ระยะเผื่อ 1 บรรทัดต้องยังพอดี
+    ``AI_IMAGE_CROP_MAX_SIDE`` (ไม่งั้นต้องย่อกลับ = ไม่ได้อะไร) · ขยายน้อยกว่า ``HIRES_MIN`` ⇒ 1.0 (ไม่คุ้ม)"""
+    mx = max(64, int(config.AI_IMAGE_CROP_MAX_SIDE))
+    bw = max(1.0, float(box[2]) - float(box[0]))
+    bh = max(1.0, float(box[3]) - float(box[1]))
+    lh = max(1.0, float(lh or bh))
+    k = min(float(config.AI_IMAGE_CROP_TARGET_LH) / lh, float(kmax or 1.0),
+            mx / (bw + 2 * lh), mx / (bh + 2 * lh))
+    return k if k >= float(config.AI_IMAGE_CROP_HIRES_MIN) else 1.0
+
+
+def crop_part(im, box, lh, hi=None) -> Optional[Tuple[dict, dict]]:
     """ครอปรอบจุดจากภาพที่ส่ง Vision → ``(ส่วนที่ส่ง {mime, w, h, b64}, ข้อมูลใน candidate {w, h, box})``
 
+    ``hi`` (``pipeline.HiresSide`` · PDF เท่านั้น) — ตัวอักษรเล็ก ⇒ เรนเดอร์บริเวณเดียวกันใหม่จากไฟล์ต้นฉบับ
+    ที่ dpi สูงขึ้น (กรอบครอปคิดในพิกัดที่ขยายแล้ว ⇒ ด้านยาวยังไม่เกินเพดาน) · เรนเดอร์ไม่ได้ ⇒ ครอป JPEG เดิม ·
     ย่อเฉพาะเมื่อครอปยังใหญ่กว่า ``AI_IMAGE_CROP_MAX_SIDE`` (ตัวจุดเองกว้างมาก) · JPEG คุณภาพสูง"""
     import cv2
     H, W = im.shape[:2]
-    r = crop_rect(box, lh, W, H)
-    c = im[r[1]:r[3], r[0]:r[2]]
+    up, c, bx = 1.0, None, [float(v) for v in box]
+    if hi is not None and float(getattr(hi, "kmax", 1.0) or 1.0) > 1.0:
+        kk = hires_scale(box, lh, hi.kmax)
+        if kk > 1.0:
+            bk = [v * kk for v in bx]
+            rk = crop_rect(bk, float(lh or 0) * kk, W * kk, H * kk)
+            got = hi.render([v / kk for v in rk], (rk[2] - rk[0], rk[3] - rk[1]))
+            if got is not None and getattr(got, "size", 0):
+                up, c, bx, r = kk, got, bk, rk
+    if c is None:
+        r = crop_rect(box, lh, W, H)
+        c = im[r[1]:r[3], r[0]:r[2]]
     if c.size == 0:
         return None
     ch, cw = c.shape[:2]
@@ -249,16 +282,22 @@ def crop_part(im, box, lh) -> Optional[Tuple[dict, dict]]:
     except Exception:                                # noqa: BLE001
         return None
     h2, w2 = c.shape[:2]
-    rel = [max(0, min(1000, int(round((box[0] - r[0]) / float(cw) * 1000)))),
-           max(0, min(1000, int(round((box[1] - r[1]) / float(ch) * 1000)))),
-           max(0, min(1000, int(round((box[2] - r[0]) / float(cw) * 1000)))),
-           max(0, min(1000, int(round((box[3] - r[1]) / float(ch) * 1000))))]
+    rel = [max(0, min(1000, int(round((bx[0] - r[0]) / float(cw) * 1000)))),
+           max(0, min(1000, int(round((bx[1] - r[1]) / float(ch) * 1000)))),
+           max(0, min(1000, int(round((bx[2] - r[0]) / float(cw) * 1000)))),
+           max(0, min(1000, int(round((bx[3] - r[1]) / float(ch) * 1000))))]
+    info = {"w": int(w2), "h": int(h2), "box": rel, "region": r, "scale": round(k, 4)}
+    if up > 1.0:
+        info["hires"] = round(up, 3)
+        if getattr(hi, "base_dpi", None):
+            info["dpi"] = round(float(hi.base_dpi) * up, 1)
     return ({"mime": "image/jpeg", "w": int(w2), "h": int(h2),
-             "b64": base64.b64encode(data).decode("ascii")},
-            {"w": int(w2), "h": int(h2), "box": rel, "region": r, "scale": round(k, 4)})
+             "b64": base64.b64encode(data).decode("ascii")}, info)
 
 
-def plan_crops(findings: List[dict], ims: dict) -> Tuple[List[dict], List[dict], dict, dict]:
+def plan_crops(findings: List[dict], ims: dict,
+               hires: Optional[dict] = None,
+               stats: Optional[dict] = None) -> Tuple[List[dict], List[dict], dict, dict]:
     """เลือกจุดที่ส่ง (แดงก่อนเหลือง · ไม่เกิน ``AI_IMAGE_MAX_CANDIDATES``) + ครอป A/B ของแต่ละจุด
 
     คืน ``(จุดที่ส่ง ตามลำดับเดิม, ส่วนภาพเรียงตามจุด, ข้อมูลครอปต่อจุด, {F<n>: เหตุที่ไม่ส่ง})``"""
@@ -277,7 +316,7 @@ def plan_crops(findings: List[dict], ims: dict) -> Tuple[List[dict], List[dict],
             if box is None:
                 skip[fid] = "ไม่มีตำแหน่งของจุดนี้บนภาพฝั่ง %s" % s.upper()
                 break
-            cp = crop_part(ims[s], box, lh)
+            cp = crop_part(ims[s], box, lh, (hires or {}).get(s))
             if cp is None:
                 skip[fid] = "ครอปภาพฝั่ง %s ไม่ได้" % s.upper()
                 break
@@ -295,6 +334,11 @@ def plan_crops(findings: List[dict], ims: dict) -> Tuple[List[dict], List[dict],
             crops.append(dict(parts[fid][s][0], candidate=fid, side=s))
     pub = {k: {s: {kk: v[s][kk] for kk in ("w", "h", "box")} for s in ("a", "b")}
            for k, v in info.items()}
+    hi_dpis = [v[s].get("dpi") or 0 for v in info.values() for s in ("a", "b") if v[s].get("hires")]
+    if stats is not None and hires is not None:
+        # สถิติสำหรับ Log (ไม่อยู่ใน payload) — ครอปกี่รูปที่เรนเดอร์ใหม่จาก PDF · dpi สูงสุด
+        stats["hires_crops"] = len(hi_dpis)
+        stats["hires_dpi_max"] = max(hi_dpis) if hi_dpis else None
     return sent, crops, pub, skip
 
 
@@ -600,7 +644,8 @@ def _ai_note(ai: dict) -> str:
     return "AI: %s" % VERDICT_TH.get(ai.get("verdict"), ai.get("verdict") or "-")
 
 
-def merge(mode: str, pr: dict, resp: dict, A: List[dict], B: List[dict]) -> dict:
+def merge(mode: str, pr: dict, resp: dict, A: List[dict], B: List[dict],
+          blind: bool = False) -> dict:
     """รวมคำตอบของ AI เข้ากับคู่โซน ``pr`` (แก้ ``pr`` ตรง ๆ) · คืนสถิติ"""
     st = {"items_total": 0, "items_valid": 0, "reviews_total": 0, "reviews_valid": 0,
           "invalid": [], "extra_added": 0, "extra_duplicate": 0, "extra_noise": 0,
@@ -687,7 +732,7 @@ def merge(mode: str, pr: dict, resp: dict, A: List[dict], B: List[dict]) -> dict
     elif mode == "raw":
         _merge_raw(pr, ai_finds, findings, st)
     elif mode == "image":
-        _merge_image(pr, resp, findings, st)
+        _merge_image(pr, resp, findings, st, blind)
     else:   # judge
         kept, dismissed = [], []
         for f in ai_finds:
@@ -753,7 +798,30 @@ def merge(mode: str, pr: dict, resp: dict, A: List[dict], B: List[dict]) -> dict
 _HARD_CLASSES = ("TEXT", "NUMBER", "CASE", "MISSING_IN_B", "EXTRA_IN_B")
 
 
-def _merge_image(pr: dict, resp: dict, findings: List[dict], st: dict) -> None:
+def blind_verdict(a_seen, b_seen, said: str) -> Tuple[str, str]:
+    """โหมดไม่เห็นข้อความ — **แอปตัดสินเอง** จากสิ่งที่ AI อ่านได้จากภาพ ``(คำตัดสิน, เหตุผลถ้าไม่แน่ใจ)``
+
+    เทียบด้วยคีย์เดียวกับอัลกอริทึม (``compare.diff_key_map``: ไม่สนช่องว่าง · จุดไข่ปลา · ®/Ⓡ · ½/1/2 ·
+    คงตัวพิมพ์และเครื่องหมาย) · ไม่แน่ใจเมื่อ: อ่านไม่ครบสองฝั่ง · มี ``[?]`` · ว่างทั้งคู่ · AI บอกไม่แน่ใจ ·
+    คำตอบของ AI ขัดกับสิ่งที่มันอ่านได้เอง (กฎเหล็กข้อ 2 — ไม่มั่นใจ = ไม่ตัดสินแทน)"""
+    if not isinstance(a_seen, str) or not isinstance(b_seen, str):
+        return "uncertain", "AI ไม่ได้ส่งสิ่งที่อ่านได้ครบทั้งสองฝั่ง"
+    if "[?]" in a_seen or "[?]" in b_seen:
+        return "uncertain", "AI อ่านบางตัวอักษรไม่ออก ([?])"
+    ka, kb = compare.diff_key_map(a_seen)[0], compare.diff_key_map(b_seen)[0]
+    if not ka and not kb:
+        return "uncertain", "AI ไม่เห็นข้อความที่จุดนี้ทั้งสองฝั่ง"
+    app = "noise" if ka == kb else "real"
+    if said == "uncertain":
+        return "uncertain", "AI บอกว่าอ่านไม่ชัด"
+    if said != app:
+        return "uncertain", ("คำตอบของ AI (%s) ขัดกับสิ่งที่ AI อ่านได้เอง (%s)"
+                             % (said, "เหมือนกัน" if app == "noise" else "ต่างกัน"))
+    return app, ""
+
+
+def _merge_image(pr: dict, resp: dict, findings: List[dict], st: dict,
+                 blind: bool = False) -> None:
     """โหมด image — Gemini ดูภาพแล้วตัดสินจุดของอัลกอริทึมทีละจุด (ผู้ใช้เลือก "ตัดสินเต็มที่")
 
     * ``real`` (ภาพต่างจริง) = แดง · ``noise`` (ภาพเหมือนกัน — Vision อ่านผิด) ⇒ ``ai_dismissed``
@@ -783,6 +851,12 @@ def _merge_image(pr: dict, resp: dict, findings: List[dict], st: dict) -> None:
         got[cid] = {"verdict": v, "reason": _clip(r.get("reason")),
                     "suggestion": _clip(r.get("suggestion")), "image": True,
                     "a_seen": _clip(r.get("a_seen"), 300), "b_seen": _clip(r.get("b_seen"), 300)}
+        if blind:
+            # คำตัดสินมาจากแอปเทียบสิ่งที่ AI อ่าน (เก็บคำตอบเดิมของ AI ไว้ดู)
+            v2, why = blind_verdict(r.get("a_seen"), r.get("b_seen"), v)
+            got[cid].update({"verdict": v2, "ai_verdict": v, "blind": True, "decided_why": why})
+            if v2 != v:
+                st["blind_overruled"] = st.get("blind_overruled", 0) + 1
     kept, dismissed = [], []
     cnt = {"real": 0, "noise": 0, "uncertain": 0, "unanswered": 0, "guarded": 0}
     for f in findings:
@@ -810,7 +884,9 @@ def _merge_image(pr: dict, resp: dict, findings: List[dict], st: dict) -> None:
             continue
         if v == "noise":
             f["severity"] = "dismissed"
-            f["notes"].append("AI ดูภาพแล้วตัดสินว่าสองฝั่งพิมพ์เหมือนกัน (Vision อ่านผิด) — ไม่นับในผลตัดสิน")
+            f["notes"].append("AI อ่านภาพเอง (ไม่เห็นข้อความของ Vision) ได้เหมือนกันทั้งสองฝั่ง — Vision อ่านผิด "
+                              "· ไม่นับในผลตัดสิน" if blind else
+                              "AI ดูภาพแล้วตัดสินว่าสองฝั่งพิมพ์เหมือนกัน (Vision อ่านผิด) — ไม่นับในผลตัดสิน")
             dismissed.append(f)
             continue
         if v == "real" and config.AI_IMAGE_CURVED_YELLOW and (
@@ -821,10 +897,12 @@ def _merge_image(pr: dict, resp: dict, findings: List[dict], st: dict) -> None:
                               "— คงไว้เป็นเหลือง โปรดดูด้วยตา")
         elif v == "real":
             f["severity"] = "red"
-            f["notes"].append("AI ดูภาพแล้วยืนยันว่าต่างจริง")
+            f["notes"].append("AI อ่านภาพเอง (ไม่เห็นข้อความของ Vision) ได้ต่างกัน — ยืนยันว่าต่างจริง"
+                              if blind else "AI ดูภาพแล้วยืนยันว่าต่างจริง")
         else:
             f["severity"] = "yellow"
-            f["notes"].append("AI ดูภาพแล้วไม่แน่ใจ — โปรดดูด้วยตา")
+            why = ai.get("decided_why") if blind else ""
+            f["notes"].append("AI ดูภาพแล้วไม่แน่ใจ%s — โปรดดูด้วยตา" % (" (%s)" % why if why else ""))
         kept.append(f)
     pr["findings"] = kept
     pr["ai_dismissed"] = dismissed
@@ -964,10 +1042,12 @@ _URL_ENV = {"raw": "ARTWORK_V2_AI_RAW_URL", "image": "ARTWORK_V2_AI_IMAGE_URL"}
 
 def run_all(pairs: List[dict], mode: str, warnings: List[str], say: Callable,
             next_id: int, poster: Optional[Callable] = None,
-            img_dir: Optional[str] = None) -> Tuple[dict, int]:
+            img_dir: Optional[str] = None,
+            hires: Optional[Callable] = None) -> Tuple[dict, int]:
     """ทำทุกคู่โซน · คืน ``(สรุปทั้งรอบ, id ถัดไป)`` — ใช้ ``pr["_cmp"]`` (บรรทัดที่เทียบจริง)
 
-    ``img_dir`` (โหมด image) = โฟลเดอร์ ``img/`` ของรอบ (ภาพที่ส่ง Vision · ``sides[s]["image"]``)"""
+    ``img_dir`` (โหมด image) = โฟลเดอร์ ``img/`` ของรอบ (ภาพที่ส่ง Vision · ``sides[s]["image"]``) ·
+    ``hires(pr, s)`` (โหมด image · PDF) = ตัวเรนเดอร์ครอปใหม่ที่ dpi สูง (``pipeline.HiresSide``)"""
     url = _url_of(mode)
     summary = {"mode": mode, "url": url if mode != "off" else "",
                "pairs_ok": 0, "pairs_failed": 0}
@@ -988,6 +1068,8 @@ def run_all(pairs: List[dict], mode: str, warnings: List[str], say: Callable,
             continue
         imgs = None
         crops = crop_info = None
+        cstat: dict = {}
+        blind = mode == "image" and bool(config.AI_IMAGE_CROPS) and bool(config.AI_IMAGE_BLIND)
         sendable = pr.get("findings") or []
         if mode == "image" and config.AI_IMAGE_CROPS:
             # ครอปรอบแต่ละจุดจากไฟล์ JPEG เดียวกับที่ส่ง Vision (ไม่เรนเดอร์ใหม่) · A/B แยกรูป
@@ -999,7 +1081,13 @@ def run_all(pairs: List[dict], mode: str, warnings: List[str], say: Callable,
                             "vision_conf": vc}
                 warnings.append("คู่ %d: AI ดูภาพไม่ได้ (อ่านไฟล์ภาพไม่ได้) — ใช้ผลของอัลกอริทึม" % pr["n"])
                 continue
-            sendable, crops, crop_info, skip = plan_crops(pr.get("findings") or [], ims)
+            hi = None
+            if hires is not None:
+                try:
+                    hi = {s: hires(pr, s) for s in ("a", "b")}
+                except Exception:                    # noqa: BLE001 — เรนเดอร์ใหม่ไม่ได้ = ครอป JPEG เดิม
+                    hi = None
+            sendable, crops, crop_info, skip = plan_crops(pr.get("findings") or [], ims, hi, cstat)
             for f in pr.get("findings") or []:
                 why = skip.get("F%d" % f["id"]) if f.get("id") is not None else None
                 if why:
@@ -1030,7 +1118,7 @@ def run_all(pairs: List[dict], mode: str, warnings: List[str], say: Callable,
             curved = pr.get("curved_lines")
         payload = build_payload(pr["n"], mode, A, B, tuple(pr["sides"]["a"]["sent_px"]),
                                 tuple(pr["sides"]["b"]["sent_px"]), sendable,
-                                curved=curved, crops=crop_info)
+                                curved=curved, crops=crop_info, blind=blind)
         if imgs:
             payload["images"] = imgs
         if crops is not None:
@@ -1049,6 +1137,10 @@ def run_all(pairs: List[dict], mode: str, warnings: List[str], say: Callable,
             ai["crops"] = len(crops)
             ai["not_sent"] = len(pr.get("findings") or []) - len(sendable)
             ai["crop_px_max"] = max([max(c["w"], c["h"]) for c in crops] or [0])
+            if "hires_crops" in cstat:
+                ai["crops_hires"] = cstat["hires_crops"]
+                ai["crop_dpi_max"] = cstat["hires_dpi_max"]
+            ai["blind"] = blind
         if resp is None:
             summary["pairs_failed"] += 1
             warnings.append("คู่ %d: AI ตรวจทานไม่สำเร็จ — ใช้ผลของอัลกอริทึม (%s)"
@@ -1058,7 +1150,7 @@ def run_all(pairs: List[dict], mode: str, warnings: List[str], say: Callable,
         # merge แก้รายการในที่ — ล้มกลางทาง ⇒ คืนผลอัลกอริทึมเดิมทุกตัวอักษร (ตามที่คำเตือนบอก)
         saved = {k: copy.deepcopy(pr[k]) for k in _MERGE_KEYS if k in pr}
         try:
-            st = merge(mode, pr, resp, A, B)
+            st = merge(mode, pr, resp, A, B, blind=blind)
         except Exception as e:                       # noqa: BLE001 — คำตอบเพี้ยนต้องไม่ล้มทั้งรอบ
             for k in _MERGE_KEYS:
                 pr.pop(k, None)

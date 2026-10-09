@@ -92,6 +92,66 @@ def _page_box(side: dict, box) -> Optional[tuple]:
     return (zx + x0 / W0 * zw, zy + y0 / H0 * zh, zx + x1 / W0 * zw, zy + y1 / H0 * zh)
 
 
+class HiresSide:
+    """เรนเดอร์ครอปของโหมด AI ดูภาพใหม่จาก PDF ต้นฉบับ (``AI_IMAGE_CROP_HIRES``)
+
+    พิกัดทุกตัวเป็นพิกเซลของภาพที่ส่ง Vision (แนวที่หมุนแล้ว) — แปลงเป็นหน้ากระดาษด้วย ``_page_box``
+    ตัวเดียวกับพื้นที่ยกเว้น · ``kmax`` = เท่าที่ขยายได้สูงสุดเทียบกับภาพที่ส่ง (เพดาน dpi + ความละเอียด
+    จริงของ PDF ที่เป็นภาพสแกน — ขยายเกินนั้นไม่ได้ข้อมูลเพิ่ม) · เรนเดอร์ไม่ได้ ⇒ ``None`` (ใช้ JPEG เดิม)"""
+
+    def __init__(self, src, side: dict):
+        self.src, self.side = src, side
+        self.kmax, self.base_dpi, self.raster_dpi = 1.0, None, None
+        if not getattr(src, "is_pdf", False) or imaging.fitz is None:
+            return
+        try:
+            W, H = side["sent_px"]
+            W0, _ = imaging.unrot_size(W, H, side.get("rotate", 0) or 0)
+            pw, ph = src.pages_pt[side["page"]]
+            zx, zy, zw, zh = side["bbox"]
+            self.base_dpi = 72.0 * float(W0) / max(1e-9, zw * pw)
+            cap = float(config.AI_IMAGE_CROP_DPI_MAX)
+            try:
+                with imaging.fitz.open(src.path) as doc:
+                    r = pixverify.zone_raster(doc[side["page"]],
+                                              (zx * pw, zy * ph, (zx + zw) * pw, (zy + zh) * ph))
+                if r and r.get("dpi"):
+                    self.raster_dpi = float(r["dpi"])
+                    cap = min(cap, self.raster_dpi)
+            except Exception:                        # noqa: BLE001 — ตรวจภาพสแกนไม่ได้ = ใช้เพดาน dpi
+                pass
+            self.kmax = max(1.0, cap / self.base_dpi)
+        except Exception:                            # noqa: BLE001
+            self.kmax = 1.0
+
+    def render(self, region, out_wh):
+        """``region`` (px ของภาพที่ส่ง · แนวหมุนแล้ว) → ภาพ BGR ขนาด ``out_wh`` (แนวเดียวกัน) · ไม่ได้ = ``None``"""
+        try:
+            side, src = self.side, self.src
+            pb = _page_box(side, region)
+            pw, ph = src.pages_pt[side["page"]]
+            clip = imaging.fitz.Rect(pb[0] * pw, pb[1] * ph, pb[2] * pw, pb[3] * ph)
+            rot = side.get("rotate", 0) or 0
+            ow, oh = int(out_wh[0]), int(out_wh[1])
+            w0, h0 = imaging.unrot_size(ow, oh, rot)
+            if clip.width <= 0 or clip.height <= 0 or w0 < 1 or h0 < 1:
+                return None
+            z = float(w0) / clip.width
+            with imaging.fitz.open(src.path) as doc:
+                pix = doc[side["page"]].get_pixmap(matrix=imaging.fitz.Matrix(z, z), clip=clip, alpha=False)
+            img = imaging._pix_to_bgr(pix)
+            if img.shape[1] != w0 or img.shape[0] != h0:
+                import cv2
+                img = cv2.resize(img, (int(w0), int(h0)), interpolation=cv2.INTER_AREA)
+            img = imaging.rotate_img(img, rot)
+            cm = (side.get("render") or {}).get("color_mode")
+            if cm in ("gray", "bw"):                 # สีเดียวกับภาพที่ส่ง Vision
+                img, _ = imaging.to_color_mode(img, cm, z * 72.0)
+            return img
+        except Exception:                            # noqa: BLE001 — เรนเดอร์ไม่ได้ = ใช้ครอปจาก JPEG
+            return None
+
+
 def _inside_ignore(side: dict, box) -> bool:
     pb = _page_box(side, box)
     if pb is None:
@@ -430,6 +490,8 @@ def _run(job_id, raw_pairs, poster, progress, sharpness, ai_mode, ai_poster,
     t0 = time.time()
     # โหมด image เท่านั้นที่ส่งภาพ (ไฟล์ img/ ของรอบ = ภาพที่ส่ง Vision) — โหมดอื่นเรียกแบบเดิมเป๊ะ
     extra = {"img_dir": os.path.join(rd, "img")} if ai_mode == "image" else {}
+    if ai_mode == "image" and config.AI_IMAGE_CROPS and config.AI_IMAGE_CROP_HIRES:
+        extra["hires"] = lambda pr, s: HiresSide(srcs[s], pr["sides"][s])
     ai_sum, fid = ai_review.run_all(pairs, ai_mode, warnings, say, fid, ai_poster, **extra)
     stage["ai_ms"] = int((time.time() - t0) * 1000)
     for pr in pairs:              # จุดที่ AI เพิ่ม/คืนมา ก็ต้องผ่านพื้นที่ยกเว้นเหมือนกัน
@@ -524,7 +586,7 @@ def settings_snapshot() -> dict:
         "PUNCT_CAN_FAIL", "CURVED_GROUP_ENABLED", "TILT_ANGLE", "CURVED_NEIGHBOR_MAX_CHARS",
         "DEBRIS_ENABLED", "DEBRIS_CONF", "SEAM_FILLER", "CROSS_ROW_JOIN", "SYMBOL_TOKEN",
         "FRACTION_YELLOW", "REREAD_ENABLED", "REREAD_MAX", "REREAD_SCALE", "REREAD_MAX_SIDE",
-        "AI_MODE", "AI_REVIEW_URL", "AI_RAW_URL", "AI_IMAGE_URL", "AI_TIMEOUT_S", "AI_RAW_TIMEOUT_S", "AI_IMAGE_TIMEOUT_S", "AI_RAW_SAFETY", "AI_IMAGE_SAFETY", "AI_IMAGE_CROPS", "AI_IMAGE_CROP_MAX_SIDE", "AI_IMAGE_CROP_MIN_W", "AI_IMAGE_CROP_JPEG_Q", "AI_IMAGE_MAX_CANDIDATES", "AI_IMAGE_CURVED_YELLOW", "AI_RETRIES", "AI_JUDGE_PUNCT_YELLOW",
+        "AI_MODE", "AI_REVIEW_URL", "AI_RAW_URL", "AI_IMAGE_URL", "AI_TIMEOUT_S", "AI_RAW_TIMEOUT_S", "AI_IMAGE_TIMEOUT_S", "AI_RAW_SAFETY", "AI_IMAGE_SAFETY", "AI_IMAGE_CROPS", "AI_IMAGE_CROP_MAX_SIDE", "AI_IMAGE_CROP_MIN_W", "AI_IMAGE_CROP_JPEG_Q", "AI_IMAGE_MAX_CANDIDATES", "AI_IMAGE_CURVED_YELLOW", "AI_IMAGE_CROP_HIRES", "AI_IMAGE_CROP_TARGET_LH", "AI_IMAGE_CROP_DPI_MAX", "AI_IMAGE_CROP_HIRES_MIN", "AI_IMAGE_BLIND", "AI_RETRIES", "AI_JUDGE_PUNCT_YELLOW",
         "AI_QUOTE_RECOVER", "AI_QUOTE_RECOVER_MAX_SHIFT", "AI_EQUIV_NOISE", "AI_SEND_CURVED",
         "AI_JUDGE_KEEP_ALGO_RED", "AI_JUDGE_NOISE_GUARD", "AI_JUDGE_CURVED_YELLOW",
         "AI_JUDGE_ONESIDED_GUARD", "AI_DEDUP_FOLDED",

@@ -23,7 +23,7 @@
 
 ## 🆕 Artwork V2 — เทียบข้อความด้วย Google Cloud Vision (2 ต.ค. 2026 · PoC)
 
-**Branch: `claude/trusting-archimedes-qoynbp`** (ต่อจาก `claude/laughing-fermat-i9aise`) · `CONFIG_VERSION` = **`2026.10.09-v2-aicrops`** ·
+**Branch: `claude/trusting-archimedes-qoynbp`** (ต่อจาก `claude/laughing-fermat-i9aise`) · `CONFIG_VERSION` = **`2026.10.09-v2-aiblind`** ·
 โมดูล `artwork_v2/` (VERSION `2026.10.09-v2rasterstrict`) · เมนู **"Artwork V2"** (`/artwork_v2`) ·
 เทสต์ `tests/test_artwork_v2.py` **73 ตัว** + `tests/test_artwork_v2_robust.py` **717 ตัว** (ข้อมูล OCR จริง · ~2.5 นาที)
 · V2 ทั้งชุด **596 + 717**
@@ -738,6 +738,25 @@ ECC **affine ไม่มีเพดาน** ⇒ ครอปที่ฝั่
   เทสต์เดิม `test_artwork_v2_ai_image.py` ตรึง `AI_IMAGE_CROPS=False` (ล็อกเส้นทางภาพทั้งโซน) · ย้อนโค้ด **8 จุด แดงทุกจุด** · V2 ไม่รวม robust **694 ผ่าน**
 * Chromium (Vision/N8N ปลอม · 1366/400): คำขอ contract `/2` ครอป 4 รูป (2 จุด) · FAIL แดง 1 + พับ 1 · กล่อง AI บอก "ส่งภาพครอปรอบจุด" · ไม่เลื่อนแนวนอน · ไม่มี JS error
 * ⏳ ยังไม่ได้ยิงจริง — ดู Log: IMAGE token ควร ≈ 258 × จำนวนครอป · `ai_seen` ต้องไม่ลอกคำที่ Vision อ่านผิด
+
+#### 🙈 9 ต.ค. (รอบ 5) — ผลสถานี John West (ครอปต่อจุด) → AI **ไม่เห็นข้อความของ Vision** + ครอปความละเอียดสูง
+
+**ผลสถานี (งาน `20261009_160853_3a8f39` run_001 · ครอป 56 รูป · IMAGE 14,448 token = **258/ครอป** ✅):** FAIL แดง 8 ·
+พับ "ภาพเหมือน" (หลักฐานภาพ) 17 — **AI ตอบ `real` ให้ทั้ง 17 จุด** และ `a_seen`/`b_seen` = คำที่ Vision อ่านผิดเป๊ะ
+(`و 26` · `Og`/`0 g` · `تحتوى`/`تحتوي`) ⇒ ครอปอ่านได้แล้วแต่ AI **ใช้ข้อความใน DATA เป็นคำตอบ** · ตัวอักษรสูงแค่ 10-13 px ที่ 400 dpi ·
+แดงเกินมาจาก **แถบรหัสโรงพิมพ์แนวตั้งซ้ายโซน** (`3AAOCN…` · `vntinterprint.com` · `FGLB…` · `MAC03` — F6/F7/F18/F28/F29 · หลักฐานภาพ UNVERIFIABLE)
+⇒ ผู้ใช้สั่ง *"ทำ 1 2 3"*: ① วาดพื้นที่ยกเว้นทับแถบนั้น (ไม่ต้องแก้โค้ด) ② ไม่ส่งข้อความ ③ เรนเดอร์ครอปใหม่ dpi สูง
+
+| ธง (`0` = เดิมเป๊ะ · default **1**) | ทำอะไร |
+|---|---|
+| `ARTWORK_V2_AI_IMAGE_BLIND` | payload contract **`/3`** = รหัสจุด + ตำแหน่งในครอป **เท่านั้น** (ไม่มี zone_a/zone_b/คำ/diff/ชนิด) · node Build ตัดข้อความทิ้งซ้ำแม้แอปส่งมา + ใช้ `PROMPT_BLIND` · **แอปตัดสินเอง** `ai_review.blind_verdict`: เทียบ `a_seen`/`b_seen` ด้วย `compare.diff_key_map` (ตัวพิมพ์/คอมมา/ทศนิยม = ต่าง · ช่องว่าง/จุดไข่ปลา/®Ⓡ/½ = เหมือน) · `[?]` / ว่างทั้งคู่ / AI บอกไม่แน่ใจ / **AI ตอบขัดกับสิ่งที่มันอ่านเอง** ⇒ เหลือง (`decided_why`) · `f.ai.ai_verdict` เก็บคำตอบเดิม · Log ต่อจุด `blind: ai_said= app=` + `image_mode: blind= overruled=` |
+| `ARTWORK_V2_AI_IMAGE_CROP_HIRES` (+`_TARGET_LH` 36 · `_DPI_MAX` 1200 · `_HIRES_MIN` 1.25) | PDF เท่านั้น — `pipeline.HiresSide`: กรอบครอปคิดในพิกัดที่ขยาย k = 36/ความสูงตัวอักษร (ไม่เกินเพดาน dpi · **ไม่เกินความละเอียดจริงของ PDF สแกน** ผ่าน `pixverify.zone_raster` · ตัวจุด + 1 บรรทัดต้องพอดี 768) แล้วเรนเดอร์บริเวณนั้นใหม่ (`_page_box` แปลงพิกัดตัวเดียวกับพื้นที่ยกเว้น · หมุน/สีเดียวกับภาพที่ส่ง) · ภาพถ่าย/k < 1.25/เรนเดอร์ไม่ได้ ⇒ ครอป JPEG เดิม · Log `hires_crops= hires_dpi_max=` |
+
+* เทสต์ `tests/test_artwork_v2_ai_image_blind.py` **35** (รวมเรนเดอร์จาก PDF จริง 4 มุมหมุนแล้วย่อกลับต้องตรงภาพที่ส่ง · PDF สแกน 300 dpi ไม่ขยาย · ทั้งเส้น) ·
+  `test_artwork_v2_ai_image_crops.py` ตรึงสองธงปิด (ล็อกรอบ `/2`) · ย้อนโค้ด **12 จุด แดงทุกจุด**
+* ตรวจด้วยตา: "24%" fontsize 4 pt — ครอป JPEG ตัวอักษร ~22 px → ครอปใหม่ 648 dpi ~36 px ตรงตำแหน่งเดิม
+* ⚠️ **ต้อง Import workflow `n8n_artwork_v2_image.workflow.json` ใหม่ทับ** (มี `PROMPT_BLIND`) — workflow เก่าจะได้ payload ที่ไม่มี zone ⇒ ตอบ error ⇒ ผลอัลกอริทึม + คำเตือน (ไม่ล้ม)
+* ⚠️ ความเสี่ยงที่ยังเหลือ: Gemini ยังเห็นครอป A/B ในคำขอเดียว ⇒ ลอก B ตาม A ได้ (คำตอบ "เหมือน" ⇒ พับ) · อ่านคนละขอบเขตคำสองฝั่ง ⇒ "ต่าง" ปลอม (prompt สั่ง "same extent") · ⏳ ยังไม่เคยยิงจริง
 
 **📚 เอกสาร Google Vision (อ่าน 4 ต.ค. — `docs.cloud.google.com` ถูก proxy บล็อก อ่านจาก proto ทางการบน GitHub + ข้อความค้นหา):**
 `DOCUMENT_TEXT_DETECTION` สำหรับข้อความหนาแน่น ✅ (ใช้อยู่) · `languageHints` *"ส่วนใหญ่ปล่อยว่างดีที่สุด · ใส่ผิดเป็นอุปสรรคมาก"* ✅ (ว่าง) ·
@@ -6410,7 +6429,7 @@ A, B, C, …) ⇒ ทุกกลุ่มมีสมาชิก 1 ตัว �
   `tests/test_artwork_ownership.py` 30 ตัว (สิทธิ์เห็นประวัติ + ชื่อผู้ตรวจ).
   ⚠️ `tests/test_inspection_golden.py` **fail 5 ตัวอยู่แล้ว** (pre-existing, `NameError: FieldResult`
   ในโมดูล Label Paper) — ไม่เกี่ยวกับ artwork. ยืนยันด้วย `git stash` ก่อนโทษการแก้ของตัวเอง.
-- CONFIG_VERSION ปัจจุบัน: **`2026.10.09-v2-aicrops`** (เช็คที่ footer ว่ารันโค้ดใหม่จริง).
+- CONFIG_VERSION ปัจจุบัน: **`2026.10.09-v2-aiblind`** (เช็คที่ footer ว่ารันโค้ดใหม่จริง).
 - **ตาข่ายนิรภัยของชั้นเทียบ: `verify_compare.py`** — แก้อะไรที่ `panelmatch`/`confirm`
   **ต้องรันไฟล์นี้ก่อนและหลังเสมอ** (`--selftest` ใช้ได้โดยไม่ต้องมีไฟล์จริง)
 

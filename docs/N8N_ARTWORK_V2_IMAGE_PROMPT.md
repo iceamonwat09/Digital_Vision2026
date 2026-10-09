@@ -16,6 +16,8 @@
 | | ทำอย่างไร |
 |---|---|
 | ภาพที่ส่ง (ค่าเริ่มต้น · `ARTWORK_V2_AI_IMAGE_CROPS=1`) | **ครอปรอบแต่ละจุด ฝั่งละ 1 รูป** ตัดจาก `img/p<N>_a.jpg` / `p<N>_b.jpg` ของรอบ (= ภาพที่ส่ง Vision · ไม่เรนเดอร์ใหม่) · ความละเอียดจริง (ด้านยาว ≤ `ARTWORK_V2_AI_IMAGE_CROP_MAX_SIDE` 768 px · กว้างอย่างน้อย 480 px ให้เห็นคำข้าง ๆ + บรรทัดบน/ล่าง) · JPEG q95 · `crops: [{candidate, side, mime, w, h, b64}]` + `candidates[].a/b.crop = {w, h, box}` (ตำแหน่งจุดในครอป 0-1000) + `image_sizes` · contract `artwork-v2-image/2` · ทุกคู่ = **1 คำขอ** (10 จุด = 20 รูป) · **ไม่ยิง Vision เพิ่ม** |
+| ครอปความละเอียดสูง (ค่าเริ่มต้น · `ARTWORK_V2_AI_IMAGE_CROP_HIRES=1` · PDF เท่านั้น) | ตัวอักษรที่จุดสูงไม่ถึง `ARTWORK_V2_AI_IMAGE_CROP_TARGET_LH` (36 px) บนภาพที่ส่ง Vision ⇒ **เรนเดอร์บริเวณครอปใหม่จาก PDF ต้นฉบับ** ให้ตัวอักษรสูงราว 36 px · เพดาน `ARTWORK_V2_AI_IMAGE_CROP_DPI_MAX` (1200 dpi) และไม่เกินความละเอียดจริงของ PDF ที่เป็นภาพสแกน · ด้านยาวยังไม่เกิน 768 px (บริบทรอบจุดแคบลงแทน) · ขยายไม่ถึง 1.25 เท่า/ภาพถ่าย/เรนเดอร์ไม่ได้ ⇒ ครอปจาก JPEG เดิม · หมุน/สีเดียวกับภาพที่ส่ง Vision · Log `hires_crops=` `hires_dpi_max=` |
+| ไม่เห็นข้อความ (ค่าเริ่มต้น · `ARTWORK_V2_AI_IMAGE_BLIND=1` · ต้องใช้ครอป) | ส่ง **ภาพครอป + ตำแหน่งจุดในครอปเท่านั้น** — ไม่มีบรรทัด/คำ/diff/ชนิดของจุดจาก Vision (contract `artwork-v2-image/3` · node Build ตัดข้อความทิ้งซ้ำอีกชั้น) ⇒ Gemini อ่าน A/B จากพิกเซลเอง (prompt ชุด `PROMPT_BLIND`) แล้ว **แอปเทียบ `a_seen`/`b_seen` เอง** ด้วยกติกาเดียวกับอัลกอริทึม (ช่องว่าง · จุดไข่ปลา · ®/Ⓡ · ½/1/2 · คงตัวพิมพ์/เครื่องหมาย) · `[?]` / ว่างทั้งคู่ / AI บอกไม่แน่ใจ / **คำตอบของ AI ขัดกับสิ่งที่มันอ่านเอง** ⇒ ไม่แน่ใจ (เหลือง) · Log ต่อจุด `blind: ai_said= app=` |
 | ภาพที่ส่ง (แบบเดิม · `ARTWORK_V2_AI_IMAGE_CROPS=0`) | ภาพทั้งโซน A/B ทุกไบต์ใน `images.a/b` · contract `/1` — ⚠️ สถานี 9 ต.ค. วัดได้ว่า Gemini นับภาพละ **258 token** (≈ ย่อเหลือ 768 px) ⇒ ตัวอักษร ~28 px เหลือ ~6 px อ่านเองไม่ได้ |
 | เพดาน (แผน ก) | ไม่เกิน `ARTWORK_V2_AI_IMAGE_MAX_CANDIDATES` (40) จุดต่อคำขอ · เลือกแดงก่อนเหลือง · จุดที่เกิน/ไม่มีตำแหน่งบนภาพฝั่งใดฝั่งหนึ่ง ⇒ **ไม่ส่ง · คงระดับของอัลกอริทึม** + หมายเหตุ "AI ไม่ได้ตรวจจุดนี้ (...)" (ไม่ยิงคำขอที่ 2) |
 | ข้อความที่ส่ง | บรรทัด/คำ/ความมั่นใจของ Vision (รูปเดียวกับ workflow review) + `candidates` = จุดต่างของอัลกอริทึม **พร้อมกรอบ 0-1000 บนภาพของแต่ละฝั่ง** (`a.box`/`b.box` — คำเต็ม · การ์ดโค้ง = union ของสมาชิก) |
@@ -33,6 +35,11 @@
 ของจริงจะ **ไปอยู่ในรายการพับ** (ยังเปิดดูได้ แต่ไม่นับในผลตัดสิน). ใช้ปุ่ม ✓/⚑ บนหน้าเว็บเก็บเฉลยแล้ววัดก่อนเชื่อ ·
 ภาพทั้งโซนถูก Gemini ย่อเหลือราว 768 px (258 token/ภาพ — วัดจาก `usage` บนสถานี) ⇒ จึงเปลี่ยนเป็นครอปต่อจุด ·
 ครอปแยกรูป A/B และ prompt สั่ง "ดูภาพก่อน แล้วค่อยดูข้อความของ Vision" — ยังต้องวัดซ้ำบนสถานีว่า `a_seen`/`b_seen` มาจากภาพจริง
+
+⚠️ **ทำไมต้องไม่เห็นข้อความ (สถานี 9 ต.ค. งาน John West):** แม้ครอปจะอ่านได้แล้ว Gemini ยังตอบ `real` ให้
+**17/17 จุดที่หลักฐานภาพบอกว่าเหมือน** และ `a_seen`/`b_seen` เป็นคำที่ Vision อ่านผิดเป๊ะ (`و 26` · `Og`/`0 g` ·
+`تحتوى`/`تحتوي`) ⇒ ข้อความใน DATA ถูกใช้เป็นคำตอบ ไม่ใช่แค่ตัวชี้ตำแหน่ง ⇒ ตัดข้อความออกจากต้นทาง ·
+ตัวอักษรของงานนั้นสูงแค่ 10-13 px ที่ 400 dpi ⇒ เรนเดอร์ครอปใหม่ที่ dpi สูง
 
 ## ② ตั้งค่าใน N8N
 
@@ -91,6 +98,54 @@ OUTPUT
 - Respond with the raw JSON object only, matching the schema. No Markdown, no code fences, no text before or after it.
 ```
 <!-- PROMPT_IMAGE END -->
+
+### Prompt ของโหมดไม่เห็นข้อความ (`blind: true` · `ARTWORK_V2_AI_IMAGE_BLIND=1`)
+
+⚠️ ต้องตรงกับ `const PROMPT_BLIND` ใน node "Build Gemini request" ทุกตัวอักษร (มีเทสต์เทียบ)
+
+<!-- PROMPT_IMAGE_BLIND START -->
+```text
+You are a meticulous packaging-artwork proofreader (QC) reading printed text from images. You receive two versions of the same label region - version A and version B - and, for every candidate spot, one crop from each version. You are NOT given any text: no OCR result, no expected words, no hint of what changed. Read what is printed, character by character, from the pixels only. The application compares your two readings itself.
+
+IMAGES
+- For every candidate you receive a crop labelled "F<n> - A crop" (version A) and a crop labelled "F<n> - B crop" (version B), cut at the same spot of the two versions.
+- DATA gives, for each candidate, a.box / b.box: the spot inside that side's crop as [x0,y0,x1,y1] in 0-1000 of the crop (x to the right, y down). The crop also shows neighbouring words and parts of the lines above and below; read only the spot.
+- The two versions can have different sizes and scales. Always use each side's own box on its own crop.
+
+METHOD (follow it for EVERY candidate, in order)
+1. Look at the A crop. Read the complete word(s) or number(s) that the box covers or touches: every letter, digit, letter case, punctuation and symbol, including punctuation attached to the word (for example "Hwy," or "24%"). If the box covers part of a word, read the whole word. Do not add words that are outside the box. Write exactly what is printed in a_seen.
+2. Then look at the B crop on its own and read the box in the same way, with the same extent. Write it in b_seen.
+3. Read each crop on its own. Never copy, complete or correct the reading of one crop from the other crop. Version B may have been edited on purpose and the differences that matter most are tiny: a changed digit, a missing comma, one changed letter case, a plural "s", a changed accent. Never assume B equals A.
+4. Write "" in a_seen / b_seen only when nothing at all is printed inside that box.
+5. If a character is too small, blurred, cut by the edge of the crop, curved or covered by graphics, write [?] for that character. Never guess a character.
+6. Only after both readings, compare them and choose the verdict.
+
+VERDICT
+- "real": a_seen and b_seen differ in any letter, digit, letter case, word, decimal point, %, ®, ©, ™, unit or punctuation.
+- "noise": a_seen and b_seen are identical.
+- "uncertain": you could not read the box clearly in one or both crops (you wrote [?]), or the box points at graphics, a logo or curved text you cannot read with certainty. When in doubt, choose "uncertain".
+- Not a difference: whitespace, line breaks, the number of leader dots or dashes, ® / Ⓡ, © / Ⓒ, • / ·, ½ / 1/2.
+
+OUTPUT
+- reviews: exactly ONE entry for EVERY candidate, using its id in "candidate", in the order given. Never skip a candidate, never invent an id.
+- a_seen / b_seen: the printed text only. No quotes, no labels such as "A:", no explanations.
+- items: always [].
+- reason: one or two Thai sentences: what you read in each crop and how they compare. Keep label text in its original language inside quotes.
+- suggestion: what the inspector should check at this point, in Thai.
+- summary: 2-6 Thai sentences: how many spots read differently (each one briefly A -> B), how many read the same, and what still needs a human look.
+- suggestions: concrete Thai actions for the inspector.
+- Do not decide which version is correct; describe it as A: "..." / B: "...".
+- Never output any number for confidence or accuracy.
+- Respond with the raw JSON object only, matching the schema. No Markdown, no code fences, no text before or after it.
+```
+<!-- PROMPT_IMAGE_BLIND END -->
+
+| กติกา (blind) | ที่มา |
+|---|---|
+| ไม่มีข้อความใด ๆ จาก Vision ใน DATA | สถานี 9 ต.ค.: AI ลอกคำที่ Vision อ่านผิดไปเป็น `a_seen`/`b_seen` ทั้งที่ภาพเหมือนกัน |
+| อ่าน **ทั้งคำ** ที่กรอบแตะ + เครื่องหมายที่ติดคำ · ขอบเขตเดียวกันทั้งสองฝั่ง | แอปเทียบสิ่งที่อ่านตรง ๆ — อ่านคนละขอบเขตจะกลายเป็น "ต่าง" ปลอม |
+| `a_seen`/`b_seen` เป็นข้อความล้วน (ไม่มี `A:`/เครื่องหมายคำพูด) | แอปเอาไปเทียบตัวอักษรต่อตัวอักษร |
+| แอปตัดสินเอง · AI ตอบขัดกับสิ่งที่อ่าน ⇒ ไม่แน่ใจ | กฎเหล็กข้อ 2 — ผลที่ผิดแบบมั่นใจแย่กว่าไม่แสดง |
 
 ### เหตุผลของกติกา
 

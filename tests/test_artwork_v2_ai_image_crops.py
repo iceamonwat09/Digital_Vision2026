@@ -46,6 +46,9 @@ def _isolated(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "REREAD_ENABLED", False)
     monkeypatch.setattr(config, "AI_IMAGE_SAFETY", False)
     monkeypatch.setattr(config, "AI_IMAGE_CROPS", True)
+    # ไฟล์นี้ล็อกรอบ "ครอปจาก JPEG + ข้อความ Vision" (/2) — โหมดไม่เห็นข้อความ/เรนเดอร์ใหม่มีเทสต์แยก
+    monkeypatch.setattr(config, "AI_IMAGE_BLIND", False)
+    monkeypatch.setattr(config, "AI_IMAGE_CROP_HIRES", False)
     monkeypatch.setattr(config, "AI_IMAGE_MAX_CANDIDATES", 40)
     monkeypatch.setattr(config, "AI_IMAGE_CURVED_YELLOW", True)
     monkeypatch.setattr(config, "AI_IMAGE_URL", "http://127.0.0.1:9/webhook/artwork-v2-image")
