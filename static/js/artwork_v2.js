@@ -959,8 +959,12 @@
     const ai = f.ai;
     if (!ai) return "";
     if (!ai.verdict) return '<span class="v2-ai-note v2-muted">🤖 AI ไม่ได้ตอบจุดนี้</span>';
-    return '<span class="v2-ai-note">🤖 <b>' + esc(AI_TH[ai.verdict] || ai.verdict) + "</b>" +
-      (ai.reason ? " — " + esc(ai.reason) : "") + "</span>" +
+    // โหมด image: สิ่งที่ AI เห็นบนภาพแต่ละฝั่ง (คำของ AI — ไม่ใช่การอ่านของ Vision)
+    const seen = ai.image && (ai.a_seen || ai.b_seen)
+      ? '<span class="v2-ai-note">🖼️ AI เห็นในภาพ — A: "' + esc(ai.a_seen || "—") + '" · B: "' + esc(ai.b_seen || "—") + '"</span>' : "";
+    const vth = ai.image && ai.verdict === "noise" ? "ภาพเหมือนกัน (Vision อ่านผิด)" : (AI_TH[ai.verdict] || ai.verdict);
+    return '<span class="v2-ai-note">🤖 <b>' + esc(vth) + "</b>" +
+      (ai.reason ? " — " + esc(ai.reason) : "") + "</span>" + seen +
       (ai.suggestion ? '<span class="v2-ai-note">💡 ' + esc(ai.suggestion) + "</span>" : "");
   }
 
@@ -1276,7 +1280,7 @@
       '<th><button type="button" class="v2-nbtn v2-nall" title="เปิด/ปิดหมายเหตุทุกแถวในตารางนี้" aria-expanded="false">ⓘ</button></th></tr></thead>'
     : '<thead><tr><th>#</th><th>ระดับ</th><th>ชนิด</th><th>🅰</th><th>🅱</th><th>ความมั่นใจ (Vision)</th><th>หมายเหตุ</th></tr></thead>';
 
-  const AI_MODE_TH = { assist: "อัลกอริทึมตัดสิน + AI เสริม", judge: "AI ตัดสินหลัก", raw: "AI ตัดสินจากข้อมูลดิบ", off: "ปิด AI" };
+  const AI_MODE_TH = { assist: "อัลกอริทึมตัดสิน + AI เสริม", judge: "AI ตัดสินหลัก", raw: "AI ตัดสินจากข้อมูลดิบ", image: "AI ดูภาพตัดสิน", off: "ปิด AI" };
   function folded(title, list) {
     if (!list || !list.length) return "";
     return '<details class="v2-debris" style="margin-top:8px"><summary>' + esc(title) + " (" + list.length +
@@ -1303,6 +1307,13 @@
       if (ai.items_equivalent) stat += " · ข้อที่สองฝั่งเท่ากันตามกติกาเทียบ (นับเป็นสัญญาณรบกวน) " + ai.items_equivalent + " ข้อ";
     }
     if (ai.mode === "raw") stat += " · AI เทียบจากบรรทัดดิบของ Vision (ไม่ผ่านอัลกอริทึม) · ผลอัลกอริทึม " + (ai.algo_compare || 0) + " จุดอยู่ในรายการพับไว้เทียบ";
+    if (ai.mode === "image" && ai.image_verdicts) {
+      const iv = ai.image_verdicts;
+      stat += " · AI ดูภาพที่ส่ง Vision แล้วตัดสิน " + (ai.reviewed || 0) + "/" + (ai.reviewable || 0) +
+        " จุด: ต่างจริง " + (iv.real || 0) + " · ภาพเหมือน (พับ) " + (iv.noise || 0) + " · ไม่แน่ใจ " + (iv.uncertain || 0);
+      if (iv.unanswered) stat += " · ไม่ได้ตอบ " + iv.unanswered + " (คงระดับเดิม)";
+      if (iv.guarded) stat += " · ภาพเหมือนแต่ Vision อ่านชัด คงไว้ " + iv.guarded;
+    }
     if (ai.algo_red_kept) stat += " · จุดแดงของอัลกอริทึมที่ AI ไม่ได้ระบุ คงไว้เป็นเหลือง " + ai.algo_red_kept + " จุด";
     if (ai.mode === "assist" && ai.reviewable) stat += " · ตอบครบ " + ai.reviewed + "/" + ai.reviewable + " จุด";
     if (ai.extra_added) stat += " · พบเพิ่ม " + ai.extra_added + " จุด";
@@ -1523,7 +1534,9 @@
         folded(p.raw_lines && p.ai && p.ai.mode === "raw"
           ? "ผลของอัลกอริทึม — ไว้เทียบกับ AI เท่านั้น ไม่นับในผลตัดสิน (โหมด AI ตัดสินจากข้อมูลดิบ)"
           : "อัลกอริทึมพบ แต่ AI ไม่ได้ระบุ — ไม่นับในผลตัดสิน (โหมด AI ตัดสินหลัก)", p.algo_only) +
-        folded("AI ตัดสินว่าเป็นสัญญาณรบกวนของ OCR — ไม่นับในผลตัดสิน", p.ai_dismissed);
+        folded(p.ai && p.ai.mode === "image"
+          ? "AI ดูภาพแล้วสองฝั่งพิมพ์เหมือนกัน (Vision อ่านผิด) — ไม่นับในผลตัดสิน"
+          : "AI ตัดสินว่าเป็นสัญญาณรบกวนของ OCR — ไม่นับในผลตัดสิน", p.ai_dismissed);
       return (CARD ? '<div class="v2-card v2-pcard v2-pv-' + esc(p.verdict || "") + '" data-pn="' + esc(p.n) + '">' + pairHead(p) :
         '<div class="v2-card" data-pn="' + esc(p.n) + '" style="margin:12px 0"><b>คู่ ' + p.n + "</b> — " + esc(p.verdict || "") +
         (p.coverage != null ? " · จับคู่ข้อความได้ " + Math.round(p.coverage * 100) + "%" +

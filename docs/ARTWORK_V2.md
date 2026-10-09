@@ -1,7 +1,7 @@
 # Artwork V2 — เอกสารพัฒนา (อ้างอิง + ปัญหาที่พบ)
 
-> อัปเดต **9 ต.ค. 2026** · branch `claude/trusting-archimedes-qoynbp` · `CONFIG_VERSION` = `2026.10.09-v2-rasterstrict` ·
-> โมดูล `artwork_v2/` `VERSION` = `2026.10.09-v2rasterstrict` · เทสต์ V2 ทั้งชุด **1371 ผ่าน** (รวม robust 717)
+> อัปเดต **9 ต.ค. 2026** · branch `claude/trusting-archimedes-qoynbp` · `CONFIG_VERSION` = `2026.10.09-v2-aiimage` ·
+> โมดูล `artwork_v2/` `VERSION` = `2026.10.09-v2rasterstrict` · เทสต์ V2 ทั้งชุด **1393 ผ่าน** (รวม robust 717)
 >
 > ไฟล์นี้คือ **เอกสารอ้างอิงฉบับรวม** — อธิบายว่าระบบทำงานอย่างไร ค่าตั้งทุกตัว และ **รายการปัญหาที่ยังเปิดอยู่**
 > บันทึกรายวัน (ที่มาของแต่ละการตัดสินใจ + ตัวเลขที่วัด) อยู่ใน `CLAUDE.md` หัวข้อ "🆕 Artwork V2"
@@ -293,10 +293,12 @@ data/artwork_v2/
 
 | env | ค่าเริ่มต้น | |
 |---|---|---|
-| `AI_MODE` | **`off`** | `assist`/`judge`/`raw` · ค่าแปลก = off |
+| `AI_MODE` | **`off`** | `assist`/`judge`/`raw`/`image` · ค่าแปลก = off |
 | `AI_EXPERIMENTAL_MODES` | 0 | 0 = ซ่อน judge/raw บนหน้าเว็บ (API ยังรับ) |
 | `AI_REVIEW_URL` · `AI_TIMEOUT_S` | `http://127.0.0.1:5678/webhook/artwork-v2-review` · 180 | |
 | `AI_RAW_URL` · `AI_RAW_TIMEOUT_S` | `…/artwork-v2-raw` · 300 | |
+| `AI_IMAGE_URL` · `AI_IMAGE_TIMEOUT_S` | `…/artwork-v2-image` · 300 | โหมด **`image`** (ทดลอง · 9 ต.ค.) — ส่งภาพที่ส่ง Vision + ข้อความ Vision + จุดของอัลกอริทึม (มีกรอบ) ให้ Gemini ดูภาพตัดสิน · real = แดง · ภาพเหมือน = พับ `ai_dismissed` · ไม่แน่ใจ = เหลือง · ไม่ตอบ = คงเดิม · แสดงบนหน้าเว็บเสมอ (ไม่ซ่อนด้วย `AI_EXPERIMENTAL_MODES`) · ดู `docs/N8N_ARTWORK_V2_IMAGE_PROMPT.md` |
+| `AI_IMAGE_SAFETY` | **0** | ผู้ใช้เลือก "Gemini ตัดสินเต็มที่" · `1` = "ภาพเหมือน" กับตัวอักษร/ตัวเลข/ตัวพิมพ์ที่ Vision อ่านชัด ≥ 80% ทั้งสองฝั่ง ⇒ คงเหลือง |
 | `AI_RETRIES` | 1 | เฉพาะต่อไม่ติด/5xx |
 | `AI_JUDGE_PUNCT_YELLOW` · `AI_QUOTE_RECOVER` (+`_MAX_SHIFT` 2) · `AI_EQUIV_NOISE` · `AI_SEND_CURVED` · `AI_JUDGE_KEEP_ALGO_RED` · `AI_JUDGE_NOISE_GUARD` · `AI_JUDGE_CURVED_YELLOW` · `AI_JUDGE_ONESIDED_GUARD` · `AI_RAW_SAFETY` | 1 | ชั้นตรวจคำตอบ AI |
 | `AI_DEDUP_FOLDED` | 1 | assist: จุดที่ AI "พบเพิ่ม" แต่ทับจุดที่พับไว้แล้ว (lowmark/debris/relocated/excluded) **และคู่บรรทัดนั้นมีตัวอักษร/ตัวเลขเหมือนกันทุกตัว** ⇒ ไม่เพิ่มซ้ำ · แนบคำตอบ AI ไว้ที่จุดที่พับ · Log `extra_folded=` |
@@ -327,6 +329,7 @@ python -m pytest tests/test_artwork_v2_robust.py                                
 | `test_artwork_v2_robust.py` | 717 | mutation 701 กรณีบนบรรทัด OCR จริง ⇒ จับได้ทุกกรณี + ความคงที่ |
 | `test_artwork_v2_runs.py` | 9 | ชุดข้อมูลสถานี + ความแปรปรวนข้ามรอบ (`cross_run_known` — **ห้ามเติมเพื่อให้ผ่าน**) |
 | `test_artwork_v2_curved_debris.py` | 22 | โค้ง/เอียง · เศษ |
+| `test_artwork_v2_ai_image.py` | 22 | โหมด image: ภาพที่ส่ง = ไฟล์ `img/` ทุกไบต์ · real/noise/uncertain/ไม่ตอบ · payload assist ไม่เปลี่ยน · N8N ล่ม/อ่านภาพไม่ได้ ⇒ ผลอัลกอริทึม · workflow + เอกสารตรงกัน |
 | `test_artwork_v2_sharp.py` | 17 | คมสูงสุด · `standard` = ไบต์เดิม |
 | `test_artwork_v2_evidence_compare.py` | 28 | ชั้นหลักฐาน 4 ธง (ปิดทั้งหมด = ผลเท่า `685ddcc`) |
 | `test_artwork_v2_ai_review.py` / `_ai_rules.py` / `_ai_raw.py` | 54 / 34 / 39 | AI ทุกโหมด · Code node จริงผ่าน node · prompt ↔ workflow ตรงกัน |
@@ -441,7 +444,8 @@ python -m pytest tests/test_artwork_v2_robust.py                                
 | D5 | **เล่นซ้ำผลดิบข้ามโหมด AI** · ชุด mutation สำหรับโหมด AI · เทียบตัวเอง A↔A ทุกโหมด | วัดแจ้งเตือนผิดอย่างเป็นธรรม |
 | D6 | ข้อเสนอ: PNG (lossless) เมื่อพอดีงบ · `legacy_layout` ของ Vision · อ่านไม่ได้ ≠ หายไป · `languageHints` | ยังไม่ได้วัด · **`languageHints` มีเครื่องมือแล้ว (8 ต.ค.):** `artwork_v2_eval.py <รอบ> --hints` (Friskies แนะนำ `ko,th,en`) → ตั้ง env → ตรวจคู่เดิมโซนเดิม → `artwork_v2_eval.py <รอบใหม่> --labels …` เทียบตาราง (ไม่ควรเปิดถาวรก่อน A/B — Google แนะนำให้ว่าง และใส่ผิดเป็นผลเสีย) |
 | D8 | **`PLACEHOLDER` แดงหรือเหลือง** | ค่าเริ่มต้นแดง (ต่างแน่นอน) · `PLACEHOLDER_RED=0` = เหลืองเสมอ · ⚠️ **สถานี run_005: CFPR ขึ้นเหลือง** เพราะ Vision อ่าน `XXXXXX` ฝั่ง 🅱 ได้ conf 0.412 < `CONF_LOW` 0.6 (รอบ fixture สูงกว่านี้) ⇒ ถามผู้ใช้: ให้เกณฑ์ของช่องว่างรอพิมพ์ต่ำลง (เช่นนับตัว `X` ซ้ำ ≥ 4 ตัวโดยไม่ดู conf) หรือคงเดิม |
-| D7 | งานใหญ่ที่เลื่อนไว้: **ชั้น C** (เทียบทั้งโซนเป็นสายโทเคนเดียว) · AI แบบตัวจำแนก · ส่งภาพให้ AI (แยกคำขอ ใช้ยืนยันว่าต่างเท่านั้น) | |
+| D7 | งานใหญ่ที่เลื่อนไว้: **ชั้น C** (เทียบทั้งโซนเป็นสายโทเคนเดียว) · AI แบบตัวจำแนก | (ส่งภาพให้ AI ทำแล้วเป็นโหมด `image` — ดู D9) |
+| D9 | **โหมด `image` ยังไม่เคยยิง Gemini จริง** | Import `n8n_artwork_v2_image.workflow.json` → ตรวจคู่ AvoDerm/Friskies/John West เดิม → ใช้ปุ่ม ✓/⚑ เก็บเฉลย → นับว่าจุดที่ AI ตอบ "ภาพเหมือน" (พับ) มีของจริงหลุดไปกี่จุด · ⚠️ 30 ก.ย. Gemini เห็นสองภาพในคำขอเดียวแล้ว **ลอก B ตาม A** กลืนของจริง 4/4 ในโซนใหญ่ ⇒ ถ้าหลุด: เปิด `AI_IMAGE_SAFETY=1` หรือแยกคำขอต่อภาพ |
 
 ---
 

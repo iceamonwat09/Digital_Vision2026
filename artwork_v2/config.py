@@ -247,7 +247,7 @@ PIXEL_RASTER_KEEP_NUMBER = _b("ARTWORK_V2_PIXEL_RASTER_KEEP_NUMBER", "1")
 # 7 ต.ค. (ข้อสรุปทีมวิเคราะห์ Log ทุกชุด): AI ที่เห็นแค่ข้อความตอบ "ต่างจริง" กับสัญญาณรบกวน 14 ครั้ง
 # · โหมด judge ทำของจริงหาย 3 จุด · บน John West "real" ถูกแค่ 1/11 ⇒ ค่าเริ่มต้น **ปิด**
 # (ตั้ง ``ARTWORK_V2_AI_MODE=assist`` = แบบเดิม)
-AI_MODES = ("assist", "judge", "raw", "off")
+AI_MODES = ("assist", "judge", "raw", "image", "off")
 AI_MODE = os.getenv("ARTWORK_V2_AI_MODE", "off").strip().lower()
 if AI_MODE not in AI_MODES:
     AI_MODE = "off"
@@ -263,6 +263,17 @@ AI_RAW_URL = os.getenv("ARTWORK_V2_AI_RAW_URL",
 # โหมด raw ให้ Gemini คิดนานขึ้น (thinkingBudget สูงสุด) ⇒ รอนานกว่า (node HTTP ของ N8N ตั้ง 290 วิ)
 AI_RAW_TIMEOUT_S = _f("ARTWORK_V2_AI_RAW_TIMEOUT_S", "300")
 AI_RETRIES = _i("ARTWORK_V2_AI_RETRIES", "1")
+# 9 ต.ค.: โหมด ``image`` (ทดลอง) — ส่ง **ภาพโซน A/B ชุดเดียวกับที่ส่ง Vision** + ข้อความ/ความมั่นใจของ Vision
+# + จุดต่างของอัลกอริทึม ให้ Gemini ดูภาพแล้วตัดสินทุกจุด (ผู้ใช้เลือก "Gemini ตัดสินเต็มที่":
+# ต่างจริง = แดง · ภาพเหมือนกัน = รายการพับ · ไม่แน่ใจ = เหลือง) · **workflow แยก**
+# (artwork_v2/n8n_artwork_v2_image.workflow.json · path artwork-v2-image) — workflow เดิมไม่ถูกแตะ
+AI_IMAGE_URL = os.getenv("ARTWORK_V2_AI_IMAGE_URL",
+                         "http://127.0.0.1:5678/webhook/artwork-v2-image").strip()
+AI_IMAGE_TIMEOUT_S = _f("ARTWORK_V2_AI_IMAGE_TIMEOUT_S", "300")
+# ชั้นกันพลาด (ปิดตามที่ผู้ใช้เลือก): ``1`` = AI บอก "ภาพเหมือน" กับตัวอักษร/ตัวเลข/ตัวพิมพ์ที่ Vision
+# อ่านชัด ≥ CONF_FAIL ทั้งสองฝั่ง ⇒ คงไว้เป็นเหลือง (ไม่พับ) — 30 ก.ย. วัดได้ว่า Gemini ที่เห็นสองภาพ
+# ในคำขอเดียว "ลอก" ภาพ B ตาม A แล้วกลืนความต่างจริง
+AI_IMAGE_SAFETY = _b("ARTWORK_V2_AI_IMAGE_SAFETY", "0")
 # โหมด judge: จุดที่ต่างแค่เครื่องหมายวรรคตอน ⇒ เหลืองเสมอ (กติกาเดียวกับอัลกอริทึม —
 # PUNCT แดงได้เฉพาะเมื่อการอ่านซ้ำยืนยัน · คำตอบของ AI ไม่ใช่การอ่านซ้ำ) · 0 = แดงได้แบบเดิม
 AI_JUDGE_PUNCT_YELLOW = _b("ARTWORK_V2_AI_JUDGE_PUNCT_YELLOW", "1")

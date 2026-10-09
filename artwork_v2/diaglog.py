@@ -174,6 +174,9 @@ def build_text(r: dict) -> str:
                     a("%s   ai_reason: %s" % (ind, _q(ai["reason"], 300)))
                 if ai.get("suggestion"):
                     a("%s   ai_suggestion: %s" % (ind, _q(ai["suggestion"], 300)))
+                if ai.get("image"):
+                    a("%s   ai_seen: A=%s B=%s" % (ind, _q(ai.get("a_seen") or "", 120),
+                                                  _q(ai.get("b_seen") or "", 120)))
             for m in f.get("members") or []:
                 finding(m, ind + "    · ")
 
@@ -309,6 +312,9 @@ def build_text(r: dict) -> str:
         if x.get("mode") == "raw":
             a("     raw: algo_compare=%s coverage_ignored=%s (ผลของอัลกอริทึมพับไว้เทียบ · ความครอบคลุมไม่ใช้ตัดสิน)"
               % (x.get("algo_compare", "-"), p.get("coverage_ignored", False)))
+        if x.get("mode") == "image":
+            a("     image: verdicts=%s items_ignored=%s (AI ดูภาพที่ส่ง Vision แล้วตัดสินจุดของอัลกอริทึม)"
+              % (x.get("image_verdicts"), x.get("items_ignored", 0)))
         for eq in x.get("equivalent") or []:
             a("     equivalent %s (AI=%s): %s" % (eq.get("what"), eq.get("verdict"), eq.get("reason")))
         for bad in x.get("invalid") or []:

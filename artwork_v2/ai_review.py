@@ -14,13 +14,19 @@ Gemini ตอบด้วย **รหัสคำของ Vision** → แอ�
 * โหมด ``judge``: AI ตัดสินหลัก · จุดของอัลกอริทึมที่ AI ไม่ระบุ ⇒ รายการพับ ``algo_only``
 * โหมด ``raw`` (ทดลอง): ส่ง **บรรทัดดิบตามที่ Vision ส่ง** (ไม่ผ่านชั้นต่อแถว/ต่อคำ ไม่มีธงหรือผล
   ของอัลกอริทึม) · AI ตัดสินเอง · กรอบ/% ยังมาจาก Vision · ผลอัลกอริทึมทั้งหมด ⇒ รายการพับ "ไว้เทียบ"
+* โหมด ``image`` (ทดลอง · 9 ต.ค.): ส่ง **ภาพโซน A/B ชุดเดียวกับที่ส่ง Vision** + ข้อความ/ความมั่นใจ
+  ของ Vision + จุดต่างของอัลกอริทึม (มีกรอบ) ให้ Gemini ดูภาพตัดสินทีละจุด · ต่างจริง = แดง ·
+  ภาพเหมือนกัน (Vision อ่านผิด) = รายการพับ ``ai_dismissed`` (ไม่ลบ) · ไม่แน่ใจ = เหลือง ·
+  จุดที่ AI ไม่ตอบ = คงระดับของอัลกอริทึม · ไม่รับจุดที่ AI "พบเพิ่ม"
 * N8N ล่ม/ตอบผิดรูป ⇒ ใช้ผลอัลกอริทึมทุกรายการ + คำเตือน (ไม่มีทางได้ผลว่างเพราะ AI พัง)
 """
 
 from __future__ import annotations
 
+import base64
 import copy
 import json
+import os
 import re
 import time
 import unicodedata
@@ -86,13 +92,39 @@ def _cand_side(f: dict, s: str) -> dict:
             "line_text": _clip(d.get("text"), 300)}
 
 
-def _candidates(findings: List[dict]) -> List[dict]:
+def _norm_box(b, size) -> Optional[List[int]]:
+    W, H = (size or (0, 0))
+    if not b or not W or not H:
+        return None
+    return [int(round(b[0] / W * 1000)), int(round(b[1] / H * 1000)),
+            int(round(b[2] / W * 1000)), int(round(b[3] / H * 1000))]
+
+
+def _cand_box(f: dict, s: str, size) -> Optional[List[int]]:
+    """กรอบของจุดต่างบนภาพฝั่ง ``s`` (0-1000) — คำเต็มก่อน · การ์ดโค้ง = union ของสมาชิก"""
+    bs = []
+    for g in [f] + list(f.get("members") or []):
+        d = g.get(s) or {}
+        b = d.get("word_box") or d.get("box")
+        if b:
+            bs.append(b)
+    if not bs:
+        return None
+    return _norm_box([min(b[0] for b in bs), min(b[1] for b in bs),
+                      max(b[2] for b in bs), max(b[3] for b in bs)], size)
+
+
+def _candidates(findings: List[dict], sizes: Optional[dict] = None) -> List[dict]:
+    """``sizes`` (โหมด image) = ``{"a": (W, H), "b": (W, H)}`` ⇒ ใส่กรอบ 0-1000 บนภาพให้ทุกฝั่ง"""
     out = []
     for f in findings:
         if f.get("id") is None:
             continue
         c = {"id": "F%d" % f["id"], "class": f["class"], "severity": f["severity"],
              "a": _cand_side(f, "a"), "b": _cand_side(f, "b")}
+        if sizes:
+            for s in ("a", "b"):
+                c[s]["box"] = _cand_box(f, s, sizes.get(s))
         if f.get("members"):
             c["members"] = [{"a": _cand_side(m, "a"), "b": _cand_side(m, "b")}
                             for m in f["members"]]
@@ -112,8 +144,26 @@ def build_payload(n: int, mode: str, A: List[dict], B: List[dict], size_a, size_
          "zone_a": _side_payload(A, "A", size_a, curved.get("A")),
          "zone_b": _side_payload(B, "B", size_b, curved.get("B"))}
     # โหมด judge/raw ไม่ส่งผลของอัลกอริทึม — ให้ AI หาเองอย่างอิสระ (ใช้ A/B เทียบสองแนวทางได้จริง)
-    p["candidates"] = _candidates(findings) if mode == "assist" else []
+    if mode == "image":
+        p["contract"] = "artwork-v2-image/1"
+        p["candidates"] = _candidates(findings, {"a": size_a, "b": size_b})
+    else:
+        p["candidates"] = _candidates(findings) if mode == "assist" else []
     return p
+
+
+def image_part(path: str, size) -> Optional[dict]:
+    """ภาพโซนที่ส่ง Vision (ไฟล์ใน ``img/`` ของรอบ) → ``{mime, w, h, b64}`` · อ่านไม่ได้ = ``None``"""
+    try:
+        with open(path, "rb") as fh:
+            data = fh.read()
+    except OSError:
+        return None
+    if not data:
+        return None
+    W, H = (size or (0, 0))
+    return {"mime": "image/jpeg", "w": int(W), "h": int(H),
+            "b64": base64.b64encode(data).decode("ascii")}
 
 
 def call(url: str, payload: dict, poster: Optional[Callable] = None,
@@ -445,7 +495,7 @@ def merge(mode: str, pr: dict, resp: dict, A: List[dict], B: List[dict]) -> dict
                        "suggestion": _clip(r.get("suggestion"))}
 
     ai_finds: List[dict] = []
-    for it in _as_list(resp.get("items")):
+    for it in ([] if mode == "image" else _as_list(resp.get("items"))):
         st["items_total"] += 1
         f, why, kind = check_item(it, A, B)
         if kind == "equivalent":
@@ -504,6 +554,8 @@ def merge(mode: str, pr: dict, resp: dict, A: List[dict], B: List[dict]) -> dict
         st["reviewable"] = len(findings)
     elif mode == "raw":
         _merge_raw(pr, ai_finds, findings, st)
+    elif mode == "image":
+        _merge_image(pr, resp, findings, st)
     else:   # judge
         kept, dismissed = [], []
         for f in ai_finds:
@@ -567,6 +619,75 @@ def merge(mode: str, pr: dict, resp: dict, A: List[dict], B: List[dict]) -> dict
 
 
 _HARD_CLASSES = ("TEXT", "NUMBER", "CASE", "MISSING_IN_B", "EXTRA_IN_B")
+
+
+def _merge_image(pr: dict, resp: dict, findings: List[dict], st: dict) -> None:
+    """โหมด image — Gemini ดูภาพแล้วตัดสินจุดของอัลกอริทึมทีละจุด (ผู้ใช้เลือก "ตัดสินเต็มที่")
+
+    * ``real`` (ภาพต่างจริง) = แดง · ``noise`` (ภาพเหมือนกัน — Vision อ่านผิด) ⇒ ``ai_dismissed``
+      (ไม่ลบ · ไม่นับ) · ``uncertain`` = เหลือง
+    * จุดที่ AI ไม่ได้ตอบ ⇒ คงระดับของอัลกอริทึม + หมายเหตุ (ไม่หายเงียบ)
+    * ``items`` (จุดที่ AI พบเพิ่ม) ไม่ถูกใช้ — โหมดนี้ตรวจเฉพาะจุดที่อัลกอริทึมพบ
+    * ``AI_IMAGE_SAFETY`` (ค่าเริ่มต้นปิด) — "ภาพเหมือน" กับตัวอักษร/ตัวเลข/ตัวพิมพ์ที่ Vision อ่านชัด ⇒ เหลือง
+    """
+    by_id = {"F%d" % f["id"]: f for f in findings if f.get("id") is not None}
+    st["items_ignored"] = len(_as_list(resp.get("items")))
+    got: Dict[str, dict] = {}
+    for r in _as_list(resp.get("reviews")):
+        st["reviews_total"] += 1
+        if not isinstance(r, dict):
+            st["invalid"].append({"what": "review", "reason": "ไม่ใช่ object"})
+            continue
+        cid = str(r.get("candidate") or "").strip()
+        v = str(r.get("verdict") or "").strip().lower()
+        if cid not in by_id or v not in VERDICTS:
+            st["invalid"].append({"what": "review %s" % _clip(cid, 20),
+                                  "reason": "ไม่มีจุดนี้" if cid not in by_id else "verdict ไม่รู้จัก"})
+            continue
+        if cid in got:
+            st["invalid"].append({"what": "review %s" % cid, "reason": "ตอบจุดเดียวกันซ้ำ — ใช้คำตอบแรก"})
+            continue
+        st["reviews_valid"] += 1
+        got[cid] = {"verdict": v, "reason": _clip(r.get("reason")),
+                    "suggestion": _clip(r.get("suggestion")), "image": True,
+                    "a_seen": _clip(r.get("a_seen"), 300), "b_seen": _clip(r.get("b_seen"), 300)}
+    kept, dismissed = [], []
+    cnt = {"real": 0, "noise": 0, "uncertain": 0, "unanswered": 0, "guarded": 0}
+    for f in findings:
+        ai = got.get("F%d" % f["id"]) if f.get("id") is not None else None
+        if ai is None:
+            cnt["unanswered"] += 1
+            f["ai"] = {"verdict": None, "reason": "", "suggestion": "", "image": True}
+            f["notes"].append("AI ไม่ได้ตอบจุดนี้ — คงระดับของอัลกอริทึม")
+            kept.append(f)
+            continue
+        f["ai"] = ai
+        v = ai["verdict"]
+        cnt[v] += 1
+        if v == "noise" and config.AI_IMAGE_SAFETY and _hard_evidence(f):
+            cnt["guarded"] += 1
+            f["severity"] = "yellow"
+            f["notes"].append("AI ดูภาพแล้วบอกว่าเหมือนกัน แต่ Vision อ่านตัวอักษร/ตัวเลขที่ต่างได้ชัด "
+                              "(≥ %d%% ทั้งสองฝั่ง) — คงไว้ให้คนดู" % round(config.CONF_FAIL * 100))
+            kept.append(f)
+            continue
+        if v == "noise":
+            f["severity"] = "dismissed"
+            f["notes"].append("AI ดูภาพแล้วตัดสินว่าสองฝั่งพิมพ์เหมือนกัน (Vision อ่านผิด) — ไม่นับในผลตัดสิน")
+            dismissed.append(f)
+            continue
+        if v == "real":
+            f["severity"] = "red"
+            f["notes"].append("AI ดูภาพแล้วยืนยันว่าต่างจริง")
+        else:
+            f["severity"] = "yellow"
+            f["notes"].append("AI ดูภาพแล้วไม่แน่ใจ — โปรดดูด้วยตา")
+        kept.append(f)
+    pr["findings"] = kept
+    pr["ai_dismissed"] = dismissed
+    st["image_verdicts"] = cnt
+    st["reviewed"] = len(findings) - cnt["unanswered"]
+    st["reviewable"] = len(findings)
 
 
 def _short_onesided(f: dict) -> str:
@@ -687,13 +808,23 @@ _MERGE_KEYS = ("findings", "ai_dismissed", "algo_only")
 
 
 def _url_of(mode: str) -> str:
-    """โหมด raw ยิง workflow แยก (artwork-v2-raw) · assist/judge ยิง workflow เดิม (artwork-v2-review)"""
-    return config.AI_RAW_URL if mode == "raw" else config.AI_REVIEW_URL
+    """โหมด raw / image ยิง workflow แยกของตัวเอง · assist/judge ยิง workflow เดิม (artwork-v2-review)"""
+    if mode == "raw":
+        return config.AI_RAW_URL
+    if mode == "image":
+        return config.AI_IMAGE_URL
+    return config.AI_REVIEW_URL
+
+
+_URL_ENV = {"raw": "ARTWORK_V2_AI_RAW_URL", "image": "ARTWORK_V2_AI_IMAGE_URL"}
 
 
 def run_all(pairs: List[dict], mode: str, warnings: List[str], say: Callable,
-            next_id: int, poster: Optional[Callable] = None) -> Tuple[dict, int]:
-    """ทำทุกคู่โซน · คืน ``(สรุปทั้งรอบ, id ถัดไป)`` — ใช้ ``pr["_cmp"]`` (บรรทัดที่เทียบจริง)"""
+            next_id: int, poster: Optional[Callable] = None,
+            img_dir: Optional[str] = None) -> Tuple[dict, int]:
+    """ทำทุกคู่โซน · คืน ``(สรุปทั้งรอบ, id ถัดไป)`` — ใช้ ``pr["_cmp"]`` (บรรทัดที่เทียบจริง)
+
+    ``img_dir`` (โหมด image) = โฟลเดอร์ ``img/`` ของรอบ (ภาพที่ส่ง Vision · ``sides[s]["image"]``)"""
     url = _url_of(mode)
     summary = {"mode": mode, "url": url if mode != "off" else "",
                "pairs_ok": 0, "pairs_failed": 0}
@@ -707,6 +838,22 @@ def run_all(pairs: List[dict], mode: str, warnings: List[str], say: Callable,
         if pr.get("unreadable") or not cmp_ or (mode == "raw" and not raw):
             pr["ai"] = {"mode": mode, "status": "skipped", "reason": "คู่นี้อ่านไม่ได้", "vision_conf": vc}
             continue
+        if mode == "image" and not (pr.get("findings") or []):
+            # ไม่มีจุดต่างให้ดูภาพ ⇒ ไม่ยิง (ประหยัดโควตา · ผลเท่าเดิม)
+            pr["ai"] = {"mode": mode, "status": "skipped", "reason": "ไม่มีจุดต่างให้ตรวจกับภาพ",
+                        "vision_conf": vc}
+            continue
+        imgs = None
+        if mode == "image":
+            imgs = {s: (image_part(os.path.join(img_dir or "", pr["sides"][s].get("image") or ""),
+                                   pr["sides"][s].get("sent_px"))
+                        if img_dir and pr["sides"][s].get("image") else None) for s in ("a", "b")}
+            if not imgs["a"] or not imgs["b"]:
+                summary["pairs_failed"] += 1
+                pr["ai"] = {"mode": mode, "status": "failed", "error": "อ่านภาพที่ส่ง Vision ไม่ได้",
+                            "vision_conf": vc}
+                warnings.append("คู่ %d: AI ดูภาพไม่ได้ (อ่านไฟล์ภาพไม่ได้) — ใช้ผลของอัลกอริทึม" % pr["n"])
+                continue
         say("กำลังให้ AI ตรวจทานคู่ %d" % pr["n"])
         if mode == "raw":
             # บรรทัดตามที่ Vision ส่ง (textmodel) — ไม่ผ่านชั้นต่อแถว/ต่อคำ · ไม่ส่งธงโค้ง
@@ -718,10 +865,12 @@ def run_all(pairs: List[dict], mode: str, warnings: List[str], say: Callable,
         payload = build_payload(pr["n"], mode, A, B, tuple(pr["sides"]["a"]["sent_px"]),
                                 tuple(pr["sides"]["b"]["sent_px"]), pr.get("findings") or [],
                                 curved=curved)
+        if imgs:
+            payload["images"] = imgs
         resp, info = call(url, payload, poster,
-                          timeout=config.AI_RAW_TIMEOUT_S if mode == "raw" else None,
-                          url_env=("ARTWORK_V2_AI_RAW_URL" if mode == "raw"
-                                   else "ARTWORK_V2_AI_REVIEW_URL"))
+                          timeout={"raw": config.AI_RAW_TIMEOUT_S,
+                                   "image": config.AI_IMAGE_TIMEOUT_S}.get(mode),
+                          url_env=_URL_ENV.get(mode, "ARTWORK_V2_AI_REVIEW_URL"))
         ai = {"mode": mode, "status": "ok" if resp is not None else "failed",
               "http": info["http"], "ms": info["ms"], "attempts": info["attempts"],
               "request_bytes": info["bytes"], "error": info["error"], "vision_conf": vc,

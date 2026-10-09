@@ -142,7 +142,8 @@ ROW_B = [("Crude Fat (min)", 20, 40, {"cw": 10, "h": 20}),
 
 
 def test_mode_is_known_and_old_modes_unchanged():
-    assert config.AI_MODES == ("assist", "judge", "raw", "off")
+    # 9 ต.ค. เพิ่มโหมด image (เพิ่มอย่างเดียว — โหมดเดิมครบ ลำดับเดิม)
+    assert config.AI_MODES == ("assist", "judge", "raw", "image", "off")
     assert ai_review.norm_mode("raw") == "raw" and ai_review.norm_mode("RAW ") == "raw"
     src = open(os.path.join(ROOT, "artwork_v2", "config.py"), encoding="utf-8").read()
     # 7 ต.ค. ค่าเริ่มต้นของเครื่องเปลี่ยนเป็น "off" (ข้อสรุปทีม) — raw ยังเป็นตัวเลือกที่ต้องเลือกเอง

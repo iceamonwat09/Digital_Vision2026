@@ -450,13 +450,14 @@
           <option value="gray"{% if v2_color_mode == "gray" %} selected{% endif %}>เทา (ทดลอง)</option>
           <option value="bw"{% if v2_color_mode == "bw" %} selected{% endif %}>ขาวดำ (ทดลอง)</option>
         </select></label>
-      <label class="v2-muted" title="ส่งข้อความที่ Vision อ่านได้ให้ Gemini (ผ่าน N8N) ตรวจทาน — ไม่ส่งภาพ ไม่ยิง Vision ซ้ำ · % ความมั่นใจคิดจาก Vision เสมอ">AI ตรวจทาน
+      <label class="v2-muted" title="ส่งข้อความที่ Vision อ่านได้ให้ Gemini (ผ่าน N8N) ตรวจทาน — ไม่ยิง Vision ซ้ำ · ส่งภาพเฉพาะโหมด &quot;AI ดูภาพตัดสิน&quot; · % ความมั่นใจคิดจาก Vision เสมอ">AI ตรวจทาน
         <select id="v2Ai" class="v2-input">
           <option value="assist"{% if v2_ai_mode == "assist" %} selected{% endif %}>อัลกอริทึมตัดสิน + AI เสริม</option>
           {% if v2_ai_experimental or v2_ai_mode in ('judge', 'raw') %}
           <option value="judge"{% if v2_ai_mode == "judge" %} selected{% endif %}>AI ตัดสินหลัก (ทดลอง)</option>
           <option value="raw"{% if v2_ai_mode == "raw" %} selected{% endif %} title="ส่งบรรทัดตามที่ Vision อ่านได้ตรง ๆ (ไม่ผ่านอัลกอริทึม) ให้ Gemini เทียบเองแบบคิดนาน · กรอบ/% ยังมาจาก Vision · ใช้เวลานานขึ้น">AI ตัดสินจากข้อมูลดิบ (ทดลอง)</option>
           {% endif %}
+          <option value="image"{% if v2_ai_mode == "image" %} selected{% endif %} title="ส่งภาพโซน A/B ชุดเดียวกับที่ส่ง Vision + ข้อความที่ Vision อ่านได้ ให้ Gemini ดูภาพแล้วตัดสินทุกจุดต่าง (ต่างจริง = แดง · ภาพเหมือนกัน = รายการพับ · ไม่แน่ใจ = เหลือง) · workflow แยก artwork-v2-image · % ยังมาจาก Vision">AI ดูภาพตัดสิน (ทดลอง)</option>
           <option value="off"{% if v2_ai_mode == "off" %} selected{% endif %}>ปิด AI</option>
         </select></label>
       <span id="v2RunMsg" class="v2-muted"></span>

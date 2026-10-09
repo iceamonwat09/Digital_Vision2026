@@ -426,9 +426,11 @@ def _run(job_id, raw_pairs, poster, progress, sharpness, ai_mode, ai_poster,
             fid += 1
             f["id"] = fid
 
-    # ── 6) AI ตรวจทาน (ข้อความของ Vision → N8N/Gemini · ไม่ส่งภาพ · ไม่ยิง Vision ซ้ำ) ──
+    # ── 6) AI ตรวจทาน (ข้อความของ Vision → N8N/Gemini · โหมด image ส่งภาพที่ส่ง Vision ไปด้วย · ไม่ยิง Vision ซ้ำ) ──
     t0 = time.time()
-    ai_sum, fid = ai_review.run_all(pairs, ai_mode, warnings, say, fid, ai_poster)
+    # โหมด image เท่านั้นที่ส่งภาพ (ไฟล์ img/ ของรอบ = ภาพที่ส่ง Vision) — โหมดอื่นเรียกแบบเดิมเป๊ะ
+    extra = {"img_dir": os.path.join(rd, "img")} if ai_mode == "image" else {}
+    ai_sum, fid = ai_review.run_all(pairs, ai_mode, warnings, say, fid, ai_poster, **extra)
     stage["ai_ms"] = int((time.time() - t0) * 1000)
     for pr in pairs:              # จุดที่ AI เพิ่ม/คืนมา ก็ต้องผ่านพื้นที่ยกเว้นเหมือนกัน
         apply_ignore(pr)
@@ -522,7 +524,7 @@ def settings_snapshot() -> dict:
         "PUNCT_CAN_FAIL", "CURVED_GROUP_ENABLED", "TILT_ANGLE", "CURVED_NEIGHBOR_MAX_CHARS",
         "DEBRIS_ENABLED", "DEBRIS_CONF", "SEAM_FILLER", "CROSS_ROW_JOIN", "SYMBOL_TOKEN",
         "FRACTION_YELLOW", "REREAD_ENABLED", "REREAD_MAX", "REREAD_SCALE", "REREAD_MAX_SIDE",
-        "AI_MODE", "AI_REVIEW_URL", "AI_RAW_URL", "AI_TIMEOUT_S", "AI_RAW_TIMEOUT_S", "AI_RAW_SAFETY", "AI_RETRIES", "AI_JUDGE_PUNCT_YELLOW",
+        "AI_MODE", "AI_REVIEW_URL", "AI_RAW_URL", "AI_IMAGE_URL", "AI_TIMEOUT_S", "AI_RAW_TIMEOUT_S", "AI_IMAGE_TIMEOUT_S", "AI_RAW_SAFETY", "AI_IMAGE_SAFETY", "AI_RETRIES", "AI_JUDGE_PUNCT_YELLOW",
         "AI_QUOTE_RECOVER", "AI_QUOTE_RECOVER_MAX_SHIFT", "AI_EQUIV_NOISE", "AI_SEND_CURVED",
         "AI_JUDGE_KEEP_ALGO_RED", "AI_JUDGE_NOISE_GUARD", "AI_JUDGE_CURVED_YELLOW",
         "AI_JUDGE_ONESIDED_GUARD", "AI_DEDUP_FOLDED",
