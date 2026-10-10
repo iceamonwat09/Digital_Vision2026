@@ -194,7 +194,7 @@ def _load_image(path: str):
     return im
 
 
-def _spot_px(f: dict, s: str):
+def _spot_px(f: dict, s: str, vertical: bool = False):
     """กรอบของจุดบนภาพฝั่ง ``s`` (พิกเซลของภาพที่ส่ง) + ความสูงบรรทัด
 
     คำเต็ม → ตัวอักษรที่ต่าง → ตำแหน่งประมาณ (``est_box`` — ฝั่งที่ไม่มีข้อความ) · การ์ดโค้ง = union
@@ -205,7 +205,7 @@ def _spot_px(f: dict, s: str):
         b = d.get("word_box") or d.get("box") or d.get("est_box")
         if b:
             bs.append(b)
-            hs.append(b[3] - b[1])
+            hs.append((b[2] - b[0]) if vertical else (b[3] - b[1]))   # แนวตั้ง: ความสูงตัวอักษร = ด้านแคบ
     if not bs:
         return None, None
     hs.sort()
@@ -213,11 +213,15 @@ def _spot_px(f: dict, s: str):
              max(b[2] for b in bs), max(b[3] for b in bs)], hs[len(hs) // 2])
 
 
-def crop_rect(box, lh, W: int, H: int) -> List[int]:
+def crop_rect(box, lh, W: int, H: int, vertical: bool = False) -> List[int]:
     """กรอบครอปรอบจุด (พิกเซล · อยู่ในภาพเสมอ) — เห็นคำข้าง ๆ และบรรทัดบน/ล่างบางส่วน
 
     กว้างอย่างน้อย ``AI_IMAGE_CROP_MIN_W`` · ถ้าบริบทเกินด้านยาวสูงสุดแต่ตัวจุดเองพอดี ⇒ ตัดบริบท
-    ให้พอดี ``AI_IMAGE_CROP_MAX_SIDE`` (คงความละเอียดจริง ไม่ย่อ)"""
+    ให้พอดี ``AI_IMAGE_CROP_MAX_SIDE`` (คงความละเอียดจริง ไม่ย่อ) · ``vertical`` = ข้อความแนวตั้ง ⇒ คิดในแกน
+    ที่สลับกัน (บริบทตามแนวข้อความ = แนวตั้ง · บรรทัดข้างเคียง = ซ้าย/ขวา) แล้วสลับกลับ"""
+    if vertical:
+        r = crop_rect([box[1], box[0], box[3], box[2]], lh, H, W)
+        return [r[1], r[0], r[3], r[2]]
     mx = max(64, int(config.AI_IMAGE_CROP_MAX_SIDE))
     x0, y0, x1, y1 = [float(v) for v in box]
     bw, bh = max(1.0, x1 - x0), max(1.0, y1 - y0)
@@ -249,12 +253,27 @@ def hires_scale(box, lh, kmax: float) -> float:
     return k if k >= float(config.AI_IMAGE_CROP_HIRES_MIN) else 1.0
 
 
-def crop_part(im, box, lh, hi=None) -> Optional[Tuple[dict, dict]]:
+def _rot_rel(b: List[int], rot: int) -> List[int]:
+    """กรอบ 0..1000 ในครอป → กรอบในครอปที่หมุนตามเข็ม ``rot`` องศา"""
+    x0, y0, x1, y1 = b
+    if rot == 90:
+        return [1000 - y1, x0, 1000 - y0, x1]
+    if rot == 180:
+        return [1000 - x1, 1000 - y1, 1000 - x0, 1000 - y0]
+    if rot == 270:
+        return [y0, 1000 - x1, y1, 1000 - x0]
+    return list(b)
+
+
+def crop_part(im, box, lh, hi=None, vertical: bool = False,
+              rot: int = 0) -> Optional[Tuple[dict, dict]]:
     """ครอปรอบจุดจากภาพที่ส่ง Vision → ``(ส่วนที่ส่ง {mime, w, h, b64}, ข้อมูลใน candidate {w, h, box})``
 
     ``hi`` (``pipeline.HiresSide`` · PDF เท่านั้น) — ตัวอักษรเล็ก ⇒ เรนเดอร์บริเวณเดียวกันใหม่จากไฟล์ต้นฉบับ
     ที่ dpi สูงขึ้น (กรอบครอปคิดในพิกัดที่ขยายแล้ว ⇒ ด้านยาวยังไม่เกินเพดาน) · เรนเดอร์ไม่ได้ ⇒ ครอป JPEG เดิม ·
-    ย่อเฉพาะเมื่อครอปยังใหญ่กว่า ``AI_IMAGE_CROP_MAX_SIDE`` (ตัวจุดเองกว้างมาก) · JPEG คุณภาพสูง"""
+    ย่อเฉพาะเมื่อครอปยังใหญ่กว่า ``AI_IMAGE_CROP_MAX_SIDE`` (ตัวจุดเองกว้างมาก) · JPEG คุณภาพสูง ·
+    ``vertical`` = ข้อความแนวตั้ง (ระยะเผื่อจากด้านแคบ) · ``rot`` = หมุนครอปตามเข็มก่อนส่ง (ให้ข้อความตั้งตรง ·
+    กรอบของจุดในครอปหมุนตาม)"""
     import cv2
     H, W = im.shape[:2]
     up, c, bx = 1.0, None, [float(v) for v in box]
@@ -262,12 +281,12 @@ def crop_part(im, box, lh, hi=None) -> Optional[Tuple[dict, dict]]:
         kk = hires_scale(box, lh, hi.kmax)
         if kk > 1.0:
             bk = [v * kk for v in bx]
-            rk = crop_rect(bk, float(lh or 0) * kk, W * kk, H * kk)
+            rk = crop_rect(bk, float(lh or 0) * kk, W * kk, H * kk, vertical)
             got = hi.render([v / kk for v in rk], (rk[2] - rk[0], rk[3] - rk[1]))
             if got is not None and getattr(got, "size", 0):
                 up, c, bx, r = kk, got, bk, rk
     if c is None:
-        r = crop_rect(box, lh, W, H)
+        r = crop_rect(box, lh, W, H, vertical)
         c = im[r[1]:r[3], r[0]:r[2]]
     if c.size == 0:
         return None
@@ -276,6 +295,10 @@ def crop_part(im, box, lh, hi=None) -> Optional[Tuple[dict, dict]]:
     if k < 1.0:
         c = cv2.resize(c, (max(1, int(round(cw * k))), max(1, int(round(ch * k)))),
                        interpolation=cv2.INTER_AREA)
+    rot = int(rot or 0) % 360
+    if rot in (90, 180, 270):
+        c = cv2.rotate(c, {90: cv2.ROTATE_90_CLOCKWISE, 180: cv2.ROTATE_180,
+                           270: cv2.ROTATE_90_COUNTERCLOCKWISE}[rot])
     try:
         from . import imaging          # ตัวเข้ารหัสเดียวกับภาพที่ส่ง Vision (4:4:4 · ไม่ลดสี)
         data = imaging.encode_jpeg(c, int(config.AI_IMAGE_CROP_JPEG_Q))
@@ -286,7 +309,11 @@ def crop_part(im, box, lh, hi=None) -> Optional[Tuple[dict, dict]]:
            max(0, min(1000, int(round((bx[1] - r[1]) / float(ch) * 1000)))),
            max(0, min(1000, int(round((bx[2] - r[0]) / float(cw) * 1000)))),
            max(0, min(1000, int(round((bx[3] - r[1]) / float(ch) * 1000))))]
+    if rot in (90, 180, 270):
+        rel = _rot_rel(rel, rot)
     info = {"w": int(w2), "h": int(h2), "box": rel, "region": r, "scale": round(k, 4)}
+    if rot in (90, 180, 270):
+        info["rot"] = rot
     if up > 1.0:
         info["hires"] = round(up, 3)
         if getattr(hi, "base_dpi", None):
@@ -295,9 +322,41 @@ def crop_part(im, box, lh, hi=None) -> Optional[Tuple[dict, dict]]:
              "b64": base64.b64encode(data).decode("ascii")}, info)
 
 
+def _line_rot(f: dict, s: str, lines: Optional[dict]) -> Optional[int]:
+    """มุมของบรรทัดที่จุดนี้อ้างบนฝั่ง ``s`` ตามที่ Vision วัด (ปัดเป็น 0/90/180/270 · ห่างเกิน 20° ⇒ None)"""
+    i = (f.get(s) or {}).get("line")
+    ls = (lines or {}).get(s) or []
+    if not isinstance(i, int) or not (0 <= i < len(ls)):
+        return None
+    a = (ls[i] or {}).get("angle")
+    if a is None:
+        return None
+    q = int(round(float(a) / 90.0)) * 90 % 360
+    d = abs(float(a) % 360 - q)
+    return q if min(d, 360 - d) <= 20 else None
+
+
+def spot_orient(f: dict, s: str, lines: Optional[dict]) -> Tuple[bool, int]:
+    """(ข้อความแนวตั้งไหม, หมุนครอปตามเข็มกี่องศาให้ข้อความตั้งตรง) ของจุดนี้บนฝั่ง ``s``
+
+    มุมจากบรรทัดของฝั่งนั้น → ไม่มี (ฝั่งที่ไม่มีข้อความ) ใช้ของอีกฝั่ง · ไม่มีมุมเลย ⇒ ครอปแบบเดิม (ไม่เดา) ·
+    ``AI_IMAGE_CROP_VERTICAL`` ปิด ⇒ (False, 0) เสมอ"""
+    if not config.AI_IMAGE_CROP_VERTICAL:
+        return False, 0
+    a = _line_rot(f, s, lines)
+    if a is None:
+        a = _line_rot(f, "b" if s == "a" else "a", lines)
+    if a is None:
+        # ไม่มีมุมจาก Vision ⇒ ครอปแบบเดิม (สัดส่วนกรอบใช้ตัดสินไม่ได้: ตัวอักษรเดี่ยว "1" "|" ก็สูง-แคบ)
+        return False, 0
+    rot = (360 - a) % 360 if config.AI_IMAGE_CROP_ROTATE else 0
+    return a in (90, 270), rot
+
+
 def plan_crops(findings: List[dict], ims: dict,
                hires: Optional[dict] = None,
-               stats: Optional[dict] = None) -> Tuple[List[dict], List[dict], dict, dict]:
+               stats: Optional[dict] = None,
+               lines: Optional[dict] = None) -> Tuple[List[dict], List[dict], dict, dict]:
     """เลือกจุดที่ส่ง (แดงก่อนเหลือง · ไม่เกิน ``AI_IMAGE_MAX_CANDIDATES``) + ครอป A/B ของแต่ละจุด
 
     คืน ``(จุดที่ส่ง ตามลำดับเดิม, ส่วนภาพเรียงตามจุด, ข้อมูลครอปต่อจุด, {F<n>: เหตุที่ไม่ส่ง})``"""
@@ -312,11 +371,12 @@ def plan_crops(findings: List[dict], ims: dict,
             continue
         got = {}
         for s in ("a", "b"):
-            box, lh = _spot_px(f, s)
+            vert, rot = spot_orient(f, s, lines)
+            box, lh = _spot_px(f, s, vert)
             if box is None:
                 skip[fid] = "ไม่มีตำแหน่งของจุดนี้บนภาพฝั่ง %s" % s.upper()
                 break
-            cp = crop_part(ims[s], box, lh, (hires or {}).get(s))
+            cp = crop_part(ims[s], box, lh, (hires or {}).get(s), vert, rot)
             if cp is None:
                 skip[fid] = "ครอปภาพฝั่ง %s ไม่ได้" % s.upper()
                 break
@@ -335,6 +395,11 @@ def plan_crops(findings: List[dict], ims: dict,
     pub = {k: {s: {kk: v[s][kk] for kk in ("w", "h", "box")} for s in ("a", "b")}
            for k, v in info.items()}
     hi_dpis = [v[s].get("dpi") or 0 for v in info.values() for s in ("a", "b") if v[s].get("hires")]
+    if stats is not None:
+        # มุมที่หมุนครอป (ไม่อยู่ใน payload — สัญญากับ N8N คงเดิม) · ใช้ตอนเก็บภาพ/แสดงใน ⓘ/Log
+        stats["rots"] = {k: {s: v[s]["rot"] for s in ("a", "b") if v[s].get("rot")}
+                         for k, v in info.items() if any(v[s].get("rot") for s in ("a", "b"))}
+        stats["rotated_crops"] = sum(len(v) for v in stats["rots"].values())
     if stats is not None and hires is not None:
         # สถิติสำหรับ Log (ไม่อยู่ใน payload) — ครอปกี่รูปที่เรนเดอร์ใหม่จาก PDF · dpi สูงสุด
         stats["hires_crops"] = len(hi_dpis)
@@ -343,11 +408,12 @@ def plan_crops(findings: List[dict], ims: dict,
 
 
 def save_crops(img_dir: Optional[str], n: int, crops: List[dict], info: dict,
-               findings: List[dict]) -> int:
+               findings: List[dict], rots: Optional[dict] = None) -> int:
     """เก็บครอปที่ส่ง Gemini จริง (ไบต์เดียวกับใน payload) → ``img/ai<n>_F<id>_<a|b>.jpg``
 
     ผูกไว้ที่ ``f["ai_crop"] = {a|b: {img, w, h, box}}`` (``box`` = กรอบ 0-1000 ที่บอก AI ว่าอ่านตรงนี้) ⇒
-    หน้าเว็บแสดงในหมายเหตุของแถว · เขียนไม่ได้ ⇒ ข้ามรูปนั้น (ไม่แตะผลตรวจ) · คืนจำนวนรูปที่เขียนได้"""
+    หน้าเว็บแสดงในหมายเหตุของแถว · เขียนไม่ได้ ⇒ ข้ามรูปนั้น (ไม่แตะผลตรวจ) · คืนจำนวนรูปที่เขียนได้ ·
+    ``rots`` = {F<n>: {a|b: องศา}} ครอปที่หมุนให้ข้อความตั้งตรงแล้ว ⇒ ``rot`` ใน ``ai_crop``"""
     if not (config.AI_IMAGE_SAVE_CROPS and img_dir and os.path.isdir(img_dir)):
         return 0
     by_id = {"F%d" % f["id"]: f for f in findings if f.get("id") is not None}
@@ -365,6 +431,9 @@ def save_crops(img_dir: Optional[str], n: int, crops: List[dict], info: dict,
             continue
         f.setdefault("ai_crop", {})[s] = {"img": name, "w": int(meta["w"]), "h": int(meta["h"]),
                                           "box": list(meta["box"])}
+        r = ((rots or {}).get(fid) or {}).get(s)
+        if r:
+            f["ai_crop"][s]["rot"] = int(r)
         done += 1
     return done
 
@@ -913,6 +982,17 @@ def _merge_image(pr: dict, resp: dict, findings: List[dict], st: dict,
                               "คงระดับเดิม โปรดดูด้วยตา")
             kept.append(f)
             continue
+        if v == "noise" and config.AI_IMAGE_ONESIDED_GUARD and _strong_onesided(f):
+            # ข้อความมีฝั่งเดียวและ Vision อ่านได้ชัด — AI ที่เห็นครอป A/B ในคำขอเดียวลอกข้อความข้ามฝั่งได้
+            # (F21 ของ John West: "อ่าน" A ได้ประโยคเดียวกับ B ทั้งที่ A ว่าง) ⇒ ไม่พับ คงเป็นเหลือง
+            cnt["onesided_kept"] = cnt.get("onesided_kept", 0) + 1
+            ai["onesided_kept"] = True
+            f["severity"] = "yellow"
+            f["notes"].append("AI บอกว่าเหมือนกันทั้งสองฝั่ง แต่ Vision อ่านข้อความนี้ได้ชัดเพียงฝั่งเดียว "
+                              "(≥ %d%%) — AI อาจลอกข้อความข้ามฝั่ง · ไม่พับ โปรดดูด้วยตา"
+                              % round(config.CONF_FAIL * 100))
+            kept.append(f)
+            continue
         if v == "noise" and config.AI_IMAGE_SAFETY and _hard_evidence(f):
             cnt["guarded"] += 1
             f["severity"] = "yellow"
@@ -947,6 +1027,24 @@ def _merge_image(pr: dict, resp: dict, findings: List[dict], st: dict,
     st["image_verdicts"] = cnt
     st["reviewed"] = len(findings) - cnt["unanswered"] - cnt.get("not_sent", 0)
     st["reviewable"] = len(findings) - cnt.get("not_sent", 0)
+
+
+def _strong_onesided(f: dict) -> bool:
+    """หายไป/เกินมาฝั่งเดียว ที่ Vision อ่านฝั่งที่มีข้อความได้ชัด (≥ ``CONF_FAIL``) · มีตัวอักษร/ตัวเลข ≥ 2 ตัว ·
+    ไม่ใช่ข้อความโค้ง — หลักฐานของ Vision ล้วน"""
+    if f.get("class") not in ("MISSING_IN_B", "EXTRA_IN_B") or f.get("curved"):
+        return False
+    side = f["a" if f["class"] == "MISSING_IN_B" else "b"] or {}
+    if side.get("line") is None:
+        return False
+    try:
+        conf = float(side.get("conf"))
+    except (TypeError, ValueError):
+        return False
+    if conf < float(config.CONF_FAIL):
+        return False
+    k = compare.diff_key_map(side.get("frag") or side.get("text") or "")[0]
+    return sum(1 for ch in k if ch.isalnum()) >= 2
 
 
 def _short_onesided(f: dict) -> str:
@@ -1126,8 +1224,10 @@ def run_all(pairs: List[dict], mode: str, warnings: List[str], say: Callable,
                     hi = {s: hires(pr, s) for s in ("a", "b")}
                 except Exception:                    # noqa: BLE001 — เรนเดอร์ใหม่ไม่ได้ = ครอป JPEG เดิม
                     hi = None
-            sendable, crops, crop_info, skip = plan_crops(pr.get("findings") or [], ims, hi, cstat)
-            cstat["saved"] = save_crops(img_dir, pr["n"], crops, crop_info, pr.get("findings") or [])
+            sendable, crops, crop_info, skip = plan_crops(pr.get("findings") or [], ims, hi, cstat,
+                                                         pr.get("lines"))
+            cstat["saved"] = save_crops(img_dir, pr["n"], crops, crop_info, pr.get("findings") or [],
+                                        cstat.get("rots"))
             for f in pr.get("findings") or []:
                 why = skip.get("F%d" % f["id"]) if f.get("id") is not None else None
                 if why:
@@ -1183,6 +1283,8 @@ def run_all(pairs: List[dict], mode: str, warnings: List[str], say: Callable,
             ai["blind"] = blind
             if config.AI_IMAGE_SAVE_CROPS:
                 ai["crops_saved"] = cstat.get("saved", 0)
+            if config.AI_IMAGE_CROP_VERTICAL:
+                ai["crops_rotated"] = cstat.get("rotated_crops", 0)
         if resp is None:
             summary["pairs_failed"] += 1
             warnings.append("คู่ %d: AI ตรวจทานไม่สำเร็จ — ใช้ผลของอัลกอริทึม (%s)"

@@ -62,6 +62,7 @@
   .v2-mode-ign .v2-zone { pointer-events:none; }
   .v2-res-stage rect.est { fill:rgba(217,119,6,.08); stroke:#d97706; stroke-width:1.5; stroke-dasharray:6 4; vector-effect:non-scaling-stroke; opacity:0; transition:opacity .2s; }
   .v2-res-stage rect.est.hov { opacity:1; }
+  .v2-res-stage rect.est.near, .v2-res-stage rect.est.prop { stroke-dasharray:2 5; fill:rgba(217,119,6,.04); }
   .v2-res-stage rect.ign { fill:rgba(185,28,28,.10); stroke:#b91c1c; stroke-width:1; stroke-dasharray:4 3; vector-effect:non-scaling-stroke; }
   .v2-zone.sel { box-shadow:0 0 0 1px #fff, 0 0 0 3px rgba(15,23,42,.35); }
   .v2-zone span { position:absolute; left:-2px; top:-20px; font-size:12px; font-weight:600; color:#fff; padding:1px 5px; border-radius:3px; white-space:nowrap; pointer-events:none; }
@@ -368,7 +369,7 @@
 {% endblock %}
 
 {% block content %}
-<div class="v2" id="v2Root" data-can-manage="{{ 1 if can_manage_key else 0 }}" data-version="{{ v2_version }}" data-box-style="{{ v2_box_style }}" data-restore-confirm="{{ 1 if v2_restore_confirm else 0 }}" data-restore-days="{{ v2_restore_days }}" data-hover-zoom="{{ 1 if v2_hover_zoom else 0 }}" data-line-group="{{ 1 if v2_line_group else 0 }}" data-sort-severity="{{ 1 if v2_sort_severity else 0 }}" data-table-rows="{{ v2_table_rows }}" data-side-table="{{ 1 if v2_side_table else 0 }}" data-zone-ignore="{{ 1 if v2_zone_ignore else 0 }}" data-ignore-max="{{ v2_ignore_max }}" data-est-box="{{ 1 if v2_est_box else 0 }}" data-review="{{ 1 if v2_review else 0 }}" data-card-style="{{ 'polish' if v2_card_style else 'classic' }}">
+<div class="v2" id="v2Root" data-can-manage="{{ 1 if can_manage_key else 0 }}" data-version="{{ v2_version }}" data-box-style="{{ v2_box_style }}" data-restore-confirm="{{ 1 if v2_restore_confirm else 0 }}" data-restore-days="{{ v2_restore_days }}" data-hover-zoom="{{ 1 if v2_hover_zoom else 0 }}" data-line-group="{{ 1 if v2_line_group else 0 }}" data-sort-severity="{{ 1 if v2_sort_severity else 0 }}" data-table-rows="{{ v2_table_rows }}" data-side-table="{{ 1 if v2_side_table else 0 }}" data-zone-ignore="{{ 1 if v2_zone_ignore else 0 }}" data-ignore-max="{{ v2_ignore_max }}" data-est-box="{{ 1 if v2_est_box else 0 }}" data-near-zoom="{{ 1 if v2_near_zoom else 0 }}" data-review="{{ 1 if v2_review else 0 }}" data-card-style="{{ 'polish' if v2_card_style else 'classic' }}">
   <div class="v2-head">
     <h2>Artwork V2 <span class="v2-sub">เทียบข้อความสองไฟล์ด้วย Google Cloud Vision OCR · PoC</span></h2>
     <span class="v2-sub">โมดูล {{ v2_version }}</span>

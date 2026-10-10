@@ -183,7 +183,8 @@ def build_text(r: dict) -> str:
                         (" why=" + _q(ai.get("decided_why"), 160)) if ai.get("decided_why") else ""))
             if f.get("ai_crop"):
                 a("%s   ai_crop: %s" % (ind, " · ".join(
-                    "%s=%s %sx%s box=%s" % (k.upper(), v.get("img"), v.get("w"), v.get("h"), v.get("box"))
+                    "%s=%s %sx%s box=%s%s" % (k.upper(), v.get("img"), v.get("w"), v.get("h"), v.get("box"),
+                                              " rot=%s" % v["rot"] if v.get("rot") else "")
                     for k, v in sorted(f["ai_crop"].items()))))
             for m in f.get("members") or []:
                 finding(m, ind + "    · ")
@@ -336,6 +337,10 @@ def build_text(r: dict) -> str:
                 a("     image_evidence: pixel_kept=%s (AI บอกว่าเหมือน แต่ภาพจากไฟล์ต้นฉบับต่าง ⇒ ไม่พับ) "
                   "crops_saved=%s (img/ai<คู่>_F<จุด>_<a|b>.jpg)"
                   % (vd.get("pixel_kept", 0), x.get("crops_saved", "-")))
+                if "crops_rotated" in x or "onesided_kept" in vd:
+                    a("     image_orient: crops_rotated=%s (หมุนให้ข้อความตั้งตรงตามมุมที่ Vision วัด) "
+                      "onesided_kept=%s (ข้อความฝั่งเดียวที่ Vision อ่านชัด · AI บอกว่าเหมือน ⇒ ไม่พับ)"
+                      % (x.get("crops_rotated", "-"), vd.get("onesided_kept", 0)))
         for eq in x.get("equivalent") or []:
             a("     equivalent %s (AI=%s): %s" % (eq.get("what"), eq.get("verdict"), eq.get("reason")))
         for bad in x.get("invalid") or []:

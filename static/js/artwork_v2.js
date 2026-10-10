@@ -184,6 +184,8 @@
   const HOVER_ZOOM = ($("v2Root") && $("v2Root").dataset.hoverZoom) === "1";
   // ตำแหน่งประมาณบนฝั่งที่ไม่พบข้อความ (ARTWORK_V2_EST_BOX) — แสดงผลล้วน
   const EST_BOX = ($("v2Root") && $("v2Root").dataset.estBox) === "1";
+  // ข้อความฝั่งเดียว ⇒ ซูมไป "บริเวณใกล้เคียง" เสมอ + ข้อความแนวตั้งซูมได้ (ARTWORK_V2_NEAR_ZOOM) — แสดงผลล้วน
+  const NEAR_ZOOM = ($("v2Root") && $("v2Root").dataset.nearZoom) === "1";
 
   function hideResult() {
     S.result = null;
@@ -994,8 +996,8 @@
       const b = Array.isArray(c.box) && c.box.length === 4 ? c.box.map((v) => Math.max(0, Math.min(1000, +v || 0)) / 10) : null;
       const url = base + encodeURIComponent(c.img);
       return '<a href="' + url + '" target="_blank" rel="noopener" title="ครอปฝั่ง ' + s.toUpperCase() + ' ที่ส่งให้ AI (' +
-        esc(c.w) + "×" + esc(c.h) + ' px) · กรอบแดง = จุดที่บอก AI ให้อ่าน (AI ไม่เห็นกรอบนี้ ได้แค่พิกัด)"><b>' +
-        (s === "a" ? "🅰" : "🅱") + '</b><img loading="lazy" alt="ครอปฝั่ง ' + s.toUpperCase() + " จุด " + esc(f.id) +
+        esc(c.w) + "×" + esc(c.h) + ' px)' + (c.rot ? " · หมุน " + esc(c.rot) + "° ให้ข้อความตั้งตรงก่อนส่ง" : "") + ' · กรอบแดง = จุดที่บอก AI ให้อ่าน (AI ไม่เห็นกรอบนี้ ได้แค่พิกัด)"><b>' +
+        (s === "a" ? "🅰" : "🅱") + (c.rot ? " ↻" + esc(c.rot) + "°" : "") + '</b><img loading="lazy" alt="ครอปฝั่ง ' + s.toUpperCase() + " จุด " + esc(f.id) +
         ' ที่ส่งให้ AI" src="' + url + '">' + (b ? '<i style="left:' + b[0] + "%;top:" + b[1] + "%;width:" +
         Math.max(0.5, b[2] - b[0]) + "%;height:" + Math.max(0.5, b[3] - b[1]) + '%"></i>' : "") + "</a>";
     };
@@ -1414,6 +1416,11 @@
           g += '<rect class="est" data-f="' + esc(f.id) + '" x="' + e[0] + '" y="' + e[1] + '" width="' + (e[2] - e[0]) +
             '" height="' + (e[3] - e[1]) + '"><title>ตำแหน่งประมาณ (ฝั่งนี้ไม่พบข้อความ)</title></rect>';
         }
+        const n = NEAR_ZOOM && !e && f[side] && !f[side].text && f[side].near_box;
+        if (n && f.id != null) {
+          g += '<rect class="est near" data-f="' + esc(f.id) + '" x="' + n[0] + '" y="' + n[1] + '" width="' + (n[2] - n[0]) +
+            '" height="' + (n[3] - n[1]) + '"><title>บริเวณใกล้เคียง (ประมาณหยาบ — ฝั่งนี้ไม่พบข้อความ)</title></rect>';
+        }
       });
     }
     let tags = "";
@@ -1730,9 +1737,50 @@
               hover: null, pin: null, shown: null, ok: new Set(), quietUntil: 0, lastEl: null, vw: 0 };
 
   // กรอบเป้าหมาย (พิกัดภาพที่ส่ง) = กรอบที่วาดบนจอ (เผื่อเท่ากับ wordFrame) · ไม่มีกรอบ ⇒ null
-  function zoomRect(sd, W, H, padK, ctx) {
+  // บรรทัดที่จุดนี้อ้างเป็นข้อความแนวตั้งไหม (มุมที่ Vision วัด ≈ 90/270 · ฝั่งที่ไม่มีข้อความใช้มุมของอีกฝั่ง)
+  //  · ไม่มีมุม ⇒ ไม่ใช่ (ตัวอักษรเดี่ยว "1" "|" ก็สูง-แคบ — ห้ามตัดสินจากรูปกรอบ)
+  function lineVert(p, f, side) {
+    if (!NEAR_ZOOM || !p || !f) return false;
+    const ang = (s) => {
+      const i = f[s] && f[s].line, ls = p.lines && p.lines[s];
+      const a = (ls && i != null && ls[i]) ? ls[i].angle : null;
+      return a == null ? null : ((+a % 360) + 360) % 360;
+    };
+    let a = ang(side);
+    if (a == null) a = ang(side === "a" ? "b" : "a");
+    return a != null && (Math.abs(a - 90) <= 20 || Math.abs(a - 270) <= 20);
+  }
+
+  // ฝั่งนี้ไม่มีกรอบ ⇒ "บริเวณใกล้เคียง" จากกรอบของอีกฝั่ง (ARTWORK_V2_NEAR_ZOOM · ไม่ใช่ตำแหน่งที่วัดได้)
+  //  near_box (เทียบจากบรรทัดที่ตรงกัน) → สัดส่วนตำแหน่งในภาพของอีกฝั่ง · คืน { box, kind } หรือ null
+  function nearOf(f, side, W, H, oW, oH) {
+    if (!NEAR_ZOOM || !f) return null;
+    const sd = f[side] || {};
+    if (sd.near_box) return { box: sd.near_box, kind: "near" };
+    const od = f[side === "a" ? "b" : "a"] || {};
+    const ob = od.word_box || od.box || od.est_box;
+    if (!ob || !(oW > 0) || !(oH > 0) || !(W > 0) || !(H > 0)) return null;
+    const b = [ob[0] / oW * W, ob[1] / oH * H, ob[2] / oW * W, ob[3] / oH * H];
+    return (b[2] > b[0] && b[3] > b[1]) ? { box: b, kind: "prop" } : null;
+  }
+
+  // มุมมองขยาย s0 เท่ารอบกลางกรอบ r (ไม่ต้องเห็นทั้งกรอบ) · เพดานเดียวกับ zoomView · บีบไม่ให้หลุดภาพ
+  const VERT_MIN_ZOOM = 2;
+  function zoomForce(r, W, H, sw, sh, cap, s0) {
+    const s = Math.min(s0, ZOOM.maxAbs, Math.max(ZOOM.minCap, cap));
+    if (!(s > 1.05)) return { s: 1, tx: 0, ty: 0 };
+    const cx = (r[0] + r[2]) / 2 * sw / W, cy = (r[1] + r[3]) / 2 * sh / H;
+    return zoomClamp({ s: s, tx: sw / 2 - s * cx, ty: sh / 2 - s * cy }, sw, sh);
+  }
+
+  function zoomRect(sd, W, H, padK, ctx, vert) {
     const wb = sd && (sd.word_box || sd.box);
     if (!wb || !(wb[2] >= wb[0]) || !(wb[3] >= wb[1])) return null;
+    if (vert) {
+      // ข้อความแนวตั้ง: ความสูงตัวอักษร = ด้านแคบ · บริบทตามแนวข้อความ (คิดในแกนสลับแล้วสลับกลับ)
+      const r = zoomRect({ box: [wb[1], wb[0], wb[3], wb[2]] }, H, W, padK, ctx, false);
+      return r ? [r[1], r[0], r[3], r[2]] : null;
+    }
     const h = Math.max(1, wb[3] - wb[1]);
     const pad = Math.max(2, h * padK);
     let x0 = wb[0] - pad, x1 = wb[2] + pad;
@@ -1869,18 +1917,39 @@
     document.querySelectorAll("#v2PairsRes .v2-res-stage").forEach((st) => {
       const z = zoomStage(st);
       const mine = !!f && card.contains(st);
+      if (NEAR_ZOOM) st.querySelectorAll("rect.est.prop").forEach((x) => x.remove());
       let to = { s: 1, tx: 0, ty: 0 }, note = "", estNote = false;
       if (mine) {
         const sd = f[st.dataset.side];
-        let rect = zoomRect(sd, z.W, z.H, FRAME_PAD, ZOOM.minCtx);
+        const vert = lineVert(p, f, st.dataset.side);
+        let rect = zoomRect(sd, z.W, z.H, FRAME_PAD, ZOOM.minCtx, vert);
         if (!rect && EST_BOX && sd && !sd.text && sd.est_box) {
           // ไม่มีข้อความฝั่งนี้ — ซูมไปที่ "ตำแหน่งประมาณ" จากบรรทัดที่ตรงกันข้างเคียง (เห็นบริบทกว้างกว่าปกติ)
-          rect = zoomRect({ box: sd.est_box }, z.W, z.H, FRAME_PAD * 2, ZOOM.minCtx * 1.5);
+          rect = zoomRect({ box: sd.est_box }, z.W, z.H, FRAME_PAD * 2, ZOOM.minCtx * 1.5, vert);
           if (rect) { note = ZNOTE_EST; estNote = true; }
+        }
+        if (!rect && NEAR_ZOOM) {
+          // ยังไม่มีตำแหน่ง ⇒ ซูมไป "บริเวณใกล้เคียง" (ผู้ใช้สั่ง: ซูมได้ทุกกรณี ดีกว่าไม่ซูมเลย) · บริบทกว้างกว่า est
+          const os = card.querySelector('.v2-res-stage[data-side="' + (st.dataset.side === "a" ? "b" : "a") + '"]');
+          const oz = os ? { W: +os.dataset.w, H: +os.dataset.h } : { W: 0, H: 0 };
+          const nb = nearOf(f, st.dataset.side, z.W, z.H, oz.W, oz.H);
+          if (nb) {
+            rect = zoomRect({ box: nb.box }, z.W, z.H, FRAME_PAD * 4, ZOOM.minCtx * 3, vert);
+            if (rect) {
+              note = nb.kind === "near" ? ZNOTE_NEAR : ZNOTE_PROP;
+              estNote = true;
+              if (nb.kind === "prop") nearMark(st, f.id, nb.box);
+            }
+          }
         }
         if (!rect) note = sd && sd.text ? "จุดนี้ไม่มีตำแหน่งบนภาพฝั่งนี้" : "ฝั่งนี้ไม่พบบรรทัดที่ตรงกับอีกฝั่ง";
         else if (z.sw > 0 && z.sh > 0 && z.W > 0 && z.H > 0 && z.img && z.img.naturalWidth) {
           to = zoomView(rect, z.W, z.H, z.sw, z.sh, z.img.naturalWidth / z.sw, ZOOM);
+          // ข้อความแนวตั้งบนแถบเตี้ย: ทั้งประโยคสูงเกือบเท่ากล่อง ⇒ พอดีกล่องแทบไม่ขยาย — ซูมอย่างน้อย ×VERT_MIN_ZOOM
+          // ที่กลางประโยค (เห็นบางส่วน แต่อ่านออก · ผู้ใช้สั่ง: ซูมได้ทุกกรณี)
+          if (vert && NEAR_ZOOM && !(to.s >= VERT_MIN_ZOOM)) {
+            to = zoomForce(rect, z.W, z.H, z.sw, z.sh, z.img.naturalWidth / z.sw, VERT_MIN_ZOOM);
+          }
         }
       }
       st.classList.toggle("zoomed", mine);
@@ -1968,6 +2037,19 @@
   //   ภาพสูงพอ ⇒ ซ้อนบนภาพเหมือนเดิม (ไม่เสียพื้นที่ใต้ภาพทุกใบ)
   const ZNOTE_SHORT_PX = 160;
   const ZNOTE_EST = "ฝั่งนี้ไม่พบข้อความนี้ — กรอบประสีส้ม = ตำแหน่งประมาณจากบรรทัดข้างเคียง (ไม่ใช่ตำแหน่งที่วัดได้)";
+  const ZNOTE_NEAR = "ฝั่งนี้ไม่พบข้อความนี้ — ซูมไปบริเวณใกล้เคียง (ประมาณหยาบจากบรรทัดที่ตรงกัน · ไม่ใช่ตำแหน่งที่วัดได้)";
+  const ZNOTE_PROP = "ฝั่งนี้ไม่พบข้อความนี้ — ซูมไปบริเวณเดียวกับอีกฝั่งตามสัดส่วนของโซน (ประมาณหยาบมาก · โปรดดูรอบ ๆ)";
+  // กรอบประของ "สัดส่วนโซน" (คำนวณตอนชี้ ไม่มีในผล) — ใส่ชั่วคราวในกล่องนั้น · ล้างทุกครั้งที่ซูมใหม่
+  function nearMark(st, id, b) {
+    const svg = st.querySelector("svg");
+    if (!svg || id == null) return;
+    const r = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+    r.setAttribute("class", "est prop");
+    r.setAttribute("data-f", String(id));
+    r.setAttribute("x", b[0]); r.setAttribute("y", b[1]);
+    r.setAttribute("width", Math.max(1, b[2] - b[0])); r.setAttribute("height", Math.max(1, b[3] - b[1]));
+    svg.appendChild(r);
+  }
   function markShortStages() {
     document.querySelectorAll("#v2PairsRes .v2-res-wrap").forEach((w) => {
       const st = w.querySelector(".v2-res-stage"), n = w.querySelector(".v2-znote");

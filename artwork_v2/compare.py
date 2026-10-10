@@ -866,6 +866,26 @@ def _box_gap(a, b) -> float:
     return max(gx, gy)
 
 
+def _near_box(side: dict, gm, b, sz) -> None:
+    """``NEAR_ZOOM`` — ตำแหน่ง "บริเวณใกล้เคียง" เมื่อ ``est_box`` ไม่ผ่านด่านความเชื่อมั่น: ใช้การแปลงจากบรรทัดที่ตรงกัน
+    ทั้งโซนโดยไม่เช็คการกระจาย · ตัดให้อยู่บนภาพ · หลุดภาพทั้งกรอบ ⇒ ไม่ให้ · **แสดงผลล้วน** (ซูม) — ไม่ใช่ ``box``/
+    ``est_box`` (หลักฐานภาพ · ครอป AI · ผลตัดสินไม่เห็นค่านี้)"""
+    if not config.NEAR_ZOOM:
+        return
+    try:
+        x0, y0, x1, y1 = [float(v) for v in gm.box(b)]
+    except Exception:                                # noqa: BLE001 — คำนวณไม่ได้ = ไม่ให้
+        return
+    if not (x1 > x0 and y1 > y0):
+        return
+    if sz:
+        x0, y0 = max(0.0, x0), max(0.0, y0)
+        x1, y1 = min(float(sz[0]), x1), min(float(sz[1]), y1)
+        if x1 <= x0 or y1 <= y0:
+            return
+    side["near_box"] = [round(x0, 1), round(y0, 1), round(x1, 1), round(y1, 1)]
+
+
 def curved_lines(lines: List[dict]) -> set:
     """``_curved_base`` + (``VERTICAL_UPRIGHT``) บรรทัดแนวตั้ง 90°±3° ที่กรอบสูง ≥ 2.5 เท่าของกว้าง
     และยาวกว่าเพื่อนบ้านสั้น = **ข้อความพิมพ์ตั้งตามปกติ** ไม่ใช่ตราโค้ง (เดิม claim แนวตั้ง
@@ -1208,6 +1228,7 @@ def compare(lines_a: List[dict], lines_b: List[dict],
                         continue
                     e = gm.estimate(b, b[3] - b[1])
                     if e is None:
+                        _near_box(f[dst], gm, b, sz)
                         continue
                     eb = e["box"]
                     if sz:              # ต้องอยู่บนภาพอีกฝั่งอย่างน้อยครึ่งกรอบ
@@ -1215,6 +1236,7 @@ def compare(lines_a: List[dict], lines_b: List[dict],
                         ih = min(eb[3], sz[1]) - max(eb[1], 0)
                         area = max(1e-6, (eb[2] - eb[0]) * (eb[3] - eb[1]))
                         if iw <= 0 or ih <= 0 or iw * ih < 0.5 * area:
+                            _near_box(f[dst], gm, b, sz)
                             continue
                     f[dst]["est_box"] = eb
                     f[dst]["est"] = {"spread": e["spread"], "anchors": e["anchors"]}
