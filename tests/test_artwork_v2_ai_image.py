@@ -341,7 +341,7 @@ def test_end_to_end_images_are_the_vision_images(monkeypatch):
     log = r["log_text"]
     assert "[AI REVIEW] mode=image" in log and "image: verdicts=" in log and "ai_seen: A=" in log
     assert "AI_IMAGE_URL" in log and KEY not in log
-    assert "b64" not in json.dumps(r, default=str)                # ภาพไม่ถูกเก็บลงผล
+    assert '"b64"' not in json.dumps(r, default=str)   # ภาพไม่ถูกเก็บลงผล (เช็คคีย์ — sha1 สุ่มอาจมี b64 ในตัว)
 
 
 def test_end_to_end_noise_passes_with_folded_list(monkeypatch):

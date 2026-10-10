@@ -486,6 +486,16 @@ def _run(job_id, raw_pairs, poster, progress, sharpness, ai_mode, ai_poster,
             fid += 1
             f["id"] = fid
 
+    # ── 5c) หลักฐานภาพ "ก่อน" AI (โหมด image · ``AI_IMAGE_PIXEL_FIRST``) — จุดที่ภาพบอกว่าเหมือนพับก่อน
+    #       ไม่ส่งให้ AI · จุดที่ภาพยืนยันว่าต่าง AI พับไม่ได้ (``ai_review._merge_image``) · โหมดอื่นลำดับเดิมเป๊ะ
+    pixel_first = ai_mode == "image" and bool(config.AI_IMAGE_PIXEL_FIRST)
+    pixel_log = None
+    if pixel_first:
+        t0 = time.time()
+        pixel_log = pixverify.run(pairs, srcs, rd, warnings, say)
+        pixel_log["before_ai"] = True
+        stage["pixel_ms"] = int((time.time() - t0) * 1000)
+
     # ── 6) AI ตรวจทาน (ข้อความของ Vision → N8N/Gemini · โหมด image ส่งภาพที่ส่ง Vision ไปด้วย · ไม่ยิง Vision ซ้ำ) ──
     t0 = time.time()
     # โหมด image เท่านั้นที่ส่งภาพ (ไฟล์ img/ ของรอบ = ภาพที่ส่ง Vision) — โหมดอื่นเรียกแบบเดิมเป๊ะ
@@ -496,11 +506,15 @@ def _run(job_id, raw_pairs, poster, progress, sharpness, ai_mode, ai_poster,
     stage["ai_ms"] = int((time.time() - t0) * 1000)
     for pr in pairs:              # จุดที่ AI เพิ่ม/คืนมา ก็ต้องผ่านพื้นที่ยกเว้นเหมือนกัน
         apply_ignore(pr)
+        if pixel_first and isinstance(pr.get("ai"), dict):
+            pr["ai"]["pixel_first"] = True
+            pr["ai"]["pixel_folded"] = len(pr.get("pixel_same") or [])
 
     # ── 6b) หลักฐานภาพ (PDF ↔ PDF · เรนเดอร์ไฟล์ต้นฉบับในเครื่อง · ไม่ยิง Vision/Gemini) ──
-    t0 = time.time()
-    pixel_log = pixverify.run(pairs, srcs, rd, warnings, say)
-    stage["pixel_ms"] = int((time.time() - t0) * 1000)
+    if not pixel_first:
+        t0 = time.time()
+        pixel_log = pixverify.run(pairs, srcs, rd, warnings, say)
+        stage["pixel_ms"] = int((time.time() - t0) * 1000)
 
     # ── 7) ผลตัดสิน + บันทึก ─────────────────────────────────────────
     for pr in pairs:
@@ -586,7 +600,7 @@ def settings_snapshot() -> dict:
         "PUNCT_CAN_FAIL", "CURVED_GROUP_ENABLED", "TILT_ANGLE", "CURVED_NEIGHBOR_MAX_CHARS",
         "DEBRIS_ENABLED", "DEBRIS_CONF", "SEAM_FILLER", "CROSS_ROW_JOIN", "SYMBOL_TOKEN",
         "FRACTION_YELLOW", "REREAD_ENABLED", "REREAD_MAX", "REREAD_SCALE", "REREAD_MAX_SIDE",
-        "AI_MODE", "AI_REVIEW_URL", "AI_RAW_URL", "AI_IMAGE_URL", "AI_TIMEOUT_S", "AI_RAW_TIMEOUT_S", "AI_IMAGE_TIMEOUT_S", "AI_RAW_SAFETY", "AI_IMAGE_SAFETY", "AI_IMAGE_CROPS", "AI_IMAGE_CROP_MAX_SIDE", "AI_IMAGE_CROP_MIN_W", "AI_IMAGE_CROP_JPEG_Q", "AI_IMAGE_MAX_CANDIDATES", "AI_IMAGE_CURVED_YELLOW", "AI_IMAGE_CROP_HIRES", "AI_IMAGE_CROP_TARGET_LH", "AI_IMAGE_CROP_DPI_MAX", "AI_IMAGE_CROP_HIRES_MIN", "AI_IMAGE_BLIND", "AI_RETRIES", "AI_JUDGE_PUNCT_YELLOW",
+        "AI_MODE", "AI_REVIEW_URL", "AI_RAW_URL", "AI_IMAGE_URL", "AI_TIMEOUT_S", "AI_RAW_TIMEOUT_S", "AI_IMAGE_TIMEOUT_S", "AI_RAW_SAFETY", "AI_IMAGE_SAFETY", "AI_IMAGE_CROPS", "AI_IMAGE_CROP_MAX_SIDE", "AI_IMAGE_CROP_MIN_W", "AI_IMAGE_CROP_JPEG_Q", "AI_IMAGE_MAX_CANDIDATES", "AI_IMAGE_CURVED_YELLOW", "AI_IMAGE_CROP_HIRES", "AI_IMAGE_CROP_TARGET_LH", "AI_IMAGE_CROP_DPI_MAX", "AI_IMAGE_CROP_HIRES_MIN", "AI_IMAGE_BLIND", "AI_IMAGE_SAVE_CROPS", "AI_IMAGE_PIXEL_FIRST", "AI_RETRIES", "AI_JUDGE_PUNCT_YELLOW",
         "AI_QUOTE_RECOVER", "AI_QUOTE_RECOVER_MAX_SHIFT", "AI_EQUIV_NOISE", "AI_SEND_CURVED",
         "AI_JUDGE_KEEP_ALGO_RED", "AI_JUDGE_NOISE_GUARD", "AI_JUDGE_CURVED_YELLOW",
         "AI_JUDGE_ONESIDED_GUARD", "AI_DEDUP_FOLDED",

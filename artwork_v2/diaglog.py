@@ -181,6 +181,10 @@ def build_text(r: dict) -> str:
                     a("%s   blind: ai_said=%s app=%s%s" % (
                         ind, ai.get("ai_verdict"), ai["verdict"],
                         (" why=" + _q(ai.get("decided_why"), 160)) if ai.get("decided_why") else ""))
+            if f.get("ai_crop"):
+                a("%s   ai_crop: %s" % (ind, " · ".join(
+                    "%s=%s %sx%s box=%s" % (k.upper(), v.get("img"), v.get("w"), v.get("h"), v.get("box"))
+                    for k, v in sorted(f["ai_crop"].items()))))
             for m in f.get("members") or []:
                 finding(m, ind + "    · ")
 
@@ -266,6 +270,8 @@ def build_text(r: dict) -> str:
         px.get("unverifiable", 0), px.get("skipped", 0), px.get("ms", 0),
         (" pymupdf=" + str(px["pymupdf"])) if px.get("pymupdf") else "",
         (" reason=" + px["reason"]) if px.get("reason") else ""))
+    if px.get("before_ai"):
+        a("  before_ai=True — ตรวจด้วยภาพก่อน AI (AI_IMAGE_PIXEL_FIRST) · จุดที่ภาพบอกว่าเหมือนไม่ถูกส่งให้ AI")
     if px.get("diff_raster"):
         a("  diff_raster=%s — DIFF บนคู่ที่มีภาพสแกน ไม่ขึ้นป้าย \"ภาพยืนยันว่าต่าง\" (PIXEL_RASTER_NOTE)"
           % px["diff_raster"])
@@ -326,6 +332,10 @@ def build_text(r: dict) -> str:
                   "overruled=%s hires_crops=%s hires_dpi_max=%s (เรนเดอร์ครอปใหม่จาก PDF)"
                   % (x.get("blind", False), x.get("blind_overruled", 0), x.get("crops_hires", "-"),
                      x.get("crop_dpi_max", "-")))
+                vd = x.get("image_verdicts") or {}
+                a("     image_evidence: pixel_kept=%s (AI บอกว่าเหมือน แต่ภาพจากไฟล์ต้นฉบับต่าง ⇒ ไม่พับ) "
+                  "crops_saved=%s (img/ai<คู่>_F<จุด>_<a|b>.jpg)"
+                  % (vd.get("pixel_kept", 0), x.get("crops_saved", "-")))
         for eq in x.get("equivalent") or []:
             a("     equivalent %s (AI=%s): %s" % (eq.get("what"), eq.get("verdict"), eq.get("reason")))
         for bad in x.get("invalid") or []:

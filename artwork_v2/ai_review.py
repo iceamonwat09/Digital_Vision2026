@@ -342,6 +342,33 @@ def plan_crops(findings: List[dict], ims: dict,
     return sent, crops, pub, skip
 
 
+def save_crops(img_dir: Optional[str], n: int, crops: List[dict], info: dict,
+               findings: List[dict]) -> int:
+    """เก็บครอปที่ส่ง Gemini จริง (ไบต์เดียวกับใน payload) → ``img/ai<n>_F<id>_<a|b>.jpg``
+
+    ผูกไว้ที่ ``f["ai_crop"] = {a|b: {img, w, h, box}}`` (``box`` = กรอบ 0-1000 ที่บอก AI ว่าอ่านตรงนี้) ⇒
+    หน้าเว็บแสดงในหมายเหตุของแถว · เขียนไม่ได้ ⇒ ข้ามรูปนั้น (ไม่แตะผลตรวจ) · คืนจำนวนรูปที่เขียนได้"""
+    if not (config.AI_IMAGE_SAVE_CROPS and img_dir and os.path.isdir(img_dir)):
+        return 0
+    by_id = {"F%d" % f["id"]: f for f in findings if f.get("id") is not None}
+    done = 0
+    for c in crops:
+        fid, s = c.get("candidate"), c.get("side")
+        f, meta = by_id.get(fid), (info.get(fid) or {}).get(s)
+        if f is None or meta is None or s not in ("a", "b"):
+            continue
+        name = "ai%d_%s_%s.jpg" % (int(n), fid, s)
+        try:
+            with open(os.path.join(img_dir, name), "wb") as fh:
+                fh.write(base64.b64decode(c["b64"]))
+        except (OSError, ValueError, KeyError, TypeError):
+            continue
+        f.setdefault("ai_crop", {})[s] = {"img": name, "w": int(meta["w"]), "h": int(meta["h"]),
+                                          "box": list(meta["box"])}
+        done += 1
+    return done
+
+
 def call(url: str, payload: dict, poster: Optional[Callable] = None,
          timeout: Optional[float] = None,
          url_env: str = "ARTWORK_V2_AI_REVIEW_URL") -> Tuple[Optional[dict], dict]:
@@ -875,6 +902,17 @@ def _merge_image(pr: dict, resp: dict, findings: List[dict], st: dict,
         f["ai"] = ai
         v = ai["verdict"]
         cnt[v] += 1
+        px = f.get("pixel") or {}
+        if (v == "noise" and config.AI_IMAGE_PIXEL_FIRST and px.get("status") == "DIFF"
+                and not px.get("raster")):
+            # หลักฐานภาพ (PDF เวกเตอร์ · เรนเดอร์จากไฟล์ต้นฉบับ) ยืนยันว่าต่าง ⇒ AI พับไม่ได้ — AI อาจทำให้
+            # อักษรเป็นรูปมาตรฐานเอง (ى→ي) · ภาพสแกน: DIFF ไม่ใช่หลักฐาน (ผิด 20/22 ที่วัดไว้) ⇒ พับได้แบบเดิม
+            cnt["pixel_kept"] = cnt.get("pixel_kept", 0) + 1
+            ai["pixel_kept"] = True
+            f["notes"].append("AI อ่านได้เหมือนกันทั้งสองฝั่ง แต่ภาพจากไฟล์ต้นฉบับต่างกันที่จุดนี้ — ไม่พับ "
+                              "คงระดับเดิม โปรดดูด้วยตา")
+            kept.append(f)
+            continue
         if v == "noise" and config.AI_IMAGE_SAFETY and _hard_evidence(f):
             cnt["guarded"] += 1
             f["severity"] = "yellow"
@@ -1063,8 +1101,9 @@ def run_all(pairs: List[dict], mode: str, warnings: List[str], say: Callable,
             continue
         if mode == "image" and not (pr.get("findings") or []):
             # ไม่มีจุดต่างให้ดูภาพ ⇒ ไม่ยิง (ประหยัดโควตา · ผลเท่าเดิม)
-            pr["ai"] = {"mode": mode, "status": "skipped", "reason": "ไม่มีจุดต่างให้ตรวจกับภาพ",
-                        "vision_conf": vc}
+            pr["ai"] = {"mode": mode, "status": "skipped", "vision_conf": vc,
+                        "reason": ("หลักฐานภาพตัดสินครบทุกจุดแล้ว (ภาพเหมือนกัน) — ไม่ต้องถาม AI"
+                                   if pr.get("pixel_same") else "ไม่มีจุดต่างให้ตรวจกับภาพ")}
             continue
         imgs = None
         crops = crop_info = None
@@ -1088,6 +1127,7 @@ def run_all(pairs: List[dict], mode: str, warnings: List[str], say: Callable,
                 except Exception:                    # noqa: BLE001 — เรนเดอร์ใหม่ไม่ได้ = ครอป JPEG เดิม
                     hi = None
             sendable, crops, crop_info, skip = plan_crops(pr.get("findings") or [], ims, hi, cstat)
+            cstat["saved"] = save_crops(img_dir, pr["n"], crops, crop_info, pr.get("findings") or [])
             for f in pr.get("findings") or []:
                 why = skip.get("F%d" % f["id"]) if f.get("id") is not None else None
                 if why:
@@ -1141,6 +1181,8 @@ def run_all(pairs: List[dict], mode: str, warnings: List[str], say: Callable,
                 ai["crops_hires"] = cstat["hires_crops"]
                 ai["crop_dpi_max"] = cstat["hires_dpi_max"]
             ai["blind"] = blind
+            if config.AI_IMAGE_SAVE_CROPS:
+                ai["crops_saved"] = cstat.get("saved", 0)
         if resp is None:
             summary["pairs_failed"] += 1
             warnings.append("คู่ %d: AI ตรวจทานไม่สำเร็จ — ใช้ผลของอัลกอริทึม (%s)"

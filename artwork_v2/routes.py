@@ -27,7 +27,7 @@ artwork_v2_bp = Blueprint("artwork_v2", __name__)
 _RUNS = runguard.RunGuard()
 _KEY_TESTS = runguard.RunGuard()
 
-_IMG_RE = re.compile(r"^((p[0-9]+|rr[0-9]+)_[ab]|pv[0-9]+)\.jpg$")
+_IMG_RE = re.compile(r"^((p[0-9]+|rr[0-9]+)_[ab]|pv[0-9]+|ai[0-9]+_F[0-9]+_[ab])\.jpg$")
 _RAW_RE = re.compile(r"^p[0-9]+_[ab]\.json$")
 
 

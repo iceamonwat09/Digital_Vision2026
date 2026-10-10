@@ -159,6 +159,12 @@
   .v2-sev.moved { background:#f1f5f9; color:#475569; } .v2-sev.pixel_same { background:#dcfce7; color:#166534; }
   .v2-sev.excluded { background:#fee2e2; color:#7f1d1d; }
   .v2-sev.lowmark { background:#f1f5f9; color:#475569; }
+  .v2-aic { display:flex; flex-wrap:wrap; align-items:flex-start; gap:6px; margin-top:6px; max-width:100%; overflow-x:auto; }
+  .v2-aic-t { flex-basis:100%; font-size:.78rem; color:#475569; }
+  .v2-aic a { position:relative; display:inline-block; flex:0 0 auto; line-height:0; }
+  .v2-aic a b { position:absolute; left:2px; top:2px; z-index:1; font-size:.75rem; line-height:1; }
+  .v2-aic img { display:block; width:auto; height:96px; max-width:none; border:1px solid #e2e8f0; border-radius:4px; background:#fff; }
+  .v2-aic i { position:absolute; box-sizing:border-box; border:1.5px solid #e11d48; pointer-events:none; }
   .v2-pv { display:block; margin-top:4px; } .v2-pv img { display:block; max-width:100%; max-height:110px; border:1px solid #e2e8f0; border-radius:4px; background:#fff; }
   /* แถวที่รวมหลายจุดในบรรทัดเดียว (ARTWORK_V2_LINE_GROUP · แสดงผลล้วน) — รายการสมาชิกในช่องหมายเหตุ */
   .v2-gm { padding:3px 0; border-top:1px dashed #e2e8f0; }
@@ -346,7 +352,7 @@
     #v2Root[data-card-style="polish"][data-side-table="1"] .v2-tbl tr.v2-rv-false[data-f] { background:#f8fafc; color:#64748b; }
     #v2Root[data-card-style="polish"][data-side-table="1"] .v2-tbl tr.v2-note:not([hidden]) { display:block; }
     #v2Root[data-card-style="polish"][data-side-table="1"] .v2-tbl tr.v2-note > td:first-child { display:none; }
-    #v2Root[data-card-style="polish"][data-side-table="1"] .v2-tbl tr.v2-note > td { display:block; padding:6px 10px 8px; }
+    #v2Root[data-card-style="polish"][data-side-table="1"] .v2-tbl tr.v2-note > td { display:block; padding:6px 10px 8px; width:auto; white-space:normal; }
     #v2Root[data-card-style="polish"] #v2PairsRes.v2-rv-todo-only tr.v2-rv-done { display:none; }
     #v2Root[data-card-style="polish"] .v2-rvt, #v2Root[data-card-style="polish"] .v2-rvs { display:inline; }
     #v2Root[data-card-style="polish"] .v2-rv .v2-rvb { font-size:11.5px; padding:2px 9px; }

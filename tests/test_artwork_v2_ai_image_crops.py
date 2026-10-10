@@ -354,7 +354,7 @@ def test_end_to_end_crops_come_from_the_run_images(monkeypatch):
     assert r["verdict"] == "FAIL" and pr["ai"]["crops"] == len(seen[0]["crops"])
     log = r["log_text"]
     assert "image_crops: crops=" in log and "AI_IMAGE_CROPS" in log and "AI_IMAGE_CURVED_YELLOW" in log
-    assert "b64" not in json.dumps(r, default=str) and KEY not in log
+    assert '"b64"' not in json.dumps(r, default=str) and KEY not in log   # คีย์ภาพ (sha1 สุ่มอาจมี b64 ในตัว)
 
 
 # ── ⑥ workflow (Code node ตัวจริงผ่าน node) ───────────────────────────

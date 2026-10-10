@@ -981,6 +981,28 @@
       '<img loading="lazy" alt="ภาพหลักฐานจุด ' + esc(f.id) + '" src="' + url + '"></a>';
   }
 
+  // ครอปที่ส่งให้ AI จริง (ARTWORK_V2_AI_IMAGE_SAVE_CROPS · ไบต์เดียวกับที่ส่ง) + กรอบแดงบาง = จุดที่บอก AI ว่า "อ่านตรงนี้"
+  // (กรอบวาดบนจอเท่านั้น — Gemini ได้แค่พิกัด ไม่เห็นกรอบนี้)
+  function aiCrops(f) {
+    const ac = f.ai_crop;
+    if (!ac || !S.result) return "";
+    const base = "/api/artwork_v2/jobs/" + encodeURIComponent(S.result.job) + "/runs/" +
+      encodeURIComponent(S.result.run) + "/img/";
+    const one = (s) => {
+      const c = ac[s];
+      if (!c || !c.img) return "";
+      const b = Array.isArray(c.box) && c.box.length === 4 ? c.box.map((v) => Math.max(0, Math.min(1000, +v || 0)) / 10) : null;
+      const url = base + encodeURIComponent(c.img);
+      return '<a href="' + url + '" target="_blank" rel="noopener" title="ครอปฝั่ง ' + s.toUpperCase() + ' ที่ส่งให้ AI (' +
+        esc(c.w) + "×" + esc(c.h) + ' px) · กรอบแดง = จุดที่บอก AI ให้อ่าน (AI ไม่เห็นกรอบนี้ ได้แค่พิกัด)"><b>' +
+        (s === "a" ? "🅰" : "🅱") + '</b><img loading="lazy" alt="ครอปฝั่ง ' + s.toUpperCase() + " จุด " + esc(f.id) +
+        ' ที่ส่งให้ AI" src="' + url + '">' + (b ? '<i style="left:' + b[0] + "%;top:" + b[1] + "%;width:" +
+        Math.max(0.5, b[2] - b[0]) + "%;height:" + Math.max(0.5, b[3] - b[1]) + '%"></i>' : "") + "</a>";
+    };
+    const h = one("a") + one("b");
+    return h ? '<div class="v2-aic"><span class="v2-aic-t">🖼️ ภาพที่ส่งให้ AI:</span>' + h + "</div>" : "";
+  }
+
   // ── ตารางข้างภาพ (ARTWORK_V2_SIDE_TABLE · แสดงผลล้วน) ──
   //  · ตารางอยู่ขวามือของภาพ 🅰/🅱 ⇒ ภาพกับตารางอยู่บนจอพร้อมกัน · คอลัมน์กระชับ (ชนิดอยู่ใต้ระดับ)
   //  · หมายเหตุ (โน้ตระบบ + ภาพหลักฐาน + คำตอบ AI) พับไว้ในแถวย่อยใต้แถว ⇒ กด ⓘ เปิดทีละแถว / "หมายเหตุทั้งหมด"
@@ -1007,13 +1029,13 @@
     if (SIDE_TABLE) {
       return sideRow(f.id, f.severity, sev, esc(CLASS_TH[f.class] || f.class) +
         (f.source === "ai" ? '<span class="v2-ai-tag">AI</span>' : "") + rvHtml([f.id]),
-        cellText(f, "a"), cellText(f, "b"), confShort(f), notes + aiNote(f), {});
+        cellText(f, "a"), cellText(f, "b"), confShort(f), notes + aiNote(f) + aiCrops(f), {});
     }
     return '<tr class="click" data-f="' + f.id + '"><td>' + f.id + '</td><td><span class="v2-sev ' + f.severity + '">' +
       sev + "</span>" + rvHtml([f.id]) + "</td><td>" + esc(CLASS_TH[f.class] || f.class) +
       (f.source === "ai" ? '<span class="v2-ai-tag">AI</span>' : "") +
       "</td><td>" + cellText(f, "a") + "</td><td>" + cellText(f, "b") + "</td><td>" + confCell(f) +
-      "</td><td>" + notes + aiNote(f) + "</td></tr>";
+      "</td><td>" + notes + aiNote(f) + aiCrops(f) + "</td></tr>";
   }
   // ── รวมจุดต่างในคู่บรรทัดเดียวกันเป็นแถวเดียว (ARTWORK_V2_LINE_GROUP · แสดงผลล้วน) ──────────
   //  · ไม่แตะผลตรวจ/ผลตัดสิน/Log — ทุกจุดยังอยู่ครบพร้อมเลขจุด กรอบบนภาพ ระดับ หมายเหตุ และคำตอบ AI ของตัวเอง
@@ -1322,6 +1344,9 @@
       if (ai.crops_hires) stat += " (เรนเดอร์ใหม่จาก PDF " + ai.crops_hires + " รูป ถึง " + Math.round(ai.crop_dpi_max || 0) + " dpi)";
       if (ai.blind) stat += " · AI ไม่เห็นข้อความของ Vision — อ่านภาพเองแล้วแอปเทียบ" +
         (ai.blind_overruled ? " (คำตอบของ AI ขัดกับสิ่งที่อ่าน ⇒ ไม่แน่ใจ " + ai.blind_overruled + ")" : "");
+      if (ai.pixel_first) stat += " · ตรวจด้วยภาพก่อนถาม AI: พับไปก่อน " + (ai.pixel_folded || 0) + " จุด (ไม่ได้ส่งให้ AI)";
+      if (iv.pixel_kept) stat += " · AI บอกว่าเหมือนแต่ภาพต่าง ⇒ ไม่พับ " + iv.pixel_kept + " จุด";
+      if (ai.crops_saved) stat += " · เก็บภาพที่ส่ง " + ai.crops_saved + " รูป (ดูใน ⓘ ของแต่ละแถว)";
     }
     if (ai.algo_red_kept) stat += " · จุดแดงของอัลกอริทึมที่ AI ไม่ได้ระบุ คงไว้เป็นเหลือง " + ai.algo_red_kept + " จุด";
     if (ai.mode === "assist" && ai.reviewable) stat += " · ตอบครบ " + ai.reviewed + "/" + ai.reviewable + " จุด";
