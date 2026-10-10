@@ -1092,7 +1092,7 @@
       return '<div class="v2-gm"><b>#' + esc(m.id) + '</b> <span class="v2-sev ' + m.severity + '" style="font-size:11px">' +
         esc(SEV_TH[m.severity] || m.severity) + "</span> " + esc(CLASS_TH[m.class] || m.class) + ": " +
         frag(m.a.frag) + " → " + frag(m.b.frag) + ' <span class="v2-muted">· ' + pct(m.confidence) + "</span>" +
-        (notes ? "<br>" + notes : "") + aiNote(m) + "</div>";
+        (notes ? "<br>" + notes : "") + aiNote(m) + aiCrops(m) + "</div>";
     }).join("");
     if (SIDE_TABLE) {
       return sideRow(g.id, g.severity, SEV_TH[g.severity] || g.severity,

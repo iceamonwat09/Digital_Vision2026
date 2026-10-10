@@ -282,6 +282,7 @@ def test_page_shows_the_crops_with_the_spot_box():
     # ทั้งตารางข้างภาพ (SIDE_TABLE) และตารางแบบเดิมต้องแสดงครอป
     assert 'confShort(f), notes + aiNote(f) + aiCrops(f), {})' in src
     assert 'notes + aiNote(f) + aiCrops(f) + "</td></tr>"' in src
+    assert 'aiNote(m) + aiCrops(m) + "</div>"' in src          # แถวกลุ่ม (LINE_GROUP) — ทุกสมาชิกต้องมีภาพด้วย
     code = ("const S={result:{job:'J1',run:'run_002'}};"
             "const esc=(s)=>String(s==null?'':s).replace(/[&<>\"']/g,(c)=>'&#'+c.charCodeAt(0)+';');" +
             _fn(src, "aiCrops") +
