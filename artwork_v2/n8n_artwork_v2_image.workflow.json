@@ -92,8 +92,9 @@
         200
       ],
       "onError": "continueRegularOutput",
-      "notes": "คัด URL + credential (googleApi) จาก node \"HTTP Request\" ของ workflow artwork-v2-review (หรือ artwork-pair) · timeout 290 วิ (ภาพครอปต่อจุด + คิดนาน) · Gemini ตอบ error/หมดเวลา ⇒ ส่งต่อให้ node ถัดไปแปลงเป็น {error} (แอปใช้ผลอัลกอริทึมแทน)",
-      "notesInFlow": true
+      "notes": "คัด URL + credential (googleApi) จาก node \"HTTP Request\" ของ workflow artwork-v2-review (หรือ artwork-pair) · timeout 290 วิ (ภาพครอปต่อจุด + คิดนาน) · Gemini ตอบ error/หมดเวลา ⇒ ส่งต่อให้ node ถัดไปแปลงเป็น {error} (แอปใช้ผลอัลกอริทึมแทน) · Always Output Data = เปิด: ไม่มีผลออกมาก็ยังส่ง item ว่างให้ node Parse ⇒ แอปได้ {error} ไม่ใช่คำตอบเงียบ",
+      "notesInFlow": true,
+      "alwaysOutputData": true
     },
     {
       "parameters": {

@@ -308,6 +308,18 @@ def build_text(r: dict) -> str:
                                x.get("ms"), x.get("attempts"), x.get("request_bytes"),
                                x.get("candidates"),
                                (" ERROR=" + x["error"]) if x.get("error") else ""))
+        if x.get("requests"):
+            # โหมด image แบ่งคำขอ (AI_IMAGE_SPLIT) — บันทึกต่อคำขอ ไว้ไล่ว่าจุดไหนล้ม/ได้อะไรกลับมา
+            a("     image_split: requests=%s failed=%s parallel=%s (คำขอละจุด · tokens = prompt/คำตอบ/ส่วนคิด)"
+              % (len(x["requests"]), x.get("requests_failed", 0), x.get("parallel", "-")))
+            for rq in x["requests"]:
+                a("       req %s [%s] status=%s http=%s ms=%s attempts=%s reviews=%s engine=%s tokens=%s%s%s%s"
+                  % (rq.get("part"), ",".join(rq.get("ids") or []), rq.get("status"), rq.get("http"),
+                     rq.get("ms"), rq.get("attempts"), rq.get("reviews", "-"), rq.get("engine") or "-",
+                     rq.get("usage", "-"),
+                     (" finish=" + rq["finish"]) if rq.get("finish") else "",
+                     (" keys=" + ",".join(rq["keys"])) if "keys" in rq else "",
+                     (" ERROR=" + str(rq["error"])) if rq.get("error") else ""))
         if x.get("status") != "ok":
             if x.get("usage"):
                 a("     usage=%s" % (x.get("usage"),))

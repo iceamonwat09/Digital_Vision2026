@@ -23,7 +23,7 @@
 
 ## 🆕 Artwork V2 — เทียบข้อความด้วย Google Cloud Vision (2 ต.ค. 2026 · PoC)
 
-**Branch: `claude/trusting-archimedes-qoynbp`** (ต่อจาก `claude/laughing-fermat-i9aise`) · `CONFIG_VERSION` = **`2026.10.11-v2-aibudget`** ·
+**Branch: `claude/trusting-archimedes-qoynbp`** (ต่อจาก `claude/laughing-fermat-i9aise`) · `CONFIG_VERSION` = **`2026.10.11-v2-aisplit`** ·
 โมดูล `artwork_v2/` (VERSION `2026.10.09-v2rasterstrict`) · เมนู **"Artwork V2"** (`/artwork_v2`) ·
 เทสต์ `tests/test_artwork_v2.py` **73 ตัว** + `tests/test_artwork_v2_robust.py` **717 ตัว** (ข้อมูล OCR จริง · ~2.5 นาที)
 · V2 ทั้งชุด **596 + 717**
@@ -816,6 +816,24 @@ Sodium แยกเป็น F12 (แดง `20%` หายไป) + F11 (เห
   ย้อนโค้ด 5 จุด แดงทุกจุด · V2 ไม่รวม robust **797 ผ่าน**
 * ⚠️ **ต้อง Import `n8n_artwork_v2_image.workflow.json` ใหม่** (หรือวางโค้ด node Build + Parse ทับ) · ยังไม่รู้ว่าวนที่จุดไหน (ผู้ต้องสงสัย F3 เลขอาหรับ-อินดิก) — รอบหน้าดูท้ายคำตอบใน Log
 * ⚠️ ถ้ายังวนอีก ⇒ ล้มใน ~10-30 วิ แทน 3 นาที (ผลเหมือนเดิม: ใช้อัลกอริทึม) · ยังไม่ได้ลองยิงซ้ำ/แยกคำขอ (temperature 0 ⇒ ยิงซ้ำน่าจะวนเหมือนเดิม)
+
+#### ✂️ 11 ต.ค. (รอบ 2) — run_003: N8N ตอบ 200 แต่ไม่มีผลตรวจ → **แยกคำขอละจุด**
+
+**ผลสถานี (John West · run_003 · หลัง commit เพดานคำตอบ):** ครอปถูกต้อง (F13/F14 หมุนตั้งตรง) · FAIL ถูก = ของจริง 3/3 แดง ·
+**แต่ AI: `status=ok http=200 72.8 วิ` · `engine` ว่าง · `usage=None` · `reviews=0/0` · ไม่ได้ตอบ 5/5 จุด** — node Parse ทุกรุ่นใส่ `engine`
+เสมอ ⇒ คำตอบนี้ไม่ได้มาจาก Parse (ยังไม่รู้ต้นเหตุ) · ผู้ใช้สั่ง: *"ต้องทำให้ N8N ทำงานได้ · ไม่ต้องทำด่านในแอป · แบ่งเป็นหลาย Request"*
+
+| ส่วน | ทำอะไร |
+|---|---|
+| `AI_IMAGE_SPLIT` (1) | `ai_review._split_payloads` + `call_split`: คำขอละ N จุด (มีเฉพาะครอปของจุดนั้น · `part`/`parts`) · ขนาน `AI_IMAGE_PARALLEL` (3) · รวม reviews/items/summary/suggestions (ไม่ซ้ำ)/usage (รวม token) เป็นคำตอบรูปเดิม ⇒ `_merge_image` ไม่ต้องรู้ |
+| คำขอที่ล้ม | เฉพาะจุดของคำขอนั้น "AI ไม่ได้ตอบ (คำขอของจุดนี้ล้ม: …)" + คำเตือนระบุจุด · ล้มทุกคำขอ ⇒ คู่ล้มเหมือนเดิม |
+| คำขอที่ได้ 200 แต่ไม่มี reviews | หมายเหตุบอก **คีย์ที่ N8N ส่งมา** (ไม่เก็บเนื้อหา) · สถานะคู่ยังเป็นตามเดิม (ผู้ใช้ไม่เอาด่าน) |
+| Log / หน้าเว็บ | `image_split: requests= failed= parallel=` + บรรทัด `req N [F3] status http ms reviews engine tokens=prompt/คำตอบ/ส่วนคิด finish keys ERROR` · กล่อง AI บอก "แยก N คำขอ (ล้ม k)" · `[SETTINGS]` มีธงใหม่ 2 ตัว |
+| workflow image | node HTTP Request `alwaysOutputData: true` ⇒ ไม่มีผลออกมาก็ยังส่ง item ว่างให้ Parse ⇒ ได้ `{error, engine}` ไม่ใช่คำตอบเงียบ · **ต้อง Import ใหม่** |
+
+* เพดานคำตอบต่อคำขอ (`maxItems` = จำนวนจุดในคำขอ · คำตอบ ≤ 2,560 token ต่อจุด) **คงไว้** — แบบเดิม 65,536 คือรอบที่วนจนล้มหลัง 187 วิ
+* เทสต์ `tests/test_artwork_v2_ai_image_split.py` **11** · ย้อนโค้ด 5 จุด แดงทุกจุด · `conftest.py` ตรึง `AI_IMAGE_SPLIT=0` ให้เทสต์รุ่นก่อน (ล็อก "1 คำขอต่อคู่") · V2 ไม่รวม robust **808 ผ่าน**
+* ⏳ รอบหน้าบนสถานีดูบรรทัด `req …`: ถ้ายังได้ `reviews=0 keys=…` ⇒ คีย์นั้นบอกว่า node ไหนตอบแทน Parse
 
 **📚 เอกสาร Google Vision (อ่าน 4 ต.ค. — `docs.cloud.google.com` ถูก proxy บล็อก อ่านจาก proto ทางการบน GitHub + ข้อความค้นหา):**
 `DOCUMENT_TEXT_DETECTION` สำหรับข้อความหนาแน่น ✅ (ใช้อยู่) · `languageHints` *"ส่วนใหญ่ปล่อยว่างดีที่สุด · ใส่ผิดเป็นอุปสรรคมาก"* ✅ (ว่าง) ·
@@ -6488,7 +6506,7 @@ A, B, C, …) ⇒ ทุกกลุ่มมีสมาชิก 1 ตัว �
   `tests/test_artwork_ownership.py` 30 ตัว (สิทธิ์เห็นประวัติ + ชื่อผู้ตรวจ).
   ⚠️ `tests/test_inspection_golden.py` **fail 5 ตัวอยู่แล้ว** (pre-existing, `NameError: FieldResult`
   ในโมดูล Label Paper) — ไม่เกี่ยวกับ artwork. ยืนยันด้วย `git stash` ก่อนโทษการแก้ของตัวเอง.
-- CONFIG_VERSION ปัจจุบัน: **`2026.10.11-v2-aibudget`** (เช็คที่ footer ว่ารันโค้ดใหม่จริง).
+- CONFIG_VERSION ปัจจุบัน: **`2026.10.11-v2-aisplit`** (เช็คที่ footer ว่ารันโค้ดใหม่จริง).
 - **ตาข่ายนิรภัยของชั้นเทียบ: `verify_compare.py`** — แก้อะไรที่ `panelmatch`/`confirm`
   **ต้องรันไฟล์นี้ก่อนและหลังเสมอ** (`--selftest` ใช้ได้โดยไม่ต้องมีไฟล์จริง)
 

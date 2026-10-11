@@ -968,7 +968,12 @@ def _merge_image(pr: dict, resp: dict, findings: List[dict], st: dict,
         if ai is None:
             cnt["unanswered"] += 1
             f["ai"] = {"verdict": None, "reason": "", "suggestion": "", "image": True}
-            f["notes"].append("AI ไม่ได้ตอบจุดนี้ — คงระดับของอัลกอริทึม")
+            # แบ่งคำขอ (``AI_IMAGE_SPLIT``) ⇒ รู้ว่าคำขอของจุดนี้เป็นอะไร (ล้ม / ตอบโดยไม่มีผลตรวจ)
+            why = ((resp.get("_unanswered_why") or {}) if isinstance(resp, dict) else {}).get(
+                "F%d" % f["id"]) if f.get("id") is not None else None
+            if why:
+                f["ai"]["unanswered_why"] = why
+            f["notes"].append("AI ไม่ได้ตอบจุดนี้%s — คงระดับของอัลกอริทึม" % (" (%s)" % why if why else ""))
             kept.append(f)
             continue
         f["ai"] = ai
@@ -1179,6 +1184,118 @@ def _url_of(mode: str) -> str:
 _URL_ENV = {"raw": "ARTWORK_V2_AI_RAW_URL", "image": "ARTWORK_V2_AI_IMAGE_URL"}
 
 
+_USAGE_SUM = ("promptTokenCount", "candidatesTokenCount", "thoughtsTokenCount", "totalTokenCount")
+
+
+def _split_payloads(payload: dict, crops: List[dict], per: int) -> List[dict]:
+    """แบ่ง payload ของโหมด image (ครอป) เป็นคำขอละ ``per`` จุด — แต่ละคำขอมีเฉพาะครอปของจุดตัวเอง"""
+    cands = payload.get("candidates") or []
+    per = max(1, int(per))
+    out = []
+    for i in range(0, len(cands), per):
+        grp = cands[i:i + per]
+        ids = {c["id"] for c in grp}
+        p = dict(payload)
+        p["candidates"] = grp
+        p["crops"] = [c for c in crops if c.get("candidate") in ids]
+        out.append(p)
+    n = len(out)
+    for i, p in enumerate(out):
+        p["part"], p["parts"] = i + 1, n
+    return out
+
+
+def _usage_tokens(u) -> str:
+    if not isinstance(u, dict):
+        return "-"
+    return "/".join(str(u.get(k, "?")) for k in ("promptTokenCount", "candidatesTokenCount",
+                                                    "thoughtsTokenCount"))
+
+
+def call_split(url: str, payloads: List[dict], poster: Optional[Callable] = None,
+               timeout: Optional[float] = None,
+               url_env: str = "ARTWORK_V2_AI_IMAGE_URL") -> Tuple[Optional[dict], dict]:
+    """ยิงหลายคำขอ (ขนานกันไม่เกิน ``AI_IMAGE_PARALLEL``) แล้วรวมเป็นคำตอบเดียวรูปแบบเดิม
+
+    คำขอที่ล้ม ⇒ จุดของคำขอนั้น "AI ไม่ได้ตอบ" + เหตุผล (``_unanswered_why``) · คำขออื่นยังใช้ได้ ·
+    ล้มทุกคำขอ ⇒ ``(None, info)`` เหมือน ``call()`` · ``info["requests"]`` = บันทึกต่อคำขอ (ลง Log)"""
+    from concurrent.futures import ThreadPoolExecutor
+    t0 = time.time()
+    par = max(1, min(int(config.AI_IMAGE_PARALLEL or 1), len(payloads) or 1))
+
+    def one(p):
+        return call(url, p, poster, timeout=timeout, url_env=url_env)
+
+    if par == 1:
+        results = [one(p) for p in payloads]
+    else:
+        with ThreadPoolExecutor(max_workers=par) as ex:
+            results = list(ex.map(one, payloads))
+    merged = {"reviews": [], "items": [], "summary": "", "suggestions": [], "engine": "",
+              "usage": None, "_unanswered_why": {}}
+    sums: Dict[str, int] = {}
+    summaries, reqs = [], []
+    info = {"http": None, "ms": None, "attempts": 0, "error": "", "bytes": 0}
+    ok = 0
+    first_err, fail_usage = "", None
+    for p, (resp, inf) in zip(payloads, results):
+        ids = [c["id"] for c in p.get("candidates") or []]
+        info["attempts"] += inf.get("attempts") or 0
+        info["bytes"] += inf.get("bytes") or 0
+        rec = {"part": p.get("part"), "ids": ids, "http": inf.get("http"), "ms": inf.get("ms"),
+               "attempts": inf.get("attempts"), "bytes": inf.get("bytes")}
+        if resp is None:
+            rec.update(status="failed", error=inf.get("error"))
+            if inf.get("usage"):
+                rec["usage"] = _usage_tokens(inf["usage"])
+                fail_usage = fail_usage or inf["usage"]
+            first_err = first_err or inf.get("error") or ""
+            for cid in ids:
+                merged["_unanswered_why"][cid] = "คำขอของจุดนี้ล้ม: %s" % _clip(inf.get("error"), 160)
+            reqs.append(rec)
+            continue
+        ok += 1
+        info["http"] = inf.get("http")
+        revs = _as_list(resp.get("reviews"))
+        rec.update(status="ok", reviews=len(revs), engine=_clip(resp.get("engine"), 60),
+                   usage=_usage_tokens(resp.get("usage")),
+                   finish=_clip(resp.get("finish_reason"), 30))
+        if not revs:
+            # N8N ตอบ 200 แต่ไม่มีผลตรวจ — บอกว่าได้คีย์อะไรมา (ไม่เก็บเนื้อหา) ไว้ไล่ workflow
+            rec["keys"] = sorted(str(k) for k in resp.keys())[:12]
+            for cid in ids:
+                merged["_unanswered_why"][cid] = ("N8N ตอบกลับโดยไม่มีผลตรวจ (คีย์ที่ได้: %s)"
+                                                  % (", ".join(rec["keys"]) or "ว่าง"))
+        reqs.append(rec)
+        merged["reviews"].extend(revs)
+        merged["items"].extend(_as_list(resp.get("items")))
+        if str(resp.get("summary") or "").strip():
+            summaries.append(str(resp["summary"]).strip())
+        for sg in _sugs(resp):
+            if sg not in merged["suggestions"]:
+                merged["suggestions"].append(sg)
+        merged["engine"] = merged["engine"] or str(resp.get("engine") or "")
+        u = resp.get("usage")
+        if isinstance(u, dict):
+            for k in _USAGE_SUM:
+                if isinstance(u.get(k), (int, float)):
+                    sums[k] = sums.get(k, 0) + int(u[k])
+    info["ms"] = int((time.time() - t0) * 1000)
+    info["requests"] = reqs
+    info["requests_failed"] = len(payloads) - ok
+    info["parallel"] = par
+    if not ok:
+        info["error"] = "ทุกคำขอล้ม (%d/%d): %s" % (len(payloads), len(payloads), first_err)
+        if fail_usage:
+            info["usage"] = fail_usage
+        return None, info
+    merged["summary"] = " · ".join(summaries)
+    merged["usage"] = sums or None
+    if not merged["_unanswered_why"]:
+        merged.pop("_unanswered_why")
+    return merged, info
+
+
 def run_all(pairs: List[dict], mode: str, warnings: List[str], say: Callable,
             next_id: int, poster: Optional[Callable] = None,
             img_dir: Optional[str] = None,
@@ -1268,14 +1385,23 @@ def run_all(pairs: List[dict], mode: str, warnings: List[str], say: Callable,
             payload["crops"] = crops
             payload["image_sizes"] = {s: {"w": int(pr["sides"][s]["sent_px"][0]),
                                           "h": int(pr["sides"][s]["sent_px"][1])} for s in ("a", "b")}
-        resp, info = call(url, payload, poster,
-                          timeout={"raw": config.AI_RAW_TIMEOUT_S,
-                                   "image": config.AI_IMAGE_TIMEOUT_S}.get(mode),
-                          url_env=_URL_ENV.get(mode, "ARTWORK_V2_AI_REVIEW_URL"))
+        tmo = {"raw": config.AI_RAW_TIMEOUT_S, "image": config.AI_IMAGE_TIMEOUT_S}.get(mode)
+        uenv = _URL_ENV.get(mode, "ARTWORK_V2_AI_REVIEW_URL")
+        split = int(config.AI_IMAGE_SPLIT or 0) if crops is not None else 0
+        if split > 0 and len(payload["candidates"]) > split:
+            # คำขอละ N จุด (แต่ละคำขอมีเฉพาะครอปของจุดตัวเอง) · รวมคำตอบกลับเป็นรูปเดิม
+            resp, info = call_split(url, _split_payloads(payload, crops, split), poster,
+                                    timeout=tmo, url_env=uenv)
+        else:
+            resp, info = call(url, payload, poster, timeout=tmo, url_env=uenv)
         ai = {"mode": mode, "status": "ok" if resp is not None else "failed",
               "http": info["http"], "ms": info["ms"], "attempts": info["attempts"],
               "request_bytes": info["bytes"], "error": info["error"], "vision_conf": vc,
               "candidates": len(payload["candidates"])}
+        if "requests" in info:
+            ai["requests"] = info["requests"]
+            ai["requests_failed"] = info["requests_failed"]
+            ai["parallel"] = info["parallel"]
         if crops is not None:
             ai["crops"] = len(crops)
             ai["not_sent"] = len(pr.get("findings") or []) - len(sendable)
@@ -1312,6 +1438,11 @@ def run_all(pairs: List[dict], mode: str, warnings: List[str], say: Callable,
             continue
         summary["pairs_ok"] += 1
         ai.update(st)
+        if info.get("requests_failed"):
+            bad = [r for r in info["requests"] if r.get("status") != "ok"]
+            warnings.append("คู่ %d: AI ล้ม %d จาก %d คำขอ (%s) — จุด %s ใช้ผลของอัลกอริทึม"
+                            % (pr["n"], len(bad), len(info["requests"]), _clip(bad[0].get("error"), 160),
+                               ", ".join(i for r in bad for i in r["ids"])))
         ai["engine"] = _clip(resp.get("engine"), 60)
         ai["usage"] = resp.get("usage") if isinstance(resp.get("usage"), dict) else None
         ai["summary"] = _clip(resp.get("summary"), 2000)

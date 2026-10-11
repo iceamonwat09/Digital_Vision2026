@@ -25,6 +25,7 @@ _GUARD_TESTED_IN = {"test_artwork_v2_zone_guard"}
 # (เช่น "ชิ้นท้ายบรรทัดที่เจอในบรรทัดข้างเคียง = ตัดบรรทัด" โดยไม่นับจำนวน) ⇒ ตรึงค่าเดิมให้ · ค่าใหม่ทดสอบใน
 # ``test_artwork_v2_noise_round.py`` (+ ``ARTWORK_V2_TEST_NEW_RULES=1`` = รันเทสต์รุ่นก่อนด้วยค่าใหม่)
 _NOISE_TESTED_IN = {"test_artwork_v2_noise_round"}
+_SPLIT_TESTED_IN = {"test_artwork_v2_ai_image_split"}
 _NOISE_FLAGS = ("REFLOW_CONSERVE", "PLACEHOLDER", "LOWMARK", "KEEP_SUPERSCRIPT", "PIXEL_RASTER_NOTE")
 
 
@@ -35,6 +36,10 @@ def _artwork_v2_legacy_defaults(request, monkeypatch):
         yield
         return
     from artwork_v2 import config
+    # 11 ต.ค.: โหมด image แบ่งคำขอละจุด (AI_IMAGE_SPLIT) — เทสต์รุ่นก่อนล็อก "1 คำขอต่อคู่" ⇒ ตรึงค่าเดิม
+    # (ค่าใหม่ทดสอบใน test_artwork_v2_ai_image_split.py)
+    if name not in _SPLIT_TESTED_IN:
+        monkeypatch.setattr(config, "AI_IMAGE_SPLIT", 0)
     monkeypatch.setattr(config, "REREAD_ENABLED", True)
     monkeypatch.setattr(config, "AI_MODE", "off")
     if name not in _STRUCT_TESTED_IN and os.getenv("ARTWORK_V2_TEST_NEW_RULES") != "1":

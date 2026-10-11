@@ -1343,6 +1343,8 @@
       if (iv.curved_yellow) stat += " · ข้อความโค้งที่ AI บอกว่าต่าง คงไว้เป็นเหลือง " + iv.curved_yellow;
       if (iv.not_sent) stat += " · ไม่ได้ส่งให้ AI " + iv.not_sent + " จุด (คงระดับเดิม)";
       if (ai.crops) stat += " · ส่งภาพครอปรอบจุด " + ai.crops + " รูป";
+      if (ai.requests && ai.requests.length) stat += " · แยก " + ai.requests.length + " คำขอ (คำขอละจุด)" +
+        (ai.requests_failed ? " — ล้ม " + ai.requests_failed + " คำขอ (จุดนั้นคงระดับเดิม)" : "");
       if (ai.crops_hires) stat += " (เรนเดอร์ใหม่จาก PDF " + ai.crops_hires + " รูป ถึง " + Math.round(ai.crop_dpi_max || 0) + " dpi)";
       if (ai.blind) stat += " · AI ไม่เห็นข้อความของ Vision — อ่านภาพเองแล้วแอปเทียบ" +
         (ai.blind_overruled ? " (คำตอบของ AI ขัดกับสิ่งที่อ่าน ⇒ ไม่แน่ใจ " + ai.blind_overruled + ")" : "");

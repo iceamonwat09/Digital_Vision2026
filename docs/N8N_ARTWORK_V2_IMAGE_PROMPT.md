@@ -55,7 +55,13 @@
    บรรทัด `image: verdicts={...}` และต่อจุด `ai_seen: A=... B=...`
 
 กันเงียบ: node HTTP Request ตั้ง **`neverError`** + **On Error = Continue** ⇒ ทุกความล้มเหลวไปจบที่
-node Parse ซึ่งคืน `{error}` เสมอ ⇒ แอปเห็นเหตุผลจริงใน Log และใช้ผลอัลกอริทึมแทน
+node Parse ซึ่งคืน `{error}` เสมอ ⇒ แอปเห็นเหตุผลจริงใน Log และใช้ผลอัลกอริทึมแทน · และ **Settings → Always Output Data = เปิด**
+(11 ต.ค.) ⇒ ถ้า node นี้ไม่มีผลออกมาเลย node Parse ก็ยังทำงานแล้วคืน `{error, engine}` (เดิมคำตอบหลุดไปเป็น object ว่าง —
+สถานี run_003: `engine` ว่าง · `reviews=0/0`) · ⚠️ **ต้อง Import ไฟล์ใหม่ทับทั้ง workflow** — วางโค้ดทับแค่บาง node ไม่ได้ค่านี้
+
+แอปแบ่งคำขอละจุด (`ARTWORK_V2_AI_IMAGE_SPLIT=1` · ยิงพร้อมกัน `ARTWORK_V2_AI_IMAGE_PARALLEL=3`) ⇒ workflow นี้ได้รับ
+`candidates` 1 จุด + ครอป 2 รูปต่อ execution (มี `part`/`parts` บอกลำดับ) · ไม่ต้องแก้ workflow — Build รับได้ทุกจำนวนจุดอยู่แล้ว ·
+Log ฝั่งแอปมีบรรทัด `req N [F3] status http ms reviews engine tokens keys` ต่อคำขอ ⇒ เทียบกับ Executions ใน N8N ได้ทีละรายการ
 
 ## ③ Prompt (system instruction)
 
