@@ -309,6 +309,8 @@ def build_text(r: dict) -> str:
                                x.get("candidates"),
                                (" ERROR=" + x["error"]) if x.get("error") else ""))
         if x.get("status") != "ok":
+            if x.get("usage"):
+                a("     usage=%s" % (x.get("usage"),))
             continue
         vc = x.get("vision_conf") or {}
         a("     ref_accuracy=%s items=%s/%s reviews=%s/%s reviewed=%s/%s extra_added=%s "

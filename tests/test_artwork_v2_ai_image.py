@@ -477,9 +477,13 @@ def test_workflow_is_a_separate_importable_flow():
             return n.startswith("Respond to Webhook")
         return all(ends(t, seen + (n,)) for t in nxt[n])
     assert ends("Webhook")
-    # node Parse = ตัวเดียวกับ workflow review (ต่างแค่บรรทัดหัว)
+    # node Parse = ตัวเดียวกับ workflow review (ต่างแค่บรรทัดหัว + 11 ต.ค.: ข้อความตอนตอบไม่จบ
+    # บอกจำนวน token และท้ายคำตอบ — เฉพาะ workflow นี้)
     parse = lambda p: _code(p, "Parse Gemini response").split("\n", 1)[1]
-    assert parse(WF) == parse(WF_REVIEW)
+    img = re.sub(r"if \(fr && fr !== 'STOP'\) \{\n.*?\n\}\n",
+                 "if (fr && fr !== 'STOP') return fail('Gemini ตอบไม่จบ (finishReason=' + fr + ')');\n",
+                 parse(WF), count=1, flags=re.S)
+    assert img != parse(WF) and img == parse(WF_REVIEW)
 
 
 def test_other_workflows_do_not_know_image_mode():

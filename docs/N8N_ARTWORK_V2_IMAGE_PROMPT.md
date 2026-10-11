@@ -28,7 +28,7 @@
 | ไม่มีจุดต่างเลย | ไม่ยิง N8N (ประหยัดโควตา) |
 | N8N ล่ม/ตอบผิดรูป/ยังไม่ได้ Import/อ่านไฟล์ภาพไม่ได้ | ผลอัลกอริทึมทั้งหมด + คำเตือน (เหมือนทุกโหมด) |
 | ชั้นกันพลาด `ARTWORK_V2_AI_IMAGE_SAFETY` | **ค่าเริ่มต้นปิด** (ผู้ใช้เลือก "ตัดสินเต็มที่") · `1` = AI บอก "ภาพเหมือน" กับตัวอักษร/ตัวเลข/ตัวพิมพ์ที่ Vision อ่านชัด ≥ 80% ทั้งสองฝั่ง ⇒ คงเป็นเหลือง |
-| เวลา | `thinkingBudget 16384` · `maxOutputTokens 65536` · node HTTP รอ 290 วิ · แอปรอ 300 วิ (`ARTWORK_V2_AI_IMAGE_TIMEOUT_S`) |
+| เวลา | `thinkingBudget 16384` · `maxOutputTokens` = 16384 + คำตอบ `min(32768, 2048 + 512 × จำนวนจุด)` (เดิม 65536 ตายตัว) · `reviews.maxItems` = จำนวนจุด · node HTTP รอ 290 วิ · แอปรอ 300 วิ (`ARTWORK_V2_AI_IMAGE_TIMEOUT_S`) |
 
 ⚠️ **ความเสี่ยงที่วัดไว้แล้ว (30 ก.ย. โหมดเทียบคู่ของ Artwork เดิม):** Gemini ที่เห็นสองภาพในคำขอเดียว
 **ถอดภาพ B ตาม A** และในโซนใหญ่กลืนความต่างจริง 4/4 — prompt ห้ามลอกแล้วก็ยังเกิด ⇒ ในโหมดนี้ `noise`
@@ -94,6 +94,7 @@ OUTPUT
 - summary: 2-6 Thai sentences: how many candidates are real differences (each one briefly A -> B), how many are Vision misreads, and what still needs a human look.
 - suggestions: concrete Thai actions for the inspector.
 - Do not decide which version is correct; describe it as A: "..." / B: "...".
+- Keep every field short. a_seen / b_seen: only the text at the spot, at most 80 characters. reason and suggestion: at most two short sentences each. Never repeat a character, word or phrase over and over; if you notice you are repeating yourself, stop that field and move on to the next candidate.
 - Never output any number for confidence or accuracy. The app computes confidence from Vision.
 - Respond with the raw JSON object only, matching the schema. No Markdown, no code fences, no text before or after it.
 ```
@@ -135,6 +136,7 @@ OUTPUT
 - summary: 2-6 Thai sentences: how many spots read differently (each one briefly A -> B), how many read the same, and what still needs a human look.
 - suggestions: concrete Thai actions for the inspector.
 - Do not decide which version is correct; describe it as A: "..." / B: "...".
+- Keep every field short. a_seen / b_seen: only the text at the spot, at most 80 characters. reason and suggestion: at most two short sentences each. Never repeat a character, word or phrase over and over; if you notice you are repeating yourself, stop that field and move on to the next candidate.
 - Never output any number for confidence or accuracy.
 - Respond with the raw JSON object only, matching the schema. No Markdown, no code fences, no text before or after it.
 ```
@@ -158,3 +160,4 @@ OUTPUT
 | ใช้กรอบของแต่ละฝั่งบนภาพของตัวเอง | ภาพ A/B ขนาด/สเกลไม่เท่ากัน (B มักเล็กกว่า ~10%) |
 | ทุก candidate ต้องได้คำตอบ 1 ข้อ · `items` ว่าง | ผู้ใช้เลือก "ตรวจเฉพาะจุดที่อัลกอริทึมพบ" |
 | ห้ามตอบตัวเลขความมั่นใจ | % มาจาก Vision เท่านั้น (กติกาเดียวกับทุกโหมด) |
+| ทุกช่องสั้น (`a_seen`/`b_seen` ≤ 80 ตัว · เหตุผล ≤ 2 ประโยค) · ห้ามพิมพ์ซ้ำวน + เพดานคำตอบตามจำนวนจุด | สถานี 11 ต.ค.: 5 จุดตอบ **61,631 token** (ส่วนคิดแค่ 3,891) = วนพิมพ์ซ้ำ ชน `maxOutputTokens 65536` หลังรอ 187 วิ ⇒ AI ล้มทั้งคู่ · เพดานใหม่ทำให้ล้มใน ~10-30 วิ และ node Parse บอกจำนวน token + ท้ายคำตอบ |

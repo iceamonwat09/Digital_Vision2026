@@ -482,7 +482,10 @@ def call(url: str, payload: dict, poster: Optional[Callable] = None,
             info["error"] = "N8N ตอบผิดรูป (ไม่ใช่ object)"
             break
         if data.get("error"):
-            info["error"] = "AI: %s" % _clip(data.get("error"), 300)
+            info["error"] = "AI: %s" % _clip(data.get("error"), 400)
+            # usage ของคำขอที่ล้ม (เช่น MAX_TOKENS) — บอกได้ว่าหมดไปกับส่วนคิดหรือคำตอบ
+            if isinstance(data.get("usage"), dict):
+                info["usage"] = data["usage"]
             break
         info["error"] = ""
         info["ms"] = int((time.time() - t0) * 1000)
@@ -1286,6 +1289,8 @@ def run_all(pairs: List[dict], mode: str, warnings: List[str], say: Callable,
             if config.AI_IMAGE_CROP_VERTICAL:
                 ai["crops_rotated"] = cstat.get("rotated_crops", 0)
         if resp is None:
+            if info.get("usage"):
+                ai["usage"] = info["usage"]
             summary["pairs_failed"] += 1
             warnings.append("คู่ %d: AI ตรวจทานไม่สำเร็จ — ใช้ผลของอัลกอริทึม (%s)"
                             % (pr["n"], info["error"]))
