@@ -23,7 +23,7 @@
 
 ## 🆕 Artwork V2 — เทียบข้อความด้วย Google Cloud Vision (2 ต.ค. 2026 · PoC)
 
-**Branch: `claude/trusting-archimedes-qoynbp`** (ต่อจาก `claude/laughing-fermat-i9aise`) · `CONFIG_VERSION` = **`2026.10.11-v2-aisplit`** ·
+**Branch: `claude/trusting-archimedes-qoynbp`** (ต่อจาก `claude/laughing-fermat-i9aise`) · `CONFIG_VERSION` = **`2026.10.11-v2-aisplit2`** ·
 โมดูล `artwork_v2/` (VERSION `2026.10.09-v2rasterstrict`) · เมนู **"Artwork V2"** (`/artwork_v2`) ·
 เทสต์ `tests/test_artwork_v2.py` **73 ตัว** + `tests/test_artwork_v2_robust.py` **717 ตัว** (ข้อมูล OCR จริง · ~2.5 นาที)
 · V2 ทั้งชุด **596 + 717**
@@ -832,8 +832,12 @@ Sodium แยกเป็น F12 (แดง `20%` หายไป) + F11 (เห
 | workflow image | node HTTP Request `alwaysOutputData: true` ⇒ ไม่มีผลออกมาก็ยังส่ง item ว่างให้ Parse ⇒ ได้ `{error, engine}` ไม่ใช่คำตอบเงียบ · **ต้อง Import ใหม่** |
 
 * เพดานคำตอบต่อคำขอ (`maxItems` = จำนวนจุดในคำขอ · คำตอบ ≤ 2,560 token ต่อจุด) **คงไว้** — แบบเดิม 65,536 คือรอบที่วนจนล้มหลัง 187 วิ
-* เทสต์ `tests/test_artwork_v2_ai_image_split.py` **11** · ย้อนโค้ด 5 จุด แดงทุกจุด · `conftest.py` ตรึง `AI_IMAGE_SPLIT=0` ให้เทสต์รุ่นก่อน (ล็อก "1 คำขอต่อคู่") · V2 ไม่รวม robust **808 ผ่าน**
+* เทสต์ `tests/test_artwork_v2_ai_image_split.py` **11** · ย้อนโค้ด 5 จุด แดงทุกจุด · `conftest.py` ตรึง `AI_IMAGE_SPLIT=0` ให้เทสต์รุ่นก่อน (ล็อก "1 คำขอต่อคู่") · V2 ไม่รวม robust **809 ผ่าน** (+1 สรุปติดรหัสจุด)
 * ⏳ รอบหน้าบนสถานีดูบรรทัด `req …`: ถ้ายังได้ `reviews=0 keys=…` ⇒ คีย์นั้นบอกว่า node ไหนตอบแทน Parse
+* ✅ **ผลสถานี run_004 (หลังแยกคำขอ):** 5 คำขอ ok ทั้งหมด · AI 9.0 วิ (เดิม 72-187) · คำตอบ 157-275 token/คำขอ · ส่วนคิด 260-742 ·
+  FAIL ถูก: ของจริง 3 เรื่องแดง (Sodium = F12 `20%` หายไป + F11 ซ้ำจาก Vision ฝั่ง 🅱 รวม `%24` เข้าบรรทัดอาหรับ · claim AR F13 · EN F16) ·
+  F3 AI บอก noise แต่หลักฐานภาพ **เวกเตอร์** DIFF ⇒ คงเหลือง (`pixel_kept` ทำงานตามออกแบบ) · ภาพพับ 11 จุด ·
+  🐛 สรุปของ AI ต่อกันจากหลายคำขอแล้ว **อ่านขัดกันเอง** (คำขอ F3 เขียน "ไม่มีจุดที่แตกต่างกัน") ⇒ ตอนนี้ทุกประโยคขึ้นต้น `[F3] …` (แสดงผลล้วน · `2026.10.11-v2-aisplit2`)
 
 **📚 เอกสาร Google Vision (อ่าน 4 ต.ค. — `docs.cloud.google.com` ถูก proxy บล็อก อ่านจาก proto ทางการบน GitHub + ข้อความค้นหา):**
 `DOCUMENT_TEXT_DETECTION` สำหรับข้อความหนาแน่น ✅ (ใช้อยู่) · `languageHints` *"ส่วนใหญ่ปล่อยว่างดีที่สุด · ใส่ผิดเป็นอุปสรรคมาก"* ✅ (ว่าง) ·
@@ -6506,7 +6510,7 @@ A, B, C, …) ⇒ ทุกกลุ่มมีสมาชิก 1 ตัว �
   `tests/test_artwork_ownership.py` 30 ตัว (สิทธิ์เห็นประวัติ + ชื่อผู้ตรวจ).
   ⚠️ `tests/test_inspection_golden.py` **fail 5 ตัวอยู่แล้ว** (pre-existing, `NameError: FieldResult`
   ในโมดูล Label Paper) — ไม่เกี่ยวกับ artwork. ยืนยันด้วย `git stash` ก่อนโทษการแก้ของตัวเอง.
-- CONFIG_VERSION ปัจจุบัน: **`2026.10.11-v2-aisplit`** (เช็คที่ footer ว่ารันโค้ดใหม่จริง).
+- CONFIG_VERSION ปัจจุบัน: **`2026.10.11-v2-aisplit2`** (เช็คที่ footer ว่ารันโค้ดใหม่จริง).
 - **ตาข่ายนิรภัยของชั้นเทียบ: `verify_compare.py`** — แก้อะไรที่ `panelmatch`/`confirm`
   **ต้องรันไฟล์นี้ก่อนและหลังเสมอ** (`--selftest` ใช้ได้โดยไม่ต้องมีไฟล์จริง)
 

@@ -1270,7 +1270,9 @@ def call_split(url: str, payloads: List[dict], poster: Optional[Callable] = None
         merged["reviews"].extend(revs)
         merged["items"].extend(_as_list(resp.get("items")))
         if str(resp.get("summary") or "").strip():
-            summaries.append(str(resp["summary"]).strip())
+            # สรุปของแต่ละคำขอพูดถึงเฉพาะจุดของตัวเอง ⇒ ติดรหัสจุดนำหน้า ไม่งั้นต่อกันแล้วอ่านเป็นสรุปทั้งคู่
+            # (สถานี 11 ต.ค.: คำขอ F3 ตอบว่า "ไม่มีจุดที่แตกต่างกัน" ต่อท้ายคำขอที่บอกว่าต่าง)
+            summaries.append("[%s] %s" % (",".join(ids), str(resp["summary"]).strip()))
         for sg in _sugs(resp):
             if sg not in merged["suggestions"]:
                 merged["suggestions"].append(sg)

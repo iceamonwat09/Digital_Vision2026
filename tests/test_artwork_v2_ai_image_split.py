@@ -181,3 +181,21 @@ def test_parse_turns_an_empty_item_into_an_error():
     import test_artwork_v2_ai_image_budget as B
     out = B._parse({})
     assert out["error"] and out["engine"]
+
+
+def test_merged_summary_names_the_spot_of_each_request(tmp_path, monkeypatch):
+    # สถานี 11 ต.ค. run_004: สรุปของคำขอ F3 ("ไม่มีจุดที่แตกต่างกัน") ต่อท้ายสรุปของจุดที่ต่าง
+    # ⇒ อ่านเป็นสรุปทั้งคู่ที่ขัดกันเอง · ต้องบอกว่าแต่ละประโยคมาจากจุดไหน
+    pr = _pr(tmp_path)
+    C._go(pr, _real, tmp_path)
+    summ = pr["ai"]["summary"]
+    for i in _ids(pr):
+        assert "[%s] s-%s" % (i, i) in summ
+
+    def many(body):
+        r = _real(body)
+        r["suggestions"] = ["ข้อ %s-%d" % (body["candidates"][0]["id"], k) for k in range(10)]
+        return r
+    pr = _pr(tmp_path)
+    C._go(pr, many, tmp_path)
+    assert len(pr["ai"]["suggestions"]) == ai_review.MAX_SUGGESTIONS
