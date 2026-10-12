@@ -420,7 +420,7 @@ def test_workflow_builds_request_with_both_images():
     assert data["zone_a"][0]["w"] == [["A0:0", "Fat", 1], ["A0:1", "20%", 1]]
     assert "b64" not in parts[4]["text"]
     gc = req["generationConfig"]
-    assert gc["temperature"] == 0 and gc["thinkingConfig"]["thinkingBudget"] == 16384
+    assert gc["temperature"] == 0 and gc["thinkingConfig"]["thinkingBudget"] == 2048 + 1024  # 1 จุด (ส่วนคิดตามจำนวนจุด · 12 ต.ค.)
     s = json.dumps(gc["responseSchema"])
     assert "a_seen" in s and "b_seen" in s and "confidence" not in s
 

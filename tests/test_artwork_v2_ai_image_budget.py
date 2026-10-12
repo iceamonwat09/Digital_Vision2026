@@ -57,7 +57,8 @@ def test_output_cap_scales_with_candidates(n, blind):
     assert b["valid"], b["error"]
     gc = b["gemini_request"]["generationConfig"]
     think = gc["thinkingConfig"]["thinkingBudget"]
-    assert gc["maxOutputTokens"] == think + min(32768, 2048 + 512 * n)
+    assert think == min(16384, 2048 + 1024 * n)
+    assert gc["maxOutputTokens"] == think + min(32768, 3072 + 512 * n)
     assert gc["maxOutputTokens"] < 65536                     # เดิมตายตัว = วนได้ถึง 61k token
     sch = gc["responseSchema"]
     assert sch["properties"]["reviews"]["maxItems"] == n
@@ -68,6 +69,24 @@ def test_station_case_would_stop_far_earlier():
     gc = C._build(_body(5, True))["gemini_request"]["generationConfig"]
     answer = gc["maxOutputTokens"] - gc["thinkingConfig"]["thinkingBudget"]
     assert answer * 10 < 61631                               # คำตอบที่วนบนสถานี
+
+
+def test_split_request_cap_leaves_no_room_for_a_long_loop():
+    """สถานี 12 ต.ค. (King Oscar · คำขอละ 1 จุด): คิด 862 + ตอบ 18,066 = ชนเพดาน 18,944 หลังรอ ~50 วิ —
+    Gemini นับส่วนคิดรวมใน maxOutputTokens ⇒ ส่วนคิดที่ไม่ได้ใช้กลายเป็นที่ให้คำตอบวน"""
+    gc = C._build(_body(1, True))["gemini_request"]["generationConfig"]
+    think = gc["thinkingConfig"]["thinkingBudget"]
+    assert gc["maxOutputTokens"] * 2.5 < 18066 + 862        # วนแล้วล้มเร็วกว่าเดิม > 2.5 เท่า
+    assert think >= 2 * 1330                                 # ส่วนคิดสูงสุดที่วัดได้ในคำขอที่สำเร็จ (16 คำขอ)
+    assert gc["maxOutputTokens"] - think >= 2 * 1716         # คำตอบยาวสุดที่สำเร็จ (F7) ยังพอ
+
+
+def test_thinking_budget_follows_candidate_count():
+    code = _code("Build Gemini request")
+    assert "THINKING_BUDGET" not in code                     # เดิมคงที่ 16384 ทุกคำขอ
+    assert "thinkingConfig: { thinkingBudget }" in code
+    big = C._build(_body(40, True))["gemini_request"]["generationConfig"]
+    assert big["thinkingConfig"]["thinkingBudget"] == 16384  # คำขอใหญ่ (ไม่แยก) = เพดานเดิม
 
 
 def test_schema_constant_is_not_mutated_between_requests():
