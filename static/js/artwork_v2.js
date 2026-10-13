@@ -1051,14 +1051,16 @@
     const out = [], at = {};
     (list || []).forEach((f) => {
       const a = f.a || {}, b = f.b || {};
-      const k = (f.id != null && !f.members && a.line != null && b.line != null)
+      // ความต่างเรื่องเดียวกันที่ขึ้นสองจุด (Vision รวมสองบรรทัด · เซิร์ฟเวอร์ติดเลข ``same_change`` — ARTWORK_V2_SAME_CHANGE)
+      const k = (f.id != null && !f.members && f.same_change != null) ? "sc\u0001" + f.same_change
+        : (f.id != null && !f.members && a.line != null && b.line != null)
         ? [f.source === "ai" ? "ai" : "algo", a.line, b.line, a.text || "", b.text || ""].join("\u0001") : null;
       if (k != null && at[k] != null) { out[at[k]].push(f); return; }
       if (k != null) at[k] = out.length;
       out.push([f]);
     });
     return out.map((g) => g.length === 1 ? g[0] : {
-      group: true, id: "g" + g[0].id, members: g,
+      group: true, id: "g" + g[0].id, members: g, same: g[0].same_change != null,
       severity: g.reduce((s, m) => ((SEV_RANK[m.severity] || 0) > (SEV_RANK[s] || 0) ? m.severity : s), g[0].severity),
     });
   }
@@ -1080,6 +1082,18 @@
     return out + esc(text.slice(pos));
   }
 
+  // แถวกลุ่ม "เรื่องเดียวกัน": แต่ละฝั่งแสดงบรรทัดของสมาชิกที่มีข้อความต่างอยู่ฝั่งนั้น (ชิ้นยาวสุด) — สมาชิกอยู่คนละบรรทัดกัน
+  function sameSide(ms, s) {
+    let best = null;
+    ms.forEach((m) => {
+      const d = m[s] || {};
+      if (!d.text) return;
+      const n = (d.frag || "").trim().length;
+      if (!best || n > best.n) best = { n: n, m: m };
+    });
+    return best ? markedMulti(best.m[s].text, [best.m[s].span]) : markedMulti("", []);
+  }
+
   function groupRow(g) {
     const ms = g.members, f0 = ms[0];
     const ids = ms.map((m) => String(m.id));
@@ -1096,20 +1110,23 @@
         frag(m.a.frag) + " → " + frag(m.b.frag) + ' <span class="v2-muted">· ' + pct(m.confidence) + "</span>" +
         (notes ? "<br>" + notes : "") + aiNote(m) + aiCrops(m) + "</div>";
     }).join("");
+    const head = g.same ? "เรื่องเดียวกัน " + ms.length + " จุด (Vision รวมบรรทัด)" : ms.length + " จุดในบรรทัดเดียวกัน";
+    const cellA = g.same ? sameSide(ms, "a") : markedMulti(f0.a.text, ms.map((m) => m.a.span));
+    const cellB = g.same ? sameSide(ms, "b") : markedMulti(f0.b.text, ms.map((m) => m.b.span));
     if (SIDE_TABLE) {
       return sideRow(g.id, g.severity, SEV_TH[g.severity] || g.severity,
-        ms.length + " จุดในบรรทัดเดียวกัน" + (f0.source === "ai" ? '<span class="v2-ai-tag">AI</span>' : "") +
+        head + (f0.source === "ai" ? '<span class="v2-ai-tag">AI</span>' : "") +
         "<br>" + esc(cls.join(" · ")) + rvHtml(ids),
-        markedMulti(f0.a.text, ms.map((m) => m.a.span)), markedMulti(f0.b.text, ms.map((m) => m.b.span)),
+        cellA, cellB,
         confShort({ confidence: lo(ms.map((m) => m.confidence)), a: { conf: lo(ms.map((m) => m.a.conf)) },
                     b: { conf: lo(ms.map((m) => m.b.conf)) } }),
         per, { cls: " v2-grp", attr: ' data-members="' + ids.join(",") + '"', label: ids.join("·") });
     }
     return '<tr class="click v2-grp" data-f="' + g.id + '" data-members="' + ids.join(",") + '"><td>' + ids.join("·") +
       '</td><td><span class="v2-sev ' + g.severity + '">' + (SEV_TH[g.severity] || g.severity) + "</span>" + rvHtml(ids) +
-      "</td><td>" + ms.length + " จุดในบรรทัดเดียวกัน" + (f0.source === "ai" ? '<span class="v2-ai-tag">AI</span>' : "") +
+      "</td><td>" + head + (f0.source === "ai" ? '<span class="v2-ai-tag">AI</span>' : "") +
       '<br><span class="v2-muted">' + esc(cls.join(" · ")) + "</span></td><td>" +
-      markedMulti(f0.a.text, ms.map((m) => m.a.span)) + "</td><td>" + markedMulti(f0.b.text, ms.map((m) => m.b.span)) +
+      cellA + "</td><td>" + cellB +
       "</td><td>" + conf + "</td><td>" + per + "</td></tr>";
   }
 

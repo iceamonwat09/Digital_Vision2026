@@ -188,6 +188,23 @@ def apply_ignore(pr: dict) -> int:
     return len(moved)
 
 
+def _note_same_change(pr: dict) -> None:
+    """หลังให้เลขจุด: จุดในกลุ่ม ``same_change`` บอกเลขของอีกจุด (หน้าเว็บที่ไม่รวมแถวก็ยังรู้ว่าเป็นเรื่องเดียวกัน) +
+    เติมเลขจุดลงรายการของ Log · กลุ่มที่สมาชิกไม่อยู่ใน findings ครบ (ถูกพับ/ยกเว้นไปก่อน) ⇒ ไม่ติดหมายเหตุ"""
+    from . import structure
+    groups: dict = {}
+    for f in pr.get("findings") or []:
+        if f.get("same_change") is not None:
+            groups.setdefault(f["same_change"], []).append(f)
+    for rec in pr.get("same_change") or []:
+        ms = groups.get(rec.get("group")) or []
+        rec["ids"] = [m.get("id") for m in ms]
+        if len(ms) != 2:
+            continue
+        for f, o in ((ms[0], ms[1]), (ms[1], ms[0])):
+            f.setdefault("notes", []).append(structure.SAME_NOTE % ("#%s" % o.get("id"), rec["merged_side"]))
+
+
 def _px_box_to_norm(box, zone_bbox, zw, zh, pad_x, pad_y):
     x, y, w, h = zone_bbox
     x0 = x + (box[0] - pad_x) / zw * w
@@ -445,6 +462,7 @@ def _run(job_id, raw_pairs, poster, progress, sharpness, ai_mode, ai_poster,
         pr["reflow_lines"] = cmp_["reflow_lines"]
         pr["row_merges"] = cmp_.get("row_merges", [])
         pr["row_splits"] = cmp_.get("row_splits", [])
+        pr["same_change"] = cmp_.get("same_change", [])
         pr["unpaired"] = {"a": cmp_["unpaired_a"], "b": cmp_["unpaired_b"]}
         pr["lines"] = {"a": _compact_lines(cmp_["lines_a"]), "b": _compact_lines(cmp_["lines_b"])}
         pr["line_pairs"] = cmp_["pairs"]
@@ -473,6 +491,7 @@ def _run(job_id, raw_pairs, poster, progress, sharpness, ai_mode, ai_poster,
         for f in pr.get("findings", []):
             fid += 1
             f["id"] = fid
+        _note_same_change(pr)
         for f in pr.get("debris", []):
             fid += 1
             f["id"] = fid
@@ -608,7 +627,8 @@ def settings_snapshot() -> dict:
         "GEO_PAIRING", "RECOMPOSE", "MOVED_TEXT", "RELOCATE", "BALANCED_MOVE",
         "VERTICAL_UPRIGHT", "QUOTE_PUNCT", "SPLIT_MERGED", "AI_EXPERIMENTAL_MODES",
         "PIXEL_VERIFY", "PIXEL_LINE_MODE", "PIXEL_TIME_BUDGET_S", "PIXEL_RASTER", "PIXEL_WARP_GUARD", "PIXEL_WARP_MAX",
-        "ZONE_IGNORE", "IGNORE_COVER", "EST_BOX", "NEAR_ZOOM",
+        "ZONE_IGNORE", "IGNORE_COVER", "EST_BOX", "NEAR_ZOOM", "SAME_CHANGE", "SEAM_YELLOW",
+        "AI_IMAGE_CROP_LINE_ONLY", "AI_IMAGE_CROP_LINE_PAD",
         "REFLOW_CONSERVE", "REFLOW_UNBALANCED_YELLOW", "PLACEHOLDER", "PLACEHOLDER_RED", "LOWMARK", "KEEP_SUPERSCRIPT",
         "PIXEL_RASTER_NOTE", "PIXEL_RASTER_STRICT_GRAY",
         "PIXEL_RASTER_INK_T", "PIXEL_RASTER_KEEP_NUMBER")}

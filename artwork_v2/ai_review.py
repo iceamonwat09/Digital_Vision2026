@@ -213,14 +213,55 @@ def _spot_px(f: dict, s: str, vertical: bool = False):
              max(b[2] for b in bs), max(b[3] for b in bs)], hs[len(hs) // 2])
 
 
-def crop_rect(box, lh, W: int, H: int, vertical: bool = False) -> List[int]:
+def _line_band(f: dict, s: str, lines: Optional[dict], box, lh, vertical: bool):
+    """``AI_IMAGE_CROP_LINE_ONLY`` — ความหนาของแถบครอป (ขวางบรรทัด) = **ความสูงตัวอักษรของบรรทัดนั้น** ไม่ใช่แค่ของคำ (คำที่ไม่มี
+    ตัวสูง/หางเช่น ``ana`` มีกรอบเตี้ยกว่าบรรทัด) · กรอบบรรทัดของ Vision บนภาพเอียงหนาเกินจริง (ภาพถ่าย King Oscar เอียง 1° ยาว
+    1,118 px ⇒ หนาขึ้น ~20 px จนกรอบบรรทัดติดกันซ้อนกัน) ⇒ หักส่วนที่เกิดจากความเอียงออก (ความยาว × sin มุม) แล้ววางแถบ
+    **กึ่งกลางที่คำที่วัดได้** (ไม่ต้องเดาทิศเอียง · ไม่หลุดกรอบบรรทัด) · บรรทัดที่หนากว่าคำเกิน 1.8 เท่า (Vision รวมหลายแถว) / ไม่มีบรรทัด (ฝั่งที่ไม่มี
+    ข้อความ · การ์ดโค้ง) ⇒ ใช้ความหนาของคำ · คืน ``(กรอบ, ความหนาแถบ)``"""
+    import math
+    lh = max(1.0, float(lh or 0))
+    if f.get("members"):
+        return box, lh
+    i = (f.get(s) or {}).get("line")
+    ls = (lines or {}).get(s) or []
+    if not isinstance(i, int) or not (0 <= i < len(ls)):
+        return box, lh
+    ln = ls[i] or {}
+    lb = ln.get("box")
+    if not lb:
+        return box, lh
+    a0, a1 = (0, 2) if vertical else (1, 3)       # แกนขวางบรรทัด (แนวตั้งของครอป · ข้อความแนวตั้ง = แนวนอน)
+    b0, b1 = (1, 3) if vertical else (0, 2)       # แกนตามบรรทัด
+    full = float(lb[a1]) - float(lb[a0])
+    length = float(lb[b1]) - float(lb[b0])
+    thick = full
+    ang = ln.get("angle")
+    if ang is not None:
+        d = abs(float(ang) % 90.0)
+        d = min(d, 90.0 - d)
+        thick -= length * math.sin(math.radians(d))
+    thick = max(thick, lh)
+    if thick > 1.8 * lh:
+        return box, lh
+    # กึ่งกลางที่คำ แต่แถบต้องอยู่ในกรอบบรรทัด (ไม่เอียง ⇒ แถบ = กรอบบรรทัดพอดี · คำไม่มีตัวสูงไม่ดึงแถบลง)
+    c = (float(box[a0]) + float(box[a1])) / 2.0
+    lo, hi = float(lb[a0]) + thick / 2.0, float(lb[a1]) - thick / 2.0
+    c = min(max(c, lo), hi) if lo <= hi else (float(lb[a0]) + float(lb[a1])) / 2.0
+    out = [float(v) for v in box]
+    out[a0] = min(out[a0], c - thick / 2.0)
+    out[a1] = max(out[a1], c + thick / 2.0)
+    return out, thick
+
+
+def crop_rect(box, lh, W: int, H: int, vertical: bool = False, line_only: bool = False) -> List[int]:
     """กรอบครอปรอบจุด (พิกเซล · อยู่ในภาพเสมอ) — เห็นคำข้าง ๆ และบรรทัดบน/ล่างบางส่วน
 
     กว้างอย่างน้อย ``AI_IMAGE_CROP_MIN_W`` · ถ้าบริบทเกินด้านยาวสูงสุดแต่ตัวจุดเองพอดี ⇒ ตัดบริบท
     ให้พอดี ``AI_IMAGE_CROP_MAX_SIDE`` (คงความละเอียดจริง ไม่ย่อ) · ``vertical`` = ข้อความแนวตั้ง ⇒ คิดในแกน
     ที่สลับกัน (บริบทตามแนวข้อความ = แนวตั้ง · บรรทัดข้างเคียง = ซ้าย/ขวา) แล้วสลับกลับ"""
     if vertical:
-        r = crop_rect([box[1], box[0], box[3], box[2]], lh, H, W)
+        r = crop_rect([box[1], box[0], box[3], box[2]], lh, H, W, line_only=line_only)
         return [r[1], r[0], r[3], r[2]]
     mx = max(64, int(config.AI_IMAGE_CROP_MAX_SIDE))
     x0, y0, x1, y1 = [float(v) for v in box]
@@ -230,7 +271,11 @@ def crop_rect(box, lh, W: int, H: int, vertical: bool = False) -> List[int]:
     cw = max(cw, float(min(config.AI_IMAGE_CROP_MIN_W, W)))
     if cw > mx and bw + 2 * lh <= mx:
         cw = float(mx)
-    ch = bh + 2 * max(1.5 * lh, 16.0)
+    if line_only:
+        # เฉพาะบรรทัดของจุด (กรอบที่ส่งมาขยายถึงกรอบบรรทัดแล้ว) + ระยะเผื่อเล็กน้อย — ไม่เห็นบรรทัดบน/ล่าง
+        ch = bh + 2 * max(float(config.AI_IMAGE_CROP_LINE_PAD) * lh, 2.0)
+    else:
+        ch = bh + 2 * max(1.5 * lh, 16.0)
     if ch > mx and bh + 2 * lh <= mx:
         ch = float(mx)
     cw, ch = min(cw, float(W)), min(ch, float(H))
@@ -266,7 +311,7 @@ def _rot_rel(b: List[int], rot: int) -> List[int]:
 
 
 def crop_part(im, box, lh, hi=None, vertical: bool = False,
-              rot: int = 0) -> Optional[Tuple[dict, dict]]:
+              rot: int = 0, line_only: bool = False) -> Optional[Tuple[dict, dict]]:
     """ครอปรอบจุดจากภาพที่ส่ง Vision → ``(ส่วนที่ส่ง {mime, w, h, b64}, ข้อมูลใน candidate {w, h, box})``
 
     ``hi`` (``pipeline.HiresSide`` · PDF เท่านั้น) — ตัวอักษรเล็ก ⇒ เรนเดอร์บริเวณเดียวกันใหม่จากไฟล์ต้นฉบับ
@@ -281,12 +326,12 @@ def crop_part(im, box, lh, hi=None, vertical: bool = False,
         kk = hires_scale(box, lh, hi.kmax)
         if kk > 1.0:
             bk = [v * kk for v in bx]
-            rk = crop_rect(bk, float(lh or 0) * kk, W * kk, H * kk, vertical)
+            rk = crop_rect(bk, float(lh or 0) * kk, W * kk, H * kk, vertical, line_only)
             got = hi.render([v / kk for v in rk], (rk[2] - rk[0], rk[3] - rk[1]))
             if got is not None and getattr(got, "size", 0):
                 up, c, bx, r = kk, got, bk, rk
     if c is None:
-        r = crop_rect(box, lh, W, H, vertical)
+        r = crop_rect(box, lh, W, H, vertical, line_only)
         c = im[r[1]:r[3], r[0]:r[2]]
     if c.size == 0:
         return None
@@ -314,6 +359,8 @@ def crop_part(im, box, lh, hi=None, vertical: bool = False,
     info = {"w": int(w2), "h": int(h2), "box": rel, "region": r, "scale": round(k, 4)}
     if rot in (90, 180, 270):
         info["rot"] = rot
+    if line_only:
+        info["line_only"] = True
     if up > 1.0:
         info["hires"] = round(up, 3)
         if getattr(hi, "base_dpi", None):
@@ -376,7 +423,10 @@ def plan_crops(findings: List[dict], ims: dict,
             if box is None:
                 skip[fid] = "ไม่มีตำแหน่งของจุดนี้บนภาพฝั่ง %s" % s.upper()
                 break
-            cp = crop_part(ims[s], box, lh, (hires or {}).get(s), vert, rot)
+            lo = bool(config.AI_IMAGE_CROP_LINE_ONLY)
+            if lo:
+                box, lh = _line_band(f, s, lines, box, lh, vert)
+            cp = crop_part(ims[s], box, lh, (hires or {}).get(s), vert, rot, lo)
             if cp is None:
                 skip[fid] = "ครอปภาพฝั่ง %s ไม่ได้" % s.upper()
                 break
@@ -400,6 +450,8 @@ def plan_crops(findings: List[dict], ims: dict,
         stats["rots"] = {k: {s: v[s]["rot"] for s in ("a", "b") if v[s].get("rot")}
                          for k, v in info.items() if any(v[s].get("rot") for s in ("a", "b"))}
         stats["rotated_crops"] = sum(len(v) for v in stats["rots"].values())
+        if config.AI_IMAGE_CROP_LINE_ONLY:
+            stats["line_only_crops"] = sum(1 for v in info.values() for s in ("a", "b") if v[s].get("line_only"))
     if stats is not None and hires is not None:
         # สถิติสำหรับ Log (ไม่อยู่ใน payload) — ครอปกี่รูปที่เรนเดอร์ใหม่จาก PDF · dpi สูงสุด
         stats["hires_crops"] = len(hi_dpis)
@@ -1021,6 +1073,13 @@ def _merge_image(pr: dict, resp: dict, findings: List[dict], st: dict,
             f["severity"] = "yellow"
             f["notes"].append("AI ดูภาพแล้วบอกว่าต่าง แต่เป็นข้อความโค้ง/เอียง (OCR และ AI อ่านไม่นิ่ง) "
                               "— คงไว้เป็นเหลือง โปรดดูด้วยตา")
+        elif v == "real" and config.SEAM_YELLOW and f.get("seam"):
+            # รอยต่อที่ Vision รวมสองบรรทัด (``structure.same_change``) — ข้อความเท่ากับอีกฝั่งทุกตัวอักษร ต่างแค่ ≤ 1 ตัว
+            # ตรงรอยต่อ · ครอป AI ของจุดนี้เห็นคนละช่วงข้อความสองฝั่ง (ชิ้นที่รวม ↔ ตัวอักษรที่รอยต่อ) ⇒ "ต่าง" ไม่ใช่หลักฐาน
+            cnt["seam_yellow"] = cnt.get("seam_yellow", 0) + 1
+            f["severity"] = "yellow"
+            f["notes"].append("AI ดูภาพแล้วบอกว่าต่าง แต่เป็นรอยต่อที่ Vision รวมสองบรรทัด (ข้อความเท่ากับอีกฝั่ง"
+                              "ทุกตัวอักษร) — คงไว้เป็นเหลือง โปรดดูด้วยตา")
         elif v == "real":
             f["severity"] = "red"
             f["notes"].append("AI อ่านภาพเอง (ไม่เห็นข้อความของ Vision) ได้ต่างกัน — ยืนยันว่าต่างจริง"
@@ -1416,6 +1475,8 @@ def run_all(pairs: List[dict], mode: str, warnings: List[str], say: Callable,
                 ai["crops_saved"] = cstat.get("saved", 0)
             if config.AI_IMAGE_CROP_VERTICAL:
                 ai["crops_rotated"] = cstat.get("rotated_crops", 0)
+            if config.AI_IMAGE_CROP_LINE_ONLY:
+                ai["crops_line_only"] = cstat.get("line_only_crops", 0)
         if resp is None:
             if info.get("usage"):
                 ai["usage"] = info["usage"]

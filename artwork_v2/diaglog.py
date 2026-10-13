@@ -150,6 +150,14 @@ def build_text(r: dict) -> str:
             for m in rs:
                 a("     %s: %s ‖ %s" % (m["side"], _q(m["left"], 400), _q(m["right"], 400)))
                 a("        ↳ ชิ้นหนึ่งตรงกับอีกฝั่งทุกตัวอักษรที่ตำแหน่งเดียวกัน: %s" % _q(m.get("evidence") or "", 80))
+        sc = p.get("same_change") or []
+        if sc:
+            a("  same_change (%d) — ความต่างเดียวกันที่ขึ้นสองจุด เพราะ Vision รวมสองบรรทัด:" % len(sc))
+            for m in sc:
+                a("     group=%s kind=%s ids=%s merged_side=%s piece=%s seam=%s line=%s%s" % (
+                    m.get("group"), m.get("kind"), m.get("ids"), m.get("merged_side"), _q(m.get("piece") or "", 80),
+                    _q(m.get("seam") or "", 20), _q(m.get("line") or "", 80),
+                    " seam_yellow" if m.get("seam_yellow") else ""))
         cl = p.get("curved_lines") or {}
         a("  curved_lines (เอียง > %s° จากแนวหลัก + เศษติดกัน): A=%s B=%s" % (
             _f(config.TILT_ANGLE, 0), cl.get("A"), cl.get("B")))
@@ -157,7 +165,9 @@ def build_text(r: dict) -> str:
         def finding(f, ind="   "):
             a("%sF%s %s %s method=%s score=%s%s" % (
                 ind, f.get("id", "-"), f["severity"].upper(), f["class"], f.get("pair_method"),
-                _f(f.get("pair_score")), " curved" if f.get("curved") else ""))
+                _f(f.get("pair_score")), " curved" if f.get("curved") else "")
+              + (" same_change=%s" % f["same_change"] if f.get("same_change") is not None else "")
+              + (" seam" if f.get("seam") else ""))
             for s_ in ("a", "b"):
                 a("%s   %s line=%s frag=%s word=%s conf=%s box=%s" % (
                     ind, s_.upper(), f[s_]["line"], _q(f[s_]["frag"], 60),
@@ -355,6 +365,8 @@ def build_text(r: dict) -> str:
                     a("     image_orient: crops_rotated=%s (หมุนให้ข้อความตั้งตรงตามมุมที่ Vision วัด) "
                       "onesided_kept=%s (ข้อความฝั่งเดียวที่ Vision อ่านชัด · AI บอกว่าเหมือน ⇒ ไม่พับ)"
                       % (x.get("crops_rotated", "-"), vd.get("onesided_kept", 0)))
+            if "crops_line_only" in x:
+                a("     image_line_only: crops=%s (ครอปเฉพาะบรรทัดของจุด — ไม่เห็นบรรทัดบน/ล่าง)" % x["crops_line_only"])
         for eq in x.get("equivalent") or []:
             a("     equivalent %s (AI=%s): %s" % (eq.get("what"), eq.get("verdict"), eq.get("reason")))
         for bad in x.get("invalid") or []:

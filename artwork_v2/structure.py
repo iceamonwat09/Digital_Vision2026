@@ -467,6 +467,133 @@ def mark_balanced(findings: List[dict]) -> None:
                 break
 
 
+
+# ── ความต่างเรื่องเดียวที่ขึ้นสองการ์ด เพราะ Vision รวมสองบรรทัดเป็นบรรทัดเดียว (``SAME_CHANGE`` · ``SEAM_YELLOW``) ──
+
+def _k(text: str) -> str:
+    return C.diff_key_map(text or "")[0]
+
+
+def _skel(k: str) -> str:
+    """ตัวเลขทุกตัว → ``#`` แล้วเรียงตัวอักษร (ไม่สนลำดับ — ข้อความ RTL ``%24`` ↔ ``24%``)"""
+    return "".join(sorted("#" if c.isdigit() else c for c in k))
+
+
+def _edge(text: str, span) -> Optional[str]:
+    """ช่วง ``span`` อยู่ต้นบรรทัด (``head``) / ท้ายบรรทัด (``tail``) ของ ``text`` (ไม่นับช่องว่าง/จุดไข่ปลา) — ไม่ใช่ ⇒ None"""
+    s0, s1 = span
+    if not _k(text[:s0]):
+        return "head"
+    if not _k(text[s1:]):
+        return "tail"
+    return None
+
+
+def _merged_piece(x: dict, A, B):
+    """ถ้า ``x`` = "บรรทัดฝั่งหนึ่ง (M) มีชิ้นเกินที่หัว/ท้าย ⇔ บรรทัดคู่ (P) ต่างแค่ ≤ 1 ตัวที่ขอบเดียวกัน และที่เหลือเท่ากัน
+    ทุกตัวอักษร" ⇒ ``(ฝั่ง M, คีย์ชิ้นเกิน, คีย์อีกฝั่งที่ขอบ)`` · ไม่ใช่ ⇒ None"""
+    if x.get("pair_method") == "unpaired" or x.get("class") in ("CURVED", "MOVED", "FILLER", "FRACTION") \
+            or x.get("curved"):
+        return None
+    for sm, sp in (("a", "b"), ("b", "a")):
+        m, p = x[sm], x[sp]
+        if m.get("line") is None or p.get("line") is None or not m.get("box"):
+            continue
+        F, Q = _k(m.get("frag")), _k(p.get("frag"))
+        if sum(1 for c in F if c.isalnum()) < 2 or len(Q) > 1:
+            continue
+        L = (A if sm == "a" else B)[m["line"]]
+        R = (B if sp == "b" else A)[p["line"]]
+        e = _edge(L["text"], m["span"])
+        if e is None or _edge(R["text"], p["span"]) != e:
+            continue
+        if e == "head":
+            rest_m, rest_p = L["text"][m["span"][1]:], R["text"][p["span"][1]:]
+        else:
+            rest_m, rest_p = L["text"][:m["span"][0]], R["text"][:p["span"][0]]
+        rk = _k(rest_m)
+        if not rk or rk != _k(rest_p):
+            continue
+        return sm, F, Q
+    return None
+
+
+SAME_NOTE = "ความต่างเดียวกับจุด %s — Vision รวมสองบรรทัดเป็นบรรทัดเดียวในฝั่ง %s จึงขึ้นสองจุด"
+SEAM_NOTE = ("ตรงรอยต่อที่ Vision รวมสองบรรทัดเป็นบรรทัดเดียว (ฝั่ง %s) — ข้อความเท่ากับบรรทัดของอีกฝั่งทุกตัวอักษร "
+             "ต่างแค่ %s ตรงรอยต่อ ซึ่ง OCR มักทำหาย/เพิ่มเอง · ลดเป็นเหลือง โปรดดูด้วยตา")
+
+
+def same_change(findings: List[dict], A, B, g: Optional[Geo], gi: Optional[Geo]) -> List[dict]:
+    """จับคู่ "จุดในคู่บรรทัดที่ Vision รวม (X)" ↔ "บรรทัดที่หาย/เกินฝั่งเดียว (Y)" ที่เป็นความต่างเรื่องเดียวกัน
+
+    ครบทุกด่านจึงจับคู่ (ไม่ครบ = สองการ์ดแบบเดิม — ไม่มีอะไรถูกลบ):
+    * X: ชิ้นเกินอยู่หัว/ท้ายบรรทัด M · อีกฝั่ง (P) ต่างแค่ ≤ 1 ตัวที่ขอบเดียวกัน · ส่วนที่เหลือของ M/P เท่ากันทุกตัวอักษร
+    * Y: บรรทัดที่ไม่มีคู่อยู่ฝั่งเดียวกับ P · คีย์ของชิ้นเกิน = คีย์ของ Y ทุกตัวอักษร (``layout``) หรือต่างแค่ตัวเลข
+      (จำนวนหลักและตัวอื่นเท่ากัน ไม่สนลำดับ — ``digits``)
+    * ตำแหน่งของ Y ที่ทำนายไปฝั่ง M ทับกรอบชิ้นเกิน ≥ ครึ่งของกรอบที่เล็กกว่า (ต้องมีคู่บรรทัดยึด ≥ 3)
+    * คู่เดียวทั้งสองทาง · ไม่โค้ง
+
+    คืนรายการสำหรับ Log · ติด ``same_change`` (เลขกลุ่ม) เมื่อ ``SAME_CHANGE`` · ``SEAM_YELLOW`` ⇒ กลุ่ม ``layout`` ลดแดงเป็นเหลือง"""
+    if g is None or gi is None:
+        return []
+    cand = []
+    for xi, x in enumerate(findings):
+        mp = _merged_piece(x, A, B)
+        if mp is None:
+            continue
+        sm, F, Q = mp
+        sp = "b" if sm == "a" else "a"
+        fbox = x[sm].get("box")
+        for yi, y in enumerate(findings):
+            if y.get("pair_method") != "unpaired" or y.get("curved"):
+                continue
+            if y[sp].get("line") is None or y[sm].get("line") is not None:
+                continue
+            ybox = y[sp].get("box")
+            if not ybox or not fbox:
+                continue
+            U = _k(y[sp].get("text"))
+            if F == U:
+                kind = "layout"
+            elif any(c.isdigit() for c in F) and len(F) == len(U) and _skel(F) == _skel(U):
+                kind = "digits"
+            else:
+                continue
+            mb = (g if sp == "a" else gi).box(ybox)
+            if _inter(mb, fbox) < 0.5 * min(_area(mb), _area(fbox)):
+                continue
+            cand.append((xi, yi, kind, sm, F, Q))
+    nx: dict = {}
+    ny: dict = {}
+    for c in cand:
+        nx[c[0]] = nx.get(c[0], 0) + 1
+        ny[c[1]] = ny.get(c[1], 0) + 1
+    out = []
+    for xi, yi, kind, sm, F, Q in cand:
+        if nx[xi] != 1 or ny[yi] != 1:
+            continue
+        x, y = findings[xi], findings[yi]
+        sp = "b" if sm == "a" else "a"
+        gid = len(out) + 1
+        rec = {"group": gid, "kind": kind, "merged_side": sm.upper(), "merged_line": x[sm]["text"],
+               "piece": x[sm]["frag"], "seam": x[sp]["frag"], "line": y[sp]["text"],
+               "x_class": x["class"], "y_class": y["class"], "seam_yellow": False}
+        if config.SAME_CHANGE:
+            x["same_change"] = gid
+            y["same_change"] = gid
+            x["same_change_role"] = "merged"
+            y["same_change_role"] = "line"
+        if config.SEAM_YELLOW and kind == "layout" and len(Q) <= 1:
+            what = ("“%s”" % (x[sp].get("frag") or "").strip()) if Q else "ไม่มีตัวอักษรเลย"
+            for f in (x, y):
+                f["seam"] = True
+                if f.get("severity") == "red":
+                    f["severity"] = "yellow"
+                    rec["seam_yellow"] = True
+                f.setdefault("notes", []).append(SEAM_NOTE % (sm.upper(), what))
+        out.append(rec)
+    return out
+
 CAP_NOTE = {
     "moved": "ข้อความเดียวกันย้ายตำแหน่งในบรรทัด (มีครบทั้งสองฝั่ง) — ดูด้วยตา",
     "moved_punct": "ส่วนที่เหลือหลังข้อความย้ายที่ต่างแค่เครื่องหมาย",

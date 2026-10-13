@@ -1214,6 +1214,15 @@ def compare(lines_a: List[dict], lines_b: List[dict],
             if (la is not None and la in curved["A"]) or (lb is not None and lb in curved["B"]):
                 f["curved"] = True
 
+    # ความต่างเรื่องเดียวที่ขึ้นสองการ์ด (Vision รวมสองบรรทัด) — ติดเลขกลุ่ม · รอยต่อ ⇒ เหลือง (ไม่ลบ ไม่พับ)
+    same: List[dict] = []
+    if (config.SAME_CHANGE or config.SEAM_YELLOW) and findings:
+        if S is None:
+            from . import structure as S
+        if g is None:
+            g, gi = S.build_geo(A, B)
+        same = S.same_change(findings, A, B, g, gi)
+
     # ตำแหน่งประมาณบนฝั่งที่ไม่พบข้อความ (หายไป/เกินมาฝั่งเดียว) — ซูมไปดูได้ · ไม่ใช้ตัดสินอะไรเลย
     if config.EST_BOX and findings:
         if S is None:
@@ -1264,6 +1273,7 @@ def compare(lines_a: List[dict], lines_b: List[dict],
         "reflow_lines": reflow_lines,
         "row_merges": merges,
         "row_splits": splits,
+        "same_change": same,
         "pair_methods": methods,
         "coverage_a": None if cov_a is None else round(cov_a, 4),
         "coverage_b": None if cov_b is None else round(cov_b, 4),

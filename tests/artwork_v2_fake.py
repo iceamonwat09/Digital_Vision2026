@@ -82,11 +82,19 @@ def fta(lines, W=1000, H=1000, block_type="TEXT"):
 
 # ── ข้อมูล OCR จริง (บรรทัด + กรอบบรรทัด) → fullTextAnnotation ───────────
 
-def para_in_box(text, box, conf=0.98, end="LINE_BREAK", angle=None):
-    """บรรทัดเดียวในกรอบ ``box`` — กระจายตัวอักษรเท่า ๆ กัน (ช่องว่าง = 1 ช่อง)"""
+def _rtl(text):
+    return any("\u0590" <= ch <= "\u08ff" for ch in text)
+
+
+def para_in_box(text, box, conf=0.98, end="LINE_BREAK", angle=None, rtl=False):
+    """บรรทัดเดียวในกรอบ ``box`` — กระจายตัวอักษรเท่า ๆ กัน (ช่องว่าง = 1 ช่อง)
+
+    ``rtl=True`` + บรรทัดมีอักษรอาหรับ/ฮีบรู ⇒ วางตัวอักษรจากขวาไปซ้าย (ตัวสุดท้ายตามลำดับข้อความอยู่ซ้ายสุด —
+    เหมือนกรอบที่ Vision ส่งมาของบรรทัด RTL เช่น ``٤٧٥ ملجم %24`` ที่ ``%24`` อยู่ซ้าย)"""
     x0, y0, x1, y1 = box
     n = max(1, len(text))
     cw = (x1 - x0) / float(n)
+    mirror = bool(rtl) and _rtl(text)
     words, cur, k = [], [], 0
     toks = text.split(" ")
     for wi, tok in enumerate(toks):
@@ -95,14 +103,14 @@ def para_in_box(text, box, conf=0.98, end="LINE_BREAK", angle=None):
             brk = None
             if ci == len(tok) - 1:
                 brk = end if wi == len(toks) - 1 else "SPACE"
-            sx = x0 + k * cw
+            sx = (x1 - (k + 1) * cw) if mirror else (x0 + k * cw)
             syms.append(_sym(ch, sx, y0, cw, y1 - y0, conf, brk))
             k += 1
         k += 1
         if not syms:
             continue
-        xs0 = syms[0]["boundingBox"]["vertices"][0]["x"]
-        xs1 = syms[-1]["boundingBox"]["vertices"][1]["x"]
+        xs0 = min(sy["boundingBox"]["vertices"][0]["x"] for sy in syms)
+        xs1 = max(sy["boundingBox"]["vertices"][1]["x"] for sy in syms)
         words.append({"confidence": conf, "symbols": syms,
                       "boundingBox": {"vertices": [{"x": xs0, "y": y0}, {"x": xs1, "y": y0},
                                                    {"x": xs1, "y": y1}, {"x": xs0, "y": y1}]}})
@@ -110,10 +118,10 @@ def para_in_box(text, box, conf=0.98, end="LINE_BREAK", angle=None):
     return {"words": words}
 
 
-def fta_from_lines(lines, W, H):
+def fta_from_lines(lines, W, H, rtl=False):
     """``lines`` = [(text, box, conf)] หรือ [(text, box, conf, angle)]
-    → fta หนึ่งบรรทัดต่อหนึ่งย่อหน้า"""
-    paras = [para_in_box(it[0], it[1], it[2], angle=it[3] if len(it) > 3 else None)
+    → fta หนึ่งบรรทัดต่อหนึ่งย่อหน้า · ``rtl`` ดู ``para_in_box``"""
+    paras = [para_in_box(it[0], it[1], it[2], angle=it[3] if len(it) > 3 else None, rtl=rtl)
              for it in lines if it[0].strip()]
     return {"text": "\n".join(it[0] for it in lines),
             "pages": [{"width": W, "height": H,

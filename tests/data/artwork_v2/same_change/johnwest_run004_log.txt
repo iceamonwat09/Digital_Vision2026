@@ -1,0 +1,526 @@
+=== ARTWORK V2 · CLOUD VISION OCR · DIAGNOSTIC LOG ===
+version=2026.10.09-v2rasterstrict job=20261011_005715_08399e run=run_004 at=2026-10-11 22:47:26 owner=admin
+VERDICT=FAIL (ไม่ผ่าน)
+  - พบจุดต่างที่มั่นใจ 4 จุด
+  - จุดที่ไม่มั่นใจ 1 จุด (ต้องดูด้วยตา)
+  - ภาพเหมือนกันทุกพิกเซล 11 จุด — OCR อ่านต่างเอง (รายการพับ — ไม่นับ)
+time_ms: render=1621 vision=19003 compare=544 reread=0 ai=10745 total=47433
+sharpness=standard (ภาพที่ส่ง: มาตรฐาน 400 dpi)
+color_mode=color (สีของภาพที่ส่ง: สี)
+api_key: source=ui masked=••••L_6g length=39
+
+[SETTINGS]
+  ENDPOINT=https://eu-vision.googleapis.com
+  MODEL=builtin/stable
+  LANGUAGE_HINTS=[]
+  TIMEOUT_S=120.0
+  RETRIES=2
+  MAX_REQUEST_BYTES=9500000
+  MAX_IMAGE_BYTES=7121928
+  MAX_IMAGE_MP=40.0
+  JPEG_QUALITIES=[92, 88, 84, 80, 75, 70]
+  PDF_ZONE_DPI=400
+  PDF_ZONE_DPI_MAX=1200
+  ZONE_MIN_LONG_SIDE=1600
+  SHARPNESS=standard
+  SHARP_FILL=0.92
+  SHARP_MAX_RENDERS=4
+  COLOR_MODE=color
+  BW_BLOCK_MM=3.0
+  BW_C=12.0
+  ZONE_ROTATE=True
+  CONF_FAIL=0.8
+  CONF_LOW=0.6
+  COVERAGE_MIN=0.9
+  PAIR_MIN_SIM=0.6
+  PAIR_MIN_RUN=0.4
+  PAIR_MAX_DIST=0.12
+  ROW_MERGE_ENABLED=True
+  ROW_MAX_ANGLE=10.0
+  PUNCT_CAN_FAIL=True
+  CURVED_GROUP_ENABLED=True
+  TILT_ANGLE=10.0
+  CURVED_NEIGHBOR_MAX_CHARS=8
+  DEBRIS_ENABLED=True
+  DEBRIS_CONF=0.6
+  SEAM_FILLER=True
+  CROSS_ROW_JOIN=True
+  SYMBOL_TOKEN=True
+  FRACTION_YELLOW=True
+  REREAD_ENABLED=False
+  REREAD_MAX=12
+  REREAD_SCALE=2.0
+  REREAD_MAX_SIDE=2400
+  AI_MODE=off
+  AI_REVIEW_URL=http://127.0.0.1:5678/webhook/artwork-v2-review
+  AI_RAW_URL=http://127.0.0.1:5678/webhook/artwork-v2-raw
+  AI_IMAGE_URL=http://127.0.0.1:5678/webhook/artwork-v2-image
+  AI_TIMEOUT_S=180.0
+  AI_RAW_TIMEOUT_S=300.0
+  AI_IMAGE_TIMEOUT_S=300.0
+  AI_RAW_SAFETY=True
+  AI_IMAGE_SAFETY=False
+  AI_IMAGE_CROPS=True
+  AI_IMAGE_CROP_MAX_SIDE=768
+  AI_IMAGE_CROP_MIN_W=480
+  AI_IMAGE_CROP_JPEG_Q=95
+  AI_IMAGE_MAX_CANDIDATES=40
+  AI_IMAGE_CURVED_YELLOW=True
+  AI_IMAGE_CROP_HIRES=True
+  AI_IMAGE_CROP_TARGET_LH=36.0
+  AI_IMAGE_CROP_DPI_MAX=1200.0
+  AI_IMAGE_CROP_HIRES_MIN=1.25
+  AI_IMAGE_BLIND=True
+  AI_IMAGE_SAVE_CROPS=True
+  AI_IMAGE_PIXEL_FIRST=True
+  AI_IMAGE_CROP_VERTICAL=True
+  AI_IMAGE_CROP_ROTATE=True
+  AI_IMAGE_ONESIDED_GUARD=True
+  AI_IMAGE_SPLIT=1
+  AI_IMAGE_PARALLEL=3
+  AI_RETRIES=1
+  AI_JUDGE_PUNCT_YELLOW=True
+  AI_QUOTE_RECOVER=True
+  AI_QUOTE_RECOVER_MAX_SHIFT=2
+  AI_EQUIV_NOISE=True
+  AI_SEND_CURVED=True
+  AI_JUDGE_KEEP_ALGO_RED=True
+  AI_JUDGE_NOISE_GUARD=True
+  AI_JUDGE_CURVED_YELLOW=True
+  AI_JUDGE_ONESIDED_GUARD=True
+  AI_DEDUP_FOLDED=True
+  ONE_REQUEST_PER_PAIR=True
+  RUN_GUARD=True
+  RUN_MAX_CONCURRENT=2
+  RUN_COOLDOWN_S=3.0
+  GEO_PAIRING=True
+  RECOMPOSE=True
+  MOVED_TEXT=True
+  RELOCATE=True
+  BALANCED_MOVE=True
+  VERTICAL_UPRIGHT=True
+  QUOTE_PUNCT=True
+  SPLIT_MERGED=True
+  AI_EXPERIMENTAL_MODES=False
+  PIXEL_VERIFY=True
+  PIXEL_LINE_MODE=True
+  PIXEL_TIME_BUDGET_S=180.0
+  PIXEL_RASTER=True
+  PIXEL_WARP_GUARD=True
+  PIXEL_WARP_MAX=0.05
+  ZONE_IGNORE=True
+  IGNORE_COVER=0.6
+  EST_BOX=True
+  NEAR_ZOOM=True
+  REFLOW_CONSERVE=True
+  REFLOW_UNBALANCED_YELLOW=True
+  PLACEHOLDER=True
+  PLACEHOLDER_RED=True
+  LOWMARK=True
+  KEEP_SUPERSCRIPT=True
+  PIXEL_RASTER_NOTE=True
+  PIXEL_RASTER_STRICT_GRAY=True
+  PIXEL_RASTER_INK_T=40.0
+  PIXEL_RASTER_KEEP_NUMBER=True
+
+[FILES]
+  A: name=Original file LBL 3AAOCN2NKALL5IJWUFSJ CH N SFO 5KZ02335N000001005 1.pdf type=pdf bytes=1365121 sha1=7feb327a3362 pages=1 page_mm=[297.0, 210.0]
+  B: name=Final printer AW-N-2026-00000836 5KZ02335N000001007 1.pdf type=pdf bytes=1702931 sha1=848e8db5a312 pages=1 page_mm=[297.0, 210.0]
+
+[VISION REQUESTS]
+  #0 phase=main images=p1_a,p1_b json_bytes=2240078 http=200 attempts=1 ms=18979 model=builtin/stable at=2026-10-11 22:47:00
+
+[PAIR 1] verdict=FAIL coverage=0.961 (A=0.998 B=0.961) same_request=True methods={'exact': 66, 'content': 4, 'position': 10, 'geo': 6}
+  A: page=1 bbox=[0.05678, 0.27269, 0.91137, 0.15357] render_dpi=400.0 zone_mm=[270.7, 32.2] render_px=[4264, 509] image_scale=- sent_px=[4264, 509] jpeg_q=92 downscale=1.0 jpeg_bytes=823903 sha1=08e87576b349 req=0 ok=True
+     sharp: mode=standard base_dpi=400.0 → dpi=400.0 (×1.0) budget=-k tries=[]
+     ocr: blocks=60 by_type={'TEXT': 60} paragraphs=65 words=298 symbols=1196 lines=89 chars=1196 conf_mean=0.967 conf_min=0.350 low_conf(<0.6)=0.017 langs=['ar', 'en', 'en-Arab'] breaks={'LINE_BREAK': 65, 'EOL_SURE_SPACE': 24} soft_hyphen_lines=0 angles={0: 295, 270: 3} skipped_blocks=0 text_len=1448 pages=[(4264, 509)]
+  B: page=1 bbox=[0.05544, 0.30478, 0.91299, 0.16045] render_dpi=400.0 zone_mm=[271.2, 33.7] render_px=[4271, 532] image_scale=- sent_px=[4271, 532] jpeg_q=92 downscale=1.0 jpeg_bytes=855984 sha1=81a85ace5a3b req=0 ok=True
+     sharp: mode=standard base_dpi=400.0 → dpi=400.0 (×1.0) budget=-k tries=[]
+     ocr: blocks=64 by_type={'TEXT': 64} paragraphs=69 words=309 symbols=1241 lines=90 chars=1241 conf_mean=0.969 conf_min=0.291 low_conf(<0.6)=0.011 langs=['ar', 'en', 'en-Arab'] breaks={'LINE_BREAK': 69, 'EOL_SURE_SPACE': 21} soft_hyphen_lines=0 angles={90: 8, 0: 298, 270: 3} skipped_blocks=0 text_len=1503 pages=[(4271, 532)]
+  pairing: line_pairs=86 unpaired_a=[45, 82] unpaired_b=[0, 27, 38, 88] reflow_lines_a=[] reflow_lines_b=[] reflow_edges=[]
+  row_merges (2) — ต่อแถวที่ OCR ตัดตรงเส้นตกแต่ง:
+     B: "WEIGHT" + ". تستند النسبة المئوية للقيم اليومية على أساس نظام غذائي ٢٠٠٠ سعرة حرارية."
+     A: "WEIGHT" + "تستند النسبة المئوية للقيم اليومية على أساس نظام غذائي ٢٠٠٠ سعرة حرارية."
+        ↳ ต่อด้วยหลักฐานจากอีกฝั่ง (ใส่ … แทนจุดไข่ปลาที่ OCR ทิ้ง): "WEIGHT . تستند النسبة المئوية للقيم اليومية على أساس نظام غذائي ٢٠٠٠ سعرة حرارية…"
+  row_splits (1) — แยกบรรทัดที่ Vision รวมข้ามคอลัมน์:
+     B: "Produced in Thailand for John West Foods Ltd," ‖ "Saturated fat"
+        ↳ ชิ้นหนึ่งตรงกับอีกฝั่งทุกตัวอักษรที่ตำแหน่งเดียวกัน: "Produced in Thailand for John West Foods Ltd,"
+  curved_lines (เอียง > 10° จากแนวหลัก + เศษติดกัน): A=[] B=[]
+  findings (5):
+   F3 YELLOW TEXT method=content score=0.968
+      A line=8 frag="غ) |" word="(١٠٠غ) |" conf=0.573 box=[2380,101,2395,113]
+        text="حجم الحصة 1/2 كوب (١٠٠غ) |"
+      B line=9 frag=")" word="(۱۰۰)" conf=0.640 box=[2392,112,2396,124]
+        text="حجم الحصة 1/2 كوب (۱۰۰)"
+      note: ภาพยืนยันว่าต่าง
+      note: AI อ่านได้เหมือนกันทั้งสองฝั่ง แต่ภาพจากไฟล์ต้นฉบับต่างกันที่จุดนี้ — ไม่พับ คงระดับเดิม โปรดดูด้วยตา
+      ai: verdict=noise confidence(vision)=0.573 words=-/-
+      ai_reason: "ในเวอร์ชัน A อ่านได้ "(غ١٠٠)" และในเวอร์ชัน B อ่านได้ "(غ١٠٠)" ทั้งสองเวอร์ชันอ่านได้เหมือนกัน"
+      ai_suggestion: "จุดนี้ไม่มีความแตกต่างกันระหว่างเวอร์ชัน A และ B ไม่จำเป็นต้องตรวจสอบเพิ่มเติมในจุดนี้"
+      ai_seen: A="(غ١٠٠)" B="(غ١٠٠)"
+      blind: ai_said=noise app=noise
+      ai_crop: A=ai1_F3_a.jpg 480x144 box=[410, 374, 591, 624] · B=ai1_F3_b.jpg 480x144 box=[424, 375, 574, 625]
+   F11 RED NUMBER method=geo score=0.276
+      A line=74 frag="" word="ملجم" conf=0.987 box=[2340,307,2342,318]
+        text="٤٧٥ ملجم"
+      B line=32 frag="%24" word="%24" conf=0.736 box=[2302,318,2323,330]
+        text="٤٧٥ ملجم %24"
+      note: ภาพยืนยันว่าต่าง
+      note: AI อ่านภาพเอง (ไม่เห็นข้อความของ Vision) ได้ต่างกัน — ยืนยันว่าต่างจริง
+      ai: verdict=real confidence(vision)=0.736 words=-/-
+      ai_reason: "ในเวอร์ชัน A อ่านได้ว่า "20%" แต่ในเวอร์ชัน B อ่านได้ว่า "24%" ซึ่งแตกต่างกัน"
+      ai_suggestion: "โปรดตรวจสอบตัวเลขเปอร์เซ็นต์ว่าถูกต้องตามที่ต้องการหรือไม่"
+      ai_seen: A="20%" B="24%"
+      blind: ai_said=real app=real
+      ai_crop: A=ai1_F11_a.jpg 480x132 box=[493, 377, 506, 626] · B=ai1_F11_b.jpg 480x144 box=[435, 374, 566, 624]
+   F12 RED MISSING_IN_B method=unpaired score=-
+      A line=45 frag="20%" word="" conf=0.978 box=[2295,309,2318,319]
+        text="20%"
+      B line=None frag="" word="" conf=- box=-
+        text=""
+      note: ไม่ได้อ่านซ้ำ (ปิดอยู่)
+      note: ภาพยืนยันว่าต่าง
+      note: AI อ่านภาพเอง (ไม่เห็นข้อความของ Vision) ได้ต่างกัน — ยืนยันว่าต่างจริง
+      ai: verdict=real confidence(vision)=0.978 words=-/-
+      ai_reason: ""20%" ในเวอร์ชัน A แตกต่างจาก "24%" ในเวอร์ชัน B"
+      ai_suggestion: ""20%" และ "24%" มีตัวเลขที่แตกต่างกัน โปรดตรวจสอบว่าค่าเปอร์เซ็นต์ที่ถูกต้องคือค่าใด"
+      ai_seen: A="20%" B="24%"
+      blind: ai_said=real app=real
+      ai_crop: A=ai1_F12_a.jpg 480x120 box=[429, 373, 572, 622] · B=ai1_F12_b.jpg 480x120 box=[429, 378, 572, 628]
+   F13 RED EXTRA_IN_B method=unpaired score=-
+      A line=None frag="" word="" conf=- box=-
+        text=""
+      B line=0 frag="خال من الزيوت المهدرجة" word="" conf=0.979 box=[159,58,194,383]
+        text="خال من الزيوت المهدرجة"
+      note: ไม่ได้อ่านซ้ำ (ปิดอยู่)
+      note: ตรวจด้วยภาพไม่ได้
+      note: AI อ่านภาพเอง (ไม่เห็นข้อความของ Vision) ได้ต่างกัน — ยืนยันว่าต่างจริง
+      ai: verdict=real confidence(vision)=0.979 words=-/-
+      ai_reason: "ในเวอร์ชัน A ไม่มีข้อความปรากฏ แต่ในเวอร์ชัน B มีข้อความภาษาอาหรับว่า "خال من الزيوت المهدرجة" ปรากฏอยู่"
+      ai_suggestion: "โปรดตรวจสอบว่าข้อความ "خال من الزيوت المهدرجة" ควรมีอยู่ในเวอร์ชัน A หรือไม่ หรือควรลบออกจากเวอร์ชัน B"
+      ai_seen: A="" B="خال من الزيوت المهدرجة"
+      blind: ai_said=real app=real
+      ai_crop: A=ai1_F13_a.jpg 509x140 box=[95, 376, 733, 626] rot=270 · B=ai1_F13_b.jpg 532x140 box=[109, 371, 720, 621] rot=270
+   F16 RED EXTRA_IN_B method=unpaired score=-
+      A line=None frag="" word="" conf=- box=-
+        text=""
+      B line=88 frag="Free from hydrogenated oils" word="" conf=0.982 box=[2539,172,2563,441]
+        text="Free from hydrogenated oils"
+      note: ไม่ได้อ่านซ้ำ (ปิดอยู่)
+      note: ภาพยืนยันว่าต่าง
+      note: AI อ่านภาพเอง (ไม่เห็นข้อความของ Vision) ได้ต่างกัน — ยืนยันว่าต่างจริง
+      ai: verdict=real confidence(vision)=0.982 words=-/-
+      ai_reason: "เวอร์ชัน A ไม่มีข้อความใดๆ ในขณะที่เวอร์ชัน B มีข้อความว่า "Free from hydrogenated oils""
+      ai_suggestion: "โปรดตรวจสอบว่าข้อความ "Free from hydrogenated oils" ควรมีอยู่ในเวอร์ชัน A หรือไม่"
+      ai_seen: A="" B="Free from hydrogenated oils"
+      blind: ai_said=real app=real
+      ai_crop: A=ai1_F16_a.jpg 691x144 box=[245, 373, 828, 623] rot=270 · B=ai1_F16_b.jpg 692x144 box=[220, 372, 803, 622] rot=270
+  debris — เศษอักขระ / ขอบโซน ไม่นับในผลตัดสิน (1):
+   F17 DEBRIS MISSING_IN_B method=unpaired score=-
+      A line=82 frag="Ⓡ" word="" conf=0.447 box=[2675,157,2689,170]
+        text="Ⓡ"
+      B line=None frag="" word="" conf=- box=-
+        text=""
+      note: เศษอักขระ / ขอบโซน — ไม่มีตัวอักษรหรือตัวเลข และความมั่นใจต่ำหรือชิดขอบโซน (ไม่นับในผลตัดสิน)
+  pixel_same — ภาพเหมือนกันทุกพิกเซล (OCR อ่านต่างเอง) ไม่นับ (11):
+   F1 PIXEL_SAME PUNCT method=content score=1.000
+      A line=14 frag="," word="اليومية," conf=0.771 box=[2289,183,2292,194]
+        text="اليومية,"
+      B line=15 frag="." word="اليومية." conf=0.639 box=[2295,193,2298,203]
+        text="اليومية."
+      note: ภาพเหมือนกันทุกพิกเซล — OCR อ่านต่างเอง
+   F2 PIXEL_SAME PUNCT method=content score=1.000
+      A line=20 frag="" word="يحفظ" conf=0.970 box=[1956,126,1960,149]
+        text="شروط التخزين يحفظ فى مكان جاف بارد وجيد التهوية."
+      B line=21 frag=":" word="التخزين:" conf=0.722 box=[1941,134,1946,157]
+        text="شروط التخزين: يحفظ فى مكان جاف بارد وجيد التهوية."
+      note: ภาพเหมือนกันทุกพิกเซล — OCR อ่านต่างเอง
+   F4 PIXEL_SAME NUMBER method=content score=0.894
+      A line=7 frag="كا" word="كا" conf=0.409 box=[2413,85,2422,97]
+        text="تحتوي العبوة على كا حصة"
+      B line=8 frag="١٢" word="١٢" conf=0.558 box=[2419,97,2427,109]
+        text="تحتوي العبوة على ١٢ حصة"
+      note: ภาพเหมือนกันทุกพิกเซล — OCR อ่านต่างเอง
+   F5 PIXEL_SAME PUNCT method=position score=0.999
+      A line=87 frag="" word="054326" conf=0.990 box=[4220,79,4224,104]
+        text="5 000171 054326"
+      B line=89 frag="'" word="054326'" conf=0.634 box=[4194,81,4229,92]
+        text="5000171 054326'"
+      note: ภาพเหมือนกันทุกพิกเซล — OCR อ่านต่างเอง
+   F6 PIXEL_SAME NUMBER method=geo score=0.842
+      A line=46 frag="0" word="0g" conf=0.554 box=[2237,326,2246,337]
+        text="0g"
+      B line=61 frag="O" word="Og" conf=0.507 box=[2243,336,2252,349]
+        text="Og"
+      note: ภาพเหมือนกันทุกพิกเซล — OCR อ่านต่างเอง
+   F7 PIXEL_SAME NUMBER method=geo score=0.829
+      A line=36 frag="9" word="19" conf=0.756 box=[2249,249,2256,260]
+        text="19"
+      B line=51 frag="g" word="g" conf=0.930 box=[2254,260,2263,271]
+        text="1 g"
+      note: ภาพเหมือนกันทุกพิกเซล — OCR อ่านต่างเอง
+   F8 PIXEL_SAME NUMBER method=geo score=0.802
+      A line=51 frag="0" word="0g" conf=0.540 box=[2237,364,2247,376]
+        text="0g"
+      B line=66 frag="O" word="Og" conf=0.567 box=[2243,375,2253,388]
+        text="Og"
+      note: ภาพเหมือนกันทุกพิกเซล — OCR อ่านต่างเอง
+   F9 PIXEL_SAME NUMBER method=geo score=0.799
+      A line=38 frag="0" word="0" conf=0.464 box=[2238,268,2246,279]
+        text="0 g"
+      B line=54 frag="O" word="Og" conf=0.540 box=[2244,278,2253,290]
+        text="Og"
+      note: ภาพเหมือนกันทุกพิกเซล — OCR อ่านต่างเอง
+   F10 PIXEL_SAME NUMBER method=geo score=0.725
+      A line=32 frag="9" word="79" conf=0.922 box=[2249,230,2255,241]
+        text="79"
+      B line=49 frag="g" word="g" conf=0.983 box=[2254,240,2263,252]
+        text="7 g"
+      note: ไม่ได้อ่านซ้ำ (ปิดอยู่)
+      note: ภาพเหมือนกันทุกพิกเซล — OCR อ่านต่างเอง
+   F14 PIXEL_SAME EXTRA_IN_B method=unpaired score=-
+      A line=None frag="" word="" conf=- box=-
+        text=""
+      B line=27 frag="اجم" word="" conf=0.964 box=[2355,259,2381,270]
+        text="اجم"
+      note: ไม่ได้อ่านซ้ำ (ปิดอยู่)
+      note: ภาพเหมือนกันทุกพิกเซล — OCR อ่านต่างเอง
+   F15 PIXEL_SAME EXTRA_IN_B method=unpaired score=-
+      A line=None frag="" word="" conf=- box=-
+        text=""
+      B line=38 frag="جم" word="" conf=0.979 box=[2356,395,2375,405]
+        text="جم"
+      note: ไม่ได้อ่านซ้ำ (ปิดอยู่)
+      note: ภาพเหมือนกันทุกพิกเซล — OCR อ่านต่างเอง
+  ai_dismissed — AI ตัดสินว่าเป็นสัญญาณรบกวน ไม่นับ (0):
+  OCR lines A (88):
+   A000 conf=0.99 min=0.97 ang=0 box=[762,35,948,72] "منذ 1857"
+   A001 conf=0.92 min=0.69 ang=1 box=[485,83,1289,223] "جون وستـ"
+   A002 conf=0.99 min=0.98 ang=0 box=[507,224,1198,304] "لحم تونا خفيف قطع كبيرة"
+   A003 conf=0.99 min=0.98 ang=1 box=[512,300,1203,412] "في زيت دوار الشمس"
+   A004 conf=0.95 min=0.63 ang=0 box=[1694,13,2070,35] "المكونات: تونا، زيت دوار الشمس، ماء، ملح."
+   A005 conf=0.98 min=0.67 ang=0 box=[1662,40,2503,66] "تم إنتاجه في تايلاند لشركة جون ويست فودز ليمتد معلومات غذائية Nutritional information"
+   A006 conf=0.97 min=0.66 ang=0 box=[1607,68,2070,96] "ليفربول، إنجلترا من قبل شركة تاي يونيون للتصنيع"
+   A007 conf=0.91 min=0.41 ang=2 box=[2385,85,2506,100] "تحتوي العبوة على كا حصة"
+   A008 conf=0.76 min=0.35 ang=0 box=[2380,101,2507,113] "حجم الحصة 1/2 كوب (١٠٠غ) |"
+   A009 conf=0.98 min=0.88 ang=2 box=[2394,128,2507,142] "محتوى الحصة الواحدة"
+   A010 conf=0.99 min=0.98 ang=0 box=[2424,151,2508,162] "السعرات الحرارية"
+   A011 conf=0.95 min=0.42 ang=358 box=[2426,177,2506,191] "الحصة اليومية 7"
+   A012 conf=0.99 min=0.99 ang=0 box=[2294,151,2318,161] "170"
+   A013 conf=0.95 min=0.83 ang=0 box=[2294,172,2328,180] "الحصة"
+   A014 conf=0.96 min=0.77 ang=0 box=[2289,182,2326,194] "اليومية,"
+   A015 conf=0.99 min=0.96 ang=0 box=[2103,86,2227,98] "1.2 Serving per container"
+   A016 conf=0.91 min=0.37 ang=0 box=[2102,101,2229,115] "Serving size 1/2 cup (100g.)"
+   A017 conf=0.99 min=0.98 ang=0 box=[2102,127,2210,140] "Amount per serving"
+   A018 conf=0.99 min=0.98 ang=0 box=[2103,151,2146,161] "Calories"
+   A019 conf=0.97 min=0.76 ang=0 box=[1689,97,2071,119] "المحدودة ساموت ساخون 74000 ، تايلاند"
+   A020 conf=0.97 min=0.76 ang=0 box=[1598,126,2070,149] "شروط التخزين يحفظ فى مكان جاف بارد وجيد التهوية."
+   A021 conf=0.96 min=0.63 ang=0 box=[1761,152,2070,177] "تاريخ الإنتاج والانتهاء: أنظر العبوة."
+   A022 conf=0.97 min=0.74 ang=0 box=[1680,181,2074,207] "الوزن المصفى : 120جم الوزن الصافي: 170 جم"
+   A023 conf=0.97 min=0.91 ang=0 box=[1542,213,2074,238] "Ingredients: Tuna, Sunflower Oil, Water, Salt."
+   A024 conf=0.98 min=0.94 ang=0 box=[1532,243,2074,265] "Produced in Thailand for John West Foods Ltd,"
+   A025 conf=0.98 min=0.89 ang=359 box=[1690,275,2073,304] "Liverpool, England by Thai Union"
+   A026 conf=0.98 min=0.93 ang=0 box=[1444,305,2072,334] "Manufacturing Co., Ltd, Samut Sakhon 74000, Thailand."
+   A027 conf=0.99 min=0.84 ang=0 box=[1620,334,2168,363] "Storage: Cool, dry in ventilated place. Dietary fibre"
+   A028 conf=0.98 min=0.94 ang=0 box=[1498,387,2074,407] "FOR PRODUCTION AND EXPIRY DATE SEE ON CAN"
+   A029 conf=0.98 min=0.97 ang=0 box=[2296,197,2321,208] "Daily"
+   A030 conf=0.96 min=0.91 ang=0 box=[2295,208,2323,217] "value"
+   A031 conf=0.98 min=0.98 ang=0 box=[2102,228,2148,238] "Total fat"
+   A032 conf=0.93 min=0.92 ang=3 box=[2238,230,2255,241] "79"
+   A033 conf=0.97 min=0.96 ang=0 box=[2296,232,2320,242] "10%"
+   A034 conf=0.99 min=0.96 ang=0 box=[2102,246,2170,257] "Saturated fat"
+   A035 conf=0.98 min=0.97 ang=0 box=[2103,266,2148,276] "Trans fat"
+   A036 conf=0.85 min=0.76 ang=3 box=[2239,249,2256,260] "19"
+   A037 conf=0.96 min=0.94 ang=0 box=[2295,252,2313,261] "5%"
+   A038 conf=0.68 min=0.46 ang=0 box=[2238,268,2256,279] "0 g"
+   A039 conf=0.99 min=0.98 ang=0 box=[2102,286,2165,296] "Cholesterol"
+   A040 conf=0.99 min=0.98 ang=0 box=[2103,305,2142,315] "Sodium"
+   A041 conf=0.99 min=0.97 ang=2 box=[2103,322,2206,336] "Total carbohydrate"
+   A042 conf=0.91 min=0.85 ang=3 box=[2239,288,2273,298] "50 mg"
+   A043 conf=0.97 min=0.97 ang=0 box=[2296,290,2318,299] "17%"
+   A044 conf=0.98 min=0.94 ang=0 box=[2238,307,2279,318] "475 mg"
+   A045 conf=0.98 min=0.97 ang=0 box=[2295,309,2318,319] "20%"
+   A046 conf=0.73 min=0.55 ang=3 box=[2237,326,2257,337] "0g"
+   A047 conf=0.97 min=0.97 ang=0 box=[2296,328,2313,338] "0%"
+   A048 conf=0.70 min=0.53 ang=3 box=[2237,345,2257,357] "Og"
+   A049 conf=0.96 min=0.95 ang=0 box=[2296,348,2312,358] "0%"
+   A050 conf=0.99 min=0.98 ang=2 box=[2103,363,2160,374] "Total sugar"
+   A051 conf=0.73 min=0.54 ang=3 box=[2237,364,2256,376] "0g"
+   A052 conf=0.97 min=0.96 ang=0 box=[2295,367,2311,377] "0%"
+   A053 conf=0.99 min=0.99 ang=3 box=[2101,381,2176,395] "Added sugars"
+   A054 conf=0.72 min=0.58 ang=3 box=[2237,384,2257,397] "Og"
+   A055 conf=0.96 min=0.94 ang=0 box=[2296,387,2312,396] "0%"
+   A056 conf=0.99 min=0.99 ang=0 box=[2103,402,2142,411] "Protein"
+   A057 conf=0.86 min=0.71 ang=2 box=[2238,404,2263,414] "26g"
+   A058 conf=0.98 min=0.97 ang=0 box=[2296,406,2318,416] "52%"
+   A059 conf=0.99 min=0.99 ang=0 box=[1471,460,1512,474] "STEEL"
+   A060 conf=0.98 min=0.98 ang=0 box=[1600,419,1644,442] "NET"
+   A061 conf=0.99 min=0.98 ang=1 box=[1553,451,1646,477] "WEIGHT"
+   A062 conf=0.98 min=0.98 ang=360 box=[1650,415,1756,500] "170g"
+   A063 conf=0.99 min=0.99 ang=0 box=[1857,419,1960,443] "DRAINED"
+   A064 conf=0.99 min=0.98 ang=360 box=[1965,418,2072,495] "120g"
+   A065 conf=0.98 min=0.97 ang=3 box=[2439,227,2507,242] "دهون كلية"
+   A066 conf=0.99 min=0.97 ang=2 box=[2435,247,2507,259] "دهون مشبعة"
+   A067 conf=0.80 min=0.55 ang=0 box=[2347,229,2375,240] "٧جم"
+   A068 conf=0.98 min=0.95 ang=2 box=[2431,266,2507,278] "دهون مهدرجة"
+   A069 conf=0.98 min=0.96 ang=0 box=[2438,286,2507,297] "كوليسترول"
+   A070 conf=0.99 min=0.98 ang=359 box=[2454,308,2505,317] "صوديوم"
+   A071 conf=0.99 min=0.97 ang=1 box=[2407,323,2507,337] "كربوهيدات كلية"
+   A072 conf=0.97 min=0.83 ang=2 box=[2446,343,2507,355] "ألياف غذائية"
+   A073 conf=0.87 min=0.60 ang=0 box=[2338,287,2375,298] "٥٠ ملجم"
+   A074 conf=0.94 min=0.86 ang=0 box=[2333,306,2375,318] "٤٧٥ ملجم"
+   A075 conf=0.98 min=0.97 ang=0 box=[2350,348,2368,356] "جم"
+   A076 conf=0.98 min=0.88 ang=0 box=[2110,428,2385,440] "*The % daily values are based on a 2000 calorie diet."
+   A077 conf=0.98 min=0.96 ang=0 box=[2465,365,2506,375] "سكريات"
+   A078 conf=0.98 min=0.96 ang=2 box=[2446,383,2507,394] "سكر مضاف"
+   A079 conf=0.99 min=0.97 ang=0 box=[2468,402,2507,413] "بروتين"
+   A080 conf=0.97 min=0.68 ang=0 box=[1870,449,2496,476] "WEIGHT … تستند النسبة المئوية للقيم اليومية على أساس نظام غذائي ٢٠٠٠ سعرة حرارية."
+   A081 conf=0.98 min=0.97 ang=358 box=[2558,110,2673,161] "SAFE"
+   A082 conf=0.45 min=0.45 ang=0 box=[2675,157,2689,170] "Ⓡ"
+   A083 conf=0.99 min=0.98 ang=0 box=[3092,35,3377,73] "SINCE 1857"
+   A084 conf=0.96 min=0.85 ang=0 box=[2795,93,3665,224] "JOHN WEST"
+   A085 conf=0.99 min=0.97 ang=0 box=[2820,272,3648,319] "LIGHT MEAT TUNA CHUNKS"
+   A086 conf=0.99 min=0.98 ang=0 box=[2883,333,3580,392] "IN SUNFLOWER OIL"
+   A087 conf=0.98 min=0.92 ang=270 box=[4188,79,4222,481] "5 000171 054326"
+  OCR lines B (90):
+   B000 conf=0.98 min=0.78 ang=90 box=[159,58,194,383] "خال من الزيوت المهدرجة"
+   B001 conf=0.99 min=0.97 ang=1 box=[768,44,954,82] "منذ 1857"
+   B002 conf=0.96 min=0.87 ang=4 box=[448,43,1302,257] "جون وست"
+   B003 conf=0.99 min=0.95 ang=0 box=[514,236,1206,306] "لحم تونا خفيف قطع كبيرة"
+   B004 conf=0.99 min=0.98 ang=0 box=[514,313,1208,427] "في زيت دوار الشمس"
+   B005 conf=0.95 min=0.64 ang=0 box=[1700,23,2075,45] "المكونات: تونا، زيت دوار الشمس، ماء، ملح."
+   B006 conf=0.96 min=0.64 ang=0 box=[1668,50,2509,77] "تم إنتاجه في تايلاند لشركة جون ويست فودز ليمتد معلومات غذائية Nutritional information"
+   B007 conf=0.97 min=0.66 ang=0 box=[1613,78,2077,105] "ليفربول، إنجلترا من قبل شركة تاي يونيون للتصنيع"
+   B008 conf=0.94 min=0.56 ang=0 box=[2391,97,2513,110] "تحتوي العبوة على ١٢ حصة"
+   B009 conf=0.85 min=0.39 ang=0 box=[2392,112,2513,124] "حجم الحصة 1/2 كوب (۱۰۰)"
+   B010 conf=0.98 min=0.86 ang=0 box=[2400,139,2512,151] "محتوى الحصة الواحدة"
+   B011 conf=0.99 min=0.98 ang=0 box=[2430,161,2513,173] "السعرات الحرارية"
+   B012 conf=0.95 min=0.42 ang=358 box=[2432,187,2512,200] "الحصة اليومية 7"
+   B013 conf=0.99 min=0.99 ang=0 box=[2300,162,2324,172] "170"
+   B014 conf=0.98 min=0.96 ang=0 box=[2302,182,2334,191] "الحصة"
+   B015 conf=0.94 min=0.64 ang=0 box=[2295,193,2332,203] "اليومية."
+   B016 conf=0.99 min=0.97 ang=0 box=[2108,97,2232,110] "1.2 Serving per container"
+   B017 conf=0.95 min=0.29 ang=0 box=[2108,112,2237,125] "Serving size ½ cup (100g.)"
+   B018 conf=0.99 min=0.98 ang=0 box=[2108,137,2216,150] "Amount per serving"
+   B019 conf=0.99 min=0.98 ang=0 box=[2109,160,2152,170] "Calories"
+   B020 conf=0.97 min=0.70 ang=0 box=[1696,107,2077,129] "المحدودة ساموت ساخون 74000 ، تايلاند"
+   B021 conf=0.97 min=0.72 ang=0 box=[1605,133,2075,159] "شروط التخزين: يحفظ فى مكان جاف بارد وجيد التهوية."
+   B022 conf=0.96 min=0.57 ang=0 box=[1767,161,2075,189] "تاريخ الإنتاج والانتهاء: أنظر العبوة."
+   B023 conf=0.97 min=0.76 ang=0 box=[1685,189,2080,217] "الوزن المصفى : 120جم الوزن الصافي: 170 جم"
+   B024 conf=0.98 min=0.97 ang=2 box=[2446,237,2513,251] "دهون كلية"
+   B025 conf=0.99 min=0.97 ang=2 box=[2441,258,2513,270] "دهون مشبعة"
+   B026 conf=0.83 min=0.57 ang=0 box=[2353,241,2381,251] "٧جم"
+   B027 conf=0.96 min=0.94 ang=0 box=[2355,259,2381,270] "اجم"
+   B028 conf=0.98 min=0.96 ang=0 box=[2437,277,2512,289] "دهون مهدرجة"
+   B029 conf=0.98 min=0.96 ang=0 box=[2444,296,2511,308] "كوليسترول"
+   B030 conf=0.99 min=0.98 ang=1 box=[2460,319,2512,327] "صوديوم"
+   B031 conf=0.86 min=0.57 ang=0 box=[2344,298,2381,308] "٥٠ ملجم"
+   B032 conf=0.86 min=0.61 ang=357 box=[2302,315,2381,330] "٤٧٥ ملجم %24"
+   B033 conf=0.97 min=0.91 ang=2 box=[2412,333,2513,346] "كربوهيدات كلية"
+   B034 conf=0.98 min=0.95 ang=0 box=[2452,353,2513,365] "ألياف غذائية"
+   B035 conf=0.98 min=0.98 ang=0 box=[2356,358,2374,366] "جم"
+   B036 conf=0.98 min=0.96 ang=0 box=[2472,375,2512,386] "سكريات"
+   B037 conf=0.98 min=0.96 ang=0 box=[2452,394,2513,404] "سكر مضاف"
+   B038 conf=0.98 min=0.98 ang=354 box=[2356,395,2375,405] "جم"
+   B039 conf=0.99 min=0.87 ang=0 box=[1549,223,2079,250] "Ingredients: Tuna, Sunflower Oil, Water, Salt."
+   B040 conf=0.98 min=0.85 ang=0 box=[1538,253,2081,276] "Produced in Thailand for John West Foods Ltd,"
+   B041 conf=0.93 min=0.68 ang=0 box=[2106,253,2179,276] "Saturated fat"
+   B042 conf=0.98 min=0.91 ang=0 box=[1696,285,2078,315] "Liverpool, England by Thai Union"
+   B043 conf=0.98 min=0.90 ang=0 box=[1451,315,2078,344] "Manufacturing Co., Ltd, Samut Sakhon 74000, Thailand."
+   B044 conf=0.98 min=0.91 ang=0 box=[1627,346,2177,373] "Storage: Cool, dry in ventilated place. Dietary fibre"
+   B045 conf=0.98 min=0.97 ang=0 box=[1505,397,2080,418] "FOR PRODUCTION AND EXPIRY DATE SEE ON CAN"
+   B046 conf=0.99 min=0.98 ang=0 box=[2302,209,2328,218] "Daily"
+   B047 conf=0.99 min=0.98 ang=4 box=[2300,218,2330,229] "value"
+   B048 conf=0.99 min=0.98 ang=0 box=[2108,238,2153,248] "Total fat"
+   B049 conf=0.97 min=0.96 ang=0 box=[2243,240,2263,252] "7 g"
+   B050 conf=0.98 min=0.98 ang=0 box=[2302,243,2325,252] "10%"
+   B051 conf=0.92 min=0.90 ang=0 box=[2244,260,2263,271] "1 g"
+   B052 conf=0.96 min=0.95 ang=0 box=[2302,263,2317,271] "5%"
+   B053 conf=0.99 min=0.99 ang=0 box=[2108,277,2153,286] "Trans fat"
+   B054 conf=0.70 min=0.54 ang=3 box=[2244,278,2262,290] "Og"
+   B055 conf=0.99 min=0.98 ang=0 box=[2108,296,2172,306] "Cholesterol"
+   B056 conf=0.98 min=0.95 ang=0 box=[2109,315,2147,325] "Sodium"
+   B057 conf=0.99 min=0.98 ang=2 box=[2109,333,2212,348] "Total carbohydrate"
+   B058 conf=0.99 min=0.99 ang=8 box=[2244,297,2280,311] "50 mg"
+   B059 conf=0.97 min=0.96 ang=0 box=[2302,301,2324,310] "17%"
+   B060 conf=0.99 min=0.99 ang=3 box=[2244,317,2286,328] "475 mg"
+   B061 conf=0.67 min=0.51 ang=6 box=[2243,336,2263,349] "Og"
+   B062 conf=0.97 min=0.96 ang=0 box=[2301,340,2317,349] "0%"
+   B063 conf=0.64 min=0.44 ang=3 box=[2243,356,2263,368] "Og"
+   B064 conf=0.96 min=0.94 ang=0 box=[2302,359,2317,368] "0%"
+   B065 conf=0.99 min=0.99 ang=5 box=[2108,372,2167,386] "Total sugar"
+   B066 conf=0.71 min=0.57 ang=3 box=[2243,375,2263,388] "Og"
+   B067 conf=0.96 min=0.94 ang=0 box=[2302,378,2319,387] "0%"
+   B068 conf=0.99 min=0.97 ang=3 box=[2107,391,2183,405] "Added sugars"
+   B069 conf=0.72 min=0.57 ang=0 box=[2244,394,2263,406] "Og"
+   B070 conf=0.96 min=0.94 ang=0 box=[2302,398,2318,407] "0%"
+   B071 conf=0.99 min=0.99 ang=2 box=[2109,412,2148,421] "Protein"
+   B072 conf=0.99 min=0.99 ang=0 box=[2244,413,2268,425] "26 g"
+   B073 conf=0.98 min=0.96 ang=0 box=[2302,416,2325,426] "52%"
+   B074 conf=0.99 min=0.99 ang=0 box=[1477,471,1518,484] "STEEL"
+   B075 conf=0.99 min=0.98 ang=358 box=[1604,428,1650,453] "NET"
+   B076 conf=0.99 min=0.98 ang=1 box=[1560,462,1649,486] "WEIGHT"
+   B077 conf=0.99 min=0.98 ang=0 box=[1654,431,1764,507] "170g"
+   B078 conf=0.99 min=0.98 ang=359 box=[1863,428,1966,453] "DRAINED"
+   B079 conf=0.96 min=0.70 ang=359 box=[1877,460,2510,487] "WEIGHT . تستند النسبة المئوية للقيم اليومية على أساس نظام غذائي ٢٠٠٠ سعرة حرارية."
+   B080 conf=0.99 min=0.99 ang=0 box=[1972,430,2080,507] "120g"
+   B081 conf=0.99 min=0.98 ang=0 box=[2474,412,2512,424] "بروتين"
+   B082 conf=0.98 min=0.88 ang=0 box=[2116,438,2391,450] "*The % daily values are based on a 2000 calorie diet."
+   B083 conf=0.91 min=0.82 ang=2 box=[2563,125,2679,170] "SAFE"
+   B084 conf=0.99 min=0.97 ang=0 box=[3099,46,3380,83] "SINCE 1857"
+   B085 conf=0.99 min=0.98 ang=358 box=[2791,84,3672,261] "JOHN WEST"
+   B086 conf=0.99 min=0.99 ang=0 box=[2826,282,3654,330] "LIGHT MEAT TUNA CHUNKS"
+   B087 conf=0.99 min=0.99 ang=0 box=[2890,343,3587,403] "IN SUNFLOWER OIL"
+   B088 conf=0.98 min=0.83 ang=91 box=[2539,172,2563,441] "Free from hydrogenated oils"
+   B089 conf=0.96 min=0.63 ang=270 box=[4192,81,4229,491] "5000171 054326'"
+
+[REREAD] enabled=False candidates=6 crops=0 done=0 confirmed=0 downgraded=0 skipped_cap=0 errors=0
+
+[PIXEL] enabled=True line_mode=True raster=True same=11 diff=4 unverifiable=1 skipped=0 ms=15513 pymupdf=1.26.5
+  before_ai=True — ตรวจด้วยภาพก่อน AI (AI_IMAGE_PIXEL_FIRST) · จุดที่ภาพบอกว่าเหมือนไม่ถูกส่งให้ AI
+  pair 1 align={'inliers': 988, 'ecc': 0.9543, 'scale': 1.0024, 'tx': 7.1, 'ty': 10.1, 'ms': 912}
+    raster_check: A=ไม่มีภาพเดียวคลุมโซน ≥ 90% (ภาพ 8 ชิ้น · คลุมมากสุด 54%) · B=ภาพ 300 dpi คลุม 100% แต่มีของเวกเตอร์ในโซน {'fill-path': 1198, 'stroke-path': 20}
+    F1 SAME checks=4 ms=883
+    F2 SAME checks=6 ms=1969
+    F3 DIFF checks=2 ms=391
+    F4 SAME checks=4 ms=923
+    F5 SAME checks=4 ms=1859
+    F6 SAME checks=4 ms=885
+    F7 SAME checks=4 ms=1087
+    F8 SAME checks=4 ms=1148
+    F9 SAME checks=4 ms=1127
+    F10 SAME checks=4 ms=935
+    F11 DIFF checks=2 ms=581
+    F12 DIFF checks=1 ms=275
+    F13 UNVERIFIABLE checks=1 ms=401
+    F14 SAME checks=2 ms=409
+    F15 SAME checks=2 ms=441
+    F16 DIFF checks=1 ms=747
+
+[AI REVIEW] mode=image url=http://127.0.0.1:5678/webhook/artwork-v2-image pairs_ok=1 pairs_failed=0
+  pair 1: status=ok engine=gemini-2.5-flash http=200 ms=9017 attempts=5 request_bytes=403051 candidates=5
+     image_split: requests=5 failed=0 parallel=3 (คำขอละจุด · tokens = prompt/คำตอบ/ส่วนคิด)
+       req 1 [F3] status=ok http=200 ms=4364 attempts=1 reviews=1 engine=gemini-2.5-flash tokens=1639/227/260 finish=STOP
+       req 2 [F11] status=ok http=200 ms=4973 attempts=1 reviews=1 engine=gemini-2.5-flash tokens=1642/157/742 finish=STOP
+       req 3 [F12] status=ok http=200 ms=5616 attempts=1 reviews=1 engine=gemini-2.5-flash tokens=1642/263/668 finish=STOP
+       req 4 [F13] status=ok http=200 ms=4648 attempts=1 reviews=1 engine=gemini-2.5-flash tokens=1641/275/545 finish=STOP
+       req 5 [F16] status=ok http=200 ms=3895 attempts=1 reviews=1 engine=gemini-2.5-flash tokens=1642/172/530 finish=STOP
+     ref_accuracy=1.000 items=0/0 reviews=5/5 reviewed=5/5 extra_added=0 extra_duplicate=0 extra_noise=0 vision_conf A=0.967 B=0.969 usage={'promptTokenCount': 8206, 'candidatesTokenCount': 1094, 'thoughtsTokenCount': 2745, 'totalTokenCount': 12045}
+     recovered=0 equivalent=0 algo_red_kept=- extra_folded=0
+     image: verdicts={'real': 4, 'noise': 1, 'uncertain': 0, 'unanswered': 0, 'guarded': 0, 'pixel_kept': 1} items_ignored=0 (AI ดูภาพที่ส่ง Vision แล้วตัดสินจุดของอัลกอริทึม)
+     image_crops: crops=10 not_sent=0 crop_px_max=692 (ครอปรอบแต่ละจุดจากภาพที่ส่ง Vision · A/B แยกรูป)
+     image_mode: blind=True (AI ไม่เห็นข้อความของ Vision · แอปเทียบ a_seen/b_seen เอง) overruled=0 hires_crops=8 hires_dpi_max=1200.0 (เรนเดอร์ครอปใหม่จาก PDF)
+     image_evidence: pixel_kept=1 (AI บอกว่าเหมือน แต่ภาพจากไฟล์ต้นฉบับต่าง ⇒ ไม่พับ) crops_saved=10 (img/ai<คู่>_F<จุด>_<a|b>.jpg)
+     image_orient: crops_rotated=4 (หมุนให้ข้อความตั้งตรงตามมุมที่ Vision วัด) onesided_kept=0 (ข้อความฝั่งเดียวที่ Vision อ่านชัด · AI บอกว่าเหมือน ⇒ ไม่พับ)
+     summary: "ตรวจพบจุดที่อ่านได้เหมือนกัน 1 จุด ไม่มีจุดที่แตกต่างกัน และไม่มีจุดที่อ่านไม่ชัดเจน · มีจุดที่อ่านแตกต่างกัน 1 จุด คือ A: "20%" เปลี่ยนเป็น B: "24%" ไม่มีจุดที่อ่านเหมือนกัน และไม่มีจุดที่อ่านไม่ชัดเจน · "20%" ในเวอร์ชัน A เปลี่ยนเป็น "24%" ในเวอร์ชัน B มีจุดที่แตกต่างกัน 1 จุด และไม่มีจุดที่เหมือนกันเลย จุดนี้ยังคงต้องการการตรวจสอบจากมนุษย์ · มีจุดที่แตกต่างกัน 1 จุด: F13 (A: ไม่มีข้อความ -> B: "خال من الزيوت المهدرجة") ไม่มีจุดที่เหมือนกัน ยังคงต้องตรวจสอบจุดที่แตกต่างกันนี้ด้วยตนเอง · พบจุดที่แตกต่างกัน 1 จุด คือ F16 โดยเวอร์ชัน A ไม่มีข้อความ แต่เวอร์ชัน B มีข้อความว่า "Free from hydrogenated oils""
+     suggestion: "ตรวจสอบจุดที่ระบุว่า 'noise' เพื่อยืนยันว่าไม่มีความแตกต่างที่มองข้ามไป"
+     suggestion: "ตรวจสอบความถูกต้องของตัวเลขเปอร์เซ็นต์ที่เปลี่ยนไป"
+     suggestion: ""20%" ในเวอร์ชัน A เปลี่ยนเป็น "24%" ในเวอร์ชัน B โปรดตรวจสอบว่าค่าเปอร์เซ็นต์ที่ถูกต้องคือค่าใด"
+     suggestion: "ตรวจสอบความถูกต้องของข้อความ "خال من الزيوت المهدرجة" ในเวอร์ชัน B"
+     suggestion: "ยืนยันว่าเวอร์ชัน A ควรไม่มีข้อความในตำแหน่งนี้"
+     suggestion: "ตรวจสอบว่าการเปลี่ยนแปลงนี้เป็นไปตามข้อกำหนดหรือไม่"
+     suggestion: "ตรวจสอบความถูกต้องของข้อความ "Free from hydrogenated oils" ในเวอร์ชัน B"
+     suggestion: "ยืนยันว่าเวอร์ชัน A ควรไม่มีข้อความนี้จริงหรือไม่"
+
+[WARNINGS] 0
+=== END ===

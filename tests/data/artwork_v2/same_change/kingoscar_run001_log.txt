@@ -1,0 +1,453 @@
+=== ARTWORK V2 · CLOUD VISION OCR · DIAGNOSTIC LOG ===
+version=2026.10.09-v2rasterstrict job=20261011_234402_e8f304 run=run_001 at=2026-10-11 23:47:03 owner=admin
+VERDICT=FAIL (ไม่ผ่าน)
+  - พบจุดต่างที่มั่นใจ 2 จุด
+  - จุดที่ไม่มั่นใจ 5 จุด (ต้องดูด้วยตา)
+  - เครื่องหมายเดี่ยวที่ OCR อ่านไม่มั่นใจ 1 จุด (รายการพับ — ไม่นับ)
+time_ms: render=998 vision=34516 compare=316 reread=0 ai=67978 total=103810
+sharpness=standard (ภาพที่ส่ง: มาตรฐาน 400 dpi)
+color_mode=color (สีของภาพที่ส่ง: สี)
+api_key: source=ui masked=••••L_6g length=39
+
+[SETTINGS]
+  ENDPOINT=https://eu-vision.googleapis.com
+  MODEL=builtin/stable
+  LANGUAGE_HINTS=[]
+  TIMEOUT_S=120.0
+  RETRIES=2
+  MAX_REQUEST_BYTES=9500000
+  MAX_IMAGE_BYTES=7121928
+  MAX_IMAGE_MP=40.0
+  JPEG_QUALITIES=[92, 88, 84, 80, 75, 70]
+  PDF_ZONE_DPI=400
+  PDF_ZONE_DPI_MAX=1200
+  ZONE_MIN_LONG_SIDE=1600
+  SHARPNESS=standard
+  SHARP_FILL=0.92
+  SHARP_MAX_RENDERS=4
+  COLOR_MODE=color
+  BW_BLOCK_MM=3.0
+  BW_C=12.0
+  ZONE_ROTATE=True
+  CONF_FAIL=0.8
+  CONF_LOW=0.6
+  COVERAGE_MIN=0.9
+  PAIR_MIN_SIM=0.6
+  PAIR_MIN_RUN=0.4
+  PAIR_MAX_DIST=0.12
+  ROW_MERGE_ENABLED=True
+  ROW_MAX_ANGLE=10.0
+  PUNCT_CAN_FAIL=True
+  CURVED_GROUP_ENABLED=True
+  TILT_ANGLE=10.0
+  CURVED_NEIGHBOR_MAX_CHARS=8
+  DEBRIS_ENABLED=True
+  DEBRIS_CONF=0.6
+  SEAM_FILLER=True
+  CROSS_ROW_JOIN=True
+  SYMBOL_TOKEN=True
+  FRACTION_YELLOW=True
+  REREAD_ENABLED=False
+  REREAD_MAX=12
+  REREAD_SCALE=2.0
+  REREAD_MAX_SIDE=2400
+  AI_MODE=off
+  AI_REVIEW_URL=http://127.0.0.1:5678/webhook/artwork-v2-review
+  AI_RAW_URL=http://127.0.0.1:5678/webhook/artwork-v2-raw
+  AI_IMAGE_URL=http://127.0.0.1:5678/webhook/artwork-v2-image
+  AI_TIMEOUT_S=180.0
+  AI_RAW_TIMEOUT_S=300.0
+  AI_IMAGE_TIMEOUT_S=300.0
+  AI_RAW_SAFETY=True
+  AI_IMAGE_SAFETY=False
+  AI_IMAGE_CROPS=True
+  AI_IMAGE_CROP_MAX_SIDE=768
+  AI_IMAGE_CROP_MIN_W=480
+  AI_IMAGE_CROP_JPEG_Q=95
+  AI_IMAGE_MAX_CANDIDATES=40
+  AI_IMAGE_CURVED_YELLOW=True
+  AI_IMAGE_CROP_HIRES=True
+  AI_IMAGE_CROP_TARGET_LH=36.0
+  AI_IMAGE_CROP_DPI_MAX=1200.0
+  AI_IMAGE_CROP_HIRES_MIN=1.25
+  AI_IMAGE_BLIND=True
+  AI_IMAGE_SAVE_CROPS=True
+  AI_IMAGE_PIXEL_FIRST=True
+  AI_IMAGE_CROP_VERTICAL=True
+  AI_IMAGE_CROP_ROTATE=True
+  AI_IMAGE_ONESIDED_GUARD=True
+  AI_IMAGE_SPLIT=1
+  AI_IMAGE_PARALLEL=3
+  AI_RETRIES=1
+  AI_JUDGE_PUNCT_YELLOW=True
+  AI_QUOTE_RECOVER=True
+  AI_QUOTE_RECOVER_MAX_SHIFT=2
+  AI_EQUIV_NOISE=True
+  AI_SEND_CURVED=True
+  AI_JUDGE_KEEP_ALGO_RED=True
+  AI_JUDGE_NOISE_GUARD=True
+  AI_JUDGE_CURVED_YELLOW=True
+  AI_JUDGE_ONESIDED_GUARD=True
+  AI_DEDUP_FOLDED=True
+  ONE_REQUEST_PER_PAIR=True
+  RUN_GUARD=True
+  RUN_MAX_CONCURRENT=2
+  RUN_COOLDOWN_S=3.0
+  GEO_PAIRING=True
+  RECOMPOSE=True
+  MOVED_TEXT=True
+  RELOCATE=True
+  BALANCED_MOVE=True
+  VERTICAL_UPRIGHT=True
+  QUOTE_PUNCT=True
+  SPLIT_MERGED=True
+  AI_EXPERIMENTAL_MODES=False
+  PIXEL_VERIFY=True
+  PIXEL_LINE_MODE=True
+  PIXEL_TIME_BUDGET_S=180.0
+  PIXEL_RASTER=True
+  PIXEL_WARP_GUARD=True
+  PIXEL_WARP_MAX=0.05
+  ZONE_IGNORE=True
+  IGNORE_COVER=0.6
+  EST_BOX=True
+  NEAR_ZOOM=True
+  REFLOW_CONSERVE=True
+  REFLOW_UNBALANCED_YELLOW=True
+  PLACEHOLDER=True
+  PLACEHOLDER_RED=True
+  LOWMARK=True
+  KEEP_SUPERSCRIPT=True
+  PIXEL_RASTER_NOTE=True
+  PIXEL_RASTER_STRICT_GRAY=True
+  PIXEL_RASTER_INK_T=40.0
+  PIXEL_RASTER_KEEP_NUMBER=True
+
+[FILES]
+  A: name=O_1 1.pdf type=pdf bytes=2518980 sha1=9fa02c1665d6 pages=1 page_mm=[279.4, 215.9]
+  B: name=F_1 1.jpeg type=image bytes=6336315 sha1=f2e5d4cb5c05 image_px=[3024, 4032] raw_px=[4032, 3024] exif_orientation=6
+
+[VISION REQUESTS]
+  #0 phase=main images=p1_a,p1_b json_bytes=4472138 http=200 attempts=1 ms=34476 model=builtin/stable at=2026-10-11 23:45:55
+
+[PAIR 1] verdict=FAIL coverage=0.957 (A=1.000 B=0.957) same_request=True methods={'exact': 52, 'content': 10, 'position': 2}
+  A: page=1 bbox=[0.50278, 0.43352, 0.17644, 0.17191] render_dpi=824.4 zone_mm=[49.3, 37.1] render_px=[1601, 1206] image_scale=- sent_px=[1206, 1601] jpeg_q=92 downscale=1.0 jpeg_bytes=609474 sha1=f776398abb7f req=0 ok=True
+     rotate: 270° ตามเข็ม (ภาพที่ส่ง + พิกัดกรอบทุกตัวอยู่ในแนวที่หมุนแล้ว)
+     sharp: mode=standard base_dpi=824.4 → dpi=824.4 (×1.0) budget=-k tries=[]
+     ocr: blocks=36 by_type={'TEXT': 36} paragraphs=43 words=303 symbols=1414 lines=66 chars=1414 conf_mean=0.963 conf_min=0.380 low_conf(<0.6)=0.013 langs=['pl', 'en', 'sk', 'pt', 'ru'] breaks={'EOL_SURE_SPACE': 23, 'LINE_BREAK': 43} soft_hyphen_lines=0 angles={0: 301, 270: 2} skipped_blocks=0 text_len=1644 pages=[(1206, 1601)]
+  B: page=1 bbox=[0.03304, 0.05696, 0.92058, 0.86783] render_dpi=- zone_mm=- render_px=[2784, 3499] image_scale=1.0 sent_px=[2784, 3499] jpeg_q=92 downscale=1.0 jpeg_bytes=2744459 sha1=5da2e4fcef29 req=0 ok=True
+     sharp: mode=standard base_dpi=- → dpi=- (×1.0) budget=-k tries=[]
+     ocr: blocks=35 by_type={'TEXT': 35} paragraphs=42 words=314 symbols=1437 lines=68 chars=1437 conf_mean=0.956 conf_min=0.325 low_conf(<0.6)=0.015 langs=['pl', 'en', 'ar', 'sk', 'pt'] breaks={'EOL_SURE_SPACE': 26, 'LINE_BREAK': 42} soft_hyphen_lines=0 angles={0: 303, 90: 9, 270: 2} skipped_blocks=0 text_len=1684 pages=[(2784, 3499)]
+  pairing: line_pairs=64 unpaired_a=[] unpaired_b=[36, 43, 63] reflow_lines_a=[] reflow_lines_b=[] reflow_edges=['A:-']
+  row_merges (0) — ต่อแถวที่ OCR ตัดตรงเส้นตกแต่ง:
+  curved_lines (เอียง > 10° จากแนวหลัก + เศษติดกัน): A=[] B=[]
+  findings (7):
+   F3 RED TEXT method=content score=0.981
+      A line=54 frag="a" word="zagęszczajaca:" conf=0.992 box=[819,1105,827,1126]
+        text="czosnek, sól, substancja zagęszczajaca: guma ksantanowa; GORCZYCA"
+      B line=56 frag="ą" word="zagęszczająca:" conf=0.631 box=[1937,2385,1958,2433]
+        text="czosnek, sól, substancja zagęszczająca: guma ksantanowa; GORCZYCA"
+      note: AI อ่านภาพเอง (ไม่เห็นข้อความของ Vision) ได้ต่างกัน — ยืนยันว่าต่างจริง
+      ai: verdict=real confidence(vision)=0.631 words=-/-
+      ai_reason: "ในเวอร์ชัน A อ่านว่า "GORC mielona" ส่วนในเวอร์ชัน B อ่านว่า "GORC mielony" มีความแตกต่างกันที่ตัวอักษรสุดท้ายของคำว่า "mielona" ใน A และ "mielony" ใน B."
+      ai_suggestion: "โปรดตรวจสอบการสะกดคำว่า "mielona" / "mielony" ว่าถูกต้องตามที่ต้องการหรือไม่"
+      ai_seen: A="GORC mielona" B="GORC mielony"
+      blind: ai_said=real app=real
+      ai_crop: A=ai1_F3_a.jpg 480x88 box=[390, 375, 608, 625] · B=ai1_F3_b.jpg 641x204 box=[318, 373, 682, 623]
+   F4 YELLOW NUMBER method=content score=0.960
+      A line=63 frag="0" word="300011814" conf=0.971 box=[1131,1358,1151,1371]
+        text="300011814 v.002"
+      B line=66 frag="" word="30011814" conf=0.529 box=[2685,2975,2689,2998]
+        text="30011814 v.002"
+      note: AI ไม่ได้ตอบจุดนี้ (คำขอของจุดนี้ล้ม: AI: Gemini ตอบไม่จบ (finishReason=MAX_TOKENS · คำตอบ 18066 token · ส่วนคิด 862 token) ท้ายคำตอบ: …u0017\u0017\u0017\u0017\u0017\u0017\u0017\u0017\u0017\u0017\u0…) — คงระดับของอัลกอริทึม
+      ai_crop: A=ai1_F4_a.jpg 480x88 box=[394, 375, 606, 625] rot=90 · B=ai1_F4_b.jpg 480x36 box=[475, 452, 523, 548] rot=90
+   F6 YELLOW TEXT method=content score=0.952
+      A line=25 frag="k" word="kJ/122" conf=0.802 box=[1007,614,1017,634]
+        text="513 kJ/122 kcal"
+      B line=25 frag="" word="513J/122" conf=0.592 box=[2357,1302,2363,1347]
+        text="513J/122 kcal"
+      note: AI ดูภาพแล้วไม่แน่ใจ (AI อ่านบางตัวอักษรไม่ออก ([?])) — โปรดดูด้วยตา
+      ai: verdict=uncertain confidence(vision)=0.593 words=-/-
+      ai_reason: "ในเวอร์ชัน A อ่านได้ว่า "144 kcal" แต่ในเวอร์ชัน B ไม่สามารถอ่านข้อความในกรอบที่กำหนดได้อย่างชัดเจน"
+      ai_suggestion: "โปรดตรวจสอบข้อความในจุด F6 ของเวอร์ชัน B อีกครั้ง เนื่องจากกรอบที่กำหนดอ่านได้ไม่ชัดเจน"
+      ai_seen: A="144 kcal" B="[?]"
+      blind: ai_said=uncertain app=uncertain why="AI อ่านบางตัวอักษรไม่ออก ([?])"
+      ai_crop: A=ai1_F6_a.jpg 480x80 box=[585, 375, 712, 625] · B=ai1_F6_b.jpg 480x180 box=[493, 378, 507, 628]
+   F7 RED NUMBER method=content score=0.871
+      A line=61 frag="Numer identyfikacyjny zakładu: TH 2077" word="Numer identyfikacyjny zakładu: TH 2077yby" conf=0.923 box=[497,1489,863,1514]
+        text="Numer identyfikacyjny zakładu: TH 2077yby certyfikowane zgodnie z wymogami środowiskowymi standardu MSC"
+      B line=64 frag="R" word="Ryby" conf=0.991 box=[1249,3322,1276,3377]
+        text="Ryby certyfikowane zgodnie z wymogami środowiskowymi standardu MSC"
+      note: ไม่ได้อ่านซ้ำ (ปิดอยู่)
+      note: AI อ่านภาพเอง (ไม่เห็นข้อความของ Vision) ได้ต่างกัน — ยืนยันว่าต่างจริง
+      ai: verdict=real confidence(vision)=0.923 words=-/-
+      ai_reason: "ข้อความในเวอร์ชัน A คือ ‘Numer identyfikacyjny zakładu: TH 2077-yby certyfikowane zgodnie z wymogami środowiskowymi standardu M’ และในเวอร์ชัน B คือ ‘Numer identyfikRyby certyfikowane’ ซึ่งแตกต่างกันอย่างชัดเจน"
+      ai_suggestion: "โปรดตรวจสอบความถูกต้องของข้อความที่แตกต่างกันนี้"
+      ai_seen: A="Numer identyfikacyjny zakładu: TH 2077-yby certyfikowane zgodnie z wymogami środowiskowymi standardu M" B="Numer identyfikRyby certyfikowane"
+      blind: ai_said=real app=real
+      ai_crop: A=ai1_F7_a.jpg 768x244 box=[262, 541, 738, 791] · B=ai1_F7_b.jpg 535x224 box=[419, 375, 581, 625]
+   F9 YELLOW EXTRA_IN_B method=unpaired score=-
+      A line=None frag="" word="" conf=- box=-
+        text=""
+      B line=36 frag="مع امة امن امه امه" word="" conf=0.798 box=[2171,1457,2209,1783]
+        text="مع امة امن امه امه"
+      note: AI ไม่ได้ตอบจุดนี้ (คำขอของจุดนี้ล้ม: AI: Gemini ตอบไม่จบ (finishReason=MAX_TOKENS · คำตอบ 18358 token · ส่วนคิด 571 token) ท้ายคำตอบ: …0601\u0601\u0601\u0601\u0601\u0601\u0601\u0601\u0601\u0601\u06…) — คงระดับของอัลกอริทึม
+      ai_crop: A=ai1_F9_a.jpg 480x69 box=[345, 375, 654, 623] rot=270 · B=ai1_F9_b.jpg 630x152 box=[241, 375, 759, 625] rot=270
+   F10 YELLOW EXTRA_IN_B method=unpaired score=-
+      A line=None frag="" word="" conf=- box=-
+        text=""
+      B line=43 frag="امه امه امه امامة" word="" conf=0.831 box=[2552,1449,2585,1790]
+        text="امه امه امه امامة"
+      note: ไม่ได้อ่านซ้ำ (ปิดอยู่)
+      note: AI บอกว่าเหมือนกันทั้งสองฝั่ง แต่ Vision อ่านข้อความนี้ได้ชัดเพียงฝั่งเดียว (≥ 80%) — AI อาจลอกข้อความข้ามฝั่ง · ไม่พับ โปรดดูด้วยตา
+      ai: verdict=noise confidence(vision)=0.831 words=-/-
+      ai_reason: "ข้อความที่อ่านได้จากเวอร์ชัน A คือ "0,6 g 0,8 g 1,5 g 1,4 g 0,7 g 1,6 g 8,5 g" และจากเวอร์ชัน B คือ "0,6 g 0,8 g 1,5 g 1,4 g 0,7 g 1,6 g 8,5 g" ซึ่งเหมือนกัน"
+      ai_suggestion: "จุดนี้ไม่มีความแตกต่าง"
+      ai_seen: A="0,6 g 0,8 g 1,5 g 1,4 g 0,7 g 1,6 g 8,5 g" B="0,6 g 0,8 g 1,5 g 1,4 g 0,7 g 1,6 g 8,5 g"
+      blind: ai_said=noise app=noise
+      ai_crop: A=ai1_F10_a.jpg 480x60 box=[339, 380, 662, 628] rot=270 · B=ai1_F10_b.jpg 605x132 box=[218, 371, 782, 621] rot=270
+   F11 YELLOW EXTRA_IN_B method=unpaired score=-
+      A line=None frag="" word="" conf=- box=-
+        text=""
+      B line=63 frag="Numer identyfikacyjny zakładu: TH 2077" word="" conf=0.981 box=[1248,3238,2051,3305]
+        text="Numer identyfikacyjny zakładu: TH 2077"
+      note: ไม่ได้อ่านซ้ำ (ปิดอยู่)
+      note: AI บอกว่าเหมือนกันทั้งสองฝั่ง แต่ Vision อ่านข้อความนี้ได้ชัดเพียงฝั่งเดียว (≥ 80%) — AI อาจลอกข้อความข้ามฝั่ง · ไม่พับ โปรดดูด้วยตา
+      ai: verdict=noise confidence(vision)=0.981 words=-/-
+      ai_reason: "เวอร์ชัน A และ B แสดงข้อความ "Numer identyfikacyjny zakładu: TH 2077" เหมือนกันทุกประการ"
+      ai_suggestion: "ตรวจสอบว่าข้อความ "Numer identyfikacyjny zakładu: TH 2077" ถูกต้องหรือไม่"
+      ai_seen: A="Numer identyfikacyjny zakładu: TH 2077" B="Numer identyfikacyjny zakładu: TH 2077"
+      blind: ai_said=noise app=noise
+      ai_crop: A=ai1_F11_a.jpg 606x122 box=[202, 376, 799, 626] · B=ai1_F11_b.jpg 768x154 box=[200, 373, 800, 623]
+  debris — เศษอักขระ / ขอบโซน ไม่นับในผลตัดสิน (0):
+  lowmark — เครื่องหมายเดี่ยวที่ OCR อ่านไม่มั่นใจ (ฝั่งเดียว) ไม่นับ (1):
+   F12 LOWMARK PUNCT method=content score=0.998
+      A line=29 frag="|" word="nasycone|" conf=0.596 box=[762,677,766,703]
+        text="w tym kwasy nasycone|"
+      B line=28 frag="" word="nasycone" conf=0.993 box=[1796,1463,1804,1514]
+        text="w tym kwasy nasycone"
+      note: เครื่องหมายเดี่ยวที่ Vision อ่านไม่มั่นใจ (< 60%) มีฝั่งเดียว — มักเป็นเส้นขอบ/ลายกราฟิก ไม่นับในผลตัดสิน (ดูด้วยตาได้)
+  ai_dismissed — AI ตัดสินว่าเป็นสัญญาณรบกวน ไม่นับ (4):
+   F1 DISMISSED PUNCT method=content score=0.994
+      A line=50 frag="|" word="|" conf=0.612 box=[1110,979,1120,1003]
+        text="Produkt sterylizowany. Składniki: RYBA-TUŃCZYK (Katsuwonus pelamis) |"
+      B line=52 frag="" word="pelamis)" conf=0.936 box=[2562,2111,2570,2165]
+        text="Produkt sterylizowany. Składniki: RYBA - TUŃCZYK (Katsuwonus pelamis)"
+      note: AI อ่านภาพเอง (ไม่เห็นข้อความของ Vision) ได้เหมือนกันทั้งสองฝั่ง — Vision อ่านผิด · ไม่นับในผลตัดสิน
+      ai: verdict=noise confidence(vision)=0.612 words=-/-
+      ai_reason: "ข้อความในเวอร์ชัน A คือ "pelamis)" และในเวอร์ชัน B คือ "pelamis)" ซึ่งเหมือนกัน"
+      ai_suggestion: "ตรวจสอบว่าข้อความ "pelamis)" ถูกต้องตามที่ต้องการหรือไม่"
+      ai_seen: A="pelamis)" B="pelamis)"
+      blind: ai_said=noise app=noise
+      ai_crop: A=ai1_F1_a.jpg 480x96 box=[800, 375, 821, 625] · B=ai1_F1_b.jpg 480x216 box=[537, 375, 554, 625]
+   F2 DISMISSED TEXT method=content score=0.981
+      A line=56 frag="ż" word="poniżej." conf=0.781 box=[857,1163,866,1184]
+        text="Najlepiej spożyć przed: data podana poniżej. Przechowywać w suchymi"
+      B line=58 frag="z" word="ponizej." conf=0.955 box=[2017,2511,2040,2564]
+        text="Najlepiej spożyć przed: data podana ponizej. Przechowywać w suchym i"
+      note: AI อ่านภาพเอง (ไม่เห็นข้อความของ Vision) ได้เหมือนกันทั้งสองฝั่ง — Vision อ่านผิด · ไม่นับในผลตัดสิน
+      ai: verdict=noise confidence(vision)=0.781 words=-/-
+      ai_reason: "เวอร์ชัน A อ่านได้ว่า "poniżej." และเวอร์ชัน B อ่านได้ว่า "poniżej." เหมือนกันทุกตัวอักษร"
+      ai_suggestion: "ตรวจสอบความถูกต้องของคำว่า "poniżej.""
+      ai_seen: A="poniżej." B="poniżej."
+      blind: ai_said=noise app=noise
+      ai_crop: A=ai1_F2_a.jpg 480x84 box=[444, 369, 556, 619] · B=ai1_F2_b.jpg 560x220 box=[393, 373, 607, 623]
+   F5 DISMISSED TEXT method=content score=0.959
+      A line=7 frag="Ą" word="DYMKĄ" conf=0.760 box=[564,387,588,416]
+        text="Z CEBULKĄ DYMKĄ I DRESSINGIEM"
+      B line=7 frag="A" word="DYMKA" conf=0.463 box=[1345,806,1404,872]
+        text="Z CEBULKĄ DYMKA I DRESSINGIEM"
+      note: AI อ่านภาพเอง (ไม่เห็นข้อความของ Vision) ได้เหมือนกันทั้งสองฝั่ง — Vision อ่านผิด · ไม่นับในผลตัดสิน
+      ai: verdict=noise confidence(vision)=0.463 words=-/-
+      ai_reason: "ทั้งสองเวอร์ชันอ่านได้คำว่า "DYMKĄ" เหมือนกัน"
+      ai_suggestion: "โปรดตรวจสอบความถูกต้องของข้อความ "DYMKĄ""
+      ai_seen: A="DYMKĄ" B="DYMKĄ"
+      blind: ai_said=noise app=noise
+      ai_crop: A=ai1_F5_a.jpg 480x116 box=[379, 371, 621, 621] · B=ai1_F5_b.jpg 768x292 box=[327, 377, 674, 627]
+   F8 DISMISSED TEXT method=content score=0.796
+      A line=20 frag="ч" word="Оначи" conf=0.696 box=[359,1126,431,1168]
+        text="Оначи"
+      B line=20 frag="с" word="Онаси" conf=0.694 box=[927,2446,1096,2536]
+        text="Онаси"
+      note: AI อ่านภาพเอง (ไม่เห็นข้อความของ Vision) ได้เหมือนกันทั้งสองฝั่ง — Vision อ่านผิด · ไม่นับในผลตัดสิน
+      ai: verdict=noise confidence(vision)=0.694 words=-/-
+      ai_reason: "ทั้งสองเวอร์ชันแสดงลายเซ็น "Oscar" เหมือนกัน"
+      ai_suggestion: "ตรวจสอบว่าลายเซ็น "Oscar" ถูกต้องหรือไม่"
+      ai_seen: A="Oscar" B="Oscar"
+      blind: ai_said=noise app=noise
+      ai_crop: A=ai1_F8_a.jpg 571x180 box=[315, 378, 685, 628] · B=ai1_F8_b.jpg 768x432 box=[182, 375, 819, 625]
+  OCR lines A (64):
+   A000 conf=0.99 min=0.99 ang=360 box=[42,117,162,141] "ZESKANUJ"
+   A001 conf=0.98 min=0.96 ang=0 box=[56,154,145,179] "QR-KOD"
+   A002 conf=0.99 min=0.96 ang=0 box=[4,192,200,216] "W POSZUKIWANIU"
+   A003 conf=0.99 min=0.97 ang=0 box=[37,229,167,253] "INSPIRACJI"
+   A004 conf=0.97 min=0.90 ang=1 box=[317,82,797,176] "KING OSCAR"
+   A005 conf=0.98 min=0.96 ang=0 box=[317,206,801,226] "BY SPECIAL ROYAL PERMISSION"
+   A006 conf=0.96 min=0.76 ang=1 box=[280,296,836,369] "TUŃCZYKOWY TWIST"
+   A007 conf=0.96 min=0.76 ang=0 box=[292,387,830,416] "Z CEBULKĄ DYMKĄ I DRESSINGIEM"
+   A008 conf=0.99 min=0.97 ang=0 box=[423,425,699,451] "MUSZTARDOWYM"
+   A009 conf=0.95 min=0.57 ang=0 box=[85,602,427,630] "DANIE Z TUŃCZYKA JEST"
+   A010 conf=0.97 min=0.79 ang=0 box=[30,642,477,669] "GOTOWE DO SPOŻYCIA PROSTO"
+   A011 conf=0.98 min=0.93 ang=0 box=[69,686,439,708] "Z OPAKOWANIA. SMAKUJE"
+   A012 conf=0.97 min=0.78 ang=1 box=[56,718,453,751] "WYŚMIENICIE I DOSKONALE"
+   A013 conf=0.96 min=0.80 ang=0 box=[50,763,463,792] "KOMPONUJE SIĘ Z KANAPKĄ,"
+   A014 conf=0.95 min=0.67 ang=0 box=[55,804,455,831] "SAŁATKĄ LUB MAKARONEM."
+   A015 conf=0.91 min=0.91 ang=1 box=[10,1000,62,1068] "0"
+   A016 conf=0.96 min=0.77 ang=0 box=[96,973,367,996] "KRÓL OSKAR UWIELBIAŁ SMAK"
+   A017 conf=0.98 min=0.91 ang=0 box=[96,1005,423,1027] "NASZYCH OWOCÓW MORZA. DLATEGO"
+   A018 conf=0.94 min=0.66 ang=0 box=[95,1036,405,1060] "TEŻ W 1902 ROKU DAŁ NAM TO, CO"
+   A019 conf=0.94 min=0.66 ang=0 box=[96,1070,422,1092] "MIAŁ NAJCENNIEJSZE - SWOJE IMIĘ."
+   A020 conf=0.73 min=0.64 ang=359 box=[242,1126,453,1171] "Оначи"
+   A021 conf=0.94 min=0.43 ang=0 box=[579,576,938,604] "WARTOŚĆ ODŻYWCZA: NA 100 g PRODUKTU"
+   A022 conf=0.92 min=0.54 ang=0 box=[985,581,1106,602] "NA PORCJĘ 85 g"
+   A023 conf=0.99 min=0.97 ang=0 box=[579,614,641,636] "Energia"
+   A024 conf=0.95 min=0.70 ang=0 box=[805,614,937,634] "604 kJ/144 kcal"
+   A025 conf=0.96 min=0.80 ang=0 box=[971,614,1104,634] "513 kJ/122 kcal"
+   A026 conf=0.91 min=0.70 ang=2 box=[579,644,642,666] "Tłuszcz"
+   A027 conf=0.98 min=0.98 ang=4 box=[897,644,941,669] "6,6g"
+   A028 conf=0.98 min=0.98 ang=1 box=[1063,645,1107,667] "5,6g"
+   A029 conf=0.96 min=0.60 ang=1 box=[590,674,766,703] "w tym kwasy nasycone|"
+   A030 conf=0.96 min=0.93 ang=0 box=[897,677,939,698] "0,9g"
+   A031 conf=0.99 min=0.99 ang=1 box=[1064,676,1107,698] "0,8g"
+   A032 conf=0.98 min=0.97 ang=2 box=[899,707,938,731] "1,8g"
+   A033 conf=0.96 min=0.94 ang=0 box=[1065,709,1105,730] "1,5g"
+   A034 conf=0.99 min=0.98 ang=1 box=[898,739,940,761] "1,7g"
+   A035 conf=0.98 min=0.97 ang=0 box=[1065,739,1106,762] "1,4g"
+   A036 conf=0.94 min=0.77 ang=0 box=[581,771,642,789] "Błonnik"
+   A037 conf=0.95 min=0.81 ang=1 box=[581,802,631,821] "Białko"
+   A038 conf=0.98 min=0.97 ang=1 box=[897,771,940,792] "0,8g"
+   A039 conf=0.98 min=0.97 ang=0 box=[1064,770,1106,793] "0,7 g"
+   A040 conf=0.98 min=0.97 ang=2 box=[903,802,939,824] "19g"
+   A041 conf=0.96 min=0.95 ang=2 box=[1070,802,1106,825] "16g"
+   A042 conf=0.99 min=0.98 ang=1 box=[898,833,939,856] "1,0g"
+   A043 conf=0.98 min=0.97 ang=5 box=[1052,831,1107,857] "0,85g"
+   A044 conf=0.94 min=0.58 ang=0 box=[579,707,694,731] "Węglowodany"
+   A045 conf=0.87 min=0.78 ang=0 box=[579,834,605,852] "Sól"
+   A046 conf=0.99 min=0.93 ang=0 box=[595,739,695,764] "w tym cukry"
+   A047 conf=0.96 min=0.81 ang=0 box=[569,886,897,917] "MASA NETTO 85g-JEDNA PORCJA"
+   A048 conf=0.95 min=0.59 ang=0 box=[570,925,1115,950] "DANIE GOTOWE Z TUŃCZYKA ROZDROBNIONEGO W STRZĘPACH"
+   A049 conf=0.96 min=0.65 ang=0 box=[568,956,1034,977] "Z CEBULKĄ DYMKĄ I DRESSINGIEM MUSZTARDOWYM."
+   A050 conf=0.95 min=0.42 ang=0 box=[569,979,1120,1003] "Produkt sterylizowany. Składniki: RYBA-TUŃCZYK (Katsuwonus pelamis) |"
+   A051 conf=0.97 min=0.59 ang=0 box=[569,1006,1109,1027] "rozdrobniony w strzępach (62,5 %) (obszar połowu: FAO 51-Zachodni Ocean"
+   A052 conf=0.95 min=0.38 ang=0 box=[570,1029,1112,1077] "Indyjski, FAO 71-Środkowo-zachodni Pacyfik, FAO 77-Środkowo-wschodni Pacyfik, podano w kodowaniu), dressing musztardowy (31,8%) (woda,"
+   A053 conf=0.98 min=0.71 ang=0 box=[569,1081,1051,1101] "olej słonecznikowy, ocet spirytusowy, cukier, skrobia modyfikowana,"
+   A054 conf=0.97 min=0.81 ang=0 box=[569,1104,1075,1127] "czosnek, sól, substancja zagęszczajaca: guma ksantanowa; GORCZYCA"
+   A055 conf=0.98 min=0.84 ang=0 box=[570,1130,1026,1151] "mielona, pietruszka, pieprz biały mielony), cebula dymka (5,7%)."
+   A056 conf=0.96 min=0.75 ang=0 box=[569,1163,1073,1184] "Najlepiej spożyć przed: data podana poniżej. Przechowywać w suchymi"
+   A057 conf=0.97 min=0.68 ang=0 box=[569,1185,946,1210] "chłodnym miejscu. Spożyć bezpośrednio po otwarciu."
+   A058 conf=0.94 min=0.59 ang=0 box=[58,1505,447,1535] "5 901489 118147 >"
+   A059 conf=0.96 min=0.79 ang=0 box=[495,1427,1026,1451] "Wyprodukowano w Tajlandii dla Thai Union Poland Sp. z o.o."
+   A060 conf=0.98 min=0.56 ang=0 box=[495,1455,1024,1478] "Strzebielinko 22, 84-250 Gniewino, Polska kingoscar.pl-"
+   A061 conf=0.98 min=0.81 ang=0 box=[497,1489,1090,1550] "Numer identyfikacyjny zakładu: TH 2077yby certyfikowane zgodnie z wymogami środowiskowymi standardu MSC"
+   A062 conf=0.85 min=0.39 ang=2 box=[494,1549,704,1576] "dla rybołówstwa. msc.org"
+   A063 conf=0.96 min=0.85 ang=272 box=[1131,1227,1154,1382] "300011814 v.002"
+  OCR lines B (67):
+   B000 conf=0.99 min=0.98 ang=358 box=[200,244,455,306] "ZESKANUJ"
+   B001 conf=0.99 min=0.97 ang=357 box=[231,325,426,387] "QR-KOD"
+   B002 conf=0.99 min=0.93 ang=358 box=[122,402,541,473] "W POSZUKIWANIU"
+   B003 conf=0.98 min=0.93 ang=358 box=[193,487,469,551] "INSPIRACJI"
+   B004 conf=0.97 min=0.90 ang=359 box=[792,128,1862,341] "KING OSCAR"
+   B005 conf=0.99 min=0.97 ang=358 box=[803,383,1872,464] "BY SPECIAL ROYAL PERMISSION"
+   B006 conf=0.96 min=0.74 ang=359 box=[726,607,1955,775] "TUŃCZYKOWY TWIST"
+   B007 conf=0.94 min=0.46 ang=358 box=[752,788,1941,892] "Z CEBULKĄ DYMKA I DRESSINGIEM"
+   B008 conf=0.98 min=0.89 ang=358 box=[1036,883,1651,962] "MUSZTARDOWYM"
+   B009 conf=0.95 min=0.56 ang=359 box=[315,1302,1046,1375] "DANIE Z TUŃCZYKA JEST"
+   B010 conf=0.96 min=0.79 ang=359 box=[204,1388,1164,1461] "GOTOWE DO SPOŻYCIA PROSTO"
+   B011 conf=0.96 min=0.51 ang=359 box=[288,1487,1085,1550] "ZOPAKOWANIA. SMAKUJE"
+   B012 conf=0.94 min=0.51 ang=359 box=[259,1564,1117,1633] "WYŚMIENICIE I DOSKONALE"
+   B013 conf=0.94 min=0.75 ang=0 box=[246,1659,1141,1724] "KOMPONUJE SIĘ Z KANAPKĄ,"
+   B014 conf=0.93 min=0.53 ang=358 box=[257,1731,1130,1815] "SAŁATKĄ LUB MAKARONEM."
+   B015 conf=0.78 min=0.78 ang=359 box=[184,2169,295,2330] "0"
+   B016 conf=0.97 min=0.83 ang=0 box=[368,2114,947,2161] "KRÓL OSKAR UWIELBIAŁ SMAK"
+   B017 conf=0.98 min=0.91 ang=0 box=[370,2181,1069,2229] "NASZYCH OWOCÓW MORZA. DLATEGO"
+   B018 conf=0.95 min=0.74 ang=1 box=[368,2249,1028,2302] "TEŻ W 1902 ROKU DAŁ NAM TO, CO"
+   B019 conf=0.95 min=0.77 ang=1 box=[372,2322,1065,2374] "MIAŁ NAJCENNIEJSZE - SWOJE IMIĘ."
+   B020 conf=0.80 min=0.69 ang=357 box=[696,2441,1185,2549] "Онаси"
+   B021 conf=0.95 min=0.49 ang=359 box=[1389,1231,2201,1291] "WARTOŚĆ ODŻYWCZA: NA 100 g PRODUKTU"
+   B022 conf=0.99 min=0.97 ang=359 box=[1396,1319,1532,1371] "Energia"
+   B023 conf=0.95 min=0.73 ang=359 box=[1902,1307,2205,1355] "604 kJ/144 kcal"
+   B024 conf=0.89 min=0.41 ang=0 box=[2312,1226,2580,1275] "NA PORCJĘ 85 g"
+   B025 conf=0.91 min=0.59 ang=359 box=[2283,1298,2584,1348] "513J/122 kcal"
+   B026 conf=0.91 min=0.77 ang=360 box=[1394,1391,1530,1434] "Tłuszcz"
+   B027 conf=0.98 min=0.98 ang=2 box=[2114,1377,2212,1432] "6,6g"
+   B028 conf=0.98 min=0.94 ang=1 box=[1420,1459,1800,1514] "w tym kwasy nasycone"
+   B029 conf=0.94 min=0.57 ang=359 box=[1394,1526,1648,1581] "Węglowodany"
+   B030 conf=0.97 min=0.95 ang=0 box=[2113,1451,2209,1502] "0,9 g"
+   B031 conf=0.93 min=0.84 ang=1 box=[2117,1522,2207,1569] "1,8g"
+   B032 conf=0.97 min=0.94 ang=2 box=[2115,1591,2209,1644] "1,7 g"
+   B033 conf=0.94 min=0.89 ang=3 box=[2111,1660,2207,1712] "0,8 g"
+   B034 conf=0.92 min=0.71 ang=360 box=[1404,1733,1513,1773] "Białko"
+   B035 conf=0.98 min=0.98 ang=3 box=[2124,1730,2205,1778] "19g"
+   B036 conf=0.80 min=0.51 ang=91 box=[2171,1457,2209,1783] "مع امة امن امه امه"
+   B037 conf=0.97 min=0.96 ang=1 box=[2493,1371,2585,1419] "5,6g"
+   B038 conf=0.95 min=0.89 ang=1 box=[2494,1442,2586,1491] "0,8g"
+   B039 conf=0.96 min=0.93 ang=0 box=[2495,1516,2584,1562] "1,5g"
+   B040 conf=0.89 min=0.72 ang=1 box=[2498,1587,2586,1632] "1,4g"
+   B041 conf=0.98 min=0.96 ang=1 box=[2494,1656,2589,1708] "0,7g"
+   B042 conf=0.99 min=0.98 ang=1 box=[2507,1727,2586,1775] "16g"
+   B043 conf=0.83 min=0.65 ang=90 box=[2552,1449,2585,1790] "امه امه امه امامة"
+   B044 conf=0.98 min=0.96 ang=3 box=[2112,1798,2205,1850] "1,0 g"
+   B045 conf=0.98 min=0.98 ang=1 box=[2470,1799,2587,1847] "0,85 g"
+   B046 conf=0.98 min=0.93 ang=0 box=[1434,1598,1653,1646] "w tym cukry"
+   B047 conf=0.93 min=0.70 ang=359 box=[1401,1665,1539,1706] "Błonnik"
+   B048 conf=0.86 min=0.81 ang=359 box=[1402,1800,1459,1841] "Sól"
+   B049 conf=0.97 min=0.84 ang=0 box=[1385,1909,2105,1978] "MASA NETTO 85 g - JEDNA PORCJA"
+   B050 conf=0.96 min=0.51 ang=0 box=[1387,1990,2609,2060] "DANIE GOTOWE Z TUŃCZYKA ROZDROBNIONEGO W STRZĘPACH"
+   B051 conf=0.96 min=0.68 ang=0 box=[1386,2060,2422,2108] "Z CEBULKĄ DYMKĄ I DRESSINGIEM MUSZTARDOWYM."
+   B052 conf=0.95 min=0.46 ang=0 box=[1388,2111,2566,2165] "Produkt sterylizowany. Składniki: RYBA - TUŃCZYK (Katsuwonus pelamis)"
+   B053 conf=0.97 min=0.58 ang=0 box=[1389,2166,2588,2221] "rozdrobniony w strzępach (62,5%) (obszar połowu: FAO 51-Zachodni Ocean"
+   B054 conf=0.96 min=0.49 ang=0 box=[1387,2214,2593,2331] "Indyjski, FAO 71-Środkowo-zachodni Pacyfik, FAO 77 - Środkowo-wschodni Pacyfik, podano w kodowaniu), dressing musztardowy (31,8%) (woda,"
+   B055 conf=0.97 min=0.76 ang=359 box=[1390,2324,2452,2387] "olej słonecznikowy, ocet spirytusowy, cukier, skrobia modyfikowana,"
+   B056 conf=0.94 min=0.56 ang=359 box=[1390,2377,2508,2441] "czosnek, sól, substancja zagęszczająca: guma ksantanowa; GORCZYCA"
+   B057 conf=0.96 min=0.68 ang=359 box=[1391,2432,2397,2499] "mielona, pietruszka, pieprz biały mielony), cebula dymka (5,7%)."
+   B058 conf=0.91 min=0.33 ang=359 box=[1395,2504,2504,2573] "Najlepiej spożyć przed: data podana ponizej. Przechowywać w suchym i"
+   B059 conf=0.95 min=0.62 ang=358 box=[1393,2553,2217,2630] "chłodnym miejscu. Spożyć bezpośrednio po otwarciu."
+   B060 conf=0.97 min=0.83 ang=0 box=[298,3266,1134,3337] "5 901489 118147 >"
+   B061 conf=0.97 min=0.80 ang=359 box=[1242,3085,2409,3169] "Wyprodukowano w Tajlandii dla Thai Union Poland Sp. z o.o."
+   B062 conf=0.98 min=0.94 ang=359 box=[1245,3156,2367,3222] "Strzebielinko 22, 84-250 Gniewino, Polska kingoscar.pl"
+   B063 conf=0.98 min=0.81 ang=359 box=[1248,3238,2051,3305] "Numer identyfikacyjny zakładu: TH 2077"
+   B064 conf=0.99 min=0.82 ang=360 box=[1249,3313,2560,3377] "Ryby certyfikowane zgodnie z wymogami środowiskowymi standardu MSC"
+   B065 conf=0.97 min=0.87 ang=2 box=[1248,3376,1701,3440] "dla rybołówstwa. msc.org"
+   B066 conf=0.94 min=0.53 ang=270 box=[2646,2661,2687,2998] "30011814 v.002"
+
+[REREAD] enabled=False candidates=3 crops=0 done=0 confirmed=0 downgraded=0 skipped_cap=0 errors=0
+
+[PIXEL] enabled=True line_mode=True raster=True same=0 diff=0 unverifiable=0 skipped=0 ms=0 pymupdf=1.26.5 reason=ไม่ใช่ PDF ทั้งสองฝั่ง — ไม่ตรวจด้วยภาพ (ผลเดิมทุกจุด)
+  before_ai=True — ตรวจด้วยภาพก่อน AI (AI_IMAGE_PIXEL_FIRST) · จุดที่ภาพบอกว่าเหมือนไม่ถูกส่งให้ AI
+
+[AI REVIEW] mode=image url=http://127.0.0.1:5678/webhook/artwork-v2-image pairs_ok=1 pairs_failed=0
+  pair 1: status=ok engine=gemini-2.5-flash http=200 ms=67641 attempts=11 request_bytes=1507581 candidates=11
+     image_split: requests=11 failed=2 parallel=3 (คำขอละจุด · tokens = prompt/คำตอบ/ส่วนคิด)
+       req 1 [F1] status=ok http=200 ms=4624 attempts=1 reviews=1 engine=gemini-2.5-flash tokens=1639/146/521 finish=STOP
+       req 2 [F2] status=ok http=200 ms=8441 attempts=1 reviews=1 engine=gemini-2.5-flash tokens=1639/1199/602 finish=STOP
+       req 3 [F3] status=ok http=200 ms=4774 attempts=1 reviews=1 engine=gemini-2.5-flash tokens=1639/227/445 finish=STOP
+       req 4 [F4] status=failed http=200 ms=52848 attempts=1 reviews=- engine=- tokens=1639/18066/862 ERROR=AI: Gemini ตอบไม่จบ (finishReason=MAX_TOKENS · คำตอบ 18066 token · ส่วนคิด 862 token) ท้ายคำตอบ: …u0017\u0017\u0017\u0017\u0017\u0017\u0017\u0017\u0017\u0017\u0017\u0017\u0017\u0017\u0017\u0017\u0017\u0017\u0017\u0017\u0017\u0017\u0017\u0017\u0017\u0017\u001
+       req 5 [F5] status=ok http=200 ms=7758 attempts=1 reviews=1 engine=gemini-2.5-flash tokens=1639/1564/338 finish=STOP
+       req 6 [F6] status=ok http=200 ms=6151 attempts=1 reviews=1 engine=gemini-2.5-flash tokens=1639/228/1246 finish=STOP
+       req 7 [F7] status=ok http=200 ms=9041 attempts=1 reviews=1 engine=gemini-2.5-flash tokens=1639/1716/621 finish=STOP
+       req 8 [F8] status=ok http=200 ms=2365 attempts=1 reviews=1 engine=gemini-2.5-flash tokens=1639/118/278 finish=STOP
+       req 9 [F9] status=failed http=200 ms=50676 attempts=1 reviews=- engine=- tokens=1639/18358/571 ERROR=AI: Gemini ตอบไม่จบ (finishReason=MAX_TOKENS · คำตอบ 18358 token · ส่วนคิด 571 token) ท้ายคำตอบ: …0601\u0601\u0601\u0601\u0601\u0601\u0601\u0601\u0601\u0601\u0601\u0601\u0601\u0601\u0601\u0601\u0601\u0601\u0601\u0601\u0601\u0601\u0601\u0601\u0601\u0601\u0601
+       req 10 [F10] status=ok http=200 ms=6601 attempts=1 reviews=1 engine=gemini-2.5-flash tokens=1642/293/1330 finish=STOP
+       req 11 [F11] status=ok http=200 ms=3558 attempts=1 reviews=1 engine=gemini-2.5-flash tokens=1642/196/408 finish=STOP
+     ref_accuracy=1.000 items=0/0 reviews=9/9 reviewed=9/11 extra_added=0 extra_duplicate=0 extra_noise=0 vision_conf A=0.963 B=0.956 usage={'promptTokenCount': 14757, 'candidatesTokenCount': 5687, 'thoughtsTokenCount': 5789, 'totalTokenCount': 26233}
+     recovered=0 equivalent=0 algo_red_kept=- extra_folded=0
+     image: verdicts={'real': 2, 'noise': 6, 'uncertain': 1, 'unanswered': 2, 'guarded': 0, 'onesided_kept': 2} items_ignored=0 (AI ดูภาพที่ส่ง Vision แล้วตัดสินจุดของอัลกอริทึม)
+     image_crops: crops=22 not_sent=0 crop_px_max=768 (ครอปรอบแต่ละจุดจากภาพที่ส่ง Vision · A/B แยกรูป)
+     image_mode: blind=True (AI ไม่เห็นข้อความของ Vision · แอปเทียบ a_seen/b_seen เอง) overruled=0 hires_crops=0 hires_dpi_max=None (เรนเดอร์ครอปใหม่จาก PDF)
+     image_evidence: pixel_kept=0 (AI บอกว่าเหมือน แต่ภาพจากไฟล์ต้นฉบับต่าง ⇒ ไม่พับ) crops_saved=22 (img/ai<คู่>_F<จุด>_<a|b>.jpg)
+     image_orient: crops_rotated=6 (หมุนให้ข้อความตั้งตรงตามมุมที่ Vision วัด) onesided_kept=2 (ข้อความฝั่งเดียวที่ Vision อ่านชัด · AI บอกว่าเหมือน ⇒ ไม่พับ)
+     summary: "ตรวจพบจุดที่เหมือนกัน 1 จุด: "pelamis)" ในเวอร์ชัน A และ B เหมือนกัน ไม่พบจุดที่แตกต่างกัน ไม่พบจุดที่อ่านไม่ได้ · จุดที่อ่านได้เหมือนกันมี 1 จุด คือ "poniżej." ในทั้งสองเวอร์ชัน ไม่พบความแตกต่างใดๆ · พบความแตกต่าง 1 จุด: A อ่านว่า "GORC mielona" ส่วน B อ่านว่า "GORC mielony" ซึ่งแตกต่างกันที่ตัวอักษรสุดท้ายของคำว่า "mielona" / "mielony" ยังไม่มีจุดที่เหมือนกันและไม่มีจุดที่อ่านไม่ชัดเจน · ทุกจุดที่ตรวจสอบมีข้อความเหมือนกันทั้งหมด 1 จุดคือ "DYMKĄ" ในทั้งสองเวอร์ชัน ไม่พบความแตกต่างใดๆ และไม่มีจุดที่ไม่แน่ใจในการอ่าน · มีจุดที่อ่านได้ไม่ชัดเจน 1 จุด จุด F6: A อ่านได้ "144 kcal" แต่ B อ่านไม่ได้ จึงไม่สามารถเปรียบเทียบความแตกต่างได้ · พบจุดที่แตกต่างกัน 1 จุด คือ ข้อความเกี่ยวกับ ‘Numer identyfikacyjny zakładu’ และ ‘Ryby certyfikowane’ มีการเปลี่ยนแปลงไปจาก A เป็น B จึงต้องการตรวจสอบเพิ่มเติม · ตรวจพบจุดที่เหมือนกัน 1 จุด คือลายเซ็น "Oscar" ในทั้งสองเวอร์ชันเหมือนกัน · มี 1 จุดที่อ่านได้เหมือนกัน จุดที่อ่านได้เหมือนกันคือ "0,6 g 0,8 g 1,5 g 1,4 g 0,7 g 1,6 g 8,5 g" ในทั้งสองเวอร์ชัน ไม่พบความแตกต่างที่สำคัญในจุดนี้ · มีจุดที่อ่านได้เหมือนกัน 1 จุด คือ "Numer identyfikacyjny zakładu: TH 2077" ในทั้งสองเวอร์ชัน ไม่มีจุดที่แตกต่างกัน ทุกจุดอ่านได้ชัดเจน"
+     suggestion: "ตรวจสอบความถูกต้องของข้อความที่อ่านได้ทั้งหมด"
+     suggestion: "ตรวจสอบความถูกต้องของข้อความทั้งหมด"
+     suggestion: "ตรวจสอบการสะกดคำว่า "mielona" / "mielony" ในจุดที่ 1"
+     suggestion: "ตรวจสอบความถูกต้องของข้อความที่ตรวจพบว่าเหมือนกันในทั้งสองเวอร์ชัน"
+     suggestion: "ตรวจสอบข้อความในจุด F6 ของเวอร์ชัน B อย่างละเอียด"
+     suggestion: "พิจารณาปรับขอบเขตของกล่องข้อความในเวอร์ชัน B หากจำเป็น"
+     suggestion: "ตรวจสอบความถูกต้องของข้อความที่แตกต่างกันในจุด F7"
+     suggestion: "ตรวจสอบลายเซ็น "Oscar" ว่าถูกต้องตามที่ต้องการหรือไม่"
+     suggestion: "ตรวจสอบจุดอื่น ๆ ต่อไป"
+     suggestion: "ตรวจสอบความถูกต้องของข้อความ "Numer identyfikacyjny zakładu: TH 2077""
+
+[WARNINGS] 1
+  - คู่ 1: AI ล้ม 2 จาก 11 คำขอ (AI: Gemini ตอบไม่จบ (finishReason=MAX_TOKENS · คำตอบ 18066 token · ส่วนคิด 862 token) ท้ายคำตอบ: …u0017\u0017\u0017\u0017\u0017\u0017\u0017\u0017\u0017\u0017\u0…) — จุด F4, F9 ใช้ผลของอัลกอริทึม
+=== END ===
